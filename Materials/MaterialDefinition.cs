@@ -10,15 +10,18 @@ public enum MaterialId : uint
     Water = 2,
     Metal = 3,
     Concrete = 4,
-    Eraser = 5
+    Eraser = 5,
+    Gas = 6
 }
 
 public enum MaterialSimulationKind : uint
 {
     None = 0,
-    CellularAutomata = 1,
+    Granular = 1,
     Lattice = 2,
-    Tool = 3
+    Tool = 3,
+    Liquid = 4,
+    Gas = 5
 }
 
 public sealed record MaterialDefinition(

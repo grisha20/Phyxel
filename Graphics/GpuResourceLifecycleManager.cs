@@ -120,11 +120,13 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             BrushShader = CompileShader("BrushApplication.hlsl"),
             CellularAutomataShader = CompileShader("CellularAutomataSolver.hlsl"),
             LatticeShader = CompileShader("LatticePhysicsSolver.hlsl"),
+            LatticeOccupancyClearShader = CompileShader("UnifiedOccupancyProjection.hlsl", "ClearLatticeOccupancy"),
+            LatticeProjectionShader = CompileShader("UnifiedOccupancyProjection.hlsl", "ProjectLatticeOccupancy"),
             CompositionShader = CompileShader("RenderComposition.hlsl")
         };
     }
 
-    private ComputeShader CompileShader(string fileName)
+    private ComputeShader CompileShader(string fileName, string entryPoint = "CSMain")
     {
         string shaderDirectory = Path.Combine(AppContext.BaseDirectory, "Content", "Shaders");
         string path = Path.Combine(shaderDirectory, fileName);
@@ -135,7 +137,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             StringComparison.Ordinal);
         using CompilationResult compilation = ShaderBytecode.Compile(
             shaderSource,
-            "CSMain",
+            entryPoint,
             "cs_5_0",
             ShaderFlags.OptimizationLevel3,
             EffectFlags.None,

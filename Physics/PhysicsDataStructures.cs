@@ -19,13 +19,13 @@ public struct LatticeParticle
 public struct LatticeBond
 {
     public uint ParticleA;
-    public uint ParticleB;
-    public float RestLength;
+    public uint ActiveNeighborMask;
+    public float CardinalRestLength;
+    public float DiagonalRestLength;
     public float ElasticLimit;
     public float PlasticLimit;
-    public float CurrentLength;
-    public uint IsActive;
-    public float AccumulatedStrain;
+    public float MaximumStrain;
+    public float AccumulatedLoad;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -81,7 +81,7 @@ public struct SimulationFrameConstants
     public uint ParticleCount;
     public uint BondCount;
     public uint StressView;
-    public uint Reserved0;
+    public uint SimulationPhase;
     public float InverseWidth;
     public float InverseHeight;
     public float MaximumVelocity;
@@ -95,4 +95,8 @@ public struct SimulationStatistics
     public uint ActiveBonds;
     public uint ActiveCells;
     public uint FrameIndex;
+    public uint StressSumMilli;
+    public uint LoadSumMilli;
+    public uint StressSampleCount;
+    public uint Reserved;
 }

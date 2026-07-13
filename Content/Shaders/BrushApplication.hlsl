@@ -50,7 +50,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     MaterialProperties material = Materials[command.MaterialId];
     GridCell cell = (GridCell)0;
     cell.MaterialId = command.MaterialId;
-    cell.Mass = material.Density;
+    cell.Mass = material.SimulationKind == 2 ? material.Density : 1;
     cell.IsActive = 1;
     cell.LatticeParticleIndex = index;
     DestinationGrid[index] = cell;
@@ -65,20 +65,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         particle.IsActive = 1;
         DestinationParticles[index] = particle;
 
-        uint neighborIndex = position.x > 0 ? index - 1 : index;
-        if (position.y > 0 && ((position.x + position.y) & 1) != 0)
-        {
-            neighborIndex = index - Width;
-        }
-
         LatticeBond bond = (LatticeBond)0;
         bond.ParticleA = index;
-        bond.ParticleB = neighborIndex;
-        bond.RestLength = 1;
-        bond.CurrentLength = 1;
+        bond.ActiveNeighborMask = 255;
+        bond.CardinalRestLength = 1;
+        bond.DiagonalRestLength = 1.41421356;
         bond.ElasticLimit = material.ElasticLimit;
         bond.PlasticLimit = material.PlasticLimit;
-        bond.IsActive = neighborIndex != index ? 1 : 0;
         DestinationBonds[index] = bond;
     }
 }

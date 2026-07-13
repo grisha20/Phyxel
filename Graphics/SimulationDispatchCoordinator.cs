@@ -36,13 +36,15 @@ public sealed class SimulationDispatchCoordinator
 
         if (!settings.Paused)
         {
-            DispatchCellularAutomata(resources, ref constants);
             int iterations = Math.Clamp(settings.SolverIterations, 1, 8);
             for (int iteration = 0; iteration < iterations; iteration++)
             {
                 constants.SolverIteration = (uint)iteration;
                 DispatchLattice(resources, ref constants);
             }
+
+            DispatchUnifiedOccupancyProjection(resources, ref constants);
+            DispatchCellularAutomata(resources, ref constants);
         }
 
         constants.StressView = settings.StressView ? 1u : 0u;
@@ -88,13 +90,44 @@ public sealed class SimulationDispatchCoordinator
         ref SimulationFrameConstants constants)
     {
         DeviceContext context = resources.Context;
-        context.CopyResource(resources.Grid.ReadBuffer, resources.Grid.WriteBuffer);
+        ReadOnlySpan<uint> phases = [4, 0, 1, 4, 2, 3, 0, 1];
+        foreach (uint phase in phases)
+        {
+            constants.SimulationPhase = phase;
+            context.CopyResource(resources.Grid.ReadBuffer, resources.Grid.WriteBuffer);
+            UpdateConstants(context, resources, ref constants);
+            context.ComputeShader.Set(resources.CellularAutomataShader);
+            context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+            context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.Particles.ReadView, resources.Materials.View);
+            context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.WriteUnorderedView);
+            context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+            Unbind(context, 3, 1);
+            resources.Grid.Swap();
+        }
+
+        constants.SimulationPhase = 0;
+    }
+
+    private void DispatchUnifiedOccupancyProjection(
+        GpuSimulationResources resources,
+        ref SimulationFrameConstants constants)
+    {
+        DeviceContext context = resources.Context;
         UpdateConstants(context, resources, ref constants);
-        context.ComputeShader.Set(resources.CellularAutomataShader);
+        context.ComputeShader.Set(resources.LatticeOccupancyClearShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.Particles.ReadView, resources.Materials.View);
+        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, null!, resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.WriteUnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        Unbind(context, 3, 1);
+        resources.Grid.Swap();
+
+        context.CopyResource(resources.Grid.ReadBuffer, resources.Grid.WriteBuffer);
+        context.ComputeShader.Set(resources.LatticeProjectionShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(0, null!, resources.Particles.ReadView, resources.Materials.View);
+        context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.WriteUnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Particles.Count, 256), 1, 1);
         Unbind(context, 3, 1);
         resources.Grid.Swap();
     }

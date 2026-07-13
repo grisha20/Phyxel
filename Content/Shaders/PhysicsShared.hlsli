@@ -25,13 +25,13 @@ struct LatticeParticle
 struct LatticeBond
 {
     uint ParticleA;
-    uint ParticleB;
-    float RestLength;
+    uint ActiveNeighborMask;
+    float CardinalRestLength;
+    float DiagonalRestLength;
     float ElasticLimit;
     float PlasticLimit;
-    float CurrentLength;
-    uint IsActive;
-    float AccumulatedStrain;
+    float MaximumStrain;
+    float AccumulatedLoad;
 };
 
 struct MaterialProperties
@@ -64,6 +64,10 @@ struct SimulationStatistics
     uint ActiveBonds;
     uint ActiveCells;
     uint FrameIndex;
+    uint StressSumMilli;
+    uint LoadSumMilli;
+    uint StressSampleCount;
+    uint Reserved;
 };
 
 cbuffer SimulationFrameConstants : register(b0)
@@ -79,7 +83,7 @@ cbuffer SimulationFrameConstants : register(b0)
     uint ParticleCount;
     uint BondCount;
     uint StressView;
-    uint Reserved0;
+    uint SimulationPhase;
     float InverseWidth;
     float InverseHeight;
     float MaximumVelocity;
@@ -104,4 +108,19 @@ uint HashValue(uint value)
 float HashUnitFloat(uint value)
 {
     return (HashValue(value) & 0x00ffffff) / 16777215.0;
+}
+
+bool IsCellularMaterial(uint simulationKind)
+{
+    return simulationKind == 1 || simulationKind == 4 || simulationKind == 5;
+}
+
+bool IsFluidMaterial(uint simulationKind)
+{
+    return simulationKind == 4 || simulationKind == 5;
+}
+
+GridCell CreateEmptyCell()
+{
+    return (GridCell)0;
 }

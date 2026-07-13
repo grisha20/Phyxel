@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Core;
+using Phyxel.Diagnostics;
 using Phyxel.Graphics;
 using Phyxel.Input;
 using Phyxel.Materials;
@@ -26,6 +27,7 @@ public sealed class PhyxelGame : Game
     private readonly GpuDebugProbe debugProbe = new();
     private readonly string scenePath;
     private readonly bool automatedVerification;
+    private readonly bool physicsRegressionVerification;
     private SpriteBatch? spriteBatch;
     private MaterialRegistry? materialRegistry;
     private GpuResourceLifecycleManager? resourceManager;
@@ -63,6 +65,14 @@ public sealed class PhyxelGame : Game
         Window.AllowUserResizing = true;
         string? verificationPath = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SCENE_PATH");
         automatedVerification = !string.IsNullOrWhiteSpace(verificationPath);
+        physicsRegressionVerification = string.Equals(
+            Environment.GetEnvironmentVariable("PHYXEL_PHYSICS_REGRESSION"),
+            "1",
+            StringComparison.Ordinal);
+        if (physicsRegressionVerification)
+        {
+            settings.ApplyScale(0.25f);
+        }
         scenePath = automatedVerification
             ? verificationPath!
             : Path.Combine(
@@ -101,12 +111,14 @@ public sealed class PhyxelGame : Game
         UiFrameActions actions = userInterface.Update(input, GraphicsDevice.Viewport, settings);
         ProcessUiActions(actions);
         Rectangle worldBounds = FitWorldToCanvas(userInterface.CanvasBounds, settings.Width, settings.Height);
-        IReadOnlyList<BrushDrawCommand> commands = brushController.CreateCommands(
-            input,
-            worldBounds,
-            settings,
-            userInterface.SelectedMaterial,
-            userInterface.PointerConsumed);
+        IReadOnlyList<BrushDrawCommand> commands = physicsRegressionVerification
+            ? PhysicsRegressionScenario.CreateCommands(frameIndex, settings.Width, settings.Height)
+            : brushController.CreateCommands(
+                input,
+                worldBounds,
+                settings,
+                userInterface.SelectedMaterial,
+                userInterface.PointerConsumed);
         try
         {
             currentResources = dispatchCoordinator.DispatchFrame(settings, commandEncoder.Encode(commands));
@@ -204,6 +216,20 @@ public sealed class PhyxelGame : Game
                 Console.WriteLine("PHYXEL_VERIFY_CAPTURE_COMPLETE");
             }
 
+            if (physicsRegressionVerification)
+            {
+                bool physicsPassed = PhysicsRegressionVerifier.Validate(snapshot, out string report);
+                Console.WriteLine(report);
+                Console.WriteLine(physicsPassed
+                    ? "PHYXEL_PHYSICS_REGRESSION_SUCCESS"
+                    : "PHYXEL_PHYSICS_REGRESSION_FAILED");
+                if (!physicsPassed)
+                {
+                    Exit();
+                    return;
+                }
+            }
+
             pendingWorldCapture = false;
             pendingSave = stateSerializer.SaveAsync(scenePath, settings, capturedMaterial, snapshot);
             SetStatus("Сохранение сцены…");
@@ -271,7 +297,8 @@ public sealed class PhyxelGame : Game
 
     private void BeginAutomatedVerificationWhenReady()
     {
-        if (!automatedVerification || automatedVerificationStage != 0 || frameIndex < 10 ||
+        uint captureFrame = physicsRegressionVerification ? 180u : 10u;
+        if (!automatedVerification || automatedVerificationStage != 0 || frameIndex < captureFrame ||
             currentResources is null || userInterface is null)
         {
             return;

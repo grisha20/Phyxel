@@ -32,6 +32,8 @@ public sealed class GpuSimulationResources : IDisposable
     public required ComputeShader BrushShader { get; init; }
     public required ComputeShader CellularAutomataShader { get; init; }
     public required ComputeShader LatticeShader { get; init; }
+    public required ComputeShader LatticeOccupancyClearShader { get; init; }
+    public required ComputeShader LatticeProjectionShader { get; init; }
     public required ComputeShader CompositionShader { get; init; }
 
     public void Dispose()
@@ -40,6 +42,8 @@ public sealed class GpuSimulationResources : IDisposable
         Context.ComputeShader.SetShaderResources(0, null, null, null, null);
         Context.ComputeShader.SetUnorderedAccessViews(0, null, null, null, null);
         CompositionShader.Dispose();
+        LatticeProjectionShader.Dispose();
+        LatticeOccupancyClearShader.Dispose();
         LatticeShader.Dispose();
         CellularAutomataShader.Dispose();
         BrushShader.Dispose();

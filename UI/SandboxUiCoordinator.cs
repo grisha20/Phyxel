@@ -165,7 +165,13 @@ public sealed class SandboxUiCoordinator
         saveButton.Draw(spriteBatch, font, panelRenderer, pixel);
         loadButton.Draw(spriteBatch, font, panelRenderer, pixel);
         string selectedName = materialRegistry[SelectedMaterial].Name;
-        string info = $"FPS {framesPerSecond,5:0}   Узлы {statistics.ActiveParticles:N0}   Связи {statistics.ActiveBonds:N0}   Материал: {selectedName}   Масштаб: {settings.Scale:0.##}×";
+        float averageStress = statistics.StressSampleCount == 0
+            ? 0
+            : statistics.StressSumMilli / (statistics.StressSampleCount * 1000f);
+        float averageLoad = statistics.StressSampleCount == 0
+            ? 0
+            : statistics.LoadSumMilli / (statistics.StressSampleCount * 10f);
+        string info = $"FPS {framesPerSecond,5:0}   Узлы {statistics.ActiveParticles:N0}   Связи {statistics.ActiveBonds:N0}   Напряжение {averageStress:0.000}   Нагрузка {averageLoad:0.0}   Материал: {selectedName}   Масштаб: {settings.Scale:0.##}×";
         spriteBatch.DrawString(font, info, new Vector2(InfoPanelBounds.X + 12, InfoPanelBounds.Y + 9), Color.White);
         if (!string.IsNullOrWhiteSpace(transientStatus))
         {
