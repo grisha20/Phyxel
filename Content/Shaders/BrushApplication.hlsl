@@ -1,12 +1,10 @@
 #include "PhysicsShared.hlsli"
 
-StructuredBuffer<GridCell> SourceGrid : register(t0);
-StructuredBuffer<BrushDrawCommand> Commands : register(t1);
-StructuredBuffer<MaterialProperties> Materials : register(t2);
-StructuredBuffer<LatticeParticle> SourceParticles : register(t3);
-RWStructuredBuffer<GridCell> DestinationGrid : register(u0);
-RWStructuredBuffer<LatticeParticle> DestinationParticles : register(u1);
-RWStructuredBuffer<LatticeBond> DestinationBonds : register(u2);
+StructuredBuffer<BrushDrawCommand> Commands : register(t0);
+StructuredBuffer<MaterialProperties> Materials : register(t1);
+RWStructuredBuffer<GridCell> Grid : register(u0);
+RWStructuredBuffer<LatticeParticle> Particles : register(u1);
+RWStructuredBuffer<LatticeBond> Bonds : register(u2);
 RWStructuredBuffer<uint> ActivatedBodyWords : register(u3);
 
 [numthreads(16, 16, 1)]
@@ -40,7 +38,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     if (command.Mode != 0 || command.MaterialId == 5)
     {
-        LatticeParticle sourceParticle = SourceParticles[index];
+        LatticeParticle sourceParticle = Particles[index];
         if (sourceParticle.IsActive != 0 && sourceParticle.BodyId != 0)
         {
             uint wordIndex = sourceParticle.BodyId >> 5;
@@ -52,9 +50,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         GridCell emptyCell = (GridCell)0;
         LatticeParticle emptyParticle = (LatticeParticle)0;
         LatticeBond emptyBond = (LatticeBond)0;
-        DestinationGrid[index] = emptyCell;
-        DestinationParticles[index] = emptyParticle;
-        DestinationBonds[index] = emptyBond;
+        Grid[index] = emptyCell;
+        Particles[index] = emptyParticle;
+        Bonds[index] = emptyBond;
         return;
     }
 
@@ -64,7 +62,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     cell.Mass = material.SimulationKind == 2 ? material.Density : 1;
     cell.IsActive = 1;
     cell.LatticeParticleIndex = index;
-    DestinationGrid[index] = cell;
+    Grid[index] = cell;
 
     if (material.SimulationKind == 2)
     {
@@ -76,7 +74,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         particle.IsActive = 1;
         particle.BodyId = command.Reserved;
         particle.IsDynamic = 0;
-        DestinationParticles[index] = particle;
+        Particles[index] = particle;
 
         LatticeBond bond = (LatticeBond)0;
         bond.ParticleA = index;
@@ -85,10 +83,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         bond.DiagonalRestLength = 1.41421356;
         bond.ElasticLimit = material.ElasticLimit;
         bond.PlasticLimit = material.PlasticLimit;
-        DestinationBonds[index] = bond;
+        Bonds[index] = bond;
         return;
     }
 
-    DestinationParticles[index] = (LatticeParticle)0;
-    DestinationBonds[index] = (LatticeBond)0;
+    Particles[index] = (LatticeParticle)0;
+    Bonds[index] = (LatticeBond)0;
 }

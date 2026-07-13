@@ -84,8 +84,8 @@ public struct SimulationFrameConstants
     public uint BondCount;
     public uint StressView;
     public uint SimulationPhase;
-    public float InverseWidth;
-    public float InverseHeight;
+    public uint DispatchOffsetX;
+    public uint DispatchOffsetY;
     public float MaximumVelocity;
     public float Reserved1;
 }

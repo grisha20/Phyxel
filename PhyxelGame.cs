@@ -30,6 +30,11 @@ public sealed class PhyxelGame : Game
     private readonly bool physicsRegressionVerification;
     private readonly bool criticalRegressionVerification;
     private readonly bool startupPerformanceVerification;
+    private readonly bool solidSpawnRegressionVerification;
+    private readonly bool solidSpawnPerformanceVerification;
+    private readonly bool hydrodynamicsRegressionVerification;
+    private readonly bool sandWaterRegressionVerification;
+    private readonly bool hydrodynamicsPerformanceVerification;
     private SpriteBatch? spriteBatch;
     private MaterialRegistry? materialRegistry;
     private GpuResourceLifecycleManager? resourceManager;
@@ -49,6 +54,11 @@ public sealed class PhyxelGame : Game
     private int automatedVerificationStage;
     private RawInputSnapshot latestInput;
     private StartupPerformanceVerifier? startupPerformanceVerifier;
+    private StartupPerformanceVerifier? solidSpawnPerformanceVerifier;
+    private StartupPerformanceVerifier? hydrodynamicsPerformanceVerifier;
+    private SimulationStatistics hydrodynamicsInitialStatistics;
+    private double hydrodynamicsInitialFramesPerSecond;
+    private bool hydrodynamicsInitialPanelCaptured;
 
     public PhyxelGame()
     {
@@ -81,9 +91,34 @@ public sealed class PhyxelGame : Game
             Environment.GetEnvironmentVariable("PHYXEL_PERFORMANCE_REGRESSION"),
             "1",
             StringComparison.Ordinal);
-        if (physicsRegressionVerification || criticalRegressionVerification)
+        solidSpawnRegressionVerification = string.Equals(
+            Environment.GetEnvironmentVariable("PHYXEL_SOLID_SPAWN_REGRESSION"),
+            "1",
+            StringComparison.Ordinal);
+        solidSpawnPerformanceVerification = string.Equals(
+            Environment.GetEnvironmentVariable("PHYXEL_SOLID_SPAWN_PERFORMANCE"),
+            "1",
+            StringComparison.Ordinal);
+        hydrodynamicsRegressionVerification = string.Equals(
+            Environment.GetEnvironmentVariable("PHYXEL_HYDRO_REGRESSION"),
+            "1",
+            StringComparison.Ordinal);
+        sandWaterRegressionVerification = string.Equals(
+            Environment.GetEnvironmentVariable("PHYXEL_SAND_WATER_REGRESSION"),
+            "1",
+            StringComparison.Ordinal);
+        hydrodynamicsPerformanceVerification = string.Equals(
+            Environment.GetEnvironmentVariable("PHYXEL_HYDRO_PERFORMANCE"),
+            "1",
+            StringComparison.Ordinal);
+        if (physicsRegressionVerification || criticalRegressionVerification || solidSpawnRegressionVerification ||
+            hydrodynamicsRegressionVerification || sandWaterRegressionVerification)
         {
             settings.ApplyScale(0.25f);
+        }
+        if (solidSpawnRegressionVerification || solidSpawnPerformanceVerification)
+        {
+            settings.Gravity = 0;
         }
         scenePath = automatedVerification
             ? verificationPath!
@@ -99,11 +134,26 @@ public sealed class PhyxelGame : Game
         SpriteFont font = Content.Load<SpriteFont>("Fonts/SandboxFont");
         materialRegistry = new MaterialRegistry();
         resourceManager = new GpuResourceLifecycleManager(GraphicsDevice, materialRegistry);
-        dispatchCoordinator = new SimulationDispatchCoordinator(resourceManager);
+        resourceManager.PrepareSimulation(settings);
+        dispatchCoordinator = new SimulationDispatchCoordinator(resourceManager, materialRegistry);
         userInterface = new SandboxUiCoordinator(materialRegistry, font, resourceManager);
         if (startupPerformanceVerification)
         {
             startupPerformanceVerifier = new StartupPerformanceVerifier();
+        }
+        if (solidSpawnPerformanceVerification)
+        {
+            solidSpawnPerformanceVerifier = new StartupPerformanceVerifier(
+                4,
+                55,
+                "PHYXEL_SOLID_SPAWN_PERFORMANCE");
+        }
+        if (hydrodynamicsPerformanceVerification)
+        {
+            hydrodynamicsPerformanceVerifier = new StartupPerformanceVerifier(
+                4,
+                55,
+                "PHYXEL_HYDRO_PERFORMANCE");
         }
 
         base.LoadContent();
@@ -129,7 +179,15 @@ public sealed class PhyxelGame : Game
         UiFrameActions actions = userInterface.Update(input, GraphicsDevice.Viewport, settings);
         ProcessUiActions(actions);
         Rectangle worldBounds = FitWorldToCanvas(userInterface.CanvasBounds, settings.Width, settings.Height);
-        IReadOnlyList<BrushDrawCommand> commands = criticalRegressionVerification
+        IReadOnlyList<BrushDrawCommand> commands = hydrodynamicsRegressionVerification || hydrodynamicsPerformanceVerification
+            ? HydrodynamicsRegressionScenario.CreateCommands(frameIndex)
+            : sandWaterRegressionVerification
+                ? SandWaterRegressionScenario.CreateCommands(frameIndex)
+                : solidSpawnPerformanceVerification
+            ? SolidSpawnPerformanceScenario.CreateCommands(frameIndex, settings.Width, settings.Height)
+            : solidSpawnRegressionVerification
+                ? SolidSpawnRegressionScenario.CreateCommands(frameIndex)
+                : criticalRegressionVerification
             ? CriticalRegressionScenario.CreateCommands(frameIndex, settings.Width, settings.Height)
             : physicsRegressionVerification
                 ? PhysicsRegressionScenario.CreateCommands(frameIndex, settings.Width, settings.Height)
@@ -194,6 +252,12 @@ public sealed class PhyxelGame : Game
         userInterface.Draw(spriteBatch, settings, debugProbe.Latest, displayedFrameRate, transientStatus);
         spriteBatch.End();
         UpdateFrameRate(gameTime);
+        if (hydrodynamicsPerformanceVerifier is not null && !hydrodynamicsInitialPanelCaptured && frameIndex >= 35)
+        {
+            hydrodynamicsInitialStatistics = debugProbe.Latest;
+            hydrodynamicsInitialFramesPerSecond = displayedFrameRate;
+            hydrodynamicsInitialPanelCaptured = true;
+        }
         if (startupPerformanceVerifier is not null &&
             startupPerformanceVerifier.RecordFrame(out bool performancePassed, out string performanceReport))
         {
@@ -202,6 +266,30 @@ public sealed class PhyxelGame : Game
             Console.WriteLine(performancePassed
                 ? "PHYXEL_STARTUP_PERFORMANCE_SUCCESS"
                 : "PHYXEL_STARTUP_PERFORMANCE_FAILED");
+            Exit();
+        }
+
+        if (solidSpawnPerformanceVerifier is not null &&
+            solidSpawnPerformanceVerifier.RecordFrame(out bool spawnPerformancePassed, out string spawnPerformanceReport))
+        {
+            Console.WriteLine(spawnPerformanceReport);
+            Console.WriteLine($"PHYXEL_SOLID_SPAWN_DISPATCHES topology={dispatchCoordinator?.LocalTopologyDispatches ?? 0} physics={dispatchCoordinator?.FullGridPhysicsDispatches ?? 0} composition={dispatchCoordinator?.CompositionDispatches ?? 0}");
+            Console.WriteLine(spawnPerformancePassed
+                ? "PHYXEL_SOLID_SPAWN_PERFORMANCE_SUCCESS"
+                : "PHYXEL_SOLID_SPAWN_PERFORMANCE_FAILED");
+            Exit();
+        }
+
+        if (hydrodynamicsPerformanceVerifier is not null &&
+            hydrodynamicsPerformanceVerifier.RecordFrame(out bool hydroPerformancePassed, out string hydroPerformanceReport))
+        {
+            Console.WriteLine(hydroPerformanceReport);
+            Console.WriteLine($"PHYXEL_HYDRO_DISPATCHES physics={dispatchCoordinator?.FullGridPhysicsDispatches ?? 0} composition={dispatchCoordinator?.CompositionDispatches ?? 0}");
+            Console.WriteLine($"PHYXEL_HYDRO_PANEL_BEGIN fps={hydrodynamicsInitialFramesPerSecond:0.0} activeBonds={hydrodynamicsInitialStatistics.ActiveBonds} activeParticles={hydrodynamicsInitialStatistics.ActiveParticles}");
+            Console.WriteLine($"PHYXEL_HYDRO_PANEL_END fps={displayedFrameRate:0.0} activeBonds={debugProbe.Latest.ActiveBonds} activeParticles={debugProbe.Latest.ActiveParticles}");
+            Console.WriteLine(hydroPerformancePassed
+                ? "PHYXEL_HYDRO_PERFORMANCE_SUCCESS"
+                : "PHYXEL_HYDRO_PERFORMANCE_FAILED");
             Exit();
         }
 
@@ -282,6 +370,48 @@ public sealed class PhyxelGame : Game
                 }
             }
 
+            if (solidSpawnRegressionVerification)
+            {
+                bool spawnPassed = SolidSpawnRegressionVerifier.Validate(snapshot, out string spawnReport);
+                Console.WriteLine(spawnReport);
+                Console.WriteLine(spawnPassed
+                    ? "PHYXEL_SOLID_SPAWN_REGRESSION_SUCCESS"
+                    : "PHYXEL_SOLID_SPAWN_REGRESSION_FAILED");
+                if (!spawnPassed)
+                {
+                    Exit();
+                    return;
+                }
+            }
+
+            if (hydrodynamicsRegressionVerification)
+            {
+                bool hydroPassed = HydrodynamicsRegressionVerifier.Validate(snapshot, out string hydroReport);
+                Console.WriteLine(hydroReport);
+                Console.WriteLine(hydroPassed
+                    ? "PHYXEL_HYDRO_REGRESSION_SUCCESS"
+                    : "PHYXEL_HYDRO_REGRESSION_FAILED");
+                if (!hydroPassed)
+                {
+                    Exit();
+                    return;
+                }
+            }
+
+            if (sandWaterRegressionVerification)
+            {
+                bool sandWaterPassed = SandWaterRegressionVerifier.Validate(snapshot, out string sandWaterReport);
+                Console.WriteLine(sandWaterReport);
+                Console.WriteLine(sandWaterPassed
+                    ? "PHYXEL_SAND_WATER_REGRESSION_SUCCESS"
+                    : "PHYXEL_SAND_WATER_REGRESSION_FAILED");
+                if (!sandWaterPassed)
+                {
+                    Exit();
+                    return;
+                }
+            }
+
             pendingWorldCapture = false;
             pendingSave = stateSerializer.SaveAsync(scenePath, settings, capturedMaterial, snapshot);
             SetStatus("Сохранение сцены…");
@@ -351,7 +481,17 @@ public sealed class PhyxelGame : Game
 
     private void BeginAutomatedVerificationWhenReady()
     {
-        uint captureFrame = criticalRegressionVerification ? 55u : physicsRegressionVerification ? 180u : 10u;
+        uint captureFrame = hydrodynamicsRegressionVerification
+            ? 123u
+            : sandWaterRegressionVerification
+                ? 302u
+                : solidSpawnRegressionVerification
+                    ? 20u
+            : criticalRegressionVerification
+                ? 55u
+                : physicsRegressionVerification
+                    ? 180u
+                    : 10u;
         if (!automatedVerification || automatedVerificationStage != 0 || frameIndex < captureFrame ||
             currentResources is null || userInterface is null)
         {

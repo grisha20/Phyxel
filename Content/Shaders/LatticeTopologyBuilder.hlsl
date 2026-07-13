@@ -1,11 +1,9 @@
 #include "PhysicsShared.hlsli"
 
-StructuredBuffer<LatticeParticle> SourceParticles : register(t0);
-StructuredBuffer<LatticeBond> SourceBonds : register(t1);
-StructuredBuffer<uint> ActivatedBodyWords : register(t2);
-StructuredBuffer<MaterialProperties> Materials : register(t3);
-RWStructuredBuffer<LatticeParticle> DestinationParticles : register(u0);
-RWStructuredBuffer<LatticeBond> DestinationBonds : register(u1);
+StructuredBuffer<uint> ActivatedBodyWords : register(t0);
+StructuredBuffer<MaterialProperties> Materials : register(t1);
+RWStructuredBuffer<LatticeParticle> Particles : register(u0);
+RWStructuredBuffer<LatticeBond> Bonds : register(u1);
 
 static const int2 NeighborOffsets[8] =
 {
@@ -16,30 +14,31 @@ static const int2 NeighborOffsets[8] =
 [numthreads(16, 16, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    if (dispatchThreadId.x >= Width || dispatchThreadId.y >= Height)
+    uint2 coordinate = dispatchThreadId.xy + uint2(DispatchOffsetX, DispatchOffsetY);
+    if (coordinate.x >= Width || coordinate.y >= Height)
     {
         return;
     }
 
-    uint index = FlattenCoordinate(dispatchThreadId.xy);
-    LatticeParticle particle = SourceParticles[index];
+    uint index = FlattenCoordinate(coordinate);
+    LatticeParticle particle = Particles[index];
     if (particle.IsActive == 0)
     {
-        DestinationParticles[index] = particle;
-        DestinationBonds[index] = (LatticeBond)0;
+        Particles[index] = particle;
+        Bonds[index] = (LatticeBond)0;
         return;
     }
 
     uint activeMask = 0;
     for (uint neighbor = 4; neighbor < 8; neighbor++)
     {
-        int2 coordinate = int2(dispatchThreadId.xy) + NeighborOffsets[neighbor];
-        if (coordinate.x < 0 || coordinate.y < 0 || coordinate.x >= int(Width) || coordinate.y >= int(Height))
+        int2 neighborCoordinate = int2(coordinate) + NeighborOffsets[neighbor];
+        if (neighborCoordinate.x < 0 || neighborCoordinate.y < 0 || neighborCoordinate.x >= int(Width) || neighborCoordinate.y >= int(Height))
         {
             continue;
         }
 
-        LatticeParticle adjacent = SourceParticles[FlattenCoordinate(uint2(coordinate))];
+        LatticeParticle adjacent = Particles[FlattenCoordinate(uint2(neighborCoordinate))];
         if (adjacent.IsActive != 0 && adjacent.BodyId == particle.BodyId && adjacent.MaterialId == particle.MaterialId)
         {
             activeMask |= 1u << neighbor;
@@ -54,7 +53,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         particle.IsDynamic |= activated ? 1 : 0;
     }
 
-    LatticeBond bond = SourceBonds[index];
+    LatticeBond bond = Bonds[index];
     MaterialProperties material = Materials[particle.MaterialId];
     bool newParticle = (bond.ActiveNeighborMask & 0x80000000) != 0;
     bond.ParticleA = index;
@@ -70,6 +69,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         bond.PlasticLimit = material.PlasticLimit;
     }
 
-    DestinationParticles[index] = particle;
-    DestinationBonds[index] = bond;
+    Particles[index] = particle;
+    Bonds[index] = bond;
 }

@@ -86,8 +86,8 @@ cbuffer SimulationFrameConstants : register(b0)
     uint BondCount;
     uint StressView;
     uint SimulationPhase;
-    float InverseWidth;
-    float InverseHeight;
+    uint DispatchOffsetX;
+    uint DispatchOffsetY;
     float MaximumVelocity;
     float Reserved1;
 };

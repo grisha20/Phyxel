@@ -1,9 +1,9 @@
 #include "PhysicsShared.hlsli"
 
-StructuredBuffer<GridCell> SourceGrid : register(t0);
-StructuredBuffer<LatticeParticle> SourceParticles : register(t1);
-StructuredBuffer<MaterialProperties> Materials : register(t2);
-RWStructuredBuffer<GridCell> DestinationGrid : register(u0);
+StructuredBuffer<MaterialProperties> Materials : register(t0);
+RWStructuredBuffer<GridCell> SourceGrid : register(u0);
+
+#define DestinationGrid SourceGrid
 
 float StableLowerMass(float totalMass)
 {
@@ -123,9 +123,17 @@ void ResolveVerticalPair(uint2 upperCoordinate)
     float totalMass = upper.Mass + lower.Mass;
     float stableMass = StableLowerMass(totalMass);
     float lowerMass = fluidKind == 5 ? totalMass - stableMass : stableMass;
+    if (fluidKind == 4 && lower.IsActive != 0)
+    {
+        float pressureLift = saturate((lower.Pressure - upper.Pressure - 1) * 0.08);
+        lowerMass -= min(lowerMass, min(totalMass * 0.45, pressureLift * 0.45));
+    }
+
     float upperMass = totalMass - lowerMass;
     GridCell resolvedUpper = CellWithMass(templateCell, upperMass);
     GridCell resolvedLower = CellWithMass(templateCell, lowerMass);
+    resolvedUpper.Pressure = upper.IsActive != 0 ? upper.Pressure : templateCell.Pressure;
+    resolvedLower.Pressure = lower.IsActive != 0 ? lower.Pressure : templateCell.Pressure;
     float transferredMass = lowerMass - lower.Mass;
     resolvedUpper.VelocityY = max(-MaximumVelocity, min(MaximumVelocity, upper.VelocityY - transferredMass * 60));
     resolvedLower.VelocityY = max(-MaximumVelocity, min(MaximumVelocity, lower.VelocityY + transferredMass * 60));
@@ -190,6 +198,8 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
         float transferredMass = rightMass - right.Mass;
         GridCell resolvedLeft = CellWithMass(templateCell, leftMass);
         GridCell resolvedRight = CellWithMass(templateCell, rightMass);
+        resolvedLeft.Pressure = left.IsActive != 0 ? left.Pressure : templateCell.Pressure;
+        resolvedRight.Pressure = right.IsActive != 0 ? right.Pressure : templateCell.Pressure;
         resolvedLeft.VelocityX = lerp(left.VelocityX, -transferredMass * 60, 0.55);
         resolvedRight.VelocityX = lerp(right.VelocityX, transferredMass * 60, 0.55);
         DestinationGrid[leftIndex] = resolvedLeft;
@@ -212,6 +222,101 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
     }
 }
 
+void ResolveHorizontalPressureSpan(uint2 leftCoordinate, uint stride)
+{
+    uint rightX = leftCoordinate.x + stride;
+    if (rightX >= Width)
+    {
+        return;
+    }
+
+    uint leftIndex = FlattenCoordinate(leftCoordinate);
+    uint rightIndex = FlattenCoordinate(uint2(rightX, leftCoordinate.y));
+    GridCell left = SourceGrid[leftIndex];
+    GridCell right = SourceGrid[rightIndex];
+    uint leftKind = CellKind(left);
+    uint rightKind = CellKind(right);
+    uint materialId = left.IsActive != 0 ? left.MaterialId : right.MaterialId;
+    uint materialKind = left.IsActive != 0 ? leftKind : rightKind;
+    if (materialKind != 4 ||
+        (left.IsActive != 0 && left.MaterialId != materialId) ||
+        (right.IsActive != 0 && right.MaterialId != materialId))
+    {
+        return;
+    }
+
+    for (uint offset = 1; offset < stride; offset++)
+    {
+        GridCell intermediate = SourceGrid[leftIndex + offset];
+        if (intermediate.IsActive != 0 && intermediate.MaterialId != materialId)
+        {
+            return;
+        }
+    }
+
+    GridCell templateCell = right;
+    if (left.IsActive != 0)
+    {
+        templateCell = left;
+    }
+
+    float totalMass = left.Mass + right.Mass;
+    float pressureDifference = left.Pressure - right.Pressure;
+    float desiredLeftMass = clamp(totalMass * 0.5 - pressureDifference * 0.045, 0, totalMass);
+    float leftMass = lerp(left.Mass, desiredLeftMass, 0.88);
+    float rightMass = totalMass - leftMass;
+    GridCell resolvedLeft = CellWithMass(templateCell, leftMass);
+    GridCell resolvedRight = CellWithMass(templateCell, rightMass);
+    resolvedLeft.Pressure = left.IsActive != 0 ? left.Pressure : templateCell.Pressure;
+    resolvedRight.Pressure = right.IsActive != 0 ? right.Pressure : templateCell.Pressure;
+    DestinationGrid[leftIndex] = resolvedLeft;
+    DestinationGrid[rightIndex] = resolvedRight;
+}
+
+void ResolveVerticalPressureSpan(uint2 upperCoordinate, uint stride)
+{
+    uint lowerY = upperCoordinate.y + stride;
+    if (lowerY >= Height)
+    {
+        return;
+    }
+
+    uint upperIndex = FlattenCoordinate(upperCoordinate);
+    uint lowerIndex = FlattenCoordinate(uint2(upperCoordinate.x, lowerY));
+    GridCell upper = SourceGrid[upperIndex];
+    GridCell lower = SourceGrid[lowerIndex];
+    if (lower.IsActive == 0 || CellKind(lower) != 4 ||
+        (upper.IsActive != 0 && upper.MaterialId != lower.MaterialId))
+    {
+        return;
+    }
+
+    for (uint offset = 1; offset < stride; offset++)
+    {
+        GridCell intermediate = SourceGrid[upperIndex + offset * Width];
+        if (intermediate.IsActive != 0 && intermediate.MaterialId != lower.MaterialId)
+        {
+            return;
+        }
+    }
+
+    float pressureDifference = lower.Pressure - upper.Pressure - stride * 0.75;
+    float availableCapacity = max(0, 1 - upper.Mass);
+    float transfer = min(lower.Mass, min(availableCapacity, max(0, pressureDifference) * 0.08));
+    if (transfer <= 0)
+    {
+        return;
+    }
+
+    GridCell templateCell = lower;
+    GridCell resolvedUpper = CellWithMass(templateCell, upper.Mass + transfer);
+    GridCell resolvedLower = CellWithMass(templateCell, lower.Mass - transfer);
+    resolvedUpper.Pressure = upper.IsActive != 0 ? upper.Pressure : lower.Pressure;
+    resolvedLower.Pressure = lower.Pressure;
+    DestinationGrid[upperIndex] = resolvedUpper;
+    DestinationGrid[lowerIndex] = resolvedLower;
+}
+
 void ResolvePressure(uint2 coordinate)
 {
     uint index = FlattenCoordinate(coordinate);
@@ -223,19 +328,28 @@ void ResolvePressure(uint2 coordinate)
     }
 
     float inheritedPressure = 0;
-    if (kind == 5 && coordinate.y + 1 < Height)
+    int direction = kind == 5 ? 1 : -1;
+    for (uint distance = 1; distance <= 32; distance++)
     {
-        GridCell below = SourceGrid[index + Width];
-        inheritedPressure = below.MaterialId == cell.MaterialId ? below.Pressure : 0;
-    }
-    else if (coordinate.y > 0)
-    {
-        GridCell above = SourceGrid[index - Width];
-        inheritedPressure = above.MaterialId == cell.MaterialId ? above.Pressure : 0;
+        int sampleY = int(coordinate.y) + direction * int(distance);
+        if (sampleY < 0 || sampleY >= int(Height))
+        {
+            break;
+        }
+
+        GridCell sampleCell = SourceGrid[FlattenCoordinate(uint2(coordinate.x, sampleY))];
+        if (sampleCell.IsActive == 0 || sampleCell.MaterialId != cell.MaterialId)
+        {
+            break;
+        }
+
+        inheritedPressure += distance == 32
+            ? sampleCell.Pressure
+            : sampleCell.Mass * CellDensity(sampleCell);
     }
 
     float hydrostaticPressure = inheritedPressure + cell.Mass * CellDensity(cell);
-    cell.Pressure = lerp(cell.Pressure, hydrostaticPressure, 0.72);
+    cell.Pressure = lerp(cell.Pressure, hydrostaticPressure, 0.9);
     cell.VelocityX *= 0.985;
     cell.VelocityY *= 0.985;
     DestinationGrid[index] = cell;
@@ -244,12 +358,12 @@ void ResolvePressure(uint2 coordinate)
 [numthreads(16, 16, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    if (dispatchThreadId.x >= Width || dispatchThreadId.y >= Height)
+    uint2 coordinate = dispatchThreadId.xy + uint2(DispatchOffsetX, DispatchOffsetY);
+    if (coordinate.x >= Width || coordinate.y >= Height)
     {
         return;
     }
 
-    uint2 coordinate = dispatchThreadId.xy;
     if (SimulationPhase <= 1)
     {
         if ((coordinate.y & 1) == SimulationPhase && coordinate.y + 1 < Height)
@@ -264,8 +378,26 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             ResolveHorizontalPair(coordinate);
         }
     }
-    else
+    else if (SimulationPhase == 4)
     {
         ResolvePressure(coordinate);
+    }
+    else if (SimulationPhase <= 9)
+    {
+        uint stride = 1u << (SimulationPhase - 4);
+        uint blockPosition = coordinate.x % (stride * 2);
+        if (blockPosition < stride)
+        {
+            ResolveHorizontalPressureSpan(coordinate, stride);
+        }
+    }
+    else
+    {
+        uint stride = 1u << (SimulationPhase - 9);
+        uint blockPosition = coordinate.y % (stride * 2);
+        if (blockPosition < stride)
+        {
+            ResolveVerticalPressureSpan(coordinate, stride);
+        }
     }
 }

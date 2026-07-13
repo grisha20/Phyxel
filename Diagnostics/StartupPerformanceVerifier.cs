@@ -5,12 +5,25 @@ namespace Phyxel.Diagnostics;
 
 public sealed class StartupPerformanceVerifier
 {
+    private readonly double durationSeconds;
+    private readonly double requiredFramesPerSecond;
+    private readonly string metricPrefix;
     private readonly Stopwatch stopwatch = Stopwatch.StartNew();
     private double windowStart;
     private int windowFrames;
     private int totalFrames;
     private double minimumFramesPerSecond = double.MaxValue;
     private bool completed;
+
+    public StartupPerformanceVerifier(
+        double durationSeconds = 10,
+        double requiredFramesPerSecond = 55,
+        string metricPrefix = "PHYXEL_STARTUP_PERFORMANCE")
+    {
+        this.durationSeconds = durationSeconds;
+        this.requiredFramesPerSecond = requiredFramesPerSecond;
+        this.metricPrefix = metricPrefix;
+    }
 
     public bool RecordFrame(out bool passed, out string report)
     {
@@ -33,15 +46,15 @@ public sealed class StartupPerformanceVerifier
             windowFrames = 0;
         }
 
-        if (elapsed < 10)
+        if (elapsed < durationSeconds)
         {
             return false;
         }
 
         completed = true;
         double averageFramesPerSecond = totalFrames / elapsed;
-        passed = minimumFramesPerSecond >= 55;
-        report = $"PHYXEL_STARTUP_PERFORMANCE seconds={elapsed:0.00} averageFps={averageFramesPerSecond:0.0} minimumWindowFps={minimumFramesPerSecond:0.0}";
+        passed = minimumFramesPerSecond >= requiredFramesPerSecond;
+        report = $"{metricPrefix} seconds={elapsed:0.00} averageFps={averageFramesPerSecond:0.0} minimumWindowFps={minimumFramesPerSecond:0.0}";
         return true;
     }
 }

@@ -17,6 +17,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
 {
     private readonly GraphicsDevice graphicsDevice;
     private readonly MaterialRegistry materialRegistry;
+    private GpuSimulationResources? preparedSimulationResources;
     private bool disposed;
 
     public GpuResourceLifecycleManager(GraphicsDevice graphicsDevice, MaterialRegistry materialRegistry)
@@ -38,12 +39,48 @@ public sealed class GpuResourceLifecycleManager : IDisposable
     public GpuSimulationResources? Resources { get; private set; }
     public bool RequiresRecreation { get; private set; }
 
+    public void PrepareSimulation(SimulationSettings settings)
+    {
+        if (preparedSimulationResources is not null &&
+            preparedSimulationResources.Width == settings.Width &&
+            preparedSimulationResources.Height == settings.Height)
+        {
+            return;
+        }
+
+        preparedSimulationResources?.Dispose();
+        preparedSimulationResources = CreateResources(settings.Width, settings.Height, true);
+    }
+
     public GpuSimulationResources CreateOrResize(SimulationSettings settings, bool requireSimulation)
     {
         if (Resources is not null && Resources.Width == settings.Width && Resources.Height == settings.Height &&
             Resources.IsSimulationAllocated == requireSimulation && !RequiresRecreation)
         {
             return Resources;
+        }
+
+        if (preparedSimulationResources is not null &&
+            (preparedSimulationResources.Width != settings.Width || preparedSimulationResources.Height != settings.Height))
+        {
+            preparedSimulationResources.Dispose();
+            preparedSimulationResources = null;
+        }
+
+        if (requireSimulation && preparedSimulationResources is not null)
+        {
+            Resources?.Dispose();
+            Resources = preparedSimulationResources;
+            preparedSimulationResources = null;
+            RequiresRecreation = false;
+            return Resources;
+        }
+
+        if (!requireSimulation && Resources is { IsSimulationAllocated: true })
+        {
+            preparedSimulationResources?.Dispose();
+            preparedSimulationResources = Resources;
+            Resources = null;
         }
 
         Resources?.Dispose();
@@ -234,6 +271,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         RequiresRecreation = true;
         Resources?.Dispose();
         Resources = null;
+        preparedSimulationResources?.Dispose();
+        preparedSimulationResources = null;
     }
 
     private void HandleDeviceReset(object? sender, EventArgs eventArgs)
@@ -252,6 +291,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         graphicsDevice.DeviceResetting -= HandleDeviceResetting;
         graphicsDevice.DeviceReset -= HandleDeviceReset;
         Resources?.Dispose();
+        preparedSimulationResources?.Dispose();
         BrushOutlineTexture.Dispose();
         CircleTexture.Dispose();
         PixelTexture.Dispose();
