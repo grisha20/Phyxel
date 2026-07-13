@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <Import Project="$(NuGetPackageRoot)nkast.xna.framework.content.pipeline.builder\4.2.9001\build\nkast.Xna.Framework.Content.Pipeline.Builder.targets" Condition="Exists('$(NuGetPackageRoot)nkast.xna.framework.content.pipeline.builder\4.2.9001\build\nkast.Xna.Framework.Content.Pipeline.Builder.targets')" />
+    <Import Project="$(NuGetPackageRoot)nkast.kni.platform.winforms.dx11\4.2.9001\build\nkast.Kni.Platform.WinForms.DX11.targets" Condition="Exists('$(NuGetPackageRoot)nkast.kni.platform.winforms.dx11\4.2.9001\build\nkast.Kni.Platform.WinForms.DX11.targets')" />
+  </ImportGroup>
+</Project>
