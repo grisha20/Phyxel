@@ -1,0 +1,246 @@
+using System;
+using System.Collections.Generic;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using Phyxel.Core;
+using Phyxel.Graphics;
+using Phyxel.Input;
+using Phyxel.Materials;
+using Phyxel.Physics;
+
+namespace Phyxel.UI;
+
+public readonly record struct UiFrameActions(
+    bool ClearRequested,
+    bool SaveRequested,
+    bool LoadRequested,
+    bool ScaleChanged);
+
+public sealed class SandboxUiCoordinator
+{
+    private readonly MaterialRegistry materialRegistry;
+    private readonly SpriteFont font;
+    private readonly Texture2D pixel;
+    private readonly UiPanelBackdropRenderer panelRenderer;
+    private readonly List<(MaterialId Material, UiIconButton Button)> materialButtons = [];
+    private readonly UiIconButton pauseButton = new(UiLocalizationProvider.Pause);
+    private readonly UiIconButton clearButton = new(UiLocalizationProvider.Clear);
+    private readonly UiIconButton saveButton = new(UiLocalizationProvider.Save);
+    private readonly UiIconButton loadButton = new(UiLocalizationProvider.Load);
+    private readonly UiIconButton stressButton = new(UiLocalizationProvider.Stress);
+    private readonly UiValueSlider brushSlider;
+    private readonly UiValueSlider densitySlider;
+    private readonly UiValueSlider scaleSlider;
+    private float clearConfirmationRemaining;
+    private bool compactLayout;
+
+    public SandboxUiCoordinator(
+        MaterialRegistry materialRegistry,
+        SpriteFont font,
+        GpuResourceLifecycleManager resources)
+    {
+        this.materialRegistry = materialRegistry;
+        this.font = font;
+        pixel = resources.PixelTexture;
+        panelRenderer = new UiPanelBackdropRenderer(resources.PixelTexture, resources.CircleTexture);
+        foreach (MaterialDefinition material in materialRegistry.SelectableMaterials)
+        {
+            UiIconButton button = new(UiLocalizationProvider.Material(material.Id))
+            {
+                AccentColor = material.Color
+            };
+            materialButtons.Add((material.Id, button));
+        }
+
+        brushSlider = new UiValueSlider(UiLocalizationProvider.BrushSize, 1, 96, 1, 18, " px");
+        densitySlider = new UiValueSlider(UiLocalizationProvider.SpawnDensity, 5, 100, 1, 82, "%");
+        scaleSlider = new UiValueSlider("Масштаб симуляции", 25, 100, 25, 100, "%");
+    }
+
+    public MaterialId SelectedMaterial { get; set; } = MaterialId.Sand;
+    public Rectangle CanvasBounds { get; private set; }
+    public Rectangle SidePanelBounds { get; private set; }
+    public Rectangle InfoPanelBounds { get; private set; }
+    public bool PointerConsumed { get; private set; }
+
+    public UiFrameActions Update(RawInputSnapshot input, Viewport viewport, SimulationSettings settings)
+    {
+        Layout(viewport);
+        PointerConsumed = SidePanelBounds.Contains(input.MousePosition) || InfoPanelBounds.Contains(input.MousePosition);
+        clearConfirmationRemaining = Math.Max(0f, clearConfirmationRemaining - input.DeltaSeconds);
+        for (int index = 0; index < materialButtons.Count; index++)
+        {
+            (MaterialId material, UiIconButton button) = materialButtons[index];
+            button.Active = material == SelectedMaterial;
+            if (button.Update(input))
+            {
+                SelectedMaterial = material;
+            }
+        }
+
+        pauseButton.Active = settings.Paused;
+        pauseButton.Label = compactLayout
+            ? settings.Paused ? "Продолжить" : "Пауза"
+            : settings.Paused ? UiLocalizationProvider.Continue : UiLocalizationProvider.Pause;
+        if (pauseButton.Update(input))
+        {
+            settings.Paused = !settings.Paused;
+        }
+
+        stressButton.Active = settings.StressView;
+        if (stressButton.Update(input))
+        {
+            settings.StressView = !settings.StressView;
+        }
+
+        bool clearRequested = false;
+        if (clearButton.Update(input))
+        {
+            if (clearConfirmationRemaining > 0f)
+            {
+                clearRequested = true;
+                clearConfirmationRemaining = 0f;
+            }
+            else
+            {
+                clearConfirmationRemaining = 3f;
+            }
+        }
+
+        clearButton.Label = clearConfirmationRemaining > 0f
+            ? compactLayout ? "Подтвердить" : UiLocalizationProvider.ConfirmClear
+            : compactLayout ? "Очистить" : UiLocalizationProvider.Clear;
+        stressButton.Label = compactLayout ? "Напряжение" : UiLocalizationProvider.Stress;
+        saveButton.Label = compactLayout ? "Сохранить" : UiLocalizationProvider.Save;
+        loadButton.Label = compactLayout ? "Загрузить" : UiLocalizationProvider.Load;
+        bool saveRequested = saveButton.Update(input) || input.SavePressed;
+        bool loadRequested = loadButton.Update(input) || input.LoadPressed;
+        if (brushSlider.Update(input))
+        {
+            settings.BrushRadius = (int)brushSlider.Value;
+        }
+
+        if (densitySlider.Update(input))
+        {
+            settings.SpawnDensity = densitySlider.Value / 100f;
+        }
+
+        bool scaleChanged = scaleSlider.Update(input);
+        if (scaleChanged)
+        {
+            settings.ApplyScale(scaleSlider.Value / 100f);
+        }
+
+        brushSlider.Value = settings.BrushRadius;
+        densitySlider.Value = settings.SpawnDensity * 100f;
+        scaleSlider.Value = settings.Scale * 100f;
+        return new UiFrameActions(clearRequested, saveRequested, loadRequested, scaleChanged);
+    }
+
+    public void Draw(
+        SpriteBatch spriteBatch,
+        SimulationSettings settings,
+        SimulationStatistics statistics,
+        double framesPerSecond,
+        string transientStatus)
+    {
+        panelRenderer.Draw(spriteBatch, SidePanelBounds, 12);
+        panelRenderer.Draw(spriteBatch, InfoPanelBounds, 8);
+        spriteBatch.DrawString(
+            font,
+            UiLocalizationProvider.Materials,
+            new Vector2(SidePanelBounds.X + 14, SidePanelBounds.Y + 12),
+            new Color(170, 170, 170));
+        foreach ((MaterialId _, UiIconButton button) in materialButtons)
+        {
+            button.Draw(spriteBatch, font, panelRenderer, pixel, true);
+        }
+
+        brushSlider.Draw(spriteBatch, font, panelRenderer, pixel);
+        densitySlider.Draw(spriteBatch, font, panelRenderer, pixel);
+        scaleSlider.Draw(spriteBatch, font, panelRenderer, pixel);
+        pauseButton.Draw(spriteBatch, font, panelRenderer, pixel);
+        stressButton.Draw(spriteBatch, font, panelRenderer, pixel);
+        clearButton.Draw(spriteBatch, font, panelRenderer, pixel);
+        saveButton.Draw(spriteBatch, font, panelRenderer, pixel);
+        loadButton.Draw(spriteBatch, font, panelRenderer, pixel);
+        string selectedName = materialRegistry[SelectedMaterial].Name;
+        string info = $"FPS {framesPerSecond,5:0}   Узлы {statistics.ActiveParticles:N0}   Связи {statistics.ActiveBonds:N0}   Материал: {selectedName}   Масштаб: {settings.Scale:0.##}×";
+        spriteBatch.DrawString(font, info, new Vector2(InfoPanelBounds.X + 12, InfoPanelBounds.Y + 9), Color.White);
+        if (!string.IsNullOrWhiteSpace(transientStatus))
+        {
+            Vector2 statusSize = font.MeasureString(transientStatus);
+            spriteBatch.DrawString(
+                font,
+                transientStatus,
+                new Vector2(InfoPanelBounds.Right - statusSize.X - 12, InfoPanelBounds.Y + 9),
+                new Color(128, 198, 238));
+        }
+    }
+
+    private void Layout(Viewport viewport)
+    {
+        compactLayout = viewport.Height < 750;
+        float scale = Math.Clamp(viewport.Height / 1080f, 0.72f, 1.35f);
+        int margin = Math.Max(8, (int)(12 * scale));
+        int sideWidth = Math.Max(206, (int)(220 * scale));
+        int infoHeight = Math.Max(38, (int)(40 * scale));
+        SidePanelBounds = new Rectangle(
+            viewport.Width - sideWidth - margin,
+            margin,
+            sideWidth,
+            viewport.Height - infoHeight - margin * 3);
+        InfoPanelBounds = new Rectangle(
+            margin,
+            viewport.Height - infoHeight - margin,
+            viewport.Width - margin * 2,
+            infoHeight);
+        int compactToolbarHeight = compactLayout ? 40 : 0;
+        CanvasBounds = new Rectangle(
+            0,
+            compactToolbarHeight,
+            SidePanelBounds.X - margin,
+            InfoPanelBounds.Y - margin - compactToolbarHeight);
+        int innerX = SidePanelBounds.X + 10;
+        int innerWidth = SidePanelBounds.Width - 20;
+        int cursorY = SidePanelBounds.Y + 42;
+        int buttonHeight = compactLayout ? 30 : Math.Max(36, (int)(40 * scale));
+        int buttonSpacing = compactLayout ? 3 : 5;
+        foreach ((MaterialId _, UiIconButton button) in materialButtons)
+        {
+            button.Bounds = new Rectangle(innerX, cursorY, innerWidth, buttonHeight);
+            cursorY += buttonHeight + buttonSpacing;
+        }
+
+        cursorY += compactLayout ? 24 : 28;
+        brushSlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
+        cursorY += compactLayout ? 49 : 64;
+        densitySlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
+        cursorY += compactLayout ? 49 : 64;
+        scaleSlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
+        UiIconButton[] serviceButtons = [pauseButton, stressButton, clearButton, saveButton, loadButton];
+        if (compactLayout)
+        {
+            int toolbarWidth = CanvasBounds.Width;
+            int toolbarGap = 4;
+            int serviceWidth = (toolbarWidth - toolbarGap * (serviceButtons.Length - 1)) / serviceButtons.Length;
+            for (int index = 0; index < serviceButtons.Length; index++)
+            {
+                serviceButtons[index].Bounds = new Rectangle(
+                    index * (serviceWidth + toolbarGap),
+                    4,
+                    serviceWidth,
+                    32);
+            }
+
+            return;
+        }
+
+        cursorY += 45;
+        foreach (UiIconButton button in serviceButtons)
+        {
+            button.Bounds = new Rectangle(innerX, cursorY, innerWidth, buttonHeight);
+            cursorY += buttonHeight + 5;
+        }
+    }
+}

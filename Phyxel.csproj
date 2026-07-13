@@ -1,36 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
-    <EnableDefaultItems>false</EnableDefaultItems>
     <TargetFramework>net8.0-windows</TargetFramework>
     <RollForward>Major</RollForward>
     <UseWindowsForms>true</UseWindowsForms>
-    <ProjectGuid>193c91af-419b-42b6-aadf-9fb2f6213fe0</ProjectGuid>
     <OutputType>WinExe</OutputType>
-    <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>Phyxel</RootNamespace>
     <AssemblyName>Phyxel</AssemblyName>
-    <OutputPath>bin\$(Platform)\$(Configuration)\</OutputPath>
+    <ApplicationIcon>Icon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <DefineConstants>$(DefineConstants);WINDOWSDX</DefineConstants>
     <KniPlatform>Windows</KniPlatform>
+    <GraphicsProfile>HiDef</GraphicsProfile>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
-	
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-  </PropertyGroup>
-	
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-  </PropertyGroup>
-	
-  <PropertyGroup>
-    <ApplicationIcon>Icon.ico</ApplicationIcon>
-  </PropertyGroup>
-  <PropertyGroup>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
-  </PropertyGroup>
-  <ItemGroup>
-    <Compile Include="PhyxelGame.cs" />
-    <Compile Include="Program.cs" />
-  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="nkast.Xna.Framework" Version="4.2.9001" />
     <PackageReference Include="nkast.Xna.Framework.Content" Version="4.2.9001" />
@@ -44,13 +26,10 @@
     <PackageReference Include="nkast.Xna.Framework.XR" Version="4.2.9001" />
     <PackageReference Include="nkast.Kni.Platform.WinForms.DX11" Version="4.2.9001" />
     <PackageReference Include="nkast.Xna.Framework.Content.Pipeline.Builder" Version="4.2.9001" />
-  </ItemGroup>
-  <ItemGroup>
-    <Content Include="Icon.ico" />
+    <PackageReference Include="SharpDX.D3DCompiler" Version="4.2.0" />
   </ItemGroup>
   <ItemGroup>
     <KniContentReference Include="Content\PhyxelContent.mgcb" />
-    <None Include="app.manifest" />
+    <None Update="Content\Shaders\**\*.*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-
 </Project>

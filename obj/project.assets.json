@@ -480,6 +480,23 @@
           }
         }
       },
+      "SharpDX.D3DCompiler/4.2.0": {
+        "type": "package",
+        "dependencies": {
+          "NETStandard.Library": "1.6.1",
+          "SharpDX": "4.2.0"
+        },
+        "compile": {
+          "lib/netstandard1.1/SharpDX.D3DCompiler.dll": {
+            "related": ".pdb;.xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard1.1/SharpDX.D3DCompiler.dll": {
+            "related": ".pdb;.xml"
+          }
+        }
+      },
       "SharpDX.Direct2D1/4.2.0": {
         "type": "package",
         "dependencies": {
@@ -2194,6 +2211,30 @@
         "lib/uap10.0/SharpDX.pri",
         "sharpdx.4.2.0.nupkg.sha512",
         "sharpdx.nuspec"
+      ]
+    },
+    "SharpDX.D3DCompiler/4.2.0": {
+      "sha512": "Rnsd6Ilp127xbXqhTit8WKFQUrXwWxqVGpglyWDNkIBCk0tWXNQEjrJpsl0KAObzyZaa33+EXAikLVt5fnd3GA==",
+      "type": "package",
+      "path": "sharpdx.d3dcompiler/4.2.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net40/SharpDX.D3DCompiler.dll",
+        "lib/net40/SharpDX.D3DCompiler.pdb",
+        "lib/net40/SharpDX.D3DCompiler.xml",
+        "lib/net45/SharpDX.D3DCompiler.dll",
+        "lib/net45/SharpDX.D3DCompiler.pdb",
+        "lib/net45/SharpDX.D3DCompiler.xml",
+        "lib/netstandard1.1/SharpDX.D3DCompiler.dll",
+        "lib/netstandard1.1/SharpDX.D3DCompiler.pdb",
+        "lib/netstandard1.1/SharpDX.D3DCompiler.xml",
+        "lib/uap10.0/SharpDX.D3DCompiler.dll",
+        "lib/uap10.0/SharpDX.D3DCompiler.pdb",
+        "lib/uap10.0/SharpDX.D3DCompiler.pri",
+        "lib/uap10.0/SharpDX.D3DCompiler.xml",
+        "sharpdx.d3dcompiler.4.2.0.nupkg.sha512",
+        "sharpdx.d3dcompiler.nuspec"
       ]
     },
     "SharpDX.Direct2D1/4.2.0": {
@@ -5307,6 +5348,7 @@
   },
   "projectFileDependencyGroups": {
     "net8.0-windows7.0": [
+      "SharpDX.D3DCompiler >= 4.2.0",
       "nkast.Kni.Platform.WinForms.DX11 >= 4.2.9001",
       "nkast.Xna.Framework >= 4.2.9001",
       "nkast.Xna.Framework.Audio >= 4.2.9001",
@@ -5322,32 +5364,24 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\Chichiryaka\\.nuget\\packages\\": {},
-    "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
+    "C:\\Users\\Степан\\.nuget\\packages\\": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\Chichiryaka\\Documents\\GitHub\\Phyxel\\Phyxel.csproj",
+      "projectUniqueName": "F:\\GitHub\\Phyxel\\Phyxel.csproj",
       "projectName": "Phyxel",
-      "projectPath": "C:\\Users\\Chichiryaka\\Documents\\GitHub\\Phyxel\\Phyxel.csproj",
-      "packagesPath": "C:\\Users\\Chichiryaka\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\Chichiryaka\\Documents\\GitHub\\Phyxel\\obj\\",
+      "projectPath": "F:\\GitHub\\Phyxel\\Phyxel.csproj",
+      "packagesPath": "C:\\Users\\Степан\\.nuget\\packages\\",
+      "outputPath": "F:\\GitHub\\Phyxel\\obj\\",
       "projectStyle": "PackageReference",
-      "fallbackFolders": [
-        "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-      ],
       "configFilePaths": [
-        "C:\\Users\\Chichiryaka\\AppData\\Roaming\\NuGet\\NuGet.Config",
-        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
-        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        "C:\\Users\\Степан\\AppData\\Roaming\\NuGet\\NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net8.0-windows"
       ],
       "sources": {
-        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
-        "C:\\Program Files\\dotnet\\library-packs": {},
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
@@ -5365,13 +5399,16 @@
         "enableAudit": "true",
         "auditLevel": "low",
         "auditMode": "direct"
-      },
-      "SdkAnalysisLevel": "9.0.300"
+      }
     },
     "frameworks": {
       "net8.0-windows7.0": {
         "targetAlias": "net8.0-windows",
         "dependencies": {
+          "SharpDX.D3DCompiler": {
+            "target": "Package",
+            "version": "[4.2.0, )"
+          },
           "nkast.Kni.Platform.WinForms.DX11": {
             "target": "Package",
             "version": "[4.2.9001, )"
@@ -5440,7 +5477,7 @@
             "privateAssets": "none"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.305/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Users\\Степан\\.dotnet\\sdk\\8.0.422/PortableRuntimeIdentifierGraph.json"
       }
     }
   }
