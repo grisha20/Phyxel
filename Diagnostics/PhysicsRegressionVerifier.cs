@@ -98,11 +98,11 @@ public static class PhysicsRegressionVerifier
         bool waterSpread = waterMass > 150 && waterSpan > snapshot.Width * 0.34f && waterSurfaceDeviation < 42;
         bool densitySorting = sandCount > 0 && averageSandY > snapshot.Height * 0.46 &&
             gasCount > 0 && averageGasY < snapshot.Height * 0.72;
-        bool latticeFall = activeMetalParticles > 0 && averageMetalY > snapshot.Height * 0.32;
+        bool latticeStability = activeMetalParticles > 0 && averageMetalY < snapshot.Height * 0.25;
         bool unifiedOccupancy = activeParticles > 0 && projectionRatio > 0.78f;
-        bool structuralResponse = activeBondCount > activeParticles && maximumStress > 0.0001f;
+        bool structuralResponse = activeBondCount > activeParticles && activeBondCount <= activeParticles * 8;
         report = $"PHYXEL_PHYSICS_METRICS waterMass={waterMass:0.0} waterSpan={waterSpan} surfaceDeviation={waterSurfaceDeviation:0.0} sandY={averageSandY:0.0} gasY={averageGasY:0.0} metalY={averageMetalY:0.0} projection={projectionRatio:0.000} bonds={activeBondCount} stress={maximumStress:0.0000}";
-        return waterSpread && densitySorting && latticeFall && unifiedOccupancy && structuralResponse;
+        return waterSpread && densitySorting && latticeStability && unifiedOccupancy && structuralResponse;
     }
 
     private static double CalculateDeviation(IReadOnlyList<int> values)

@@ -14,7 +14,7 @@ public static class PhysicsRegressionScenario
             int floorY = height - 5;
             for (int x = 5; x < width - 5; x += 7)
             {
-                commands.Add(CreateCommand(x, floorY, MaterialId.Concrete, 5, (uint)x));
+                commands.Add(CreateCommand(x, floorY, MaterialId.Concrete, 5, (uint)x, 1));
             }
         }
         else if (frameIndex == 1)
@@ -23,7 +23,7 @@ public static class PhysicsRegressionScenario
             {
                 for (int x = 38; x <= 101; x += 7)
                 {
-                    commands.Add(CreateCommand(x, y, MaterialId.Water, 5, (uint)(y * width + x)));
+                    commands.Add(CreateCommand(x, y, MaterialId.Water, 5, (uint)(y * width + x), 0));
                 }
             }
         }
@@ -31,19 +31,19 @@ public static class PhysicsRegressionScenario
         {
             for (int x = 55; x <= 90; x += 5)
             {
-                commands.Add(CreateCommand(x, 82, MaterialId.Sand, 4, (uint)(10000 + x)));
+                commands.Add(CreateCommand(x, 82, MaterialId.Sand, 4, (uint)(10000 + x), 0));
             }
 
             for (int x = width / 2; x <= width / 2 + 75; x += 5)
             {
-                commands.Add(CreateCommand(x, 45, MaterialId.Metal, 4, (uint)(20000 + x)));
+                commands.Add(CreateCommand(x, 45, MaterialId.Metal, 4, (uint)(20000 + x), 2));
             }
         }
         else if (frameIndex == 3)
         {
             for (int x = 58; x <= 86; x += 5)
             {
-                commands.Add(CreateCommand(x, height - 42, MaterialId.Gas, 4, (uint)(30000 + x)));
+                commands.Add(CreateCommand(x, height - 42, MaterialId.Gas, 4, (uint)(30000 + x), 0));
             }
         }
 
@@ -55,7 +55,8 @@ public static class PhysicsRegressionScenario
         int y,
         MaterialId materialId,
         float radius,
-        uint seed)
+        uint seed,
+        uint bodyId)
     {
         return new BrushDrawCommand
         {
@@ -65,7 +66,8 @@ public static class PhysicsRegressionScenario
             Radius = radius,
             Density = 1,
             Mode = 0,
-            Seed = seed
+            Seed = seed,
+            Reserved = bodyId
         };
     }
 }

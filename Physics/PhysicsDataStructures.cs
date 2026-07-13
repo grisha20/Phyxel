@@ -13,6 +13,8 @@ public struct LatticeParticle
     public uint MaterialId;
     public uint IsActive;
     public float Stress;
+    public uint BodyId;
+    public uint IsDynamic;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

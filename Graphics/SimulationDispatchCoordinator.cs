@@ -10,7 +10,15 @@ namespace Phyxel.Graphics;
 public sealed class SimulationDispatchCoordinator
 {
     private readonly GpuResourceLifecycleManager lifecycleManager;
+    private GpuSimulationResources? boundResources;
     private uint frameIndex;
+    private uint lastObservedStatisticsFrame;
+    private bool worldHasMatter;
+    private bool presentationDirty = true;
+    private bool lastStressView;
+
+    public ulong FullGridPhysicsDispatches { get; private set; }
+    public ulong CompositionDispatches { get; private set; }
 
     public SimulationDispatchCoordinator(GpuResourceLifecycleManager lifecycleManager)
     {
@@ -21,20 +29,27 @@ public sealed class SimulationDispatchCoordinator
         SimulationSettings settings,
         ReadOnlySpan<BrushDrawCommand> commands)
     {
-        GpuSimulationResources resources = lifecycleManager.CreateOrResize(settings);
-        resources.Commands.Upload(resources.Context, commands);
-        if (frameIndex == 0)
+        GpuSimulationResources resources = lifecycleManager.CreateOrResize(
+            settings,
+            worldHasMatter || commands.Length > 0);
+        if (!ReferenceEquals(resources, boundResources))
         {
             Clear(resources);
+            boundResources = resources;
+            worldHasMatter = false;
+            presentationDirty = resources.IsSimulationAllocated;
         }
 
         SimulationFrameConstants constants = CreateConstants(settings, commands.Length, 0);
         if (commands.Length > 0)
         {
+            resources.Commands.Upload(resources.Context, commands);
             DispatchBrush(resources, ref constants, commands);
+            worldHasMatter |= ContainsMatterCommand(commands);
+            presentationDirty = true;
         }
 
-        if (!settings.Paused)
+        if (!settings.Paused && worldHasMatter)
         {
             int iterations = Math.Clamp(settings.SolverIterations, 1, 8);
             for (int iteration = 0; iteration < iterations; iteration++)
@@ -45,18 +60,50 @@ public sealed class SimulationDispatchCoordinator
 
             DispatchUnifiedOccupancyProjection(resources, ref constants);
             DispatchCellularAutomata(resources, ref constants);
+            presentationDirty = true;
         }
 
+        presentationDirty |= resources.IsSimulationAllocated && lastStressView != settings.StressView;
+        lastStressView = settings.StressView;
         constants.StressView = settings.StressView ? 1u : 0u;
-        DispatchComposition(resources, ref constants);
+        if (presentationDirty && resources.IsSimulationAllocated)
+        {
+            DispatchComposition(resources, ref constants);
+            presentationDirty = false;
+        }
+
         frameIndex++;
         return resources;
     }
 
     public void ClearCurrentWorld(SimulationSettings settings)
     {
-        GpuSimulationResources resources = lifecycleManager.CreateOrResize(settings);
+        GpuSimulationResources resources = lifecycleManager.CreateOrResize(settings, false);
         Clear(resources);
+        boundResources = resources;
+        worldHasMatter = false;
+        presentationDirty = resources.IsSimulationAllocated;
+    }
+
+    public void RestoreWorldActivity(GpuSimulationResources resources, bool containsMatter)
+    {
+        boundResources = resources;
+        worldHasMatter = containsMatter;
+        presentationDirty = resources.IsSimulationAllocated;
+    }
+
+    public void ObserveStatistics(SimulationStatistics statistics)
+    {
+        if (statistics.FrameIndex == 0 || statistics.FrameIndex <= lastObservedStatisticsFrame)
+        {
+            return;
+        }
+
+        lastObservedStatisticsFrame = statistics.FrameIndex;
+        if (statistics.ActiveParticles == 0 && statistics.ActiveCells == 0)
+        {
+            worldHasMatter = false;
+        }
     }
 
     private void DispatchBrush(
@@ -68,19 +115,54 @@ public sealed class SimulationDispatchCoordinator
         context.CopyResource(resources.Grid.ReadBuffer, resources.Grid.WriteBuffer);
         context.CopyResource(resources.Particles.ReadBuffer, resources.Particles.WriteBuffer);
         context.CopyResource(resources.Bonds.ReadBuffer, resources.Bonds.WriteBuffer);
+        context.ClearUnorderedAccessView(resources.ActivatedBodyWords.WriteUnorderedView, new RawInt4(0, 0, 0, 0));
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.BrushShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.Commands.View, resources.Materials.View);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Grid.ReadView,
+            resources.Commands.View,
+            resources.Materials.View,
+            resources.Particles.ReadView);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Grid.WriteUnorderedView,
             resources.Particles.WriteUnorderedView,
-            resources.Bonds.WriteUnorderedView);
+            resources.Bonds.WriteUnorderedView,
+            resources.ActivatedBodyWords.WriteUnorderedView);
         int maximumDiameter = Math.Max(1, (int)constants.MaximumBrushDiameter);
         context.Dispatch(DivideRoundUp(maximumDiameter, 16), DivideRoundUp(maximumDiameter, 16), commands.Length);
-        Unbind(context, 3, 3);
+        Unbind(context, 4, 4);
         resources.Grid.Swap();
+        resources.Particles.Swap();
+        resources.Bonds.Swap();
+        DispatchLatticeTopology(resources, ref constants);
+    }
+
+    private void DispatchLatticeTopology(
+        GpuSimulationResources resources,
+        ref SimulationFrameConstants constants)
+    {
+        DeviceContext context = resources.Context;
+        context.CopyResource(resources.Particles.ReadBuffer, resources.Particles.WriteBuffer);
+        context.CopyResource(resources.Bonds.ReadBuffer, resources.Bonds.WriteBuffer);
+        UpdateConstants(context, resources, ref constants);
+        context.ComputeShader.Set(resources.LatticeTopologyShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Particles.ReadView,
+            resources.Bonds.ReadView,
+            resources.ActivatedBodyWords.WriteView,
+            resources.Materials.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Particles.WriteUnorderedView,
+            resources.Bonds.WriteUnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        FullGridPhysicsDispatches++;
+        Unbind(context, 4, 2);
         resources.Particles.Swap();
         resources.Bonds.Swap();
     }
@@ -101,6 +183,7 @@ public sealed class SimulationDispatchCoordinator
             context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.Particles.ReadView, resources.Materials.View);
             context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.WriteUnorderedView);
             context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+            FullGridPhysicsDispatches++;
             Unbind(context, 3, 1);
             resources.Grid.Swap();
         }
@@ -119,6 +202,7 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, null!, resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.WriteUnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        FullGridPhysicsDispatches++;
         Unbind(context, 3, 1);
         resources.Grid.Swap();
 
@@ -128,6 +212,7 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetShaderResources(0, null!, resources.Particles.ReadView, resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.WriteUnorderedView);
         context.Dispatch(DivideRoundUp(resources.Particles.Count, 256), 1, 1);
+        FullGridPhysicsDispatches++;
         Unbind(context, 3, 1);
         resources.Grid.Swap();
     }
@@ -153,6 +238,7 @@ public sealed class SimulationDispatchCoordinator
             resources.Particles.WriteUnorderedView,
             resources.Bonds.WriteUnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        FullGridPhysicsDispatches++;
         Unbind(context, 4, 2);
         resources.Particles.Swap();
         resources.Bonds.Swap();
@@ -178,6 +264,7 @@ public sealed class SimulationDispatchCoordinator
             resources.CompositionTargets.WriteView,
             resources.Statistics.WriteUnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        CompositionDispatches++;
         Unbind(context, 4, 2);
         resources.Statistics.Swap();
         context.CopyResource(resources.CompositionTargets.WriteTexture, resources.NativePresentationTexture);
@@ -203,6 +290,11 @@ public sealed class SimulationDispatchCoordinator
         }
 
         foreach (UnorderedAccessView view in resources.Statistics.UnorderedAccessViews)
+        {
+            resources.Context.ClearUnorderedAccessView(view, zero);
+        }
+
+        foreach (UnorderedAccessView view in resources.ActivatedBodyWords.UnorderedAccessViews)
         {
             resources.Context.ClearUnorderedAccessView(view, zero);
         }
@@ -246,5 +338,18 @@ public sealed class SimulationDispatchCoordinator
     private static int DivideRoundUp(int value, int divisor)
     {
         return (value + divisor - 1) / divisor;
+    }
+
+    private static bool ContainsMatterCommand(ReadOnlySpan<BrushDrawCommand> commands)
+    {
+        foreach (BrushDrawCommand command in commands)
+        {
+            if (command.Mode == 0 && command.MaterialId != 5)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

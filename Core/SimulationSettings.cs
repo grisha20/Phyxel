@@ -7,6 +7,8 @@ public sealed class SimulationSettings
     public const int NativeWidth = 1920;
     public const int NativeHeight = 1080;
     public const int MaximumBrushCommands = 256;
+    public const int MaximumLatticeBodies = 262144;
+    public const int BodyActivationWordCount = MaximumLatticeBodies / 32;
     public int Width { get; set; } = NativeWidth;
     public int Height { get; set; } = NativeHeight;
     public float Scale { get; set; } = 1f;

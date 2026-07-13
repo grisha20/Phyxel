@@ -20,6 +20,8 @@ struct LatticeParticle
     uint MaterialId;
     uint IsActive;
     float Stress;
+    uint BodyId;
+    uint IsDynamic;
 };
 
 struct LatticeBond

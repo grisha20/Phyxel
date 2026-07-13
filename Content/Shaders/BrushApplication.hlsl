@@ -3,9 +3,11 @@
 StructuredBuffer<GridCell> SourceGrid : register(t0);
 StructuredBuffer<BrushDrawCommand> Commands : register(t1);
 StructuredBuffer<MaterialProperties> Materials : register(t2);
+StructuredBuffer<LatticeParticle> SourceParticles : register(t3);
 RWStructuredBuffer<GridCell> DestinationGrid : register(u0);
 RWStructuredBuffer<LatticeParticle> DestinationParticles : register(u1);
 RWStructuredBuffer<LatticeBond> DestinationBonds : register(u2);
+RWStructuredBuffer<uint> ActivatedBodyWords : register(u3);
 
 [numthreads(16, 16, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -38,6 +40,15 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     if (command.Mode != 0 || command.MaterialId == 5)
     {
+        LatticeParticle sourceParticle = SourceParticles[index];
+        if (sourceParticle.IsActive != 0 && sourceParticle.BodyId != 0)
+        {
+            uint wordIndex = sourceParticle.BodyId >> 5;
+            uint bodyBit = 1u << (sourceParticle.BodyId & 31);
+            uint ignoredWord;
+            InterlockedOr(ActivatedBodyWords[wordIndex], bodyBit, ignoredWord);
+        }
+
         GridCell emptyCell = (GridCell)0;
         LatticeParticle emptyParticle = (LatticeParticle)0;
         LatticeBond emptyBond = (LatticeBond)0;
@@ -63,15 +74,21 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         particle.Mass = material.Density;
         particle.MaterialId = command.MaterialId;
         particle.IsActive = 1;
+        particle.BodyId = command.Reserved;
+        particle.IsDynamic = 0;
         DestinationParticles[index] = particle;
 
         LatticeBond bond = (LatticeBond)0;
         bond.ParticleA = index;
-        bond.ActiveNeighborMask = 255;
+        bond.ActiveNeighborMask = 0x80000000;
         bond.CardinalRestLength = 1;
         bond.DiagonalRestLength = 1.41421356;
         bond.ElasticLimit = material.ElasticLimit;
         bond.PlasticLimit = material.PlasticLimit;
         DestinationBonds[index] = bond;
+        return;
     }
+
+    DestinationParticles[index] = (LatticeParticle)0;
+    DestinationBonds[index] = (LatticeBond)0;
 }

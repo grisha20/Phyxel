@@ -21,6 +21,7 @@ public sealed class SandboxUiCoordinator
     private readonly MaterialRegistry materialRegistry;
     private readonly SpriteFont font;
     private readonly Texture2D pixel;
+    private readonly Texture2D brushOutline;
     private readonly UiPanelBackdropRenderer panelRenderer;
     private readonly List<(MaterialId Material, UiIconButton Button)> materialButtons = [];
     private readonly UiIconButton pauseButton = new(UiLocalizationProvider.Pause);
@@ -42,6 +43,7 @@ public sealed class SandboxUiCoordinator
         this.materialRegistry = materialRegistry;
         this.font = font;
         pixel = resources.PixelTexture;
+        brushOutline = resources.BrushOutlineTexture;
         panelRenderer = new UiPanelBackdropRenderer(resources.PixelTexture, resources.CircleTexture);
         foreach (MaterialDefinition material in materialRegistry.SelectableMaterials)
         {
@@ -67,6 +69,11 @@ public sealed class SandboxUiCoordinator
     {
         Layout(viewport);
         PointerConsumed = SidePanelBounds.Contains(input.MousePosition) || InfoPanelBounds.Contains(input.MousePosition);
+        if (input.WheelDelta != 0 && CanvasBounds.Contains(input.MousePosition) && !PointerConsumed)
+        {
+            settings.BrushRadius = Math.Clamp(settings.BrushRadius + Math.Sign(input.WheelDelta) * 2, 1, 96);
+        }
+
         clearConfirmationRemaining = Math.Max(0f, clearConfirmationRemaining - input.DeltaSeconds);
         for (int index = 0; index < materialButtons.Count; index++)
         {
@@ -171,7 +178,7 @@ public sealed class SandboxUiCoordinator
         float averageLoad = statistics.StressSampleCount == 0
             ? 0
             : statistics.LoadSumMilli / (statistics.StressSampleCount * 10f);
-        string info = $"FPS {framesPerSecond,5:0}   Узлы {statistics.ActiveParticles:N0}   Связи {statistics.ActiveBonds:N0}   Напряжение {averageStress:0.000}   Нагрузка {averageLoad:0.0}   Материал: {selectedName}   Масштаб: {settings.Scale:0.##}×";
+        string info = $"FPS {framesPerSecond,5:0}   Узлы {statistics.ActiveParticles:N0}   Связи {statistics.ActiveBonds:N0}   Материал: {selectedName}   Кисть: {settings.BrushRadius} px   Напряжение {averageStress:0.000}   Нагрузка {averageLoad:0.0}";
         spriteBatch.DrawString(font, info, new Vector2(InfoPanelBounds.X + 12, InfoPanelBounds.Y + 9), Color.White);
         if (!string.IsNullOrWhiteSpace(transientStatus))
         {
@@ -182,6 +189,26 @@ public sealed class SandboxUiCoordinator
                 new Vector2(InfoPanelBounds.Right - statusSize.X - 12, InfoPanelBounds.Y + 9),
                 new Color(128, 198, 238));
         }
+    }
+
+    public void DrawBrushIndicator(
+        SpriteBatch spriteBatch,
+        Point pointer,
+        Rectangle worldBounds,
+        SimulationSettings settings,
+        bool eraseOverride)
+    {
+        if (!worldBounds.Contains(pointer))
+        {
+            return;
+        }
+
+        float pixelScale = worldBounds.Width / (float)Math.Max(1, settings.Width);
+        int diameter = Math.Max(3, (int)MathF.Round((settings.BrushRadius * 2 + 1) * pixelScale));
+        Rectangle bounds = new(pointer.X - diameter / 2, pointer.Y - diameter / 2, diameter, diameter);
+        bool erasing = eraseOverride || SelectedMaterial == MaterialId.Eraser;
+        Color color = erasing ? new Color(255, 96, 96, 190) : new Color(210, 235, 255, 175);
+        spriteBatch.Draw(brushOutline, bounds, color);
     }
 
     private void Layout(Viewport viewport)

@@ -28,6 +28,8 @@ public sealed class PhyxelGame : Game
     private readonly string scenePath;
     private readonly bool automatedVerification;
     private readonly bool physicsRegressionVerification;
+    private readonly bool criticalRegressionVerification;
+    private readonly bool startupPerformanceVerification;
     private SpriteBatch? spriteBatch;
     private MaterialRegistry? materialRegistry;
     private GpuResourceLifecycleManager? resourceManager;
@@ -42,9 +44,11 @@ public sealed class PhyxelGame : Game
     private float transientStatusRemaining;
     private double frameRateAccumulator;
     private int accumulatedFrames;
-    private double displayedFrameRate;
+    private double displayedFrameRate = 60;
     private uint frameIndex;
     private int automatedVerificationStage;
+    private RawInputSnapshot latestInput;
+    private StartupPerformanceVerifier? startupPerformanceVerifier;
 
     public PhyxelGame()
     {
@@ -69,7 +73,15 @@ public sealed class PhyxelGame : Game
             Environment.GetEnvironmentVariable("PHYXEL_PHYSICS_REGRESSION"),
             "1",
             StringComparison.Ordinal);
-        if (physicsRegressionVerification)
+        criticalRegressionVerification = string.Equals(
+            Environment.GetEnvironmentVariable("PHYXEL_CRITICAL_REGRESSION"),
+            "1",
+            StringComparison.Ordinal);
+        startupPerformanceVerification = string.Equals(
+            Environment.GetEnvironmentVariable("PHYXEL_PERFORMANCE_REGRESSION"),
+            "1",
+            StringComparison.Ordinal);
+        if (physicsRegressionVerification || criticalRegressionVerification)
         {
             settings.ApplyScale(0.25f);
         }
@@ -89,6 +101,11 @@ public sealed class PhyxelGame : Game
         resourceManager = new GpuResourceLifecycleManager(GraphicsDevice, materialRegistry);
         dispatchCoordinator = new SimulationDispatchCoordinator(resourceManager);
         userInterface = new SandboxUiCoordinator(materialRegistry, font, resourceManager);
+        if (startupPerformanceVerification)
+        {
+            startupPerformanceVerifier = new StartupPerformanceVerifier();
+        }
+
         base.LoadContent();
     }
 
@@ -101,6 +118,7 @@ public sealed class PhyxelGame : Game
         }
 
         RawInputSnapshot input = inputSampler.Sample(gameTime);
+        latestInput = input;
         if (input.EscapePressed)
         {
             Exit();
@@ -111,18 +129,21 @@ public sealed class PhyxelGame : Game
         UiFrameActions actions = userInterface.Update(input, GraphicsDevice.Viewport, settings);
         ProcessUiActions(actions);
         Rectangle worldBounds = FitWorldToCanvas(userInterface.CanvasBounds, settings.Width, settings.Height);
-        IReadOnlyList<BrushDrawCommand> commands = physicsRegressionVerification
-            ? PhysicsRegressionScenario.CreateCommands(frameIndex, settings.Width, settings.Height)
-            : brushController.CreateCommands(
-                input,
-                worldBounds,
-                settings,
-                userInterface.SelectedMaterial,
-                userInterface.PointerConsumed);
+        IReadOnlyList<BrushDrawCommand> commands = criticalRegressionVerification
+            ? CriticalRegressionScenario.CreateCommands(frameIndex, settings.Width, settings.Height)
+            : physicsRegressionVerification
+                ? PhysicsRegressionScenario.CreateCommands(frameIndex, settings.Width, settings.Height)
+                : brushController.CreateCommands(
+                    input,
+                    worldBounds,
+                    settings,
+                    userInterface.SelectedMaterial,
+                    userInterface.PointerConsumed);
         try
         {
             currentResources = dispatchCoordinator.DispatchFrame(settings, commandEncoder.Encode(commands));
             debugProbe.Update(currentResources, frameIndex++);
+            dispatchCoordinator.ObserveStatistics(debugProbe.Latest);
             BeginAutomatedVerificationWhenReady();
         }
         catch (SharpDXException exception) when (exception.ResultCode.Code == unchecked((int)0x8007000E) && settings.Scale > 0.25f)
@@ -164,9 +185,26 @@ public sealed class PhyxelGame : Game
             SamplerState.LinearClamp,
             DepthStencilState.None,
             RasterizerState.CullNone);
+        userInterface.DrawBrushIndicator(
+            spriteBatch,
+            latestInput.MousePosition,
+            worldBounds,
+            settings,
+            latestInput.RightDown);
         userInterface.Draw(spriteBatch, settings, debugProbe.Latest, displayedFrameRate, transientStatus);
         spriteBatch.End();
         UpdateFrameRate(gameTime);
+        if (startupPerformanceVerifier is not null &&
+            startupPerformanceVerifier.RecordFrame(out bool performancePassed, out string performanceReport))
+        {
+            Console.WriteLine(performanceReport);
+            Console.WriteLine($"PHYXEL_STARTUP_DISPATCHES physics={dispatchCoordinator?.FullGridPhysicsDispatches ?? 0} composition={dispatchCoordinator?.CompositionDispatches ?? 0}");
+            Console.WriteLine(performancePassed
+                ? "PHYXEL_STARTUP_PERFORMANCE_SUCCESS"
+                : "PHYXEL_STARTUP_PERFORMANCE_FAILED");
+            Exit();
+        }
+
         base.Draw(gameTime);
     }
 
@@ -230,6 +268,20 @@ public sealed class PhyxelGame : Game
                 }
             }
 
+            if (criticalRegressionVerification)
+            {
+                bool criticalPassed = CriticalRegressionVerifier.Validate(snapshot, out string criticalReport);
+                Console.WriteLine(criticalReport);
+                Console.WriteLine(criticalPassed
+                    ? "PHYXEL_CRITICAL_REGRESSION_SUCCESS"
+                    : "PHYXEL_CRITICAL_REGRESSION_FAILED");
+                if (!criticalPassed)
+                {
+                    Exit();
+                    return;
+                }
+            }
+
             pendingWorldCapture = false;
             pendingSave = stateSerializer.SaveAsync(scenePath, settings, capturedMaterial, snapshot);
             SetStatus("Сохранение сцены…");
@@ -267,8 +319,10 @@ public sealed class PhyxelGame : Game
             userInterface.SelectedMaterial = loaded.State.SelectedMaterial;
             if (loaded.World is not null && resourceManager is not null)
             {
-                currentResources = resourceManager.CreateOrResize(settings);
+                bool containsMatter = SimulationStateSerializer.ContainsMatter(loaded.World);
+                currentResources = resourceManager.CreateOrResize(settings, containsMatter);
                 stateSerializer.ApplyWorldSnapshot(currentResources, loaded.World);
+                dispatchCoordinator?.RestoreWorldActivity(currentResources, containsMatter);
                 SetStatus("Сцена и мир загружены");
                 if (automatedVerification && automatedVerificationStage == 2)
                 {
@@ -297,7 +351,7 @@ public sealed class PhyxelGame : Game
 
     private void BeginAutomatedVerificationWhenReady()
     {
-        uint captureFrame = physicsRegressionVerification ? 180u : 10u;
+        uint captureFrame = criticalRegressionVerification ? 55u : physicsRegressionVerification ? 180u : 10u;
         if (!automatedVerification || automatedVerificationStage != 0 || frameIndex < captureFrame ||
             currentResources is null || userInterface is null)
         {

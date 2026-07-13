@@ -26,6 +26,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         Device = (Device)graphicsDevice.GetD3D11Device();
         PixelTexture = CreatePixelTexture();
         CircleTexture = CreateCircleTexture(64);
+        BrushOutlineTexture = CreateBrushOutlineTexture(128);
         graphicsDevice.DeviceResetting += HandleDeviceResetting;
         graphicsDevice.DeviceReset += HandleDeviceReset;
     }
@@ -33,28 +34,31 @@ public sealed class GpuResourceLifecycleManager : IDisposable
     public Device Device { get; }
     public KniTexture2D PixelTexture { get; }
     public KniTexture2D CircleTexture { get; }
+    public KniTexture2D BrushOutlineTexture { get; }
     public GpuSimulationResources? Resources { get; private set; }
     public bool RequiresRecreation { get; private set; }
 
-    public GpuSimulationResources CreateOrResize(SimulationSettings settings)
+    public GpuSimulationResources CreateOrResize(SimulationSettings settings, bool requireSimulation)
     {
-        if (Resources is not null && Resources.Width == settings.Width && Resources.Height == settings.Height && !RequiresRecreation)
+        if (Resources is not null && Resources.Width == settings.Width && Resources.Height == settings.Height &&
+            Resources.IsSimulationAllocated == requireSimulation && !RequiresRecreation)
         {
             return Resources;
         }
 
         Resources?.Dispose();
-        Resources = CreateResources(settings.Width, settings.Height);
+        Resources = CreateResources(settings.Width, settings.Height, requireSimulation);
         RequiresRecreation = false;
         return Resources;
     }
 
-    private GpuSimulationResources CreateResources(int width, int height)
+    private GpuSimulationResources CreateResources(int width, int height, bool allocateSimulation)
     {
-        int cellCount = checked(width * height);
+        int cellCount = allocateSimulation ? checked(width * height) : 1;
         GpuBufferPair<GridCell> grid = new(Device, cellCount);
         GpuBufferPair<LatticeParticle> particles = new(Device, cellCount);
         GpuBufferPair<LatticeBond> bonds = new(Device, cellCount);
+        GpuBufferPair<uint> activatedBodyWords = new(Device, SimulationSettings.BodyActivationWordCount);
         GpuBufferPair<SimulationStatistics> statistics = new(Device, 1);
         GpuUploadBuffer<BrushDrawCommand> commands = new(Device, SimulationSettings.MaximumBrushCommands);
         MaterialProperties[] materialTable = materialRegistry.CreateGpuTable();
@@ -91,8 +95,15 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Type = QueryType.Event,
             Flags = QueryFlags.None
         });
-        GpuRenderTexturePair targets = new(Device, width, height);
-        KniTexture2D presentation = new(graphicsDevice, width, height, false, SurfaceFormat.Color);
+        int textureWidth = allocateSimulation ? width : 1;
+        int textureHeight = allocateSimulation ? height : 1;
+        GpuRenderTexturePair targets = new(Device, textureWidth, textureHeight);
+        KniTexture2D presentation = new(graphicsDevice, textureWidth, textureHeight, false, SurfaceFormat.Color);
+        if (!allocateSimulation)
+        {
+            presentation.SetData([new Color(9, 11, 14)]);
+        }
+
         SharpDX.Direct3D11.Texture2D nativePresentation =
             (SharpDX.Direct3D11.Texture2D)presentation.GetD3D11Resource();
         return new GpuSimulationResources
@@ -101,9 +112,11 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Context = Device.ImmediateContext,
             Width = width,
             Height = height,
+            IsSimulationAllocated = allocateSimulation,
             Grid = grid,
             Particles = particles,
             Bonds = bonds,
+            ActivatedBodyWords = activatedBodyWords,
             Statistics = statistics,
             Commands = commands,
             Materials = materials,
@@ -117,12 +130,13 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             CompositionTargets = targets,
             PresentationTexture = presentation,
             NativePresentationTexture = nativePresentation,
-            BrushShader = CompileShader("BrushApplication.hlsl"),
-            CellularAutomataShader = CompileShader("CellularAutomataSolver.hlsl"),
-            LatticeShader = CompileShader("LatticePhysicsSolver.hlsl"),
-            LatticeOccupancyClearShader = CompileShader("UnifiedOccupancyProjection.hlsl", "ClearLatticeOccupancy"),
-            LatticeProjectionShader = CompileShader("UnifiedOccupancyProjection.hlsl", "ProjectLatticeOccupancy"),
-            CompositionShader = CompileShader("RenderComposition.hlsl")
+            BrushShader = allocateSimulation ? CompileShader("BrushApplication.hlsl") : null,
+            CellularAutomataShader = allocateSimulation ? CompileShader("CellularAutomataSolver.hlsl") : null,
+            LatticeShader = allocateSimulation ? CompileShader("LatticePhysicsSolver.hlsl") : null,
+            LatticeTopologyShader = allocateSimulation ? CompileShader("LatticeTopologyBuilder.hlsl") : null,
+            LatticeOccupancyClearShader = allocateSimulation ? CompileShader("UnifiedOccupancyProjection.hlsl", "ClearLatticeOccupancy") : null,
+            LatticeProjectionShader = allocateSimulation ? CompileShader("UnifiedOccupancyProjection.hlsl", "ProjectLatticeOccupancy") : null,
+            CompositionShader = allocateSimulation ? CompileShader("RenderComposition.hlsl") : null
         };
     }
 
@@ -189,6 +203,32 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         return texture;
     }
 
+    private KniTexture2D CreateBrushOutlineTexture(int size)
+    {
+        KniTexture2D texture = new(graphicsDevice, size, size);
+        Color[] pixels = new Color[size * size];
+        float center = (size - 1) * 0.5f;
+        float outerRadius = center;
+        float innerRadius = center - 4;
+        float outerSquared = outerRadius * outerRadius;
+        float innerSquared = innerRadius * innerRadius;
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float offsetX = x - center;
+                float offsetY = y - center;
+                float distanceSquared = offsetX * offsetX + offsetY * offsetY;
+                pixels[y * size + x] = distanceSquared <= outerSquared && distanceSquared >= innerSquared
+                    ? Color.White
+                    : Color.Transparent;
+            }
+        }
+
+        texture.SetData(pixels);
+        return texture;
+    }
+
     private void HandleDeviceResetting(object? sender, EventArgs eventArgs)
     {
         RequiresRecreation = true;
@@ -212,6 +252,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         graphicsDevice.DeviceResetting -= HandleDeviceResetting;
         graphicsDevice.DeviceReset -= HandleDeviceReset;
         Resources?.Dispose();
+        BrushOutlineTexture.Dispose();
         CircleTexture.Dispose();
         PixelTexture.Dispose();
     }

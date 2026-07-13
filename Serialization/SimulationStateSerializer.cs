@@ -42,11 +42,19 @@ public sealed class SimulationStateSerializer
     private const uint WorldFileMagic = 0x5058594C;
     private readonly JsonSerializerOptions options = new() { WriteIndented = true };
     private bool capturePending;
+    private SimulationWorldSnapshot? emptySnapshot;
 
     public void BeginWorldCapture(GpuSimulationResources resources)
     {
         if (capturePending)
         {
+            return;
+        }
+
+        if (!resources.IsSimulationAllocated)
+        {
+            emptySnapshot = new SimulationWorldSnapshot(resources.Width, resources.Height, [], [], []);
+            capturePending = true;
             return;
         }
 
@@ -65,6 +73,14 @@ public sealed class SimulationStateSerializer
         if (!capturePending)
         {
             return false;
+        }
+
+        if (emptySnapshot is not null)
+        {
+            snapshot = emptySnapshot;
+            emptySnapshot = null;
+            capturePending = false;
+            return true;
         }
 
         bool ready = resources.Context.GetData(
@@ -94,7 +110,7 @@ public sealed class SimulationStateSerializer
         CancellationToken cancellationToken = default)
     {
         SimulationSceneState state = new(
-            1,
+            2,
             settings.Scale,
             settings.Gravity,
             settings.SolverIterations,
@@ -144,6 +160,11 @@ public sealed class SimulationStateSerializer
             throw new InvalidDataException("Размер снимка мира не совпадает с размером GPU-ресурсов.");
         }
 
+        if (world.Grid.Length == 0 && world.Particles.Length == 0 && world.Bonds.Length == 0)
+        {
+            return;
+        }
+
         UploadBuffer(resources.Context, resources.GridStaging, world.Grid, resources.Grid.Buffers);
         UploadBuffer(resources.Context, resources.ParticlesStaging, world.Particles, resources.Particles.Buffers);
         UploadBuffer(resources.Context, resources.BondsStaging, world.Bonds, resources.Bonds.Buffers);
@@ -157,6 +178,20 @@ public sealed class SimulationStateSerializer
         settings.BrushRadius = Math.Clamp(state.BrushRadius, 1, 96);
         settings.SpawnDensity = Math.Clamp(state.SpawnDensity, 0.05f, 1f);
         settings.StressView = state.StressView;
+    }
+
+    public static bool ContainsMatter(SimulationWorldSnapshot world)
+    {
+        ReadOnlySpan<GridCell> grid = MemoryMarshal.Cast<byte, GridCell>(world.Grid);
+        foreach (GridCell cell in grid)
+        {
+            if (cell.IsActive != 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static byte[] ReadBuffer(DeviceContext context, Buffer buffer)
@@ -192,7 +227,7 @@ public sealed class SimulationStateSerializer
     {
         await using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, true);
         await WriteUInt32Async(stream, WorldFileMagic, cancellationToken);
-        await WriteInt32Async(stream, 1, cancellationToken);
+        await WriteInt32Async(stream, 2, cancellationToken);
         await WriteInt32Async(stream, world.Width, cancellationToken);
         await WriteInt32Async(stream, world.Height, cancellationToken);
         await WriteSectionAsync(stream, world.Grid, cancellationToken);
@@ -210,17 +245,24 @@ public sealed class SimulationStateSerializer
         await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, true);
         uint magic = await ReadUInt32Async(stream, cancellationToken);
         int version = await ReadInt32Async(stream, cancellationToken);
-        if (magic != WorldFileMagic || version != 1)
+        if (magic != WorldFileMagic || version != 2)
         {
             throw new InvalidDataException("Формат снимка мира не поддерживается.");
         }
 
         int width = await ReadInt32Async(stream, cancellationToken);
         int height = await ReadInt32Async(stream, cancellationToken);
-        int expectedSectionLength = checked(width * height * Marshal.SizeOf<GridCell>());
-        byte[] grid = await ReadSectionAsync(stream, expectedSectionLength, cancellationToken);
-        byte[] particles = await ReadSectionAsync(stream, expectedSectionLength, cancellationToken);
-        byte[] bonds = await ReadSectionAsync(stream, expectedSectionLength, cancellationToken);
+        int cellCount = checked(width * height);
+        byte[] grid = await ReadSectionAsync(stream, checked(cellCount * Marshal.SizeOf<GridCell>()), cancellationToken);
+        byte[] particles = await ReadSectionAsync(stream, checked(cellCount * Marshal.SizeOf<LatticeParticle>()), cancellationToken);
+        byte[] bonds = await ReadSectionAsync(stream, checked(cellCount * Marshal.SizeOf<LatticeBond>()), cancellationToken);
+        bool emptyWorld = grid.Length == 0 && particles.Length == 0 && bonds.Length == 0;
+        bool completeWorld = grid.Length > 0 && particles.Length > 0 && bonds.Length > 0;
+        if (!emptyWorld && !completeWorld)
+        {
+            throw new InvalidDataException("Секции снимка мира имеют несовместимые размеры.");
+        }
+
         return new SimulationWorldSnapshot(width, height, grid, particles, bonds);
     }
 
@@ -236,7 +278,7 @@ public sealed class SimulationStateSerializer
         CancellationToken cancellationToken)
     {
         int length = await ReadInt32Async(stream, cancellationToken);
-        if (length != expectedLength || length < 0)
+        if ((length != expectedLength && length != 0) || length < 0)
         {
             throw new InvalidDataException("Размер секции снимка мира некорректен.");
         }

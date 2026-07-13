@@ -96,6 +96,18 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     MaterialProperties material = Materials[particle.MaterialId];
     LatticeBond bond = SourceBonds[index];
+    if (particle.IsDynamic == 0)
+    {
+        particle.VelocityX = 0;
+        particle.VelocityY = 0;
+        particle.Stress = 0;
+        bond.MaximumStrain = 0;
+        bond.AccumulatedLoad = 0;
+        DestinationParticles[index] = particle;
+        DestinationBonds[index] = bond;
+        return;
+    }
+
     float substep = DeltaTime / 4;
     float2 sourcePosition = float2(particle.PositionX, particle.PositionY);
     float2 velocity = float2(particle.VelocityX, particle.VelocityY);
@@ -125,42 +137,64 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     for (uint neighbor = 0; neighbor < 8; neighbor++)
     {
         uint neighborBit = 1u << neighbor;
-        if ((activeMask & neighborBit) == 0)
-        {
-            continue;
-        }
-
         int2 neighborCoordinate = int2(dispatchThreadId.xy) + NeighborOffsets[neighbor];
         if (neighborCoordinate.x < 0 || neighborCoordinate.y < 0 || neighborCoordinate.x >= int(Width) || neighborCoordinate.y >= int(Height))
         {
-            activeMask &= ~neighborBit;
+            if (neighbor >= 4)
+            {
+                activeMask &= ~neighborBit;
+            }
+
             continue;
         }
 
         uint neighborIndex = FlattenCoordinate(uint2(neighborCoordinate));
         LatticeParticle neighborParticle = SourceParticles[neighborIndex];
-        if (neighborParticle.IsActive == 0 || neighborParticle.MaterialId != particle.MaterialId)
+        uint reciprocalNeighbor = 7 - neighbor;
+        bool ownsConstraint = neighbor >= 4;
+        LatticeBond constraintBond = bond;
+        if (!ownsConstraint)
         {
-            activeMask &= ~neighborBit;
+            constraintBond = SourceBonds[neighborIndex];
+        }
+
+        uint constraintBit = ownsConstraint ? neighborBit : 1u << reciprocalNeighbor;
+        if ((constraintBond.ActiveNeighborMask & constraintBit) == 0)
+        {
+            continue;
+        }
+
+        if (neighborParticle.IsActive == 0 || neighborParticle.MaterialId != particle.MaterialId ||
+            neighborParticle.BodyId != particle.BodyId)
+        {
+            if (ownsConstraint)
+            {
+                activeMask &= ~neighborBit;
+            }
+
             continue;
         }
 
         float2 separation = float2(neighborParticle.PositionX, neighborParticle.PositionY) - predictedPosition;
         float currentLength = max(length(separation), 0.0001);
         bool diagonal = abs(NeighborOffsets[neighbor].x) + abs(NeighborOffsets[neighbor].y) == 2;
-        float restLength = diagonal ? bond.DiagonalRestLength : bond.CardinalRestLength;
+        float restLength = diagonal ? constraintBond.DiagonalRestLength : constraintBond.CardinalRestLength;
         float strain = abs(currentLength - restLength) / max(restLength, 0.0001);
         maximumStrain = max(maximumStrain, strain);
-        if (strain > bond.PlasticLimit)
+        if (strain > constraintBond.PlasticLimit)
         {
-            activeMask &= ~neighborBit;
+            if (ownsConstraint)
+            {
+                activeMask &= ~neighborBit;
+            }
+
             velocity += normalize(-separation + 0.001) * min(strain * 22, 80);
             continue;
         }
 
         correction += normalize(separation) * (currentLength - restLength) * 0.22;
         activeConstraints++;
-        if (strain > bond.ElasticLimit)
+        if (ownsConstraint && strain > bond.ElasticLimit)
         {
             if (diagonal)
             {
@@ -185,7 +219,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     maximumStrain = max(maximumStrain, loadStrain);
     if (loadStrain > material.PlasticLimit)
     {
-        uint weakestNeighbor = HashValue(index ^ FrameIndex) & 7;
+        uint weakestNeighbor = 4 + (HashValue(index ^ FrameIndex) & 3);
         activeMask &= ~(1u << weakestNeighbor);
     }
 

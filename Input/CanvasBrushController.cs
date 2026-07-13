@@ -14,6 +14,8 @@ public sealed class CanvasBrushController
     private Point strokeOrigin;
     private bool strokeActive;
     private uint commandSeed;
+    private uint activeBodyId;
+    private uint nextBodyId = 1;
 
     public IReadOnlyList<BrushDrawCommand> CreateCommands(
         RawInputSnapshot input,
@@ -23,11 +25,6 @@ public sealed class CanvasBrushController
         bool pointerConsumedByUi)
     {
         frameCommands.Clear();
-        if (input.WheelDelta != 0 && !pointerConsumedByUi)
-        {
-            settings.BrushRadius = Math.Clamp(settings.BrushRadius + Math.Sign(input.WheelDelta) * 2, 1, 96);
-        }
-
         bool drawing = input.LeftDown || input.RightDown;
         if (!drawing || pointerConsumedByUi || !canvasBounds.Contains(input.MousePosition))
         {
@@ -44,6 +41,8 @@ public sealed class CanvasBrushController
         {
             previousGridPosition = gridPosition;
             strokeOrigin = gridPosition;
+            activeBodyId = nextBodyId;
+            nextBodyId = nextBodyId + 1 >= SimulationSettings.MaximumLatticeBodies ? 1 : nextBodyId + 1;
             strokeActive = true;
         }
 
@@ -76,7 +75,8 @@ public sealed class CanvasBrushController
                 Radius = settings.BrushRadius,
                 Density = settings.SpawnDensity,
                 Mode = material == MaterialId.Eraser ? 1u : 0u,
-                Seed = ++commandSeed
+                Seed = ++commandSeed,
+                Reserved = activeBodyId
             });
         }
     }
