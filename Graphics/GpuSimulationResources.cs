@@ -17,6 +17,8 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuBufferPair<GridCell> Grid { get; init; }
     public required GpuStructuredBuffer<uint> ComponentParents { get; init; }
     public required GpuStructuredBuffer<uint> BodyFlags { get; init; }
+    public required GpuStructuredBuffer<uint> PathBlockerMasks { get; init; }
+    public required GpuStructuredBuffer<uint> CellMaterials { get; init; }
     public required GpuBufferPair<SimulationStatistics> Statistics { get; init; }
     public required GpuUploadBuffer<BrushDrawCommand> Commands { get; init; }
     public required GpuUploadBuffer<MaterialProperties> Materials { get; init; }
@@ -26,8 +28,12 @@ public sealed class GpuSimulationResources : IDisposable
     public required Buffer GridStaging { get; init; }
     public required Query SceneTransferQuery { get; init; }
     public required GpuRenderTexturePair CompositionTargets { get; init; }
-    public required KniTexture2D PresentationTexture { get; init; }
-    public required SharpDX.Direct3D11.Texture2D NativePresentationTexture { get; init; }
+    public required KniTexture2D[] PresentationTextures { get; init; }
+    public required SharpDX.Direct3D11.Texture2D[] NativePresentationTextures { get; init; }
+    public int PresentationIndex { get; set; }
+    public KniTexture2D PresentationTexture => PresentationTextures[1 - PresentationIndex];
+    public SharpDX.Direct3D11.Texture2D NativePresentationTexture => NativePresentationTextures[PresentationIndex];
+    public SharpDX.Direct3D11.Texture2D NativeReadTexture => NativePresentationTextures[1 - PresentationIndex];
     public ComputeShader? BrushShader { get; init; }
     public ComputeShader? CellularAutomataShader { get; init; }
     public ComputeShader? ComponentInitializeShader { get; init; }
@@ -42,7 +48,7 @@ public sealed class GpuSimulationResources : IDisposable
     {
         Context.ComputeShader.Set(null);
         Context.ComputeShader.SetShaderResources(0, null, null, null, null);
-        Context.ComputeShader.SetUnorderedAccessViews(0, null, null, null, null);
+        Context.ComputeShader.SetUnorderedAccessViews(0, null, null, null, null, null);
         CompositionShader?.Dispose();
         SolidMoveShader?.Dispose();
         SolidAnalyzeShader?.Dispose();
@@ -52,7 +58,10 @@ public sealed class GpuSimulationResources : IDisposable
         ComponentInitializeShader?.Dispose();
         CellularAutomataShader?.Dispose();
         BrushShader?.Dispose();
-        PresentationTexture.Dispose();
+        foreach (KniTexture2D texture in PresentationTextures)
+        {
+            texture.Dispose();
+        }
         CompositionTargets.Dispose();
         StatisticsQuery.Dispose();
         StatisticsStaging.Dispose();
@@ -62,6 +71,8 @@ public sealed class GpuSimulationResources : IDisposable
         Materials.Dispose();
         Commands.Dispose();
         Statistics.Dispose();
+        CellMaterials.Dispose();
+        PathBlockerMasks.Dispose();
         BodyFlags.Dispose();
         ComponentParents.Dispose();
         Grid.Dispose();

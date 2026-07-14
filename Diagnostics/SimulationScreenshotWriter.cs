@@ -11,14 +11,14 @@ public static class SimulationScreenshotWriter
 {
     public static void Save(GpuSimulationResources resources, string path)
     {
-        Texture2DDescription sourceDescription = resources.NativePresentationTexture.Description;
+        Texture2DDescription sourceDescription = resources.NativeReadTexture.Description;
         Texture2DDescription stagingDescription = sourceDescription;
         stagingDescription.Usage = ResourceUsage.Staging;
         stagingDescription.BindFlags = BindFlags.None;
         stagingDescription.CpuAccessFlags = CpuAccessFlags.Read;
         stagingDescription.OptionFlags = ResourceOptionFlags.None;
         using Texture2D staging = new(resources.Device, stagingDescription);
-        resources.Context.CopyResource(resources.NativePresentationTexture, staging);
+        resources.Context.CopyResource(resources.NativeReadTexture, staging);
         SharpDX.DataBox data = resources.Context.MapSubresource(staging, 0, MapMode.Read, MapFlags.None);
         int rowBytes = resources.Width * 4;
         byte[] pixels = new byte[rowBytes * resources.Height];

@@ -46,8 +46,215 @@ public static class AcceptanceRegressionVerifier
                 snapshot,
                 artifactDirectory,
                 out report),
+            AcceptanceScenarioMode.WaterStress => ValidateWaterStress(
+                snapshot,
+                framesPerSecond,
+                out report),
+            AcceptanceScenarioMode.WaterDrain => ValidateWaterDrain(snapshot, out report),
+            AcceptanceScenarioMode.CommunicatingVessels => ValidateCommunicatingVessels(
+                snapshot,
+                artifactDirectory,
+                out report),
+            AcceptanceScenarioMode.PressureTube => ValidatePressureTube(
+                snapshot,
+                artifactDirectory,
+                out report),
+            AcceptanceScenarioMode.SavedPressure => ValidateSavedPressure(snapshot, out report),
             _ => Fail(out report)
         };
+    }
+
+    private static bool ValidateWaterStress(
+        SimulationWorldSnapshot snapshot,
+        double framesPerSecond,
+        out string report)
+    {
+        int water = 0;
+        int resting = 0;
+        int moving = 0;
+        foreach (GridCell cell in Cells(snapshot))
+        {
+            if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+            {
+                continue;
+            }
+            water++;
+            resting += cell.RestFrames >= 60 ? 1 : 0;
+            moving += Speed(cell) > 0.02f ? 1 : 0;
+        }
+        report = $"PHYXEL_STRESS_WATER water={water} resting={resting} moving={moving} fps={framesPerSecond:0.0}";
+        return water >= 500000;
+    }
+
+    private static bool ValidateWaterDrain(
+        SimulationWorldSnapshot snapshot,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int leftTop = SurfaceTop(grid, snapshot.Width, 20, 170, 20, 250);
+        int rightTop = SurfaceTop(grid, snapshot.Width, 310, 460, 20, 250);
+        int referenceTop = Math.Max(leftTop, rightTop);
+        int water = 0;
+        int sand = 0;
+        int hangingWater = 0;
+        int movingWater = 0;
+        int unsettledWater = 0;
+        for (int y = 0; y < snapshot.Height; y++)
+        {
+            for (int x = 0; x < snapshot.Width; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive == 0)
+                {
+                    continue;
+                }
+                if (cell.MaterialId == (uint)MaterialId.Sand)
+                {
+                    sand++;
+                    continue;
+                }
+                if (cell.MaterialId != (uint)MaterialId.Water)
+                {
+                    continue;
+                }
+                water++;
+                movingWater += Speed(cell) > 0.02f ? 1 : 0;
+                unsettledWater += cell.RestFrames < 60 ? 1 : 0;
+                if (referenceTop > 0 && y + 4 < referenceTop)
+                {
+                    hangingWater++;
+                }
+            }
+        }
+        report = $"PHYXEL_WATER_DRAIN water={water} sand={sand} leftTop={leftTop} rightTop={rightTop} hanging={hangingWater} moving={movingWater} unsettled={unsettledWater}";
+        return water > 5000 && sand > 1000 && Math.Abs(leftTop - rightTop) <= 2 &&
+            hangingWater <= water / 100 && movingWater == 0 && unsettledWater == 0;
+    }
+
+    private static bool ValidateCommunicatingVessels(
+        SimulationWorldSnapshot snapshot,
+        string artifactDirectory,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int leftTop = SurfaceTop(grid, snapshot.Width, 35, 95, 30, 247);
+        int centerTop = SurfaceTop(grid, snapshot.Width, 115, 265, 30, 247);
+        int rightTop = SurfaceTop(grid, snapshot.Width, 285, 445, 30, 247);
+        int finalRange = Math.Max(leftTop, Math.Max(centerTop, rightTop)) -
+            Math.Min(leftTop, Math.Min(centerTop, rightTop));
+        string twoSecondImage = Path.Combine(artifactDirectory, "H_vessels_2s.png");
+        int imageLeft = ImageSurfaceTop(twoSecondImage, 35, 95, 30, 247);
+        int imageCenter = ImageSurfaceTop(twoSecondImage, 115, 265, 30, 247);
+        int imageRight = ImageSurfaceTop(twoSecondImage, 285, 445, 30, 247);
+        int imageRange = Math.Max(imageLeft, Math.Max(imageCenter, imageRight)) -
+            Math.Min(imageLeft, Math.Min(imageCenter, imageRight));
+        int water = 0;
+        int resting = 0;
+        int moving = 0;
+        int leaks = 0;
+        foreach (GridCell cell in grid)
+        {
+            if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+            {
+                continue;
+            }
+            water++;
+            resting += cell.RestFrames >= 60 ? 1 : 0;
+            moving += Speed(cell) > 0.02f ? 1 : 0;
+        }
+        for (int y = 0; y < snapshot.Height; y++)
+        {
+            for (int x = 0; x < snapshot.Width; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive != 0 && cell.MaterialId == (uint)MaterialId.Water &&
+                    (x < 20 || x > 460 || y > 251))
+                {
+                    leaks++;
+                }
+            }
+        }
+        bool passed = water > 10000 && leftTop > 0 && centerTop > 0 && rightTop > 0 &&
+            finalRange <= 2 && imageRange <= 2 && resting == water && moving == 0 && leaks == 0;
+        report = $"PHYXEL_H_VESSELS water={water} final={leftTop}/{centerTop}/{rightTop} finalRange={finalRange} image2s={imageLeft}/{imageCenter}/{imageRight} imageRange={imageRange} resting={resting} moving={moving} leaks={leaks}";
+        return passed;
+    }
+
+    private static bool ValidatePressureTube(
+        SimulationWorldSnapshot snapshot,
+        string artifactDirectory,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int tubeTop = SurfaceTop(grid, snapshot.Width, 236, 254, 60, 245);
+        int tankTop = SurfaceTop(grid, snapshot.Width, 340, 450, 60, 250);
+        int water = 0;
+        int resting = 0;
+        int moving = 0;
+        int leaks = 0;
+        for (int y = 0; y < snapshot.Height; y++)
+        {
+            for (int x = 0; x < snapshot.Width; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+                {
+                    continue;
+                }
+                water++;
+                resting += cell.RestFrames >= 60 ? 1 : 0;
+                moving += Speed(cell) > 0.02f ? 1 : 0;
+                leaks += y > 254 || x > 475 ? 1 : 0;
+            }
+        }
+        string fillImage = Path.Combine(artifactDirectory, "I_pressure_tube_fill.png");
+        int imageTubeTop = ImageSurfaceTop(fillImage, 236, 254, 60, 245);
+        int imageTankTop = ImageSurfaceTop(fillImage, 340, 450, 60, 250);
+        bool passed = water > 10000 && tubeTop > 0 && tankTop > 0 &&
+            Math.Abs(tubeTop - tankTop) <= 2 &&
+            Math.Abs(imageTubeTop - imageTankTop) <= 2 &&
+            resting == water && moving == 0 && leaks == 0;
+        report = $"PHYXEL_I_PRESSURE_TUBE water={water} final={tubeTop}/{tankTop} image300={imageTubeTop}/{imageTankTop} resting={resting} moving={moving} leaks={leaks}";
+        return passed;
+    }
+
+    private static bool ValidateSavedPressure(
+        SimulationWorldSnapshot snapshot,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int tubeTop = CurvedTubeSurfaceTop(
+            grid,
+            snapshot.Width,
+            1120,
+            1240,
+            620,
+            790,
+            1190,
+            out int tubeWidth);
+        int tankTop = SurfaceTop(grid, snapshot.Width, 1080, 1130, 450, 900);
+        int water = 0;
+        int moving = 0;
+        int routed = 0;
+        float minimumHead = float.MaxValue;
+        foreach (GridCell cell in grid)
+        {
+            if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+            {
+                continue;
+            }
+            water++;
+            moving += Speed(cell) > 0.02f ? 1 : 0;
+            if (cell.Pressure > 0)
+            {
+                routed++;
+                minimumHead = Math.Min(minimumHead, cell.Pressure - 1);
+            }
+        }
+        bool passed = water > 100000 && tubeTop > 0 && tankTop > 0 &&
+            Math.Abs(tubeTop - tankTop) <= 3 && moving == 0;
+        report = $"PHYXEL_J_SAVED_PRESSURE water={water} tubeTop={tubeTop} tubeWidth={tubeWidth} tankTop={tankTop} difference={Math.Abs(tubeTop - tankTop)} moving={moving} routed={routed} minHead={(minimumHead == float.MaxValue ? -1 : minimumHead):0}";
+        return passed;
     }
 
     private static bool ValidateBowl(
@@ -374,6 +581,80 @@ public static class AcceptanceRegressionVerifier
         if (tops.Count == 0) return -1;
         tops.Sort();
         return tops[tops.Count / 2];
+    }
+
+    private static int CurvedTubeSurfaceTop(
+        ReadOnlySpan<GridCell> grid,
+        int width,
+        int left,
+        int right,
+        int top,
+        int bottom,
+        int expectedCenter,
+        out int filledWidth)
+    {
+        filledWidth = 0;
+        for (int y = top; y <= bottom; y++)
+        {
+            List<(int Start, int End)> walls = [];
+            int runStart = -1;
+            for (int x = left; x <= right + 1; x++)
+            {
+                bool solid = x <= right && grid[y * width + x].IsActive != 0 &&
+                    grid[y * width + x].MaterialId != (uint)MaterialId.Water;
+                if (solid && runStart < 0)
+                {
+                    runStart = x;
+                }
+                else if (!solid && runStart >= 0)
+                {
+                    if (x - runStart >= 4)
+                    {
+                        walls.Add((runStart, x - 1));
+                    }
+                    runStart = -1;
+                }
+            }
+            int interiorLeft = -1;
+            int interiorRight = -1;
+            int bestDistance = int.MaxValue;
+            for (int wall = 0; wall + 1 < walls.Count; wall++)
+            {
+                int gapLeft = walls[wall].End + 1;
+                int gapRight = walls[wall + 1].Start - 1;
+                int gapWidth = gapRight - gapLeft + 1;
+                if (gapWidth is < 3 or > 45)
+                {
+                    continue;
+                }
+                int distance = Math.Abs((gapLeft + gapRight) / 2 - expectedCenter);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    interiorLeft = gapLeft;
+                    interiorRight = gapRight;
+                }
+            }
+            if (interiorLeft < 0)
+            {
+                continue;
+            }
+            int water = CountMaterial(
+                grid,
+                width,
+                interiorLeft,
+                interiorRight,
+                y,
+                y,
+                MaterialId.Water);
+            int interiorWidth = interiorRight - interiorLeft + 1;
+            if (water * 2 >= interiorWidth)
+            {
+                filledWidth = water;
+                return y;
+            }
+        }
+        return -1;
     }
 
     private static int ImageSurfaceTop(string path, int left, int right, int top, int bottom)

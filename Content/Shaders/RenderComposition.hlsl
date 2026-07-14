@@ -2,6 +2,7 @@
 
 StructuredBuffer<GridCell> Grid : register(t0);
 StructuredBuffer<MaterialProperties> Materials : register(t1);
+StructuredBuffer<uint> WaterActivity : register(t2);
 RWTexture2D<unorm float4> OutputTexture : register(u0);
 RWStructuredBuffer<SimulationStatistics> Statistics : register(u1);
 
@@ -52,7 +53,9 @@ void Collect(GridCell cell)
     if (cell.MaterialId == 1) InterlockedAdd(Statistics[0].SandCells, 1, ignored);
     if (cell.MaterialId == 6) InterlockedAdd(Statistics[0].GasCells, 1, ignored);
     bool restingSolid = kind == 2 && (SolidGravity == 0 || cell.RestFrames >= 2);
-    bool restingCellular = kind != 2 && abs(cell.VelocityX) + abs(cell.VelocityY) <= 0.02;
+    uint cellularRestThreshold = kind == 1 ? 30 : 60;
+    bool restingCellular = kind != 2 &&
+        (!IsCellularMaterial(kind) || cell.RestFrames >= cellularRestThreshold);
     if (restingSolid || restingCellular)
     {
         InterlockedAdd(Statistics[0].RestingCells, 1, ignored);
@@ -98,6 +101,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         if (coordinate.x == 0 && coordinate.y == 0)
         {
             Statistics[0].FrameIndex = FrameIndex;
+            Statistics[0].PressureMoves = WaterActivity[Width * 9];
+            Statistics[0].Reserved0 = 0;
+            Statistics[0].Reserved1 = 0;
+            Statistics[0].Reserved2 = 0;
         }
     }
 }

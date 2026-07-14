@@ -52,6 +52,7 @@ public sealed class SimulationStateSerializer
         }
         resources.Context.CopyResource(resources.Grid.ReadBuffer, resources.GridStaging);
         resources.Context.End(resources.SceneTransferQuery);
+        resources.Context.Flush();
         capturePending = true;
     }
 

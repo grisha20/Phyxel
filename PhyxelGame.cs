@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 using Microsoft.Xna.Framework;
@@ -36,6 +37,7 @@ public sealed class PhyxelGame : Game
     private Task? pendingSave;
     private Task<LoadedSimulationScene?>? pendingLoad;
     private bool pendingWorldCapture;
+    private bool acceptanceSuccess;
     private MaterialId capturedMaterial;
     private string transientStatus = string.Empty;
     private float transientStatusRemaining;
@@ -59,12 +61,20 @@ public sealed class PhyxelGame : Game
         };
         Content.RootDirectory = "Content";
         IsMouseVisible = true;
-        IsFixedTimeStep = true;
+        IsFixedTimeStep = false;
         TargetElapsedTime = TimeSpan.FromSeconds(1d / 60d);
         Window.AllowUserResizing = true;
         if (acceptance.Active)
         {
-            settings.ApplyScale(0.25f);
+            string? requestedScale = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_SCALE");
+            float acceptanceScale = float.TryParse(
+                requestedScale,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out float parsedScale)
+                ? parsedScale
+                : acceptance.RequiresNativeResolution ? 1f : 0.25f;
+            settings.ApplyScale(acceptanceScale);
         }
         scenePath = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SCENE_PATH") ??
             Path.Combine(
@@ -82,6 +92,10 @@ public sealed class PhyxelGame : Game
         resourceManager.PrepareSimulation(settings);
         dispatchCoordinator = new SimulationDispatchCoordinator(resourceManager, materialRegistry);
         userInterface = new SandboxUiCoordinator(materialRegistry, font, resourceManager);
+        if (acceptance.RequiresSavedScene)
+        {
+            pendingLoad = stateSerializer.LoadAsync(scenePath);
+        }
         base.LoadContent();
     }
 
@@ -219,6 +233,7 @@ public sealed class PhyxelGame : Game
                     displayedFrameRate,
                     out _);
                 Environment.ExitCode = passed ? 0 : 1;
+                acceptanceSuccess = true;
                 Exit();
                 return;
             }
@@ -256,7 +271,7 @@ public sealed class PhyxelGame : Game
 
     private void BeginAcceptanceCapture()
     {
-        if (!acceptance.Active || pendingWorldCapture || frameIndex < acceptance.CaptureFrame ||
+        if (acceptanceSuccess || !acceptance.Active || pendingWorldCapture || frameIndex < acceptance.CaptureFrame ||
             currentResources is null || userInterface is null)
         {
             return;

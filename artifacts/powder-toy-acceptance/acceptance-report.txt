@@ -1,0 +1,2 @@
+PHYXEL_D water=12413 leftTop=204 rightTop=205 image2s=203/204 waterfallTop=232 fallingWater=2338 resting=12413 moving=0 leaks=0 leakMass=0,000 leakBounds=480,270-0,0 wallGaps=0 fps=144,0 statsMoving=21 red=0
+PHYXEL_ACCEPTANCE_SUCCESS

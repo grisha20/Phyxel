@@ -54,8 +54,8 @@ public struct SimulationFrameConstants
     public float MaximumVelocity;
     public uint SolidGravity;
     public uint SolidPass;
-    public uint Reserved0;
-    public uint Reserved1;
+    public uint DispatchExtentX;
+    public uint DispatchExtentY;
     public uint Reserved2;
 }
 
@@ -70,4 +70,8 @@ public struct SimulationStatistics
     public uint WaterCells;
     public uint SandCells;
     public uint GasCells;
+    public uint PressureMoves;
+    public uint Reserved0;
+    public uint Reserved1;
+    public uint Reserved2;
 }

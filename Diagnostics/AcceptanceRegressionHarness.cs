@@ -22,22 +22,46 @@ public sealed class AcceptanceRegressionHarness
             "hydro" or "acceptance_hydro" => AcceptanceScenarioMode.Hydro,
             "slope" or "acceptance_slope" => AcceptanceScenarioMode.Slope,
             "gas" or "acceptance_gas" => AcceptanceScenarioMode.Gas,
+            "water_stress" or "stress_water" => AcceptanceScenarioMode.WaterStress,
+            "water_drain" or "drain" => AcceptanceScenarioMode.WaterDrain,
+            "communicating_vessels" or "vessels" or "hydrostatic" => AcceptanceScenarioMode.CommunicatingVessels,
+            "pressure_tube" or "tube" => AcceptanceScenarioMode.PressureTube,
+            "saved_pressure" => AcceptanceScenarioMode.SavedPressure,
             _ => AcceptanceScenarioMode.None
         };
     }
 
     public AcceptanceScenarioMode Mode { get; }
     public bool Active => Mode != AcceptanceScenarioMode.None;
-    public uint CaptureFrame => Mode switch
+    public bool RequiresNativeResolution => Mode == AcceptanceScenarioMode.WaterStress;
+    public bool RequiresSavedScene => Mode == AcceptanceScenarioMode.SavedPressure;
+    public uint CaptureFrame
     {
-        AcceptanceScenarioMode.Bowl => 420,
-        AcceptanceScenarioMode.SolidGravity => 360,
-        AcceptanceScenarioMode.Sand => 190,
-        AcceptanceScenarioMode.Hydro => 360,
-        AcceptanceScenarioMode.Slope => 300,
-        AcceptanceScenarioMode.Gas => 240,
-        _ => uint.MaxValue
-    };
+        get
+        {
+            if (uint.TryParse(
+                Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_CAPTURE_FRAME"),
+                out uint requestedFrame) && requestedFrame > 0)
+            {
+                return requestedFrame;
+            }
+            return Mode switch
+            {
+                AcceptanceScenarioMode.Bowl => 1000,
+                AcceptanceScenarioMode.SolidGravity => 360,
+                AcceptanceScenarioMode.Sand => 190,
+                AcceptanceScenarioMode.Hydro => 1200,
+                AcceptanceScenarioMode.Slope => 600,
+                AcceptanceScenarioMode.Gas => 900,
+                AcceptanceScenarioMode.WaterStress => 180,
+                AcceptanceScenarioMode.WaterDrain => 1200,
+                AcceptanceScenarioMode.CommunicatingVessels => 1200,
+                AcceptanceScenarioMode.PressureTube => 1200,
+                AcceptanceScenarioMode.SavedPressure => 2000,
+                _ => uint.MaxValue
+            };
+        }
+    }
 
     public IReadOnlyList<BrushDrawCommand> CreateCommands(uint frame)
     {
@@ -65,7 +89,7 @@ public sealed class AcceptanceRegressionHarness
         string? label = Mode switch
         {
             AcceptanceScenarioMode.Bowl when frame == 125 => "A_water_2s",
-            AcceptanceScenarioMode.Bowl when frame == 419 => "A_water_sand",
+            AcceptanceScenarioMode.Bowl when frame == 999 => "A_water_sand",
             AcceptanceScenarioMode.SolidGravity when frame == 59 => "B_gravity_off",
             AcceptanceScenarioMode.SolidGravity when frame == 120 => "B_falling",
             AcceptanceScenarioMode.SolidGravity when frame == 190 => "B_landed",
@@ -73,11 +97,17 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.Sand when frame == 189 => "C_pile_3s",
             AcceptanceScenarioMode.Hydro when frame == 125 => "D_equal_2s",
             AcceptanceScenarioMode.Hydro when frame == 15 => "D_waterfall",
-            AcceptanceScenarioMode.Hydro when frame == 359 => "D_rest",
+            AcceptanceScenarioMode.Hydro when frame == 1199 => "D_rest",
             AcceptanceScenarioMode.Slope when frame == 20 => "E_slope_fall",
-            AcceptanceScenarioMode.Slope when frame == 299 => "E_slope_rest",
+            AcceptanceScenarioMode.Slope when frame == 599 => "E_slope_rest",
             AcceptanceScenarioMode.Gas when frame == 30 => "F_gas_rise",
-            AcceptanceScenarioMode.Gas when frame == 239 => "F_gas_spread",
+            AcceptanceScenarioMode.Gas when frame == 899 => "F_gas_spread",
+            AcceptanceScenarioMode.WaterDrain when frame == 1199 => "G_water_drain",
+            AcceptanceScenarioMode.CommunicatingVessels when frame == 125 => "H_vessels_2s",
+            AcceptanceScenarioMode.CommunicatingVessels when frame == 1199 => "H_vessels_rest",
+            AcceptanceScenarioMode.PressureTube when frame == 300 => "I_pressure_tube_fill",
+            AcceptanceScenarioMode.PressureTube when frame == 1199 => "I_pressure_tube_rest",
+            AcceptanceScenarioMode.SavedPressure when frame == 1199 => "J_saved_pressure",
             _ => null
         };
         if (label is null)
@@ -101,6 +131,11 @@ public sealed class AcceptanceRegressionHarness
             framesPerSecond,
             ArtifactDirectory,
             out report);
+        Directory.CreateDirectory(ArtifactDirectory);
+        File.WriteAllText(
+            Path.Combine(ArtifactDirectory, "acceptance-report.txt"),
+            report + Environment.NewLine +
+            (passed ? "PHYXEL_ACCEPTANCE_SUCCESS" : "PHYXEL_ACCEPTANCE_FAILED") + Environment.NewLine);
         Console.WriteLine(report);
         Console.WriteLine(passed ? "PHYXEL_ACCEPTANCE_SUCCESS" : "PHYXEL_ACCEPTANCE_FAILED");
         return passed;

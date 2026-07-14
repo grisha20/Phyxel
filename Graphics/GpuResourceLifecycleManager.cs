@@ -100,7 +100,13 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         int cellCount = allocateSimulation ? checked(width * height) : 1;
         GpuBufferPair<GridCell> grid = new(Device, cellCount);
         GpuStructuredBuffer<uint> componentParents = new(Device, cellCount);
-        GpuStructuredBuffer<uint> bodyFlags = new(Device, cellCount);
+        // The cellular solver reuses the first nine rows for its compact
+        // water-column cache and pressure-transfer scratch space.
+        int bodyFlagCount = allocateSimulation ? Math.Max(cellCount, checked(width * 9 + 1)) : 10;
+        GpuStructuredBuffer<uint> bodyFlags = new(Device, bodyFlagCount);
+        int blockerMaskCount = allocateSimulation ? checked(((width + 31) / 32) * height) : 1;
+        GpuStructuredBuffer<uint> pathBlockerMasks = new(Device, blockerMaskCount);
+        GpuStructuredBuffer<uint> cellMaterials = new(Device, cellCount);
         GpuBufferPair<SimulationStatistics> statistics = new(Device, 1);
         GpuUploadBuffer<BrushDrawCommand> commands = new(Device, SimulationSettings.MaximumBrushCommands);
         MaterialProperties[] materialTable = materialRegistry.CreateGpuTable();
@@ -138,14 +144,23 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         int textureWidth = allocateSimulation ? width : 1;
         int textureHeight = allocateSimulation ? height : 1;
         GpuRenderTexturePair targets = new(Device, textureWidth, textureHeight);
-        KniTexture2D presentation = new(graphicsDevice, textureWidth, textureHeight, false, SurfaceFormat.Color);
+        KniTexture2D[] presentations =
+        [
+            new KniTexture2D(graphicsDevice, textureWidth, textureHeight, false, SurfaceFormat.Color),
+            new KniTexture2D(graphicsDevice, textureWidth, textureHeight, false, SurfaceFormat.Color)
+        ];
         if (!allocateSimulation)
         {
-            presentation.SetData([new Color(9, 11, 14)]);
+            Color[] clearColor = [new Color(9, 11, 14)];
+            presentations[0].SetData(clearColor);
+            presentations[1].SetData(clearColor);
         }
 
-        SharpDX.Direct3D11.Texture2D nativePresentation =
-            (SharpDX.Direct3D11.Texture2D)presentation.GetD3D11Resource();
+        SharpDX.Direct3D11.Texture2D[] nativePresentations =
+        [
+            (SharpDX.Direct3D11.Texture2D)presentations[0].GetD3D11Resource(),
+            (SharpDX.Direct3D11.Texture2D)presentations[1].GetD3D11Resource()
+        ];
         return new GpuSimulationResources
         {
             Device = Device,
@@ -156,6 +171,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Grid = grid,
             ComponentParents = componentParents,
             BodyFlags = bodyFlags,
+            PathBlockerMasks = pathBlockerMasks,
+            CellMaterials = cellMaterials,
             Statistics = statistics,
             Commands = commands,
             Materials = materials,
@@ -165,8 +182,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             GridStaging = gridStaging,
             SceneTransferQuery = sceneTransferQuery,
             CompositionTargets = targets,
-            PresentationTexture = presentation,
-            NativePresentationTexture = nativePresentation,
+            PresentationTextures = presentations,
+            NativePresentationTextures = nativePresentations,
             BrushShader = allocateSimulation ? CompileShader("BrushApplication.hlsl") : null,
             CellularAutomataShader = allocateSimulation ? CompileShader("CellularAutomataSolver.hlsl") : null,
             ComponentInitializeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "InitializeComponents") : null,

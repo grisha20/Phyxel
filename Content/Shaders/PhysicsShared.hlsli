@@ -41,6 +41,10 @@ struct SimulationStatistics
     uint WaterCells;
     uint SandCells;
     uint GasCells;
+    uint PressureMoves;
+    uint Reserved0;
+    uint Reserved1;
+    uint Reserved2;
 };
 
 cbuffer SimulationFrameConstants : register(b0)
@@ -58,8 +62,8 @@ cbuffer SimulationFrameConstants : register(b0)
     float MaximumVelocity;
     uint SolidGravity;
     uint SolidPass;
-    uint Reserved0;
-    uint Reserved1;
+    uint DispatchExtentX;
+    uint DispatchExtentY;
     uint Reserved2;
 };
 

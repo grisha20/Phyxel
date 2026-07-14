@@ -2,16 +2,58 @@
 
 StructuredBuffer<MaterialProperties> Materials : register(t0);
 RWStructuredBuffer<GridCell> Grid : register(u0);
-RWStructuredBuffer<uint> WaterMoves : register(u1);
+// Shared with the solid-body flags. During the hydraulic phases the first nine
+// rows store packed column bounds, transfer slots, and the pressure activity count.
+RWStructuredBuffer<uint> WaterColumnState : register(u1);
+RWStructuredBuffer<uint> PathBlockerMasks : register(u2);
+RWStructuredBuffer<uint> CellMaterials : register(u3);
+RWStructuredBuffer<uint> WaterPressureRoutes : register(u4);
 
 static const uint SandRestThreshold = 30;
 static const uint FluidRestThreshold = 60;
 static const float GasMinimumMass = 0.01;
 static const float GasTransferThreshold = 0.03;
+static const uint PathBlockerTileWidth = 32;
+// Keeps the connectivity check local even for tall maps. Horizontal reach is
+// provided by the power-of-two column spans dispatched by the coordinator.
+static const uint HydraulicConnectionSearchDepth = 128;
+static const uint HydraulicHeadRouteTolerance = 1;
+static const uint HydraulicSurfaceTolerance = 1;
+static const uint HydraulicTransfersPerColumn = 8;
+static const uint HydraulicActivityRow = 9;
 
 uint CellKind(GridCell cell)
 {
     return cell.IsActive == 0 ? 0 : Materials[cell.MaterialId].SimulationKind;
+}
+
+uint CellKindFromMaterial(uint materialId)
+{
+    return materialId == 0 ? 0 : Materials[materialId].SimulationKind;
+}
+
+uint CellKindAtIndex(uint index)
+{
+    return CellKindFromMaterial(CellMaterials[index]);
+}
+
+uint CellKindAt(uint2 coordinate)
+{
+    return CellKindAtIndex(FlattenCoordinate(coordinate));
+}
+
+float CellRankFromMaterial(uint materialId)
+{
+    uint kind = CellKindFromMaterial(materialId);
+    if (kind == 0)
+    {
+        return 0;
+    }
+    if (kind == 5)
+    {
+        return -1;
+    }
+    return Materials[materialId].Density;
 }
 
 float CellRank(GridCell cell)
@@ -88,6 +130,9 @@ void SwapCells(uint firstIndex, uint secondIndex, float horizontal, float vertic
     MarkMovement(first, second, horizontal, vertical);
     Grid[firstIndex] = second;
     Grid[secondIndex] = first;
+    uint firstMaterial = CellMaterials[firstIndex];
+    CellMaterials[firstIndex] = CellMaterials[secondIndex];
+    CellMaterials[secondIndex] = firstMaterial;
 }
 
 void RelaxGasPair(
@@ -106,6 +151,8 @@ void RelaxGasPair(
     {
         Grid[firstIndex] = CreateEmptyCell();
         Grid[secondIndex] = CreateEmptyCell();
+        CellMaterials[firstIndex] = 0;
+        CellMaterials[secondIndex] = 0;
         return;
     }
     float targetFirst = min(1, totalMass * firstShare);
@@ -120,6 +167,8 @@ void RelaxGasPair(
     MarkMovement(resolvedFirst, resolvedSecond, horizontal, vertical);
     Grid[firstIndex] = resolvedFirst;
     Grid[secondIndex] = resolvedSecond;
+    CellMaterials[firstIndex] = resolvedFirst.IsActive != 0 ? resolvedFirst.MaterialId : 0;
+    CellMaterials[secondIndex] = resolvedSecond.IsActive != 0 ? resolvedSecond.MaterialId : 0;
 }
 
 bool SandSupported(uint2 coordinate)
@@ -128,32 +177,38 @@ bool SandSupported(uint2 coordinate)
     {
         return true;
     }
-    GridCell below = Grid[FlattenCoordinate(coordinate + uint2(0, 1))];
-    uint kind = CellKind(below);
+    uint kind = CellKindAt(coordinate + uint2(0, 1));
     return kind == 1 || kind == 2;
 }
+#define MaxSolidDistance 8
 
 uint SolidDistanceBelow(uint2 coordinate)
 {
-    for (uint distance = 1; distance <= 16 && coordinate.y + distance < Height; distance++)
+    for (uint distance = 1; distance <= MaxSolidDistance && coordinate.y + distance < Height; distance++)
     {
-        if (IsSolid(Grid[FlattenCoordinate(coordinate + uint2(0, distance))]))
+        if (CellKindAt(coordinate + uint2(0, distance)) == 2)
         {
             return distance;
         }
     }
-    return 17;
+    return MaxSolidDistance + 1;
 }
 
-bool SandCanRoll(uint2 source, uint2 destination, GridCell sand, GridCell target)
+
+
+bool SandCanRoll(uint2 source, uint2 destination, uint sandMaterial, uint targetMaterial)
 {
-    if (CellRank(sand) <= CellRank(target))
+    if (CellRankFromMaterial(sandMaterial) <= CellRankFromMaterial(targetMaterial))
     {
         return false;
     }
     uint sourceDistance = SolidDistanceBelow(source);
+    if (sourceDistance > MaxSolidDistance)
+    {
+        return false;
+    }
     uint destinationDistance = SolidDistanceBelow(destination);
-    return sourceDistance <= 16 && destinationDistance > sourceDistance;
+    return destinationDistance > sourceDistance;
 }
 
 bool WaterSupported(uint2 coordinate)
@@ -162,18 +217,18 @@ bool WaterSupported(uint2 coordinate)
     {
         return true;
     }
-    GridCell below = Grid[FlattenCoordinate(coordinate + uint2(0, 1))];
-    uint kind = CellKind(below);
-    return below.IsActive != 0 && kind != 5;
+    uint kind = CellKindAt(coordinate + uint2(0, 1));
+    return kind != 0 && kind != 5;
 }
 
-bool WaterCanEnter(GridCell water, GridCell destination)
+bool WaterCanEnter(uint waterMaterial, uint destinationMaterial)
 {
-    if (IsSolid(destination))
+    uint destinationKind = CellKindFromMaterial(destinationMaterial);
+    if (destinationKind == 2)
     {
         return false;
     }
-    return CellRank(water) > CellRank(destination);
+    return CellRankFromMaterial(waterMaterial) > CellRankFromMaterial(destinationMaterial);
 }
 
 bool IsWaterAt(int x, int y)
@@ -182,16 +237,26 @@ bool IsWaterAt(int x, int y)
     {
         return false;
     }
-    return CellKind(Grid[FlattenCoordinate(uint2(x, y))]) == 4;
+    return CellKindAt(uint2(x, y)) == 4;
 }
 
 bool WaterCanFlowSide(
     uint2 source,
     uint2 destination,
-    GridCell water,
-    GridCell target)
+    uint waterMaterial,
+    uint targetMaterial)
 {
-    if (!WaterCanEnter(water, target) || !WaterSupported(destination))
+    uint stride = abs(int(destination.x) - int(source.x));
+    uint requiredDepth = stride >= 128 ? 7 : stride >= 32 ? 3 : stride >= 2 ? 1 : 0;
+    if (requiredDepth > 0)
+    {
+        if (source.y < requiredDepth ||
+            !IsWaterAt(int(source.x), int(source.y) - int(requiredDepth)))
+        {
+            return false;
+        }
+    }
+    if (!WaterCanEnter(waterMaterial, targetMaterial) || !WaterSupported(destination))
     {
         return false;
     }
@@ -206,20 +271,93 @@ bool WaterCanFlowSide(
         !IsWaterAt(destinationShoulder, int(destination.y));
 }
 
+bool WaterCanFlowSideOpt(
+    uint2 source,
+    uint2 destination,
+    uint waterMaterial,
+    uint targetMaterial,
+    bool hasWaterAbove,
+    bool hasWaterLeft,
+    bool hasWaterRight)
+{
+    uint stride = abs(int(destination.x) - int(source.x));
+    uint requiredDepth = stride >= 128 ? 7 : stride >= 32 ? 3 : stride >= 2 ? 1 : 0;
+    if (requiredDepth > 0)
+    {
+        if (source.y < requiredDepth ||
+            !IsWaterAt(int(source.x), int(source.y) - int(requiredDepth)))
+        {
+            return false;
+        }
+    }
+    if (!WaterCanEnter(waterMaterial, targetMaterial) || !WaterSupported(destination))
+    {
+        return false;
+    }
+    if (hasWaterAbove)
+    {
+        return true;
+    }
+    int direction = destination.x > source.x ? 1 : -1;
+    bool hasWaterBehind = direction == 1 ? hasWaterLeft : hasWaterRight;
+    int destinationShoulder = int(destination.x) + direction;
+    return hasWaterBehind && !IsWaterAt(destinationShoulder, int(destination.y));
+}
+
 bool WaterPathClear(uint2 first, uint2 second)
 {
     uint start = min(first.x, second.x) + 1;
     uint end = max(first.x, second.x);
-    uint row = first.y * Width;
-    for (uint x = start; x < end; x++)
+    if (start >= end)
     {
-        uint kind = CellKind(Grid[row + x]);
-        if (kind != 0 && kind != 4 && kind != 5)
+        return true;
+    }
+    uint tilesPerRow = (Width + PathBlockerTileWidth - 1) / PathBlockerTileWidth;
+    uint firstTile = start / PathBlockerTileWidth;
+    uint lastTile = (end - 1) / PathBlockerTileWidth;
+    uint row = first.y * tilesPerRow;
+    for (uint tile = firstTile; tile <= lastTile; tile++)
+    {
+        uint relevantBits = 0xffffffffu;
+        if (tile == firstTile)
+        {
+            relevantBits &= 0xffffffffu << (start & 31);
+        }
+        if (tile == lastTile)
+        {
+            uint endBit = end - tile * PathBlockerTileWidth;
+            if (endBit < PathBlockerTileWidth)
+            {
+                relevantBits &= (1u << endBit) - 1u;
+            }
+        }
+        if ((PathBlockerMasks[row + tile] & relevantBits) != 0)
         {
             return false;
         }
     }
     return true;
+}
+
+void BuildPathBlockerMask(uint2 tileCoordinate)
+{
+    uint tilesPerRow = (Width + PathBlockerTileWidth - 1) / PathBlockerTileWidth;
+    if (tileCoordinate.x >= tilesPerRow || tileCoordinate.y >= Height)
+    {
+        return;
+    }
+    uint firstX = tileCoordinate.x * PathBlockerTileWidth;
+    uint row = tileCoordinate.y * Width;
+    uint mask = 0;
+    for (uint bit = 0; bit < PathBlockerTileWidth && firstX + bit < Width; bit++)
+    {
+        uint kind = CellKindAtIndex(row + firstX + bit);
+        if (kind != 0 && kind != 4 && kind != 5)
+        {
+            mask |= 1u << bit;
+        }
+    }
+    PathBlockerMasks[tileCoordinate.y * tilesPerRow + tileCoordinate.x] = mask;
 }
 
 bool GasPathClear(uint2 first, uint2 second)
@@ -229,7 +367,7 @@ bool GasPathClear(uint2 first, uint2 second)
     uint row = first.y * Width;
     for (uint x = start; x < end; x++)
     {
-        uint kind = CellKind(Grid[row + x]);
+        uint kind = CellKindAtIndex(row + x);
         if (kind != 0 && kind != 5)
         {
             return false;
@@ -242,7 +380,7 @@ bool GasNearCeiling(uint2 coordinate)
 {
     for (uint distance = 1; distance <= 12 && coordinate.y >= distance; distance++)
     {
-        if (IsSolid(Grid[FlattenCoordinate(coordinate - uint2(0, distance))]))
+        if (CellKindAt(coordinate - uint2(0, distance)) == 2)
         {
             return true;
         }
@@ -254,7 +392,7 @@ int WaterBaseY(uint x)
 {
     for (int y = int(Height) - 1; y >= 0; y--)
     {
-        if (CellKind(Grid[FlattenCoordinate(uint2(x, y))]) == 4)
+        if (CellKindAt(uint2(x, y)) == 4)
         {
             return y;
         }
@@ -265,9 +403,9 @@ int WaterBaseY(uint x)
 uint WaterSurfaceY(uint2 coordinate)
 {
     uint top = coordinate.y;
-    for (uint depth = 0; top > 0 && depth < 256; depth++)
+    while (top > 0)
     {
-        if (CellKind(Grid[FlattenCoordinate(uint2(coordinate.x, top - 1))]) != 4)
+        if (CellKindAt(uint2(coordinate.x, top - 1)) != 4)
         {
             break;
         }
@@ -276,72 +414,163 @@ uint WaterSurfaceY(uint2 coordinate)
     return top;
 }
 
-void BalanceWaterColumns(uint2 first, uint2 second)
+uint PackWaterColumn(uint top, uint base)
 {
-    uint firstTop = WaterSurfaceY(first);
-    uint secondTop = WaterSurfaceY(second);
-    uint2 source;
-    uint2 destination;
-    if (firstTop + 2 < secondTop)
+    return ((top + 1) & 0xffffu) | ((base + 1) << 16);
+}
+
+bool UnpackWaterColumn(uint packed, out uint top, out uint base)
+{
+    if (packed == 0)
     {
-        source = first;
-        destination = uint2(second.x, secondTop - 1);
+        top = 0;
+        base = 0;
+        return false;
     }
-    else if (secondTop + 2 < firstTop)
+    top = (packed & 0xffffu) - 1;
+    base = (packed >> 16) - 1;
+    return true;
+}
+
+void BuildWaterColumnInfo(uint x)
+{
+    if (x >= Width)
     {
-        source = second;
-        destination = uint2(first.x, firstTop - 1);
+        return;
+    }
+    int base = WaterBaseY(x);
+    WaterColumnState[x] = base < 0
+        ? 0
+        : PackWaterColumn(WaterSurfaceY(uint2(x, uint(base))), uint(base));
+    for (uint lane = 0; lane < HydraulicTransfersPerColumn; lane++)
+    {
+        WaterColumnState[Width * (lane + 1) + x] = 0;
+    }
+    if (x == 0)
+    {
+        WaterColumnState[Width * HydraulicActivityRow] = 0;
+    }
+}
+
+bool WaterPathFilled(uint firstX, uint secondX, uint y)
+{
+    uint start = min(firstX, secondX);
+    uint end = max(firstX, secondX);
+    uint row = y * Width;
+    for (uint x = start; x <= end; x++)
+    {
+        if (CellKindAtIndex(row + x) != 4)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool WaterPathFilledBetween(uint firstX, uint secondX, uint y)
+{
+    uint start = min(firstX, secondX) + 1;
+    uint end = max(firstX, secondX);
+    uint row = y * Width;
+    for (uint x = start; x < end; x++)
+    {
+        if (CellKindAtIndex(row + x) != 4)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool HasFilledWaterConnection(
+    uint firstX,
+    uint firstTop,
+    uint firstBase,
+    uint secondX,
+    uint secondTop,
+    uint secondBase)
+{
+    uint overlapTop = max(firstTop, secondTop);
+    uint overlapBase = min(firstBase, secondBase);
+    if (overlapTop > overlapBase)
+    {
+        return false;
+    }
+    uint searchTop = overlapBase > HydraulicConnectionSearchDepth
+        ? max(overlapTop, overlapBase - HydraulicConnectionSearchDepth)
+        : overlapTop;
+    for (int y = int(overlapBase); y >= int(searchTop); y--)
+    {
+        if (WaterPathFilled(firstX, secondX, uint(y)))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void PlanWaterColumnMove(
+    uint firstX,
+    uint firstTop,
+    uint secondX,
+    uint secondTop)
+{
+    uint sourceX;
+    uint sourceTop;
+    uint destinationX;
+    uint destinationTop;
+    if (firstTop + 1 < secondTop)
+    {
+        sourceX = firstX;
+        sourceTop = firstTop;
+        destinationX = secondX;
+        destinationTop = secondTop;
+    }
+    else if (secondTop + 1 < firstTop)
+    {
+        sourceX = secondX;
+        sourceTop = secondTop;
+        destinationX = firstX;
+        destinationTop = firstTop;
     }
     else
     {
         return;
     }
-    uint sourceIndex = FlattenCoordinate(source);
-    uint destinationIndex = FlattenCoordinate(destination);
-    if (CellKind(Grid[destinationIndex]) != 0)
+    if (destinationTop == 0)
     {
         return;
     }
-    WaterMoves[sourceIndex] = destinationIndex + 1;
-}
-
-void ApplyWaterColumnMove(uint2 coordinate)
-{
-    uint sourceIndex = FlattenCoordinate(coordinate);
-    uint encodedDestination = WaterMoves[sourceIndex];
-    if (encodedDestination == 0)
+    uint sourceIndex = FlattenCoordinate(uint2(sourceX, sourceTop));
+    uint destinationIndex = FlattenCoordinate(uint2(destinationX, destinationTop - 1));
+    if (CellKindAtIndex(sourceIndex) != 4 || CellKindAtIndex(destinationIndex) != 0)
     {
         return;
     }
-    uint destinationIndex = encodedDestination - 1;
-    GridCell water = Grid[sourceIndex];
-    if (CellKind(water) != 4 || CellKind(Grid[destinationIndex]) != 0)
-    {
-        return;
-    }
-    GridCell empty = CreateEmptyCell();
-    MarkMovement(water, empty, 54, -36);
-    Grid[sourceIndex] = empty;
-    Grid[destinationIndex] = water;
+    WaterColumnState[Width + sourceX] = sourceIndex + 1;
+    WaterColumnState[Width * 2 + sourceX] = destinationIndex + 1;
 }
 
 void ResolveVerticalPair(uint2 upperCoordinate)
 {
     uint upperIndex = FlattenCoordinate(upperCoordinate);
     uint lowerIndex = upperIndex + Width;
-    GridCell upper = Grid[upperIndex];
-    GridCell lower = Grid[lowerIndex];
-    if (IsSolid(upper) || IsSolid(lower))
+    uint upperMaterial = CellMaterials[upperIndex];
+    uint lowerMaterial = CellMaterials[lowerIndex];
+    uint upperKind = CellKindFromMaterial(upperMaterial);
+    uint lowerKind = CellKindFromMaterial(lowerMaterial);
+    if (upperKind == 2 || lowerKind == 2)
     {
         return;
     }
-    if (IsGasOrEmpty(upper) && IsGasOrEmpty(lower) &&
-        (CellKind(upper) == 5 || CellKind(lower) == 5))
+    if ((upperKind == 0 || upperKind == 5) &&
+        (lowerKind == 0 || lowerKind == 5) &&
+        (upperKind == 5 || lowerKind == 5))
     {
         RelaxGasPair(upperIndex, lowerIndex, 0.72, 0, -36);
         return;
     }
-    if (upper.IsActive != 0 && CellRank(upper) > CellRank(lower))
+    if (upperKind != 0 && CellRankFromMaterial(upperMaterial) > CellRankFromMaterial(lowerMaterial))
     {
         SwapCells(upperIndex, lowerIndex, 0, 60);
     }
@@ -351,31 +580,33 @@ void ResolveDiagonalPair(uint2 upperCoordinate, uint2 lowerCoordinate)
 {
     uint upperIndex = FlattenCoordinate(upperCoordinate);
     uint lowerIndex = FlattenCoordinate(lowerCoordinate);
-    GridCell upper = Grid[upperIndex];
-    GridCell lower = Grid[lowerIndex];
-    if (IsSolid(upper) || IsSolid(lower))
+    uint upperMaterial = CellMaterials[upperIndex];
+    uint lowerMaterial = CellMaterials[lowerIndex];
+    uint upperKind = CellKindFromMaterial(upperMaterial);
+    uint lowerKind = CellKindFromMaterial(lowerMaterial);
+    if (upperKind == 2 || lowerKind == 2)
     {
         return;
     }
     uint2 firstCorner = uint2(upperCoordinate.x, lowerCoordinate.y);
     uint2 secondCorner = uint2(lowerCoordinate.x, upperCoordinate.y);
-    if (IsSolid(Grid[FlattenCoordinate(firstCorner)]) &&
-        IsSolid(Grid[FlattenCoordinate(secondCorner)]))
+    if (CellKindAt(firstCorner) == 2 && CellKindAt(secondCorner) == 2)
     {
         return;
     }
-    if (IsGasOrEmpty(upper) && IsGasOrEmpty(lower) &&
-        (CellKind(upper) == 5 || CellKind(lower) == 5))
+    if ((upperKind == 0 || upperKind == 5) &&
+        (lowerKind == 0 || lowerKind == 5) &&
+        (upperKind == 5 || lowerKind == 5))
     {
         float direction = lowerCoordinate.x > upperCoordinate.x ? 24 : -24;
         RelaxGasPair(upperIndex, lowerIndex, 0.62, direction, -28);
         return;
     }
-    uint upperKind = CellKind(upper);
     bool supported = upperKind == 1
         ? SandSupported(upperCoordinate)
         : upperKind == 4 && WaterSupported(upperCoordinate);
-    if (supported && upper.IsActive != 0 && CellRank(upper) > CellRank(lower))
+    if (supported && upperKind != 0 &&
+        CellRankFromMaterial(upperMaterial) > CellRankFromMaterial(lowerMaterial))
     {
         float direction = lowerCoordinate.x > upperCoordinate.x ? 32 : -32;
         SwapCells(upperIndex, lowerIndex, direction, 48);
@@ -386,50 +617,53 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
 {
     uint leftIndex = FlattenCoordinate(leftCoordinate);
     uint rightIndex = leftIndex + 1;
-    GridCell left = Grid[leftIndex];
-    GridCell right = Grid[rightIndex];
-    if (IsSolid(left) || IsSolid(right))
+    uint leftMaterial = CellMaterials[leftIndex];
+    uint rightMaterial = CellMaterials[rightIndex];
+    uint leftKind = CellKindFromMaterial(leftMaterial);
+    uint rightKind = CellKindFromMaterial(rightMaterial);
+    if (leftKind == 2 || rightKind == 2)
     {
         return;
     }
-    if (CellKind(left) == 1 && SandCanRoll(
+    if (leftKind == 1 && SandCanRoll(
         leftCoordinate,
         leftCoordinate + uint2(1, 0),
-        left,
-        right))
+        leftMaterial,
+        rightMaterial))
     {
         SwapCells(leftIndex, rightIndex, 30, 0);
         return;
     }
-    if (CellKind(right) == 1 && SandCanRoll(
+    if (rightKind == 1 && SandCanRoll(
         leftCoordinate + uint2(1, 0),
         leftCoordinate,
-        right,
-        left))
+        rightMaterial,
+        leftMaterial))
     {
         SwapCells(leftIndex, rightIndex, -30, 0);
         return;
     }
-    if (IsGasOrEmpty(left) && IsGasOrEmpty(right) &&
-        (CellKind(left) == 5 || CellKind(right) == 5))
+    if ((leftKind == 0 || leftKind == 5) &&
+        (rightKind == 0 || rightKind == 5) &&
+        (leftKind == 5 || rightKind == 5))
     {
         RelaxGasPair(leftIndex, rightIndex, 0.5, 28, 0);
         return;
     }
-    if (CellKind(left) == 4 && WaterCanFlowSide(
+    if (leftKind == 4 && WaterCanFlowSide(
         leftCoordinate,
         leftCoordinate + uint2(1, 0),
-        left,
-        right))
+        leftMaterial,
+        rightMaterial))
     {
         SwapCells(leftIndex, rightIndex, 42, 0);
         return;
     }
-    if (CellKind(right) == 4 && WaterCanFlowSide(
+    if (rightKind == 4 && WaterCanFlowSide(
         leftCoordinate + uint2(1, 0),
         leftCoordinate,
-        right,
-        left))
+        rightMaterial,
+        leftMaterial))
     {
         SwapCells(leftIndex, rightIndex, -42, 0);
     }
@@ -444,11 +678,19 @@ void ResolveWaterSpan(uint2 leftCoordinate, uint stride)
     }
     uint leftIndex = FlattenCoordinate(leftCoordinate);
     uint rightIndex = FlattenCoordinate(uint2(rightX, leftCoordinate.y));
-    GridCell left = Grid[leftIndex];
-    GridCell right = Grid[rightIndex];
-    uint leftKind = CellKind(left);
-    uint rightKind = CellKind(right);
+    uint leftMaterial = CellMaterials[leftIndex];
+    uint rightMaterial = CellMaterials[rightIndex];
+    uint leftKind = CellKindFromMaterial(leftMaterial);
+    uint rightKind = CellKindFromMaterial(rightMaterial);
     uint2 rightCoordinate = uint2(rightX, leftCoordinate.y);
+    if (leftKind == 4 && !WaterSupported(leftCoordinate))
+    {
+        return;
+    }
+    if (rightKind == 4 && !WaterSupported(rightCoordinate))
+    {
+        return;
+    }
     if ((leftKind == 5 || rightKind == 5) &&
         (leftKind == 0 || leftKind == 5) &&
         (rightKind == 0 || rightKind == 5) &&
@@ -464,30 +706,26 @@ void ResolveWaterSpan(uint2 leftCoordinate, uint stride)
     {
         return;
     }
-    if (!WaterPathClear(leftCoordinate, rightCoordinate))
-    {
-        return;
-    }
     if (leftKind == 4 && rightKind == 4)
     {
         return;
     }
-    if (leftKind == 4 && WaterCanFlowSide(
-        leftCoordinate,
-        rightCoordinate,
-        left,
-        right))
+    if (leftKind == 4)
     {
-        SwapCells(leftIndex, rightIndex, 52, 0);
+        if (WaterCanFlowSide(leftCoordinate, rightCoordinate, leftMaterial, rightMaterial) &&
+            WaterPathFilledBetween(leftCoordinate.x, rightCoordinate.x, leftCoordinate.y))
+        {
+            SwapCells(leftIndex, rightIndex, 52, 0);
+        }
         return;
     }
-    if (rightKind == 4 && WaterCanFlowSide(
-        rightCoordinate,
-        leftCoordinate,
-        right,
-        left))
+    if (rightKind == 4)
     {
-        SwapCells(leftIndex, rightIndex, -52, 0);
+        if (WaterCanFlowSide(rightCoordinate, leftCoordinate, rightMaterial, leftMaterial) &&
+            WaterPathFilledBetween(leftCoordinate.x, rightCoordinate.x, leftCoordinate.y))
+        {
+            SwapCells(leftIndex, rightIndex, -52, 0);
+        }
     }
 }
 
@@ -502,24 +740,373 @@ void ResolveWaterColumnSpan(uint2 leftCoordinate, uint stride)
     {
         return;
     }
-    int leftBase = WaterBaseY(leftCoordinate.x);
-    int rightBase = WaterBaseY(rightX);
-    if (leftBase < 0 || rightBase < 0 || abs(leftBase - rightBase) > 8)
+    WaterColumnState[Width + leftCoordinate.x] = 0;
+    WaterColumnState[Width * 2 + leftCoordinate.x] = 0;
+    WaterColumnState[Width + rightX] = 0;
+    WaterColumnState[Width * 2 + rightX] = 0;
+    uint leftTop;
+    uint leftBase;
+    uint rightTop;
+    uint rightBase;
+    if (!UnpackWaterColumn(WaterColumnState[leftCoordinate.x], leftTop, leftBase) ||
+        !UnpackWaterColumn(WaterColumnState[rightX], rightTop, rightBase) ||
+        abs(int(leftTop) - int(rightTop)) <= 1)
     {
         return;
     }
-    uint connectionY = uint(min(leftBase, rightBase));
-    uint2 leftConnection = uint2(leftCoordinate.x, connectionY);
-    uint2 rightConnection = uint2(rightX, connectionY);
-    if (CellKind(Grid[FlattenCoordinate(leftConnection)]) != 4 ||
-        CellKind(Grid[FlattenCoordinate(rightConnection)]) != 4 ||
-        !WaterPathClear(leftConnection, rightConnection))
+    if (!HasFilledWaterConnection(
+        leftCoordinate.x,
+        leftTop,
+        leftBase,
+        rightX,
+        rightTop,
+        rightBase))
     {
         return;
     }
-    BalanceWaterColumns(
-        uint2(leftCoordinate.x, leftBase),
-        uint2(rightX, rightBase));
+    PlanWaterColumnMove(
+        leftCoordinate.x,
+        leftTop,
+        rightX,
+        rightTop);
+}
+
+void ApplyWaterColumnMove(uint x)
+{
+    uint encodedSource = WaterColumnState[Width + x];
+    uint encodedDestination = WaterColumnState[Width * 2 + x];
+    WaterColumnState[Width + x] = 0;
+    WaterColumnState[Width * 2 + x] = 0;
+    if (encodedSource == 0 || encodedDestination == 0)
+    {
+        return;
+    }
+    uint sourceIndex = encodedSource - 1;
+    uint destinationIndex = encodedDestination - 1;
+    if (CellKindAtIndex(sourceIndex) != 4 || CellKindAtIndex(destinationIndex) != 0)
+    {
+        return;
+    }
+    uint sourceX = sourceIndex % Width;
+    uint destinationX = destinationIndex % Width;
+    uint sourceTop;
+    uint sourceBase;
+    uint destinationTop;
+    uint destinationBase;
+    if (!UnpackWaterColumn(WaterColumnState[sourceX], sourceTop, sourceBase) ||
+        !UnpackWaterColumn(WaterColumnState[destinationX], destinationTop, destinationBase))
+    {
+        return;
+    }
+    GridCell water = Grid[sourceIndex];
+    GridCell empty = CreateEmptyCell();
+    float horizontal = destinationX > sourceX ? 54 : -54;
+    MarkMovement(water, empty, horizontal, 36);
+    Grid[sourceIndex] = empty;
+    Grid[destinationIndex] = water;
+    CellMaterials[sourceIndex] = 0;
+    CellMaterials[destinationIndex] = water.MaterialId;
+    WaterColumnState[sourceX] = sourceTop == sourceBase
+        ? 0
+        : PackWaterColumn(sourceTop + 1, sourceBase);
+    WaterColumnState[destinationX] = PackWaterColumn(destinationTop - 1, destinationBase);
+}
+
+uint PressureSourceHead(uint route)
+{
+    if (route == 0 || (route & 0x80000000u) != 0)
+    {
+        return Height;
+    }
+    uint sourceX = route - 1;
+    if (sourceX >= Width)
+    {
+        return Height;
+    }
+    uint sourceTop;
+    uint sourceBase;
+    if (!UnpackWaterColumn(WaterColumnState[sourceX], sourceTop, sourceBase) ||
+        sourceBase < sourceTop + 3 || !WaterSupported(uint2(sourceX, sourceBase)))
+    {
+        return Height;
+    }
+    return sourceTop;
+}
+
+void RelaxWaterPressureRoute(uint2 coordinate)
+{
+    uint index = FlattenCoordinate(coordinate);
+    if (CellKindAtIndex(index) != 4)
+    {
+        WaterPressureRoutes[index] = 0;
+        return;
+    }
+    uint bestRoute = WaterPressureRoutes[index];
+    uint bestHead = PressureSourceHead(bestRoute);
+    uint ownRoute = coordinate.x + 1;
+    uint ownHead = PressureSourceHead(ownRoute);
+    if (ownHead + HydraulicHeadRouteTolerance < bestHead)
+    {
+        bestRoute = ownRoute;
+        bestHead = ownHead;
+    }
+    int2 offsets[4] =
+    {
+        int2(-1, 0),
+        int2(1, 0),
+        int2(0, -1),
+        int2(0, 1)
+    };
+    for (uint neighbor = 0; neighbor < 4; neighbor++)
+    {
+        int2 candidate = int2(coordinate) + offsets[neighbor];
+        if (candidate.x < 0 || candidate.y < 0 ||
+            candidate.x >= int(Width) || candidate.y >= int(Height))
+        {
+            continue;
+        }
+        uint candidateIndex = FlattenCoordinate(uint2(candidate));
+        if (CellKindAtIndex(candidateIndex) != 4)
+        {
+            continue;
+        }
+        uint candidateRoute = WaterPressureRoutes[candidateIndex];
+        uint candidateHead = PressureSourceHead(candidateRoute);
+        if (candidateHead + HydraulicHeadRouteTolerance < bestHead)
+        {
+            bestRoute = candidateRoute;
+            bestHead = candidateHead;
+        }
+    }
+    WaterPressureRoutes[index] = bestHead < Height ? bestRoute : 0;
+    GridCell routedCell = Grid[index];
+    routedCell.Pressure = bestHead < Height ? float(bestHead + 1) : 0;
+    Grid[index] = routedCell;
+}
+
+void PlanPressurizedWaterMove(uint2 coordinate)
+{
+    uint index = FlattenCoordinate(coordinate);
+    if (CellKindAtIndex(index) != 4)
+    {
+        return;
+    }
+    uint route = WaterPressureRoutes[index];
+    uint sourceHead = PressureSourceHead(route);
+    if (sourceHead >= Height)
+    {
+        return;
+    }
+    uint sourceX = route - 1;
+    int sideDirection = ((FrameIndex + coordinate.x) & 1) == 0 ? -1 : 1;
+    int2 offsets[8] =
+    {
+        int2(0, -1),
+        int2(sideDirection, -1),
+        int2(-sideDirection, -1),
+        int2(sideDirection, 0),
+        int2(-sideDirection, 0),
+        int2(sideDirection, 1),
+        int2(-sideDirection, 1),
+        int2(0, 1)
+    };
+    for (uint attempt = 0; attempt < 8; attempt++)
+    {
+        int2 destinationCoordinate = int2(coordinate) + offsets[attempt];
+        if (destinationCoordinate.x < 0 ||
+            destinationCoordinate.y < int(sourceHead + HydraulicSurfaceTolerance) ||
+            destinationCoordinate.x >= int(Width) || destinationCoordinate.y >= int(Height))
+        {
+            continue;
+        }
+        uint2 destination = uint2(destinationCoordinate);
+        uint destinationIndex = FlattenCoordinate(destination);
+        if (CellKindAtIndex(destinationIndex) != 0)
+        {
+            continue;
+        }
+        if (offsets[attempt].x != 0 && offsets[attempt].y != 0 &&
+            CellKindAt(uint2(destinationCoordinate.x, coordinate.y)) == 2 &&
+            CellKindAt(uint2(coordinate.x, destinationCoordinate.y)) == 2)
+        {
+            continue;
+        }
+        uint reservation = 0x80000000u | route;
+        uint previousReservation;
+        InterlockedCompareExchange(
+            WaterPressureRoutes[destinationIndex],
+            0,
+            reservation,
+            previousReservation);
+        if (previousReservation != 0)
+        {
+            continue;
+        }
+        uint firstLane = (destinationIndex + FrameIndex) % HydraulicTransfersPerColumn;
+        for (uint laneAttempt = 0; laneAttempt < HydraulicTransfersPerColumn; laneAttempt++)
+        {
+            uint lane = (firstLane + laneAttempt) % HydraulicTransfersPerColumn;
+            uint previousDestination;
+            InterlockedCompareExchange(
+                WaterColumnState[Width * (lane + 1) + sourceX],
+                0,
+                destinationIndex + 1,
+                previousDestination);
+            if (previousDestination == 0)
+            {
+                return;
+            }
+        }
+        uint ignored;
+        InterlockedCompareExchange(
+            WaterPressureRoutes[destinationIndex],
+            reservation,
+            0,
+            ignored);
+    }
+}
+
+void PlanPressurizedWaterReturn(uint2 coordinate)
+{
+    uint index = FlattenCoordinate(coordinate);
+    if (coordinate.y == 0 || CellKindAtIndex(index) != 4 ||
+        CellKindAtIndex(index - Width) != 0)
+    {
+        return;
+    }
+    uint route = WaterPressureRoutes[index];
+    uint sourceHead = PressureSourceHead(route);
+    if (sourceHead >= Height || coordinate.y + HydraulicSurfaceTolerance >= sourceHead)
+    {
+        return;
+    }
+    uint sourceX = route - 1;
+    uint encodedSource = 0x80000000u | (index + 1);
+    uint firstLane = (index + FrameIndex) % HydraulicTransfersPerColumn;
+    for (uint laneAttempt = 0; laneAttempt < HydraulicTransfersPerColumn; laneAttempt++)
+    {
+        uint lane = (firstLane + laneAttempt) % HydraulicTransfersPerColumn;
+        uint previousSource;
+        InterlockedCompareExchange(
+            WaterColumnState[Width * (lane + 1) + sourceX],
+            0,
+            encodedSource,
+            previousSource);
+        if (previousSource == 0)
+        {
+            return;
+        }
+    }
+}
+
+void ApplyPressurizedWaterReturnSlot(uint sourceX, uint lane)
+{
+    uint slot = Width * (lane + 1) + sourceX;
+    uint encodedSource = WaterColumnState[slot];
+    WaterColumnState[slot] = 0;
+    if ((encodedSource & 0x80000000u) == 0)
+    {
+        return;
+    }
+    uint sourceWaterIndex = (encodedSource & 0x7fffffffu) - 1;
+    uint route = sourceX + 1;
+    uint sourceTop;
+    uint sourceBase;
+    if (WaterPressureRoutes[sourceWaterIndex] != route ||
+        !UnpackWaterColumn(WaterColumnState[sourceX], sourceTop, sourceBase) ||
+        sourceTop == 0)
+    {
+        return;
+    }
+    uint sourceWaterY = sourceWaterIndex / Width;
+    if (sourceWaterY + HydraulicSurfaceTolerance >= sourceTop)
+    {
+        return;
+    }
+    uint destinationIndex = FlattenCoordinate(uint2(sourceX, sourceTop - 1));
+    if (CellKindAtIndex(sourceWaterIndex) != 4 || CellKindAtIndex(destinationIndex) != 0)
+    {
+        return;
+    }
+    GridCell water = Grid[sourceWaterIndex];
+    GridCell empty = CreateEmptyCell();
+    uint sourceWaterX = sourceWaterIndex % Width;
+    float horizontal = sourceX == sourceWaterX ? 0 : sourceX > sourceWaterX ? 54 : -54;
+    MarkMovement(water, empty, horizontal, 38);
+    Grid[sourceWaterIndex] = empty;
+    Grid[destinationIndex] = water;
+    CellMaterials[sourceWaterIndex] = 0;
+    CellMaterials[destinationIndex] = water.MaterialId;
+    WaterPressureRoutes[sourceWaterIndex] = 0;
+    WaterPressureRoutes[destinationIndex] = route;
+    uint ignored;
+    InterlockedAdd(WaterColumnState[Width * HydraulicActivityRow], 1, ignored);
+    WaterColumnState[sourceX] = PackWaterColumn(sourceTop - 1, sourceBase);
+}
+
+void ApplyPressurizedWaterReturn(uint sourceX)
+{
+    for (uint lane = 0; lane < HydraulicTransfersPerColumn; lane++)
+    {
+        ApplyPressurizedWaterReturnSlot(sourceX, lane);
+    }
+}
+
+void ApplyPressurizedWaterMoveSlot(uint sourceX, uint lane)
+{
+    uint slot = Width * (lane + 1) + sourceX;
+    uint encodedDestination = WaterColumnState[slot];
+    WaterColumnState[slot] = 0;
+    if (encodedDestination == 0)
+    {
+        return;
+    }
+    uint destinationIndex = encodedDestination - 1;
+    uint route = sourceX + 1;
+    if (WaterPressureRoutes[destinationIndex] != (0x80000000u | route))
+    {
+        return;
+    }
+    uint sourceTop;
+    uint sourceBase;
+    if (!UnpackWaterColumn(WaterColumnState[sourceX], sourceTop, sourceBase))
+    {
+        WaterPressureRoutes[destinationIndex] = 0;
+        return;
+    }
+    uint sourceIndex = FlattenCoordinate(uint2(sourceX, sourceTop));
+    if (CellKindAtIndex(sourceIndex) != 4 || CellKindAtIndex(destinationIndex) != 0)
+    {
+        WaterPressureRoutes[destinationIndex] = 0;
+        return;
+    }
+    GridCell water = Grid[sourceIndex];
+    GridCell empty = CreateEmptyCell();
+    uint destinationX = destinationIndex % Width;
+    float horizontal = destinationX == sourceX ? 0 : destinationX > sourceX ? 54 : -54;
+    MarkMovement(water, empty, horizontal, 36);
+    Grid[sourceIndex] = empty;
+    Grid[destinationIndex] = water;
+    CellMaterials[sourceIndex] = 0;
+    CellMaterials[destinationIndex] = water.MaterialId;
+    WaterPressureRoutes[sourceIndex] = 0;
+    WaterPressureRoutes[destinationIndex] = route;
+    uint ignored;
+    InterlockedAdd(
+        WaterColumnState[Width * HydraulicActivityRow],
+        1,
+        ignored);
+    WaterColumnState[sourceX] = sourceTop == sourceBase
+        ? 0
+        : PackWaterColumn(sourceTop + 1, sourceBase);
+}
+
+void ApplyPressurizedWaterMove(uint sourceX)
+{
+    for (uint lane = 0; lane < HydraulicTransfersPerColumn; lane++)
+    {
+        ApplyPressurizedWaterMoveSlot(sourceX, lane);
+    }
 }
 
 bool CanMoveSand(uint2 coordinate, GridCell cell)
@@ -528,8 +1115,9 @@ bool CanMoveSand(uint2 coordinate, GridCell cell)
     {
         return false;
     }
-    GridCell below = Grid[FlattenCoordinate(coordinate + uint2(0, 1))];
-    if (!IsSolid(below) && CellRank(cell) > CellRank(below))
+    uint belowMaterial = CellMaterials[FlattenCoordinate(coordinate + uint2(0, 1))];
+    uint belowKind = CellKindFromMaterial(belowMaterial);
+    if (belowKind != 2 && CellRankFromMaterial(cell.MaterialId) > CellRankFromMaterial(belowMaterial))
     {
         return true;
     }
@@ -544,23 +1132,38 @@ bool CanMoveSand(uint2 coordinate, GridCell cell)
         {
             continue;
         }
-        GridCell diagonal = Grid[FlattenCoordinate(uint2(x, coordinate.y + 1))];
-        if (!IsSolid(diagonal) && CellRank(cell) > CellRank(diagonal))
+        uint diagonalMaterial = CellMaterials[FlattenCoordinate(uint2(x, coordinate.y + 1))];
+        if (CellKindFromMaterial(diagonalMaterial) != 2 &&
+            CellRankFromMaterial(cell.MaterialId) > CellRankFromMaterial(diagonalMaterial))
         {
             return true;
         }
     }
-    for (int direction = -1; direction <= 1; direction += 2)
+    if (belowKind != 1)
     {
-        int x = int(coordinate.x) + direction;
-        if (x < 0 || x >= int(Width))
+        // Optimization: Calculate source solid distance once.
+        // If it's > MaxSolidDistance, sand cannot roll, so we can skip rolling checks entirely.
+        uint sourceDistance = SolidDistanceBelow(coordinate);
+        if (sourceDistance <= MaxSolidDistance)
         {
-            continue;
-        }
-        uint2 side = uint2(x, coordinate.y);
-        if (SandCanRoll(coordinate, side, cell, Grid[FlattenCoordinate(side)]))
-        {
-            return true;
+            for (int direction = -1; direction <= 1; direction += 2)
+            {
+                int x = int(coordinate.x) + direction;
+                if (x < 0 || x >= int(Width))
+                {
+                    continue;
+                }
+                uint2 side = uint2(x, coordinate.y);
+                uint targetMaterial = CellMaterials[FlattenCoordinate(side)];
+                if (CellRankFromMaterial(cell.MaterialId) > CellRankFromMaterial(targetMaterial))
+                {
+                    uint destinationDistance = SolidDistanceBelow(side);
+                    if (destinationDistance > sourceDistance)
+                    {
+                        return true;
+                    }
+                }
+            }
         }
     }
     return false;
@@ -570,8 +1173,8 @@ bool CanMoveWater(uint2 coordinate, GridCell cell)
 {
     if (coordinate.y + 1 < Height)
     {
-        GridCell below = Grid[FlattenCoordinate(coordinate + uint2(0, 1))];
-        if (WaterCanEnter(cell, below))
+        uint belowMaterial = CellMaterials[FlattenCoordinate(coordinate + uint2(0, 1))];
+        if (WaterCanEnter(cell.MaterialId, belowMaterial))
         {
             return true;
         }
@@ -585,49 +1188,68 @@ bool CanMoveWater(uint2 coordinate, GridCell cell)
                     continue;
                 }
                 uint2 diagonalCoordinate = uint2(x, coordinate.y + 1);
-                if (WaterCanEnter(cell, Grid[FlattenCoordinate(diagonalCoordinate)]))
+                if (WaterCanEnter(
+                    cell.MaterialId,
+                    CellMaterials[FlattenCoordinate(diagonalCoordinate)]))
                 {
                     return true;
                 }
             }
         }
     }
-    for (int direction = -1; direction <= 1; direction += 2)
+
+    // Only check horizontal flow if the water is supported!
+    if (WaterSupported(coordinate))
     {
-        int x = int(coordinate.x) + direction;
-        if (x < 0 || x >= int(Width))
-        {
-            continue;
-        }
-        uint2 sideCoordinate = uint2(x, coordinate.y);
-        if (WaterCanFlowSide(
-            coordinate,
-            sideCoordinate,
-            cell,
-            Grid[FlattenCoordinate(sideCoordinate)]))
-        {
-            return true;
-        }
-    }
-    static const uint spans[8] = { 2, 4, 8, 16, 32, 64, 128, 256 };
-    for (uint spanIndex = 0; spanIndex < 8; spanIndex++)
-    {
-        int stride = int(spans[spanIndex]);
+        // Cache neighbor water states to reduce redundant buffer reads inside loop
+        bool hasWaterAbove = IsWaterAt(int(coordinate.x), int(coordinate.y) - 1);
+        bool hasWaterLeft = IsWaterAt(int(coordinate.x) - 1, int(coordinate.y));
+        bool hasWaterRight = IsWaterAt(int(coordinate.x) + 1, int(coordinate.y));
+
         for (int direction = -1; direction <= 1; direction += 2)
         {
-            int x = int(coordinate.x) + direction * stride;
+            int x = int(coordinate.x) + direction;
             if (x < 0 || x >= int(Width))
             {
                 continue;
             }
-            uint2 destination = uint2(x, coordinate.y);
-            if (WaterPathClear(coordinate, destination) && WaterCanFlowSide(
+            uint2 sideCoordinate = uint2(x, coordinate.y);
+            if (WaterCanFlowSideOpt(
                 coordinate,
-                destination,
-                cell,
-                Grid[FlattenCoordinate(destination)]))
+                sideCoordinate,
+                cell.MaterialId,
+                CellMaterials[FlattenCoordinate(sideCoordinate)],
+                hasWaterAbove,
+                hasWaterLeft,
+                hasWaterRight))
             {
                 return true;
+            }
+        }
+        static const uint spans[8] = { 2, 4, 8, 16, 32, 64, 128, 256 };
+        for (uint spanIndex = 0; spanIndex < 8; spanIndex++)
+        {
+            int stride = int(spans[spanIndex]);
+            for (int direction = -1; direction <= 1; direction += 2)
+            {
+                int x = int(coordinate.x) + direction * stride;
+                if (x < 0 || x >= int(Width))
+                {
+                    continue;
+                }
+                uint2 destination = uint2(x, coordinate.y);
+                if (WaterCanFlowSideOpt(
+                    coordinate,
+                    destination,
+                    cell.MaterialId,
+                    CellMaterials[FlattenCoordinate(destination)],
+                    hasWaterAbove,
+                    hasWaterLeft,
+                    hasWaterRight) &&
+                    WaterPathFilledBetween(coordinate.x, destination.x, coordinate.y))
+                {
+                    return true;
+                }
             }
         }
     }
@@ -654,12 +1276,19 @@ bool CanMoveGas(uint2 coordinate, GridCell cell)
             {
                 continue;
             }
-            GridCell neighbor = Grid[FlattenCoordinate(uint2(x, y))];
-            if (neighbor.IsActive == 0 && cell.Mass > GasTransferThreshold * 2 ||
-                CellKind(neighbor) == 5 &&
-                abs(neighbor.Mass - cell.Mass) > GasTransferThreshold * 2)
+            uint neighborIndex = FlattenCoordinate(uint2(x, y));
+            uint neighborKind = CellKindAtIndex(neighborIndex);
+            if (neighborKind == 0 && cell.Mass > GasTransferThreshold * 2)
             {
                 return true;
+            }
+            if (neighborKind == 5)
+            {
+                GridCell neighbor = Grid[neighborIndex];
+                if (abs(neighbor.Mass - cell.Mass) > GasTransferThreshold * 2)
+                {
+                    return true;
+                }
             }
         }
     }
@@ -669,59 +1298,111 @@ bool CanMoveGas(uint2 coordinate, GridCell cell)
 void UpdateRestState(uint2 coordinate)
 {
     uint index = FlattenCoordinate(coordinate);
-    GridCell cell = Grid[index];
-    uint kind = CellKind(cell);
+    uint kind = CellKindAtIndex(index);
     if (!IsCellularMaterial(kind))
     {
         return;
     }
-    bool canMove = kind == 1
-        ? CanMoveSand(coordinate, cell)
-        : kind == 4
-            ? CanMoveWater(coordinate, cell)
-            : CanMoveGas(coordinate, cell);
+    GridCell cell = Grid[index];
+    uint threshold = kind == 1 ? SandRestThreshold : FluidRestThreshold;
+    bool canMove = false;
+    if (cell.RestFrames < threshold)
+    {
+        canMove = kind == 1
+            ? CanMoveSand(coordinate, cell)
+            : kind == 4
+                ? CanMoveWater(coordinate, cell)
+                : CanMoveGas(coordinate, cell);
+    }
     if (canMove)
     {
         cell.RestFrames = 0;
     }
     else
     {
-        uint threshold = kind == 1 ? SandRestThreshold : FluidRestThreshold;
         cell.RestFrames = min(cell.RestFrames + 1, threshold);
         cell.VelocityX = 0;
         cell.VelocityY = 0;
     }
-    cell.Pressure = 0;
     Grid[index] = cell;
 }
 
 void ForceCellularRest(uint2 coordinate)
 {
     uint index = FlattenCoordinate(coordinate);
-    GridCell cell = Grid[index];
-    uint kind = CellKind(cell);
+    uint kind = CellKindAtIndex(index);
     if (!IsCellularMaterial(kind))
     {
         return;
     }
+    GridCell cell = Grid[index];
     cell.RestFrames = kind == 1 ? SandRestThreshold : FluidRestThreshold;
     cell.VelocityX = 0;
     cell.VelocityY = 0;
-    cell.Pressure = 0;
     Grid[index] = cell;
+}
+
+void BuildCellMaterialMap(uint2 coordinate)
+{
+    if (coordinate.x >= Width || coordinate.y >= Height)
+    {
+        return;
+    }
+    uint index = FlattenCoordinate(coordinate);
+    GridCell cell = Grid[index];
+    CellMaterials[index] = cell.IsActive != 0 ? cell.MaterialId : 0;
 }
 
 [numthreads(16, 16, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint2 coordinate = dispatchThreadId.xy + uint2(DispatchOffsetX, DispatchOffsetY);
+    if (SimulationPhase == 32)
+    {
+        BuildCellMaterialMap(dispatchThreadId.xy);
+        return;
+    }
+    if (SimulationPhase == 31)
+    {
+        BuildPathBlockerMask(dispatchThreadId.xy);
+        return;
+    }
+    if (SimulationPhase == 33)
+    {
+        BuildWaterColumnInfo(dispatchThreadId.x);
+        return;
+    }
+    if (dispatchThreadId.x >= DispatchExtentX || dispatchThreadId.y >= DispatchExtentY)
+    {
+        return;
+    }
+    uint2 coordinate;
+    if (SimulationPhase <= 1)
+    {
+        coordinate = uint2(
+            DispatchOffsetX + dispatchThreadId.x,
+            DispatchOffsetY + dispatchThreadId.y * 2);
+    }
+    else if (SimulationPhase <= 3)
+    {
+        coordinate = uint2(
+            DispatchOffsetX + dispatchThreadId.x * 2,
+            DispatchOffsetY + dispatchThreadId.y);
+    }
+    else if (SimulationPhase >= 5 && SimulationPhase <= 12)
+    {
+        coordinate = uint2(DispatchOffsetX, DispatchOffsetY) + dispatchThreadId.xy * 2;
+    }
+    else
+    {
+        coordinate = dispatchThreadId.xy + uint2(DispatchOffsetX, DispatchOffsetY);
+    }
     if (coordinate.x >= Width || coordinate.y >= Height)
     {
         return;
     }
     if (SimulationPhase <= 1)
     {
-        if ((coordinate.y & 1) == SimulationPhase && coordinate.y + 1 < Height)
+        if (coordinate.y + 1 < Height)
         {
             ResolveVerticalPair(coordinate);
         }
@@ -729,7 +1410,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     if (SimulationPhase <= 3)
     {
-        if ((coordinate.x & 1) == SimulationPhase - 2 && coordinate.x + 1 < Width)
+        if (coordinate.x + 1 < Width)
         {
             ResolveHorizontalPair(coordinate);
         }
@@ -742,7 +1423,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     if (SimulationPhase == 29)
     {
-        ApplyWaterColumnMove(coordinate);
+        ApplyWaterColumnMove(coordinate.x);
         return;
     }
     if (SimulationPhase == 30)
@@ -750,30 +1431,54 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         ForceCellularRest(coordinate);
         return;
     }
-    if (SimulationPhase >= 13)
+    if (SimulationPhase >= 13 && SimulationPhase <= 23)
     {
-        bool columnPhase = SimulationPhase <= 20;
-        uint stride = 1u << (columnPhase ? SimulationPhase - 12 : SimulationPhase - 20);
+        uint stride = 1u << (SimulationPhase - 13);
         uint blockPosition = coordinate.x % (stride * 2);
         if (blockPosition < stride)
         {
-            if (columnPhase)
-            {
-                ResolveWaterColumnSpan(coordinate, stride);
-            }
-            else
-            {
-                ResolveWaterSpan(coordinate, stride);
-            }
+            ResolveWaterColumnSpan(coordinate, stride);
+        }
+        return;
+    }
+    if (SimulationPhase == 34)
+    {
+        RelaxWaterPressureRoute(coordinate);
+        return;
+    }
+    if (SimulationPhase == 36)
+    {
+        PlanPressurizedWaterMove(coordinate);
+        return;
+    }
+    if (SimulationPhase == 37)
+    {
+        ApplyPressurizedWaterMove(coordinate.x);
+        return;
+    }
+    if (SimulationPhase == 38)
+    {
+        PlanPressurizedWaterReturn(coordinate);
+        return;
+    }
+    if (SimulationPhase == 39)
+    {
+        ApplyPressurizedWaterReturn(coordinate.x);
+        return;
+    }
+    if (SimulationPhase >= 40 && SimulationPhase <= 47)
+    {
+        uint stride = 1u << (SimulationPhase - 39);
+        uint blockPosition = coordinate.x % (stride * 2);
+        if (blockPosition < stride)
+        {
+            ResolveWaterSpan(coordinate, stride);
         }
         return;
     }
     uint diagonalPhase = SimulationPhase - 5;
     uint orientation = diagonalPhase & 1;
-    uint xParity = (diagonalPhase >> 1) & 1;
-    uint yParity = (diagonalPhase >> 2) & 1;
-    if ((coordinate.x & 1) != xParity || (coordinate.y & 1) != yParity ||
-        coordinate.x + 1 >= Width || coordinate.y + 1 >= Height)
+    if (coordinate.x + 1 >= Width || coordinate.y + 1 >= Height)
     {
         return;
     }

@@ -24,7 +24,15 @@ public sealed class SimulationDispatchCoordinator
     private bool previousSolidGravity;
     private bool presentationDirty = true;
     private bool finalizeCellularRest;
+    private bool waterPressureRoutesDirty = true;
     private int settledObservations;
+
+    // Active Region tracking
+    private int activeMinX;
+    private int activeMinY;
+    private int activeMaxX;
+    private int activeMaxY;
+    private bool activeRegionValid;
 
     public SimulationDispatchCoordinator(
         GpuResourceLifecycleManager lifecycleManager,
@@ -32,6 +40,45 @@ public sealed class SimulationDispatchCoordinator
     {
         this.lifecycleManager = lifecycleManager;
         this.materialRegistry = materialRegistry;
+        ResetActiveRegion();
+    }
+
+    private void ResetActiveRegion()
+    {
+        activeMinX = int.MaxValue;
+        activeMinY = int.MaxValue;
+        activeMaxX = int.MinValue;
+        activeMaxY = int.MinValue;
+        activeRegionValid = false;
+    }
+
+    private void ExpandActiveRegion(int x, int y, int radius, int width, int height)
+    {
+        int minX = Math.Clamp(x - radius, 0, width - 1);
+        int maxX = Math.Clamp(x + radius, 0, width - 1);
+        int minY = Math.Clamp(y - radius, 0, height - 1);
+        int maxY = Math.Clamp(y + radius, 0, height - 1);
+
+        if (minX > maxX || minY > maxY)
+        {
+            return;
+        }
+
+        if (!activeRegionValid)
+        {
+            activeMinX = minX;
+            activeMaxX = maxX;
+            activeMinY = minY;
+            activeMaxY = maxY;
+            activeRegionValid = true;
+        }
+        else
+        {
+            activeMinX = Math.Min(activeMinX, minX);
+            activeMaxX = Math.Max(activeMaxX, maxX);
+            activeMinY = Math.Min(activeMinY, minY);
+            activeMaxY = Math.Max(activeMaxY, maxY);
+        }
     }
 
     public bool CellularSleeping => cellularSleeping;
@@ -55,7 +102,7 @@ public sealed class SimulationDispatchCoordinator
         {
             resources.Commands.Upload(resources.Context, commands);
             DispatchBrush(resources, ref constants);
-            RegisterActivity(commands);
+            RegisterActivity(commands, settings.Width, settings.Height);
             worldHasMatter |= ContainsMatterCommand(commands);
             presentationDirty = true;
         }
@@ -77,6 +124,13 @@ public sealed class SimulationDispatchCoordinator
 
         if (!settings.Paused && settings.SolidGravity && solidMatter && !solidSleeping)
         {
+            // If active solids are moving, we must simulate the entire world to catch all cellular updates safely
+            activeMinX = 0;
+            activeMinY = 0;
+            activeMaxX = settings.Width - 1;
+            activeMaxY = settings.Height - 1;
+            activeRegionValid = true;
+
             if (topologyDirty)
             {
                 DispatchComponentLabeling(resources, ref constants);
@@ -88,12 +142,38 @@ public sealed class SimulationDispatchCoordinator
             presentationDirty = true;
         }
 
+        if (waterPressureRoutesDirty && resources.IsSimulationAllocated)
+        {
+            resources.Context.ClearUnorderedAccessView(
+                resources.ComponentParents.UnorderedView,
+                new RawInt4(0, 0, 0, 0));
+            waterPressureRoutesDirty = false;
+        }
+
         if (!settings.Paused && cellularMatter && !cellularSleeping)
         {
-            DispatchCellularAutomata(resources, ref constants);
+            // Expand the active bounding box to account for gravity and horizontal flow
+            if (activeRegionValid)
+            {
+                activeMaxY = Math.Min(settings.Height - 1, activeMaxY + 38);
+                activeMinY = Math.Max(0, activeMinY - 12);
+                int dx = fluidMatter ? 256 : 4;
+                activeMinX = Math.Max(0, activeMinX - dx);
+                activeMaxX = Math.Min(settings.Width - 1, activeMaxX + dx);
+            }
+            else
+            {
+                activeMinX = 0;
+                activeMinY = 0;
+                activeMaxX = settings.Width - 1;
+                activeMaxY = settings.Height - 1;
+                activeRegionValid = true;
+            }
+
+            DispatchCellularAutomata(resources, ref constants, true);
             if (fluidMatter)
             {
-                DispatchCellularAutomata(resources, ref constants);
+                DispatchCellularAutomata(resources, ref constants, false);
             }
             presentationDirty = true;
         }
@@ -126,8 +206,22 @@ public sealed class SimulationDispatchCoordinator
         cellularSleeping = false;
         solidSleeping = false;
         topologyDirty = true;
+        waterPressureRoutesDirty = true;
         settledObservations = 0;
         presentationDirty = resources.IsSimulationAllocated;
+
+        if (containsMatter)
+        {
+            activeMinX = 0;
+            activeMinY = 0;
+            activeMaxX = resources.Width - 1;
+            activeMaxY = resources.Height - 1;
+            activeRegionValid = true;
+        }
+        else
+        {
+            ResetActiveRegion();
+        }
     }
 
     public void ObserveStatistics(SimulationStatistics statistics)
@@ -138,14 +232,18 @@ public sealed class SimulationDispatchCoordinator
         }
         lastObservedStatisticsFrame = statistics.FrameIndex;
         uint cellularCells = statistics.WaterCells + statistics.SandCells + statistics.GasCells;
-        uint tolerance = Math.Max(1u, cellularCells / (statistics.GasCells > 0 ? 10u : 50u));
-        bool settled = statistics.ActiveCells > 0 && statistics.MovingCells <= tolerance;
+        uint residualTolerance = statistics.GasCells > 0
+            ? Math.Max(64u, cellularCells / 10u)
+            : Math.Max(64u, cellularCells / 50u);
+        bool settled = statistics.ActiveCells > 0 && statistics.PressureMoves == 0 &&
+            statistics.MovingCells <= residualTolerance;
         settledObservations = settled ? settledObservations + 1 : 0;
-        if (settledObservations >= 2)
+        if (settledObservations >= 8)
         {
             finalizeCellularRest = cellularMatter && !cellularSleeping;
             cellularSleeping = true;
             solidSleeping = true;
+            ResetActiveRegion();
         }
         if (statistics.ActiveCells == 0)
         {
@@ -231,45 +329,146 @@ public sealed class SimulationDispatchCoordinator
 
     private void DispatchCellularAutomata(
         GpuSimulationResources resources,
-        ref SimulationFrameConstants constants)
+        ref SimulationFrameConstants constants,
+        bool rebuildCellMaterials)
     {
         DeviceContext context = resources.Context;
+        // 33 caches each water column once. Phases 13..23 plan bounded
+        // power-of-two hydraulic transfers and phase 29 applies each plan.
         ReadOnlySpan<uint> phases = (frameIndex & 1) == 0
-            ? [0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
-                19, 29,
-                21, 22, 23, 24, 25, 26, 27, 28,
+            ? [32, 0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
+                33,
+                13, 29, 14, 29, 15, 29, 16, 29, 17, 29, 18, 29,
+                19, 29, 20, 29, 21, 29, 22, 29, 23, 29,
+                34, 34, 34, 38, 39, 36, 37,
+                40, 41, 42, 43, 44, 45, 46, 47,
                 2, 3, 2, 3, 2, 3, 2, 3, 4]
-            : [1, 0, 1, 0, 1, 0, 1, 0, 6, 5, 8, 7, 10, 9, 12, 11,
-                28, 27, 26, 25, 24, 23, 22, 21,
-                19, 29,
+            : [32, 1, 0, 1, 0, 1, 0, 1, 0, 6, 5, 8, 7, 10, 9, 12, 11,
+                33,
+                23, 29, 22, 29, 21, 29, 20, 29, 19, 29, 18, 29,
+                17, 29, 16, 29, 15, 29, 14, 29, 13, 29,
+                34, 34, 34, 38, 39, 36, 37,
+                47, 46, 45, 44, 43, 42, 41, 40,
                 3, 2, 3, 2, 3, 2, 3, 2, 4];
+
+        // Bind common compute states once before the loop
+        context.ComputeShader.Set(resources.CellularAutomataShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResource(0, resources.Materials.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Grid.ReadUnorderedView,
+            resources.BodyFlags.UnorderedView,
+            resources.PathBlockerMasks.UnorderedView,
+            resources.CellMaterials.UnorderedView,
+            resources.ComponentParents.UnorderedView);
+
         foreach (uint phase in phases)
         {
-            if (phase is >= 13 and <= 20)
+            if (phase == 32 && !rebuildCellMaterials)
             {
-                context.ClearUnorderedAccessView(resources.BodyFlags.UnorderedView, new RawInt4(0, 0, 0, 0));
+                continue;
             }
+            bool hydraulicPhase = phase == 33 || phase == 29 || phase == 34 ||
+                phase == 36 || phase == 37 || phase == 38 || phase == 39 ||
+                phase is >= 13 and <= 23;
+            if (hydraulicPhase && !rebuildCellMaterials)
+            {
+                continue;
+            }
+
             constants.SimulationPhase = phase;
+
+            bool buildPathBlockers = phase == 31;
+            bool buildCellMaterials = phase == 32;
+            bool waterColumnPhase = phase == 33 || phase == 29 || phase == 37 ||
+                phase == 39 ||
+                phase is >= 13 and <= 23;
+            int startX = buildPathBlockers || buildCellMaterials || waterColumnPhase
+                ? 0
+                : activeRegionValid ? activeMinX : 0;
+            int startY = buildPathBlockers || buildCellMaterials || waterColumnPhase
+                ? 0
+                : activeRegionValid ? activeMinY : 0;
+            int endX = buildPathBlockers
+                ? DivideRoundUp(resources.Width, 32) - 1
+                : buildCellMaterials
+                    ? resources.Width - 1
+                    : waterColumnPhase
+                        ? resources.Width - 1
+                        : activeRegionValid ? activeMaxX : resources.Width - 1;
+            int endY = buildPathBlockers
+                ? resources.Height - 1
+                : buildCellMaterials
+                    ? resources.Height - 1
+                    : waterColumnPhase
+                        ? 0
+                        : activeRegionValid ? activeMaxY : resources.Height - 1;
+
+            int dispatchW = endX - startX + 1;
+            int dispatchH = endY - startY + 1;
+            if (phase <= 1)
+            {
+                int parity = (int)phase;
+                startY += (startY & 1) == parity ? 0 : 1;
+                dispatchH = startY > endY ? 0 : (endY - startY) / 2 + 1;
+            }
+            else if (phase is >= 2 and <= 3)
+            {
+                int parity = (int)phase - 2;
+                startX += (startX & 1) == parity ? 0 : 1;
+                dispatchW = startX > endX ? 0 : (endX - startX) / 2 + 1;
+            }
+            else if (phase is >= 5 and <= 12)
+            {
+                int diagonalPhase = (int)phase - 5;
+                int xParity = (diagonalPhase >> 1) & 1;
+                int yParity = (diagonalPhase >> 2) & 1;
+                startX += (startX & 1) == xParity ? 0 : 1;
+                startY += (startY & 1) == yParity ? 0 : 1;
+                dispatchW = startX > endX ? 0 : (endX - startX) / 2 + 1;
+                dispatchH = startY > endY ? 0 : (endY - startY) / 2 + 1;
+            }
+
+            if (dispatchW <= 0 || dispatchH <= 0)
+            {
+                continue;
+            }
+
+            constants.DispatchOffsetX = (uint)startX;
+            constants.DispatchOffsetY = (uint)startY;
+            constants.DispatchExtentX = (uint)dispatchW;
+            constants.DispatchExtentY = (uint)dispatchH;
+
             UpdateConstants(context, resources, ref constants);
-            context.ComputeShader.Set(resources.CellularAutomataShader);
-            context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-            context.ComputeShader.SetShaderResource(0, resources.Materials.View);
-            context.ComputeShader.SetUnorderedAccessViews(
-                0,
-                resources.Grid.ReadUnorderedView,
-                resources.BodyFlags.UnorderedView);
-            context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-            Unbind(context, 1, 2);
+            context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
         }
+
+        // Unbind once at the end
+        Unbind(context, 1, 5);
         constants.SimulationPhase = 0;
     }
 
-    private static void DispatchCellularRest(
+    private void DispatchCellularRest(
         GpuSimulationResources resources,
         ref SimulationFrameConstants constants)
     {
         DeviceContext context = resources.Context;
         constants.SimulationPhase = 30;
+
+        int startX = activeRegionValid ? activeMinX : 0;
+        int startY = activeRegionValid ? activeMinY : 0;
+        int endX = activeRegionValid ? activeMaxX : resources.Width - 1;
+        int endY = activeRegionValid ? activeMaxY : resources.Height - 1;
+
+        constants.DispatchOffsetX = (uint)startX;
+        constants.DispatchOffsetY = (uint)startY;
+
+        int dispatchW = Math.Max(1, endX - startX + 1);
+        int dispatchH = Math.Max(1, endY - startY + 1);
+        constants.DispatchExtentX = (uint)dispatchW;
+        constants.DispatchExtentY = (uint)dispatchH;
+
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.CellularAutomataShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
@@ -277,9 +476,12 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Grid.ReadUnorderedView,
-            resources.BodyFlags.UnorderedView);
-        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 1, 2);
+            resources.BodyFlags.UnorderedView,
+            resources.PathBlockerMasks.UnorderedView,
+            resources.CellMaterials.UnorderedView);
+
+        context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
+        Unbind(context, 1, 4);
         constants.SimulationPhase = 0;
     }
 
@@ -297,19 +499,24 @@ public sealed class SimulationDispatchCoordinator
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.CompositionShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.Materials.View);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Grid.ReadView,
+            resources.Materials.View,
+            resources.BodyFlags.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.CompositionTargets.WriteView,
             resources.Statistics.WriteUnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 2, 2);
+        Unbind(context, 3, 2);
         if (collect)
         {
             resources.Statistics.Swap();
         }
         constants.SimulationPhase = 0;
         context.CopyResource(resources.CompositionTargets.WriteTexture, resources.NativePresentationTexture);
+        resources.PresentationIndex = 1 - resources.PresentationIndex;
         resources.CompositionTargets.Swap();
     }
 
@@ -322,6 +529,7 @@ public sealed class SimulationDispatchCoordinator
         }
         resources.Context.ClearUnorderedAccessView(resources.ComponentParents.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.BodyFlags.UnorderedView, zero);
+        resources.Context.ClearUnorderedAccessView(resources.CellMaterials.UnorderedView, zero);
         foreach (UnorderedAccessView view in resources.Statistics.UnorderedAccessViews)
         {
             resources.Context.ClearUnorderedAccessView(view, zero);
@@ -351,10 +559,16 @@ public sealed class SimulationDispatchCoordinator
         };
     }
 
-    private void RegisterActivity(ReadOnlySpan<BrushDrawCommand> commands)
+    private void RegisterActivity(ReadOnlySpan<BrushDrawCommand> commands, int width, int height)
     {
+        if (commands.Length > 0)
+        {
+            waterPressureRoutesDirty = true;
+        }
         foreach (BrushDrawCommand command in commands)
         {
+            ExpandActiveRegion(command.X, command.Y, (int)MathF.Ceiling(command.Radius), width, height);
+
             if (command.Mode != 0 || command.MaterialId == (uint)MaterialId.Eraser)
             {
                 topologyDirty = true;
@@ -395,6 +609,8 @@ public sealed class SimulationDispatchCoordinator
         settledObservations = 0;
         presentationDirty = dirtyPresentation;
         finalizeCellularRest = false;
+        waterPressureRoutesDirty = true;
+        ResetActiveRegion();
     }
 
     private static bool ContainsMatterCommand(ReadOnlySpan<BrushDrawCommand> commands)

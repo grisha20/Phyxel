@@ -13,7 +13,12 @@ public enum AcceptanceScenarioMode
     Sand,
     Hydro,
     Slope,
-    Gas
+    Gas,
+    WaterStress,
+    WaterDrain,
+    CommunicatingVessels,
+    PressureTube,
+    SavedPressure
 }
 
 public static class AcceptanceRegressionScenario
@@ -30,6 +35,11 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.Hydro => CreateHydro(frame),
             AcceptanceScenarioMode.Slope => CreateSlope(frame),
             AcceptanceScenarioMode.Gas => CreateGas(frame),
+            AcceptanceScenarioMode.WaterStress => CreateWaterStress(frame),
+            AcceptanceScenarioMode.WaterDrain => CreateWaterDrain(frame),
+            AcceptanceScenarioMode.CommunicatingVessels => CreateCommunicatingVessels(frame),
+            AcceptanceScenarioMode.PressureTube => CreatePressureTube(frame),
+            AcceptanceScenarioMode.SavedPressure => [],
             _ => []
         };
     }
@@ -199,6 +209,101 @@ public static class AcceptanceRegressionScenario
         gas.Density = 0.72f;
         gas.Seed = 6002;
         return [gas];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateWaterStress(uint frame)
+    {
+        List<BrushDrawCommand> commands = [];
+        if (frame == 0)
+        {
+            AddLine(commands, 24, 1000, 1896, 1000, 16, 8, MaterialId.Metal, 7001);
+            AddLine(commands, 24, 96, 24, 1000, 16, 8, MaterialId.Metal, 7001);
+            AddLine(commands, 1896, 96, 1896, 1000, 16, 8, MaterialId.Metal, 7001);
+            return commands;
+        }
+        if (frame == 1)
+        {
+            AddLine(commands, 320, 900, 820, 520, 16, 8, MaterialId.Metal, 7002);
+            AddLine(commands, 1100, 520, 1600, 900, 16, 8, MaterialId.Metal, 7002);
+            return commands;
+        }
+        if (frame is >= 2 and <= 18)
+        {
+            int y = 160 + ((int)frame - 2) * 42;
+            AddLine(commands, 100, y, 1820, y, 52, 34, MaterialId.Water, 0);
+            return commands;
+        }
+        return commands;
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateWaterDrain(uint frame)
+    {
+        List<BrushDrawCommand> commands = [];
+        if (frame == 0)
+        {
+            AddLine(commands, 5, 255, 475, 255, 7, 5, MaterialId.Metal, 8001);
+            AddLine(commands, 5, 20, 5, 255, 7, 5, MaterialId.Metal, 8001);
+            AddLine(commands, 475, 20, 475, 255, 7, 5, MaterialId.Metal, 8001);
+            return commands;
+        }
+        if (frame == 1)
+        {
+            return AddFill(20, 205, 230, 245, 8, 5, MaterialId.Water, 0);
+        }
+        if (frame == 2)
+        {
+            return AddFill(238, 205, 460, 245, 8, 5, MaterialId.Water, 0);
+        }
+        if (frame is >= 30 and <= 75)
+        {
+            int offset = ((int)frame % 5 - 2) * 4;
+            BrushDrawCommand sand = Create(240 + offset, 65, 18, MaterialId.Sand, 0, 0);
+            sand.Density = 0.62f;
+            sand.Seed = 8002 + frame;
+            return [sand];
+        }
+        return commands;
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateCommunicatingVessels(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 25, 35, 25, 252, 7, 5, MaterialId.Concrete, 9001);
+            AddLine(commands, 455, 25, 455, 252, 7, 5, MaterialId.Concrete, 9001);
+            AddLine(commands, 25, 252, 455, 252, 7, 5, MaterialId.Concrete, 9001);
+            AddLine(commands, 105, 35, 105, 218, 7, 5, MaterialId.Concrete, 9001);
+            AddLine(commands, 275, 85, 275, 232, 7, 5, MaterialId.Concrete, 9001);
+            return commands;
+        }
+        if (frame == 1)
+        {
+            return AddFill(295, 40, 440, 190, 10, 6, MaterialId.Water, 0);
+        }
+        return [];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreatePressureTube(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 300, 40, 300, 192, 6, 4, MaterialId.Concrete, 9101);
+            AddLine(commands, 300, 238, 300, 255, 6, 4, MaterialId.Concrete, 9101);
+            AddLine(commands, 470, 40, 470, 255, 6, 4, MaterialId.Concrete, 9101);
+            AddLine(commands, 300, 255, 470, 255, 6, 4, MaterialId.Concrete, 9101);
+            AddLine(commands, 230, 70, 230, 210, 6, 4, MaterialId.Concrete, 9102);
+            AddLine(commands, 260, 70, 260, 180, 6, 4, MaterialId.Concrete, 9102);
+            AddLine(commands, 260, 180, 300, 200, 6, 4, MaterialId.Concrete, 9102);
+            AddLine(commands, 230, 210, 300, 230, 6, 4, MaterialId.Concrete, 9102);
+            return commands;
+        }
+        if (frame == 1)
+        {
+            return AddFill(315, 145, 455, 245, 8, 5, MaterialId.Water, 0);
+        }
+        return [];
     }
 
     private static List<BrushDrawCommand> AddFill(
