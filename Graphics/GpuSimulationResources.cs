@@ -17,6 +17,7 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuBufferPair<GridCell> Grid { get; init; }
     public required GpuStructuredBuffer<uint> ComponentParents { get; init; }
     public required GpuStructuredBuffer<uint> BodyFlags { get; init; }
+    public required GpuStructuredBuffer<uint> SolidBodyGeometry { get; init; }
     public required GpuStructuredBuffer<uint> PathBlockerMasks { get; init; }
     public required GpuStructuredBuffer<uint> CellMaterials { get; init; }
     public required GpuBufferPair<SimulationStatistics> Statistics { get; init; }
@@ -40,8 +41,11 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? ComponentUnionShader { get; init; }
     public ComputeShader? ComponentCompressShader { get; init; }
     public ComputeShader? ComponentFinalizeShader { get; init; }
+    public ComputeShader? SolidGeometryAnalyzeShader { get; init; }
     public ComputeShader? SolidAnalyzeShader { get; init; }
+    public ComputeShader? SolidDisplacementPlanShader { get; init; }
     public ComputeShader? SolidMoveShader { get; init; }
+    public ComputeShader? SolidDisplacementApplyShader { get; init; }
     public ComputeShader? CompositionShader { get; init; }
 
     public void Dispose()
@@ -50,8 +54,11 @@ public sealed class GpuSimulationResources : IDisposable
         Context.ComputeShader.SetShaderResources(0, null, null, null, null);
         Context.ComputeShader.SetUnorderedAccessViews(0, null, null, null, null, null);
         CompositionShader?.Dispose();
+        SolidDisplacementApplyShader?.Dispose();
         SolidMoveShader?.Dispose();
+        SolidDisplacementPlanShader?.Dispose();
         SolidAnalyzeShader?.Dispose();
+        SolidGeometryAnalyzeShader?.Dispose();
         ComponentFinalizeShader?.Dispose();
         ComponentCompressShader?.Dispose();
         ComponentUnionShader?.Dispose();
@@ -74,6 +81,7 @@ public sealed class GpuSimulationResources : IDisposable
         CellMaterials.Dispose();
         PathBlockerMasks.Dispose();
         BodyFlags.Dispose();
+        SolidBodyGeometry.Dispose();
         ComponentParents.Dispose();
         Grid.Dispose();
     }

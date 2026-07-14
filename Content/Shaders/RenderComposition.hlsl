@@ -63,6 +63,10 @@ void Collect(GridCell cell)
     else
     {
         InterlockedAdd(Statistics[0].MovingCells, 1, ignored);
+        if (kind == 2)
+        {
+            InterlockedAdd(Statistics[0].MovingSolidCells, 1, ignored);
+        }
     }
 }
 
@@ -102,7 +106,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             Statistics[0].FrameIndex = FrameIndex;
             Statistics[0].PressureMoves = WaterActivity[Width * 9];
-            Statistics[0].Reserved0 = 0;
             Statistics[0].Reserved1 = 0;
             Statistics[0].Reserved2 = 0;
         }

@@ -61,6 +61,8 @@ public static class AcceptanceRegressionVerifier
                 out report),
             AcceptanceScenarioMode.SavedPressure => ValidateSavedPressure(snapshot, out report),
             AcceptanceScenarioMode.SavedIsolation => ValidateSavedIsolation(snapshot, out report),
+            AcceptanceScenarioMode.SavedGravity => ValidateSavedGravity(snapshot, out report),
+            AcceptanceScenarioMode.Buoyancy => ValidateBuoyancy(snapshot, framesPerSecond, out report),
             _ => Fail(out report)
         };
     }
@@ -281,6 +283,76 @@ public static class AcceptanceRegressionVerifier
             MaterialId.Water);
         bool passed = vesselWater > 1000;
         report = $"PHYXEL_K_SAVED_ISOLATION water={water} vesselWater={vesselWater}";
+        return passed;
+    }
+
+    private static bool ValidateSavedGravity(
+        SimulationWorldSnapshot snapshot,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int lowerMetal = CountMaterial(
+            grid, snapshot.Width, 0, snapshot.Width - 1, 850, snapshot.Height - 1, MaterialId.Metal);
+        int lowerConcrete = CountMaterial(
+            grid, snapshot.Width, 0, snapshot.Width - 1, 850, snapshot.Height - 1, MaterialId.Concrete);
+        int lowerSolids = lowerMetal + lowerConcrete;
+        int movingSolids = 0;
+        foreach (GridCell cell in grid)
+        {
+            if (cell.IsActive != 0 &&
+                cell.MaterialId is (uint)MaterialId.Metal or (uint)MaterialId.Concrete &&
+                cell.RestFrames < 2)
+            {
+                movingSolids++;
+            }
+        }
+        bool passed = lowerSolids > 1000 && movingSolids == 0;
+        report = $"PHYXEL_L_SAVED_GRAVITY lowerSolids={lowerSolids} movingSolids={movingSolids}";
+        return passed;
+    }
+
+    private static bool ValidateBuoyancy(
+        SimulationWorldSnapshot snapshot,
+        double framesPerSecond,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int waterTop = SurfaceTop(grid, snapshot.Width, 20, 45, 130, 250);
+        int closedBottom = MaterialBottom(grid, snapshot.Width, 45, 195, 60, 250, MaterialId.Metal);
+        int openBottom = MaterialBottom(grid, snapshot.Width, 205, 340, 60, 250, MaterialId.Metal);
+        int blockBottom = MaterialBottom(grid, snapshot.Width, 365, 435, 60, 250, MaterialId.Metal);
+        int closedHull = CountMaterial(
+            grid, snapshot.Width, 45, 195, Math.Max(0, waterTop - 80), waterTop + 2, MaterialId.Metal);
+        int openHull = CountMaterial(
+            grid, snapshot.Width, 205, 340, Math.Max(0, waterTop - 80), waterTop + 2, MaterialId.Metal);
+        int sunkBlock = CountMaterial(
+            grid, snapshot.Width, 365, 435, waterTop + 3, 250, MaterialId.Metal);
+        int closedWater = CountMaterial(
+            grid, snapshot.Width, 70, 170, Math.Max(0, waterTop - 80), closedBottom - 10, MaterialId.Water);
+        int openWater = CountMaterial(
+            grid, snapshot.Width, 230, 315, Math.Max(0, waterTop - 80), openBottom - 10, MaterialId.Water);
+        int deepHull = CountMaterial(
+            grid, snapshot.Width, 45, 340, waterTop + 25, 250, MaterialId.Metal);
+        int totalWater = 0;
+        int movingSolids = 0;
+        foreach (GridCell cell in grid)
+        {
+            if (cell.IsActive != 0 && cell.MaterialId == (uint)MaterialId.Water)
+            {
+                totalWater++;
+            }
+            if (cell.IsActive != 0 && cell.MaterialId == (uint)MaterialId.Metal &&
+                cell.RestFrames < 2)
+            {
+                movingSolids++;
+            }
+        }
+        bool passed = waterTop > 0 && closedHull > 1000 && openHull > 1000 && sunkBlock > 1000 &&
+            closedBottom - waterTop is >= 10 and <= 24 &&
+            openBottom - waterTop is >= 10 and <= 24 &&
+            blockBottom >= 245 && closedWater == 0 && openWater == 0 && deepHull == 0 &&
+            totalWater is >= 32300 and <= 32450 && movingSolids == 0;
+        report = $"PHYXEL_M_BUOYANCY waterTop={waterTop} bottoms={closedBottom}/{openBottom}/{blockBottom} closedHull={closedHull} openHull={openHull} sunkBlock={sunkBlock} closedWater={closedWater} openWater={openWater} deepHull={deepHull} water={totalWater} movingSolids={movingSolids} fps={framesPerSecond:0.0}";
         return passed;
     }
 
@@ -608,6 +680,25 @@ public static class AcceptanceRegressionVerifier
         if (tops.Count == 0) return -1;
         tops.Sort();
         return tops[tops.Count / 2];
+    }
+
+    private static int MaterialBottom(
+        ReadOnlySpan<GridCell> grid,
+        int width,
+        int left,
+        int right,
+        int top,
+        int bottom,
+        MaterialId material)
+    {
+        for (int y = bottom; y >= top; y--)
+        {
+            if (HasMaterial(grid, width, left, right, y, material))
+            {
+                return y;
+            }
+        }
+        return -1;
     }
 
     private static int CurvedTubeSurfaceTop(

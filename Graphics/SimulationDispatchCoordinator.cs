@@ -83,6 +83,23 @@ public sealed class SimulationDispatchCoordinator
 
     public bool CellularSleeping => cellularSleeping;
 
+    public void SetSolidGravityEnabled(bool enabled)
+    {
+        if (enabled)
+        {
+            // A UI toggle is an explicit wake-up request. Rebuild body IDs even
+            // for a restored world or for solids that were previously sleeping.
+            solidMatter |= worldHasMatter;
+            topologyDirty = worldHasMatter;
+            solidSleeping = false;
+            cellularSleeping = false;
+            settledObservations = 0;
+            presentationDirty = true;
+            return;
+        }
+        solidSleeping = true;
+    }
+
     public GpuSimulationResources DispatchFrame(
         SimulationSettings settings,
         ReadOnlySpan<BrushDrawCommand> commands)
@@ -109,6 +126,7 @@ public sealed class SimulationDispatchCoordinator
 
         if (settings.SolidGravity && !previousSolidGravity)
         {
+            solidMatter |= worldHasMatter;
             topologyDirty = true;
             solidSleeping = false;
             settledObservations = 0;
@@ -134,10 +152,10 @@ public sealed class SimulationDispatchCoordinator
             if (topologyDirty)
             {
                 DispatchComponentLabeling(resources, ref constants);
+                DispatchSolidGeometry(resources, ref constants);
                 topologyDirty = false;
             }
             DispatchSolidPass(resources, ref constants, 0);
-            DispatchSolidPass(resources, ref constants, 1);
             cellularSleeping = false;
             presentationDirty = true;
         }
@@ -242,7 +260,7 @@ public sealed class SimulationDispatchCoordinator
         {
             finalizeCellularRest = cellularMatter && !cellularSleeping;
             cellularSleeping = true;
-            solidSleeping = true;
+            solidSleeping = !previousSolidGravity || statistics.MovingSolidCells == 0;
             ResetActiveRegion();
         }
         if (statistics.ActiveCells == 0)
@@ -302,6 +320,32 @@ public sealed class SimulationDispatchCoordinator
         Unbind(context, 2, 2);
     }
 
+    private static void DispatchSolidGeometry(
+        GpuSimulationResources resources,
+        ref SimulationFrameConstants constants)
+    {
+        DeviceContext context = resources.Context;
+        context.ClearUnorderedAccessView(
+            resources.SolidBodyGeometry.UnorderedView,
+            new RawInt4(0, 0, 0, 0));
+        UpdateConstants(context, resources, ref constants);
+        context.ComputeShader.Set(resources.SolidGeometryAnalyzeShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResource(0, resources.Grid.ReadView);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            null,
+            null,
+            null,
+            null,
+            resources.SolidBodyGeometry.UnorderedView);
+        context.Dispatch(
+            DivideRoundUp(resources.Width, 16),
+            DivideRoundUp(resources.Height, 16),
+            1);
+        Unbind(context, 1, 5);
+    }
+
     private void DispatchSolidPass(
         GpuSimulationResources resources,
         ref SimulationFrameConstants constants,
@@ -310,21 +354,70 @@ public sealed class SimulationDispatchCoordinator
         DeviceContext context = resources.Context;
         constants.SolidPass = pass;
         context.ClearUnorderedAccessView(resources.BodyFlags.UnorderedView, new RawInt4(0, 0, 0, 0));
+        // CellMaterials is rebuilt by cellular phase 32. During the solid pass
+        // it stores the current water depth for each cached rigid body.
+        context.ClearUnorderedAccessView(resources.CellMaterials.UnorderedView, new RawInt4(0, 0, 0, 0));
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.SolidAnalyzeShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
         context.ComputeShader.SetShaderResource(0, resources.Grid.ReadView);
-        context.ComputeShader.SetUnorderedAccessView(0, resources.BodyFlags.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.BodyFlags.UnorderedView,
+            null,
+            resources.CellMaterials.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 1, 1);
+        Unbind(context, 1, 3);
+
+        // ComponentParents is only labeling scratch after body IDs have been
+        // copied into the cells. Reuse it for one-frame displacement targets;
+        // hydraulic routing clears/rebuilds it immediately after solid motion.
+        context.ClearUnorderedAccessView(resources.ComponentParents.UnorderedView, new RawInt4(0, 0, 0, 0));
+        context.ComputeShader.Set(resources.SolidDisplacementPlanShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Grid.ReadView,
+            resources.BodyFlags.View,
+            resources.CellMaterials.View,
+            null,
+            resources.SolidBodyGeometry.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            null,
+            null,
+            null,
+            resources.ComponentParents.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        Unbind(context, 5, 4);
 
         context.ComputeShader.Set(resources.SolidMoveShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.BodyFlags.View);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Grid.ReadView,
+            resources.BodyFlags.View,
+            resources.CellMaterials.View,
+            resources.ComponentParents.View,
+            resources.SolidBodyGeometry.View);
         context.ComputeShader.SetUnorderedAccessViews(0, null, resources.Grid.WriteUnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 2, 2);
+        Unbind(context, 5, 2);
+
+        context.ComputeShader.Set(resources.SolidDisplacementApplyShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Grid.ReadView,
+            resources.BodyFlags.View,
+            resources.CellMaterials.View,
+            resources.ComponentParents.View,
+            resources.SolidBodyGeometry.View);
+        context.ComputeShader.SetUnorderedAccessViews(0, null, resources.Grid.WriteUnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        Unbind(context, 5, 2);
         resources.Grid.Swap();
+        waterPressureRoutesDirty = true;
     }
 
     private void DispatchCellularAutomata(
@@ -529,6 +622,7 @@ public sealed class SimulationDispatchCoordinator
         }
         resources.Context.ClearUnorderedAccessView(resources.ComponentParents.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.BodyFlags.UnorderedView, zero);
+        resources.Context.ClearUnorderedAccessView(resources.SolidBodyGeometry.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.CellMaterials.UnorderedView, zero);
         foreach (UnorderedAccessView view in resources.Statistics.UnorderedAccessViews)
         {

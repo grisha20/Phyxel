@@ -42,7 +42,7 @@ struct SimulationStatistics
     uint SandCells;
     uint GasCells;
     uint PressureMoves;
-    uint Reserved0;
+    uint MovingSolidCells;
     uint Reserved1;
     uint Reserved2;
 };

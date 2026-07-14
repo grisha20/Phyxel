@@ -204,6 +204,11 @@ public sealed class PhyxelGame : Game
             dispatchCoordinator.ClearCurrentWorld(settings);
             SetStatus("Сцена очищена");
         }
+        if (actions.GravityChanged)
+        {
+            dispatchCoordinator.SetSolidGravityEnabled(settings.SolidGravity);
+            SetStatus(settings.SolidGravity ? "Гравитация включена" : "Гравитация выключена");
+        }
         if (actions.SaveRequested && pendingSave is null && !pendingWorldCapture && currentResources is not null)
         {
             stateSerializer.BeginWorldCapture(currentResources);

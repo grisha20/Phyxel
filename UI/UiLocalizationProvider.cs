@@ -26,6 +26,6 @@ public static class UiLocalizationProvider
     public static string ConfirmClear => "Подтвердить очистку";
     public static string Save => "Сохранить сцену";
     public static string Load => "Загрузить сцену";
-    public static string SolidGravity => "Гравитация твердых тел";
+    public static string SolidGravity => "Гравитация";
     public static string Materials => "МАТЕРИАЛЫ";
 }

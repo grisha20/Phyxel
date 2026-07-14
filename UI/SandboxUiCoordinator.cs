@@ -14,7 +14,8 @@ public readonly record struct UiFrameActions(
     bool ClearRequested,
     bool SaveRequested,
     bool LoadRequested,
-    bool ScaleChanged);
+    bool ScaleChanged,
+    bool GravityChanged);
 
 public sealed class SandboxUiCoordinator
 {
@@ -95,9 +96,12 @@ public sealed class SandboxUiCoordinator
         }
 
         solidGravityButton.Active = settings.SolidGravity;
+        bool gravityChanged = false;
         if (solidGravityButton.Update(input))
         {
             settings.SolidGravity = !settings.SolidGravity;
+            solidGravityButton.Active = settings.SolidGravity;
+            gravityChanged = true;
         }
 
         bool clearRequested = false;
@@ -117,7 +121,7 @@ public sealed class SandboxUiCoordinator
         clearButton.Label = clearConfirmationRemaining > 0f
             ? compactLayout ? "Подтвердить" : UiLocalizationProvider.ConfirmClear
             : compactLayout ? "Очистить" : UiLocalizationProvider.Clear;
-        solidGravityButton.Label = compactLayout ? "Гравитация тел" : UiLocalizationProvider.SolidGravity;
+        solidGravityButton.Label = UiLocalizationProvider.SolidGravity;
         saveButton.Label = compactLayout ? "Сохранить" : UiLocalizationProvider.Save;
         loadButton.Label = compactLayout ? "Загрузить" : UiLocalizationProvider.Load;
         bool saveRequested = saveButton.Update(input) || input.SavePressed;
@@ -141,7 +145,7 @@ public sealed class SandboxUiCoordinator
         brushSlider.Value = settings.BrushRadius;
         densitySlider.Value = settings.SpawnDensity * 100f;
         scaleSlider.Value = settings.Scale * 100f;
-        return new UiFrameActions(clearRequested, saveRequested, loadRequested, scaleChanged);
+        return new UiFrameActions(clearRequested, saveRequested, loadRequested, scaleChanged, gravityChanged);
     }
 
     public void Draw(
@@ -173,7 +177,7 @@ public sealed class SandboxUiCoordinator
         loadButton.Draw(spriteBatch, font, panelRenderer, pixel);
         string selectedName = materialRegistry[SelectedMaterial].Name;
         string gravityState = settings.SolidGravity ? "вкл" : "выкл";
-        string info = $"FPS {framesPerSecond,5:0}   Частицы {statistics.ActiveCells:N0}   Твердые {statistics.SolidCells:N0}   Материал: {selectedName}   Кисть: {settings.BrushRadius} px   Гравитация тел: {gravityState}";
+        string info = $"FPS {framesPerSecond,5:0}   Частицы {statistics.ActiveCells:N0}   Твердые {statistics.SolidCells:N0}   Материал: {selectedName}   Кисть: {settings.BrushRadius} px   Гравитация: {gravityState}";
         spriteBatch.DrawString(font, info, new Vector2(InfoPanelBounds.X + 12, InfoPanelBounds.Y + 9), Color.White);
         if (!string.IsNullOrWhiteSpace(transientStatus))
         {

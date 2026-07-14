@@ -104,6 +104,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         // water-column cache and pressure-transfer scratch space.
         int bodyFlagCount = allocateSimulation ? Math.Max(cellCount, checked(width * 9 + 1)) : 10;
         GpuStructuredBuffer<uint> bodyFlags = new(Device, bodyFlagCount);
+        GpuStructuredBuffer<uint> solidBodyGeometry = new(Device, cellCount);
         int blockerMaskCount = allocateSimulation ? checked(((width + 31) / 32) * height) : 1;
         GpuStructuredBuffer<uint> pathBlockerMasks = new(Device, blockerMaskCount);
         GpuStructuredBuffer<uint> cellMaterials = new(Device, cellCount);
@@ -171,6 +172,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Grid = grid,
             ComponentParents = componentParents,
             BodyFlags = bodyFlags,
+            SolidBodyGeometry = solidBodyGeometry,
             PathBlockerMasks = pathBlockerMasks,
             CellMaterials = cellMaterials,
             Statistics = statistics,
@@ -190,8 +192,11 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ComponentUnionShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "UnionComponents") : null,
             ComponentCompressShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "CompressComponents") : null,
             ComponentFinalizeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "FinalizeComponents") : null,
+            SolidGeometryAnalyzeShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "AnalyzeSolidGeometry") : null,
             SolidAnalyzeShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "AnalyzeSolidBodies") : null,
+            SolidDisplacementPlanShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "PlanHullWaterDisplacement") : null,
             SolidMoveShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "MoveSolidBodies") : null,
+            SolidDisplacementApplyShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "ApplyHullWaterDisplacement") : null,
             CompositionShader = allocateSimulation ? CompileShader("RenderComposition.hlsl") : null
         };
     }

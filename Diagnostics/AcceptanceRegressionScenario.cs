@@ -19,7 +19,9 @@ public enum AcceptanceScenarioMode
     CommunicatingVessels,
     PressureTube,
     SavedPressure,
-    SavedIsolation
+    SavedIsolation,
+    SavedGravity,
+    Buoyancy
 }
 
 public static class AcceptanceRegressionScenario
@@ -42,6 +44,8 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.PressureTube => CreatePressureTube(frame),
             AcceptanceScenarioMode.SavedPressure => [],
             AcceptanceScenarioMode.SavedIsolation => CreateSavedIsolation(frame),
+            AcceptanceScenarioMode.SavedGravity => [],
+            AcceptanceScenarioMode.Buoyancy => CreateBuoyancy(frame),
             _ => []
         };
     }
@@ -318,6 +322,36 @@ public static class AcceptanceRegressionScenario
         water.Density = 0.82f;
         water.Seed = 9200 + frame;
         return [water];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateBuoyancy(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 15, 255, 465, 255, 7, 5, MaterialId.Fixture, 10001);
+            AddLine(commands, 55, 75, 185, 75, 7, 5, MaterialId.Metal, 10101);
+            AddLine(commands, 55, 75, 55, 140, 7, 5, MaterialId.Metal, 10101);
+            AddLine(commands, 185, 75, 185, 140, 7, 5, MaterialId.Metal, 10101);
+            AddLine(commands, 55, 140, 185, 140, 7, 5, MaterialId.Metal, 10101);
+            AddLine(commands, 215, 75, 215, 140, 7, 5, MaterialId.Metal, 10201);
+            AddLine(commands, 330, 75, 330, 140, 7, 5, MaterialId.Metal, 10201);
+            AddLine(commands, 215, 140, 330, 140, 7, 5, MaterialId.Metal, 10201);
+            return commands;
+        }
+        if (frame == 1)
+        {
+            return AddFill(375, 90, 425, 140, 6, 4, MaterialId.Metal, 10301);
+        }
+        if (frame == 2)
+        {
+            return AddFill(20, 175, 240, 247, 8, 5, MaterialId.Water, 0);
+        }
+        if (frame == 3)
+        {
+            return AddFill(240, 175, 460, 247, 8, 5, MaterialId.Water, 0);
+        }
+        return [];
     }
 
     private static List<BrushDrawCommand> AddFill(

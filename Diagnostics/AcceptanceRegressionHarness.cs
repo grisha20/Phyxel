@@ -28,6 +28,8 @@ public sealed class AcceptanceRegressionHarness
             "pressure_tube" or "tube" => AcceptanceScenarioMode.PressureTube,
             "saved_pressure" => AcceptanceScenarioMode.SavedPressure,
             "saved_isolation" or "isolation" => AcceptanceScenarioMode.SavedIsolation,
+            "saved_gravity" => AcceptanceScenarioMode.SavedGravity,
+            "buoyancy" or "float" => AcceptanceScenarioMode.Buoyancy,
             _ => AcceptanceScenarioMode.None
         };
     }
@@ -36,7 +38,8 @@ public sealed class AcceptanceRegressionHarness
     public bool Active => Mode != AcceptanceScenarioMode.None;
     public bool RequiresNativeResolution => Mode == AcceptanceScenarioMode.WaterStress;
     public bool RequiresSavedScene => Mode is
-        AcceptanceScenarioMode.SavedPressure or AcceptanceScenarioMode.SavedIsolation;
+        AcceptanceScenarioMode.SavedPressure or AcceptanceScenarioMode.SavedIsolation or
+        AcceptanceScenarioMode.SavedGravity;
     public uint CaptureFrame
     {
         get
@@ -61,6 +64,8 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.PressureTube => 1200,
                 AcceptanceScenarioMode.SavedPressure => 2000,
                 AcceptanceScenarioMode.SavedIsolation => 600,
+                AcceptanceScenarioMode.SavedGravity => 400,
+                AcceptanceScenarioMode.Buoyancy => 500,
                 _ => uint.MaxValue
             };
         }
@@ -73,7 +78,14 @@ public sealed class AcceptanceRegressionHarness
 
     public void ConfigureSettings(uint frame, SimulationSettings settings)
     {
-        settings.SolidGravity = Mode == AcceptanceScenarioMode.SolidGravity && frame >= 60;
+        if (Mode is AcceptanceScenarioMode.SolidGravity or AcceptanceScenarioMode.Buoyancy)
+        {
+            settings.SolidGravity = frame >= 60;
+        }
+        else if (Mode == AcceptanceScenarioMode.SavedGravity)
+        {
+            settings.SolidGravity = frame >= 30;
+        }
     }
 
     public void CaptureScreenshot(GpuSimulationResources resources, uint frame)
@@ -112,6 +124,8 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.PressureTube when frame == 1199 => "I_pressure_tube_rest",
             AcceptanceScenarioMode.SavedPressure when frame == 1199 => "J_saved_pressure",
             AcceptanceScenarioMode.SavedIsolation when frame == 599 => "K_saved_isolation",
+            AcceptanceScenarioMode.SavedGravity when frame == 399 => "L_saved_gravity",
+            AcceptanceScenarioMode.Buoyancy when frame == 499 => "M_buoyancy",
             _ => null
         };
         if (label is null)
