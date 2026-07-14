@@ -99,9 +99,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
     {
         int cellCount = allocateSimulation ? checked(width * height) : 1;
         GpuBufferPair<GridCell> grid = new(Device, cellCount);
-        GpuBufferPair<LatticeParticle> particles = new(Device, cellCount);
-        GpuBufferPair<LatticeBond> bonds = new(Device, cellCount);
-        GpuBufferPair<uint> activatedBodyWords = new(Device, SimulationSettings.BodyActivationWordCount);
+        GpuStructuredBuffer<uint> componentParents = new(Device, cellCount);
+        GpuStructuredBuffer<uint> bodyFlags = new(Device, cellCount);
         GpuBufferPair<SimulationStatistics> statistics = new(Device, 1);
         GpuUploadBuffer<BrushDrawCommand> commands = new(Device, SimulationSettings.MaximumBrushCommands);
         MaterialProperties[] materialTable = materialRegistry.CreateGpuTable();
@@ -131,8 +130,6 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Flags = QueryFlags.None
         });
         Buffer gridStaging = CreateStagingBuffer(grid.ReadBuffer.Description.SizeInBytes);
-        Buffer particlesStaging = CreateStagingBuffer(particles.ReadBuffer.Description.SizeInBytes);
-        Buffer bondsStaging = CreateStagingBuffer(bonds.ReadBuffer.Description.SizeInBytes);
         Query sceneTransferQuery = new(Device, new QueryDescription
         {
             Type = QueryType.Event,
@@ -157,9 +154,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Height = height,
             IsSimulationAllocated = allocateSimulation,
             Grid = grid,
-            Particles = particles,
-            Bonds = bonds,
-            ActivatedBodyWords = activatedBodyWords,
+            ComponentParents = componentParents,
+            BodyFlags = bodyFlags,
             Statistics = statistics,
             Commands = commands,
             Materials = materials,
@@ -167,18 +163,18 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             StatisticsStaging = statisticsStaging,
             StatisticsQuery = statisticsQuery,
             GridStaging = gridStaging,
-            ParticlesStaging = particlesStaging,
-            BondsStaging = bondsStaging,
             SceneTransferQuery = sceneTransferQuery,
             CompositionTargets = targets,
             PresentationTexture = presentation,
             NativePresentationTexture = nativePresentation,
             BrushShader = allocateSimulation ? CompileShader("BrushApplication.hlsl") : null,
             CellularAutomataShader = allocateSimulation ? CompileShader("CellularAutomataSolver.hlsl") : null,
-            LatticeShader = allocateSimulation ? CompileShader("LatticePhysicsSolver.hlsl") : null,
-            LatticeTopologyShader = allocateSimulation ? CompileShader("LatticeTopologyBuilder.hlsl") : null,
-            LatticeOccupancyClearShader = allocateSimulation ? CompileShader("UnifiedOccupancyProjection.hlsl", "ClearLatticeOccupancy") : null,
-            LatticeProjectionShader = allocateSimulation ? CompileShader("UnifiedOccupancyProjection.hlsl", "ProjectLatticeOccupancy") : null,
+            ComponentInitializeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "InitializeComponents") : null,
+            ComponentUnionShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "UnionComponents") : null,
+            ComponentCompressShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "CompressComponents") : null,
+            ComponentFinalizeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "FinalizeComponents") : null,
+            SolidAnalyzeShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "AnalyzeSolidBodies") : null,
+            SolidMoveShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "MoveSolidBodies") : null,
             CompositionShader = allocateSimulation ? CompileShader("RenderComposition.hlsl") : null
         };
     }

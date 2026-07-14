@@ -3,15 +3,13 @@
 StructuredBuffer<BrushDrawCommand> Commands : register(t0);
 StructuredBuffer<MaterialProperties> Materials : register(t1);
 RWStructuredBuffer<GridCell> Grid : register(u0);
-RWStructuredBuffer<LatticeParticle> Particles : register(u1);
-RWStructuredBuffer<LatticeBond> Bonds : register(u2);
-RWStructuredBuffer<uint> ActivatedBodyWords : register(u3);
 
 [numthreads(16, 16, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint commandIndex = dispatchThreadId.z;
-    if (commandIndex >= CommandCount || dispatchThreadId.x >= MaximumBrushDiameter || dispatchThreadId.y >= MaximumBrushDiameter)
+    if (commandIndex >= CommandCount || dispatchThreadId.x >= MaximumBrushDiameter ||
+        dispatchThreadId.y >= MaximumBrushDiameter)
     {
         return;
     }
@@ -36,75 +34,33 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
+    GridCell existing = Grid[index];
     if (command.Mode == 2)
     {
-        GridCell sourceCell = Grid[index];
-        if (sourceCell.IsActive != 0 && IsCellularMaterial(Materials[sourceCell.MaterialId].SimulationKind))
+        if (existing.IsActive != 0 && IsCellularMaterial(Materials[existing.MaterialId].SimulationKind))
         {
-            Grid[index] = (GridCell)0;
+            Grid[index] = CreateEmptyCell();
         }
-
         return;
     }
 
     if (command.Mode != 0 || command.MaterialId == 5)
     {
-        LatticeParticle sourceParticle = Particles[index];
-        if (sourceParticle.IsActive != 0 && sourceParticle.BodyId != 0)
-        {
-            uint wordIndex = sourceParticle.BodyId >> 5;
-            uint bodyBit = 1u << (sourceParticle.BodyId & 31);
-            uint ignoredWord;
-            InterlockedOr(ActivatedBodyWords[wordIndex], bodyBit, ignoredWord);
-        }
-
-        GridCell emptyCell = (GridCell)0;
-        LatticeParticle emptyParticle = (LatticeParticle)0;
-        LatticeBond emptyBond = (LatticeBond)0;
-        Grid[index] = emptyCell;
-        Particles[index] = emptyParticle;
-        Bonds[index] = emptyBond;
+        Grid[index] = CreateEmptyCell();
         return;
     }
 
     MaterialProperties material = Materials[command.MaterialId];
-    GridCell existingCell = Grid[index];
-    if (IsCellularMaterial(material.SimulationKind) && existingCell.IsActive != 0 &&
-        Materials[existingCell.MaterialId].SimulationKind == 2)
+    if (IsCellularMaterial(material.SimulationKind) && existing.IsActive != 0 &&
+        Materials[existing.MaterialId].SimulationKind == 2)
     {
         return;
     }
 
-    GridCell cell = (GridCell)0;
+    GridCell cell = CreateEmptyCell();
     cell.MaterialId = command.MaterialId;
     cell.Mass = material.SimulationKind == 2 ? material.Density : 1;
     cell.IsActive = 1;
-    cell.LatticeParticleIndex = index;
+    cell.BodyId = material.SimulationKind == 2 ? command.Reserved : 0;
     Grid[index] = cell;
-
-    if (material.SimulationKind == 2)
-    {
-        LatticeParticle particle = (LatticeParticle)0;
-        particle.PositionX = position.x + 0.5;
-        particle.PositionY = position.y + 0.5;
-        particle.Mass = material.Density;
-        particle.MaterialId = command.MaterialId;
-        particle.IsActive = 1;
-        particle.BodyId = command.Reserved;
-        particle.IsDynamic = 0;
-        Particles[index] = particle;
-
-        LatticeBond bond = (LatticeBond)0;
-        bond.ParticleA = index;
-        bond.ActiveNeighborMask = 0x80000000;
-        bond.CardinalRestLength = 1;
-        bond.DiagonalRestLength = 1.41421356;
-        bond.ElasticLimit = material.ElasticLimit;
-        bond.PlasticLimit = material.PlasticLimit;
-        Bonds[index] = bond;
-        return;
-    }
-
-    Particles[index] = (LatticeParticle)0;
-    Bonds[index] = (LatticeBond)0;
 }

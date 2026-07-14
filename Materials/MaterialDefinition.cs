@@ -19,17 +19,10 @@ public enum MaterialSimulationKind : uint
 {
     None = 0,
     Granular = 1,
-    Lattice = 2,
+    Solid = 2,
     Tool = 3,
     Liquid = 4,
     Gas = 5
-}
-
-public enum MaterialFailureMode : uint
-{
-    None = 0,
-    Ductile = 1,
-    Brittle = 2
 }
 
 public sealed record MaterialDefinition(

@@ -6,36 +6,8 @@ struct GridCell
     float VelocityY;
     float Pressure;
     uint IsActive;
-    uint LatticeParticleIndex;
-    uint Reserved;
-};
-
-struct LatticeParticle
-{
-    float PositionX;
-    float PositionY;
-    float VelocityX;
-    float VelocityY;
-    float Mass;
-    uint MaterialId;
-    uint IsActive;
-    float Stress;
     uint BodyId;
-    uint IsDynamic;
-    float PlasticOffsetX;
-    float PlasticOffsetY;
-};
-
-struct LatticeBond
-{
-    uint ParticleA;
-    uint ActiveNeighborMask;
-    float CardinalRestLength;
-    float DiagonalRestLength;
-    float ElasticLimit;
-    float PlasticLimit;
-    float MaximumStrain;
-    float AccumulatedLoad;
+    uint RestFrames;
 };
 
 struct MaterialProperties
@@ -43,13 +15,8 @@ struct MaterialProperties
     uint MaterialId;
     uint SimulationKind;
     float Density;
-    float ElasticLimit;
-    float PlasticLimit;
     float Friction;
-    float Restitution;
     float FlowRate;
-    uint FailureMode;
-    float ActivationLoad;
 };
 
 struct BrushDrawCommand
@@ -66,18 +33,14 @@ struct BrushDrawCommand
 
 struct SimulationStatistics
 {
-    uint ActiveParticles;
-    uint ActiveBonds;
     uint ActiveCells;
+    uint RestingCells;
+    uint MovingCells;
+    uint SolidCells;
     uint FrameIndex;
-    uint StressSumMilli;
-    uint LoadSumMilli;
-    uint StressSampleCount;
-    uint Reserved;
-    uint MovingParticles;
-    uint SleepingParticles;
-    uint CrackedParticles;
-    uint BrokenParticles;
+    uint WaterCells;
+    uint SandCells;
+    uint GasCells;
 };
 
 cbuffer SimulationFrameConstants : register(b0)
@@ -89,15 +52,15 @@ cbuffer SimulationFrameConstants : register(b0)
     uint FrameIndex;
     uint CommandCount;
     uint MaximumBrushDiameter;
-    uint SolverIteration;
-    uint ParticleCount;
-    uint BondCount;
-    uint StressView;
     uint SimulationPhase;
     uint DispatchOffsetX;
     uint DispatchOffsetY;
     float MaximumVelocity;
-    float Reserved1;
+    uint SolidGravity;
+    uint SolidPass;
+    uint Reserved0;
+    uint Reserved1;
+    uint Reserved2;
 };
 
 uint FlattenCoordinate(uint2 coordinate)
@@ -128,6 +91,11 @@ bool IsCellularMaterial(uint simulationKind)
 bool IsFluidMaterial(uint simulationKind)
 {
     return simulationKind == 4 || simulationKind == 5;
+}
+
+bool IsFallingSolid(uint materialId)
+{
+    return materialId == 3 || materialId == 4;
 }
 
 GridCell CreateEmptyCell()

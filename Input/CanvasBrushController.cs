@@ -42,7 +42,7 @@ public sealed class CanvasBrushController
             previousGridPosition = gridPosition;
             strokeOrigin = gridPosition;
             activeBodyId = nextBodyId;
-            nextBodyId = nextBodyId + 1 >= SimulationSettings.MaximumLatticeBodies ? 1 : nextBodyId + 1;
+            nextBodyId = nextBodyId == uint.MaxValue ? 1 : nextBodyId + 1;
             strokeActive = true;
         }
 

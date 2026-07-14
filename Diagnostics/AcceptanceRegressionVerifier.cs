@@ -2,9 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
-using System.Numerics;
 using System.Runtime.InteropServices;
-using Phyxel.Graphics;
 using Phyxel.Materials;
 using Phyxel.Physics;
 using Phyxel.Serialization;
@@ -13,526 +11,544 @@ namespace Phyxel.Diagnostics;
 
 public static class AcceptanceRegressionVerifier
 {
-    private readonly record struct ColorMetrics(
-        int Water,
-        int Sand,
-        int WrongWater,
-        int WrongSand,
-        int RedWater,
-        int RedSand,
-        int RedMetal);
+    private readonly record struct ComponentMetrics(
+        int Count,
+        int Largest,
+        int MinimumX,
+        int MaximumX,
+        int MinimumY,
+        int MaximumY);
 
     public static bool Validate(
-        SpecificationScenarioMode mode,
+        AcceptanceScenarioMode mode,
         SimulationWorldSnapshot snapshot,
         SimulationStatistics statistics,
-        SimulationDispatchCoordinator coordinator,
+        double framesPerSecond,
         string artifactDirectory,
         out string report)
     {
         return mode switch
         {
-            SpecificationScenarioMode.AcceptanceBowl =>
-                ValidateBowl(snapshot, statistics, coordinator, artifactDirectory, out report),
-            SpecificationScenarioMode.AcceptanceBeam =>
-                ValidateBeam(snapshot, artifactDirectory, out report),
-            SpecificationScenarioMode.AcceptanceSand =>
-                ValidateSand(snapshot, statistics, coordinator, artifactDirectory, out report),
-            SpecificationScenarioMode.AcceptanceColors =>
-                ValidateColors(snapshot, artifactDirectory, out report),
-            SpecificationScenarioMode.AcceptanceMetalCritical =>
-                MetalFractureRegressionVerifier.Validate(snapshot, out report),
+            AcceptanceScenarioMode.Bowl => ValidateBowl(snapshot, artifactDirectory, out report),
+            AcceptanceScenarioMode.SolidGravity => ValidateSolidGravity(snapshot, artifactDirectory, out report),
+            AcceptanceScenarioMode.Sand => ValidateSand(snapshot, artifactDirectory, out report),
+            AcceptanceScenarioMode.Hydro => ValidateHydro(
+                snapshot,
+                statistics,
+                framesPerSecond,
+                artifactDirectory,
+                out report),
+            AcceptanceScenarioMode.Slope => MaterialRegressionVerifier.ValidateSlope(
+                snapshot,
+                artifactDirectory,
+                out report),
+            AcceptanceScenarioMode.Gas => MaterialRegressionVerifier.ValidateGas(
+                snapshot,
+                artifactDirectory,
+                out report),
             _ => Fail(out report)
         };
     }
 
     private static bool ValidateBowl(
         SimulationWorldSnapshot snapshot,
-        SimulationStatistics statistics,
-        SimulationDispatchCoordinator coordinator,
         string artifactDirectory,
         out string report)
     {
-        ReadOnlySpan<GridCell> grid = MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid);
-        float[] bottomBoundary = BuildBottomBoundary(snapshot, 8001, 220);
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int metal = 0;
         int water = 0;
         int sand = 0;
         int leakedWater = 0;
-        int lateralWater = 0;
-        int waterBelowBottom = 0;
-        int missingBottom = 0;
-        float waterY = 0;
-        float sandY = 0;
-        float maximumFluidSpeed = 0;
-        float maximumSandSpeed = 0;
-        int speedX = 0;
-        int speedY = 0;
+        int movingWater = 0;
+        int movingSand = 0;
+        double waterY = 0;
+        double sandY = 0;
         for (int y = 0; y < snapshot.Height; y++)
         {
             for (int x = 0; x < snapshot.Width; x++)
-            {
-                GridCell cell = grid[y * snapshot.Width + x];
-                MaterialId material = cell.IsActive == 0 ? MaterialId.Empty : (MaterialId)cell.MaterialId;
-                if (material == MaterialId.Water)
-                {
-                    water++;
-                    waterY += y;
-                    bool lateral = x is < 110 or > 329;
-                    bool missing = bottomBoundary[x] < 0;
-                    bool below = !missing && y > bottomBoundary[x] + 1;
-                    lateralWater += lateral ? 1 : 0;
-                    missingBottom += missing ? 1 : 0;
-                    waterBelowBottom += below ? 1 : 0;
-                    leakedWater += lateral || missing || below ? 1 : 0;
-                    float speed = Math.Abs(cell.VelocityX) + Math.Abs(cell.VelocityY);
-                    if (speed > maximumFluidSpeed)
-                    {
-                        maximumFluidSpeed = speed;
-                        speedX = x;
-                        speedY = y;
-                    }
-                }
-                else if (material == MaterialId.Sand)
-                {
-                    sand++;
-                    sandY += y;
-                    maximumSandSpeed = Math.Max(
-                        maximumSandSpeed,
-                        Math.Abs(cell.VelocityX) + Math.Abs(cell.VelocityY));
-                }
-            }
-        }
-
-        BodyMetrics body = MeasureBody(snapshot, 8001, 220, 120, 319);
-        string finalImage = ImagePath(artifactDirectory, "AcceptanceBowl_A_water_sand.png");
-        string waterImage = ImagePath(artifactDirectory, "AcceptanceBowl_A_water_2s.png");
-        ColorMetrics colors = AnalyzeColors(snapshot, finalImage, 8001);
-        int waterStageRed = CountRedPixels(waterImage, new Rectangle(100, 100, 240, 145));
-        float averageWaterY = waterY / Math.Max(water, 1);
-        float averageSandY = sandY / Math.Max(sand, 1);
-        bool passed = water >= 7000 && sand >= 3000 && leakedWater == 0 &&
-            averageSandY >= averageWaterY + 10 && maximumFluidSpeed <= 2 && maximumSandSpeed <= 0.02f &&
-            body.Nodes >= 3000 && body.Fragments == 0 && body.Bonds >= body.Nodes * 2 &&
-            body.MaximumSag is >= 2 and <= 45 && waterStageRed == 0 &&
-            colors.Water >= 5000 && colors.Sand >= 2000 &&
-            colors.RedWater == 0 && colors.RedSand == 0 &&
-            colors.WrongWater == 0 && colors.WrongSand == 0;
-        report = $"PHYXEL_ACCEPTANCE_A water={water} sand={sand} leaked={leakedWater} " +
-            $"lateral={lateralWater} below={waterBelowBottom} missingBottom={missingBottom} " +
-            $"waterY={averageWaterY:0.0} sandY={averageSandY:0.0} speed={maximumFluidSpeed:0.000}@{speedX},{speedY} " +
-            $"sandSpeed={maximumSandSpeed:0.000} " +
-            $"metalNodes={body.Nodes} bonds={body.Bonds} fragments={body.Fragments} sag={body.MaximumSag:0.0} " +
-            $"waterStageRed={waterStageRed} redWater={colors.RedWater} redSand={colors.RedSand} " +
-            $"wrongWater={colors.WrongWater} wrongSand={colors.WrongSand} sleeping={coordinator.CellularSleeping}";
-        return passed;
-    }
-
-    private static bool ValidateBeam(
-        SimulationWorldSnapshot snapshot,
-        string artifactDirectory,
-        out string report)
-    {
-        BodyMetrics body = MeasureBody(snapshot, 8101, 150, 190, 250);
-        BodyMetrics leftSupport = MeasureBody(snapshot, 8102, 150, 110, 122);
-        BodyMetrics rightSupport = MeasureBody(snapshot, 8103, 150, 318, 330);
-        int supportCells = CountMaterial(
-            snapshot,
-            MaterialId.Fixture,
-            new Rectangle(105, 140, 230, snapshot.Height - 140));
-        ColorMetrics loaded50 = AnalyzeColors(
-            snapshot,
-            ImagePath(artifactDirectory, "AcceptanceBeam_B_load_50.png"),
-            8101);
-        ColorMetrics loaded100 = AnalyzeColors(
-            snapshot,
-            ImagePath(artifactDirectory, "AcceptanceBeam_B_load_100.png"),
-            8101);
-        bool passed = body.Nodes is >= 390 and <= 410 && body.Bonds >= 900 &&
-            body.Fragments == 0 && body.Plastic > 0 && body.AverageCenterSag >= 10 &&
-            body.MaximumSag <= 60 && loaded50.RedSand == 0 && loaded100.RedSand == 0 &&
-            loaded100.RedMetal > 5 && loaded100.WrongSand == 0 &&
-            leftSupport.Nodes >= 800 && rightSupport.Nodes >= 800 && supportCells >= 1600;
-        report = $"PHYXEL_ACCEPTANCE_B nodes={body.Nodes} bonds={body.Bonds} fragments={body.Fragments} " +
-            $"plastic={body.Plastic} centerSag={body.AverageCenterSag:0.0} maximumSag={body.MaximumSag:0.0} " +
-            $"redMetal={loaded100.RedMetal} redSand50={loaded50.RedSand} redSand100={loaded100.RedSand} " +
-            $"wrongSand={loaded100.WrongSand} supports={leftSupport.Nodes}/{rightSupport.Nodes} " +
-            $"supportCells={supportCells}";
-        return passed;
-    }
-
-    private static bool ValidateSand(
-        SimulationWorldSnapshot snapshot,
-        SimulationStatistics statistics,
-        SimulationDispatchCoordinator coordinator,
-        string artifactDirectory,
-        out string report)
-    {
-        ReadOnlySpan<GridCell> grid = MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid);
-        List<(int X, int Y)> surface = [];
-        int sand = 0;
-        int minimumX = snapshot.Width;
-        int maximumX = 0;
-        int apexX = 0;
-        int apexY = snapshot.Height;
-        int baseY = 0;
-        int restingSand = 0;
-        float maximumSandSpeed = 0;
-        for (int x = 40; x < snapshot.Width - 40; x++)
-        {
-            int top = snapshot.Height;
-            for (int y = 0; y < snapshot.Height; y++)
-            {
-                GridCell cell = grid[y * snapshot.Width + x];
-                if (cell.IsActive != 0 && (MaterialId)cell.MaterialId == MaterialId.Sand)
-                {
-                    sand++;
-                    restingSand += cell.Reserved >= 30 ? 1 : 0;
-                    maximumSandSpeed = Math.Max(
-                        maximumSandSpeed,
-                        Math.Abs(cell.VelocityX) + Math.Abs(cell.VelocityY));
-                    top = Math.Min(top, y);
-                }
-            }
-
-            if (top == snapshot.Height)
-            {
-                continue;
-            }
-
-            minimumX = Math.Min(minimumX, x);
-            maximumX = Math.Max(maximumX, x);
-            baseY = Math.Max(baseY, top);
-            if (top < apexY)
-            {
-                apexY = top;
-                apexX = x;
-            }
-            surface.Add((x, top));
-        }
-
-        int height = baseY - apexY;
-        float leftAngle = FitAngle(surface, apexX, baseY, height, true);
-        float rightAngle = FitAngle(surface, apexX, baseY, height, false);
-        float roughness = SurfaceRoughness(surface);
-        int gaps = maximumX >= minimumX ? maximumX - minimumX + 1 - surface.Count : int.MaxValue;
-        ColorMetrics colors = AnalyzeColors(
-            snapshot,
-            ImagePath(artifactDirectory, "AcceptanceSand_C_pile_3s.png"),
-            0);
-        bool passed = sand is >= 850 and <= 1150 && height >= 15 &&
-            leftAngle is >= 30 and <= 45 && rightAngle is >= 30 and <= 45 &&
-            gaps == 0 && roughness <= 1.5f && colors.RedSand == 0 && colors.WrongSand == 0 &&
-            maximumSandSpeed <= 0.02f && restingSand >= sand * 0.99f;
-        report = $"PHYXEL_ACCEPTANCE_C sand={sand} height={height} width={maximumX - minimumX + 1} " +
-            $"leftAngle={leftAngle:0.0} rightAngle={rightAngle:0.0} roughness={roughness:0.00} gaps={gaps} " +
-            $"redSand={colors.RedSand} wrongSand={colors.WrongSand} resting={restingSand}/{sand} " +
-            $"speed={maximumSandSpeed:0.000} gpuSleeping={coordinator.CellularSleeping}";
-        return passed;
-    }
-
-    private static bool ValidateColors(
-        SimulationWorldSnapshot snapshot,
-        string artifactDirectory,
-        out string report)
-    {
-        BodyMetrics body = MeasureBody(snapshot, 8303, 150, 330, 400);
-        ColorMetrics colors = AnalyzeColors(
-            snapshot,
-            ImagePath(artifactDirectory, "AcceptanceColors_D_colors.png"),
-            8303);
-        bool passed = colors.Water >= 1500 && colors.Sand >= 2500 &&
-            colors.WrongWater == 0 && colors.WrongSand == 0 &&
-            colors.RedWater == 0 && colors.RedSand == 0 && colors.RedMetal > 5 &&
-            body.Nodes is >= 390 and <= 410 && body.Fragments == 0 && body.MaximumStress > 0.045f;
-        report = $"PHYXEL_ACCEPTANCE_D water={colors.Water} sand={colors.Sand} " +
-            $"wrongWater={colors.WrongWater} wrongSand={colors.WrongSand} redWater={colors.RedWater} " +
-            $"redSand={colors.RedSand} redMetal={colors.RedMetal} metalStress={body.MaximumStress:0.000} " +
-            $"metalFragments={body.Fragments}";
-        return passed;
-    }
-
-    private static ColorMetrics AnalyzeColors(
-        SimulationWorldSnapshot snapshot,
-        string imagePath,
-        uint highlightedBody)
-    {
-        if (!File.Exists(imagePath))
-        {
-            return new ColorMetrics(0, 0, int.MaxValue, int.MaxValue, int.MaxValue, int.MaxValue, 0);
-        }
-
-        ReadOnlySpan<GridCell> grid = MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid);
-        ReadOnlySpan<LatticeParticle> particles = MemoryMarshal.Cast<byte, LatticeParticle>(snapshot.Particles);
-        int water = 0;
-        int sand = 0;
-        int wrongWater = 0;
-        int wrongSand = 0;
-        int redWater = 0;
-        int redSand = 0;
-        int redMetal = 0;
-        using Bitmap bitmap = new(imagePath);
-        int width = Math.Min(bitmap.Width, snapshot.Width);
-        int height = Math.Min(bitmap.Height, snapshot.Height);
-        for (int y = 0; y < height; y++)
-        {
-            for (int x = 0; x < width; x++)
             {
                 GridCell cell = grid[y * snapshot.Width + x];
                 if (cell.IsActive == 0)
                 {
                     continue;
                 }
-
-                Color color = bitmap.GetPixel(x, y);
-                bool red = IsStressRed(color);
                 MaterialId material = (MaterialId)cell.MaterialId;
+                if (material == MaterialId.Metal) metal++;
                 if (material == MaterialId.Water)
                 {
                     water++;
-                    wrongWater += color.B <= color.G || color.B <= color.R ? 1 : 0;
-                    redWater += red ? 1 : 0;
+                    waterY += y;
+                    leakedWater += x < 108 || x > 331 || y > 231 ? 1 : 0;
+                    movingWater += Speed(cell) > 0.02f ? 1 : 0;
                 }
-                else if (material == MaterialId.Sand)
+                if (material == MaterialId.Sand)
                 {
                     sand++;
-                    wrongSand += color.R <= color.G || color.G <= color.B ? 1 : 0;
-                    redSand += red ? 1 : 0;
-                }
-                else if (material == MaterialId.Metal && highlightedBody != 0)
-                {
-                    uint particleIndex = Math.Min(cell.LatticeParticleIndex, (uint)particles.Length - 1);
-                    redMetal += particles[(int)particleIndex].BodyId == highlightedBody && red ? 1 : 0;
+                    sandY += y;
+                    movingSand += Speed(cell) > 0.02f ? 1 : 0;
                 }
             }
         }
-
-        return new ColorMetrics(water, sand, wrongWater, wrongSand, redWater, redSand, redMetal);
+        int wallGaps = 0;
+        for (int y = 115; y <= 229; y++)
+        {
+            wallGaps += HasMaterial(grid, snapshot.Width, 108, 120, y, MaterialId.Metal) ? 0 : 1;
+            wallGaps += HasMaterial(grid, snapshot.Width, 319, 331, y, MaterialId.Metal) ? 0 : 1;
+        }
+        for (int x = 110; x <= 329; x++)
+        {
+            wallGaps += HasMaterial(grid, snapshot.Width, x, x, 220, 230, MaterialId.Metal) ? 0 : 1;
+        }
+        string waterImage = Path.Combine(artifactDirectory, "A_water_2s.png");
+        string finalImage = Path.Combine(artifactDirectory, "A_water_sand.png");
+        WaterVisualMetrics waterVisual = AnalyzeWater(waterImage, 121, 318, 120, 218);
+        ColorMetrics colors = AnalyzeColors(finalImage);
+        bool passed = metal > 3500 && water > 1000 && sand > 5000 && leakedWater == 0 && wallGaps == 0 &&
+            movingWater == 0 && movingSand == 0 && sandY / sand > waterY / water &&
+            waterVisual.Columns > 190 && waterVisual.Gaps == 0 && waterVisual.SurfaceRange <= 2 &&
+            File.Exists(waterImage) && colors.Red == 0 && colors.Blue > 500 && colors.Yellow > 500 && colors.Metal > 500;
+        report = $"PHYXEL_A bowlMetal={metal} water={water} sand={sand} leaked={leakedWater} gaps={wallGaps} movingWater={movingWater} movingSand={movingSand} waterY={waterY / Math.Max(1, water):0.0} sandY={sandY / Math.Max(1, sand):0.0} imageColumns={waterVisual.Columns} imageGaps={waterVisual.Gaps} surfaceRange={waterVisual.SurfaceRange} red={colors.Red}";
+        return passed;
     }
 
-    private static int CountMaterial(
+    private static bool ValidateSolidGravity(
         SimulationWorldSnapshot snapshot,
-        MaterialId material,
-        Rectangle region)
+        string artifactDirectory,
+        out string report)
     {
-        ReadOnlySpan<GridCell> grid = MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid);
-        Rectangle bounds = Rectangle.Intersect(region, new Rectangle(0, 0, snapshot.Width, snapshot.Height));
-        int count = 0;
-        for (int y = bounds.Top; y < bounds.Bottom; y++)
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        GridCell[] componentCells = grid.ToArray();
+        ComponentMetrics metal = Components(componentCells, snapshot.Width, snapshot.Height, MaterialId.Metal);
+        ComponentMetrics concrete = Components(componentCells, snapshot.Width, snapshot.Height, MaterialId.Concrete);
+        string offImage = Path.Combine(artifactDirectory, "B_gravity_off.png");
+        string fallingImage = Path.Combine(artifactDirectory, "B_falling.png");
+        string landedImage = Path.Combine(artifactDirectory, "B_landed.png");
+        string splitImage = Path.Combine(artifactDirectory, "B_split_concrete.png");
+        int suspendedMetal = CountColor(offImage, 50, 15, 120, 85, IsMetal);
+        int suspendedConcrete = CountColor(offImage, 205, 45, 425, 75, IsConcrete);
+        ColorMetrics colors = AnalyzeColors(splitImage);
+        int squareCells = CountMaterial(grid, snapshot.Width, 50, 120, 180, 245, MaterialId.Metal);
+        int supportedFragment = CountMaterial(grid, snapshot.Width, 125, 165, 90, 115, MaterialId.Metal);
+        int floorFragment = CountMaterial(grid, snapshot.Width, 170, 210, 225, 245, MaterialId.Metal);
+        int supportedConcrete = CountMaterial(grid, snapshot.Width, 210, 310, 155, 185, MaterialId.Concrete);
+        int floorConcrete = CountMaterial(grid, snapshot.Width, 320, 410, 225, 245, MaterialId.Concrete);
+        int landedWholeConcrete = CountColor(landedImage, 205, 155, 425, 185, IsConcrete);
+        int water = CountMaterial(grid, snapshot.Width, 0, snapshot.Width - 1, 0, snapshot.Height - 1, MaterialId.Water);
+        int sand = CountMaterial(grid, snapshot.Width, 0, snapshot.Width - 1, 0, snapshot.Height - 1, MaterialId.Sand);
+        bool metalWhole = metal.Count == 3 && metal.Largest > 1800 && squareCells > 1800 &&
+            supportedFragment > 150 && floorFragment > 150;
+        bool concreteSplit = concrete.Count == 2 && concrete.Largest > 700 &&
+            supportedConcrete > 650 && floorConcrete > 500 && landedWholeConcrete > 1400 &&
+            concrete.MinimumY <= 170 && concrete.MaximumY >= 240;
+        bool passed = metalWhole && concreteSplit && water > 500 && sand > 300 &&
+            suspendedMetal > 1500 && suspendedConcrete > 1000 &&
+            File.Exists(fallingImage) && File.Exists(splitImage) && colors.Red == 0;
+        report = $"PHYXEL_B metalComponents={metal.Count} largestMetal={metal.Largest} square={squareCells} splitLevels={supportedFragment}/{floorFragment} concreteComponents={concrete.Count} concreteCells={concrete.Largest} concreteLevels={supportedConcrete}/{floorConcrete} landedWhole={landedWholeConcrete} water={water} sand={sand} suspendedMetal={suspendedMetal} suspendedConcrete={suspendedConcrete} red={colors.Red}";
+        return passed;
+    }
+
+    private static bool ValidateSand(
+        SimulationWorldSnapshot snapshot,
+        string artifactDirectory,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int[] surface = new int[snapshot.Width];
+        Array.Fill(surface, -1);
+        int sand = 0;
+        int resting = 0;
+        int moving = 0;
+        for (int y = 0; y < snapshot.Height; y++)
         {
-            for (int x = bounds.Left; x < bounds.Right; x++)
+            for (int x = 0; x < snapshot.Width; x++)
             {
                 GridCell cell = grid[y * snapshot.Width + x];
-                count += cell.IsActive != 0 && (MaterialId)cell.MaterialId == material ? 1 : 0;
+                if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Sand)
+                {
+                    continue;
+                }
+                sand++;
+                surface[x] = surface[x] < 0 ? y : surface[x];
+                resting += cell.RestFrames >= 30 ? 1 : 0;
+                moving += Speed(cell) > 0.02f ? 1 : 0;
             }
         }
+        int left = Array.FindIndex(surface, value => value >= 0);
+        int right = Array.FindLastIndex(surface, value => value >= 0);
+        int peakX = left;
+        for (int x = Math.Max(0, left); x <= right; x++)
+        {
+            if (surface[x] >= 0 && surface[x] < surface[peakX]) peakX = x;
+        }
+        float leftAngle = Angle(surface, left, peakX);
+        float rightAngle = Angle(surface, right, peakX);
+        float roughness = 0;
+        int samples = 0;
+        int gaps = 0;
+        for (int x = Math.Max(0, left + 1); x <= right; x++)
+        {
+            if (surface[x] < 0 || surface[x - 1] < 0)
+            {
+                gaps++;
+                continue;
+            }
+            roughness += Math.Abs(surface[x] - surface[x - 1]);
+            samples++;
+        }
+        roughness /= Math.Max(1, samples);
+        ColorMetrics colors = AnalyzeColors(Path.Combine(artifactDirectory, "C_pile_3s.png"));
+        bool passed = sand is >= 900 and <= 1100 && leftAngle is >= 30 and <= 45 &&
+            rightAngle is >= 30 and <= 45 && roughness <= 1.5f && gaps == 0 &&
+            resting == sand && moving == 0 && colors.Red == 0 && colors.Yellow > 500;
+        report = $"PHYXEL_C sand={sand} resting={resting} moving={moving} width={right - left + 1} leftAngle={leftAngle:0.0} rightAngle={rightAngle:0.0} roughness={roughness:0.00} gaps={gaps} red={colors.Red}";
+        return passed;
+    }
 
+    private static bool ValidateHydro(
+        SimulationWorldSnapshot snapshot,
+        SimulationStatistics statistics,
+        double framesPerSecond,
+        string artifactDirectory,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int leftTop = SurfaceTop(grid, snapshot.Width, 25, 128, 100, 245);
+        int rightTop = SurfaceTop(grid, snapshot.Width, 148, 250, 100, 245);
+        int waterfallTop = SurfaceTop(grid, snapshot.Width, 300, 455, 100, 245);
+        int water = 0;
+        int resting = 0;
+        int moving = 0;
+        int leaks = 0;
+        double leakedMass = 0;
+        int minimumLeakY = snapshot.Height;
+        int maximumLeakY = 0;
+        int minimumLeakX = snapshot.Width;
+        int maximumLeakX = 0;
+        int wallGaps = 0;
+        foreach (GridCell cell in grid)
+        {
+            if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+            {
+                continue;
+            }
+            water++;
+            resting += cell.RestFrames >= 60 ? 1 : 0;
+            moving += Speed(cell) > 0.02f ? 1 : 0;
+        }
+        for (int y = 0; y < snapshot.Height; y++)
+        {
+            for (int x = 0; x < snapshot.Width; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive != 0 && cell.MaterialId == (uint)MaterialId.Water &&
+                    ((x < 10 || x > 470) || y > 249))
+                {
+                    leaks++;
+                    leakedMass += cell.Mass;
+                    minimumLeakY = Math.Min(minimumLeakY, y);
+                    maximumLeakY = Math.Max(maximumLeakY, y);
+                    minimumLeakX = Math.Min(minimumLeakX, x);
+                    maximumLeakX = Math.Max(maximumLeakX, x);
+                }
+            }
+        }
+        for (int y = 95; y <= 254; y++)
+        {
+            wallGaps += HasMaterial(grid, snapshot.Width, 10, 20, y, MaterialId.Metal) ? 0 : 1;
+            wallGaps += HasMaterial(grid, snapshot.Width, 255, 265, y, MaterialId.Metal) ? 0 : 1;
+        }
+        for (int x = 15; x <= 260; x++)
+        {
+            wallGaps += HasMaterial(grid, snapshot.Width, x, x, 245, 255, MaterialId.Metal) ? 0 : 1;
+        }
+        string equalImage = Path.Combine(artifactDirectory, "D_equal_2s.png");
+        string waterfallImage = Path.Combine(artifactDirectory, "D_waterfall.png");
+        int imageLeft = ImageSurfaceTop(equalImage, 25, 128, 100, 245);
+        int imageRight = ImageSurfaceTop(equalImage, 148, 250, 100, 245);
+        WaterVisualMetrics leftVisual = AnalyzeWater(equalImage, 25, 128, 100, 245);
+        WaterVisualMetrics rightVisual = AnalyzeWater(equalImage, 148, 250, 100, 245);
+        int fallingWater = CountColor(waterfallImage, 330, 80, 415, 220, IsBlue);
+        ColorMetrics colors = AnalyzeColors(Path.Combine(artifactDirectory, "D_rest.png"));
+        bool passed = water > 5000 && Math.Abs(leftTop - rightTop) <= 3 &&
+            Math.Abs(imageLeft - imageRight) <= 3 && waterfallTop > 0 &&
+            leftVisual.Gaps == 0 && rightVisual.Gaps == 0 &&
+            resting >= water * 0.99 && moving == 0 && leaks == 0 &&
+            framesPerSecond >= 55 && colors.Red == 0 && colors.Blue > 500 &&
+            fallingWater > 100;
+        report = $"PHYXEL_D water={water} leftTop={leftTop} rightTop={rightTop} image2s={imageLeft}/{imageRight} waterfallTop={waterfallTop} fallingWater={fallingWater} resting={resting} moving={moving} leaks={leaks} leakMass={leakedMass:0.000} leakBounds={minimumLeakX},{minimumLeakY}-{maximumLeakX},{maximumLeakY} wallGaps={wallGaps} fps={framesPerSecond:0.0} statsMoving={statistics.MovingCells} red={colors.Red}";
+        return passed;
+    }
+
+    private static ComponentMetrics Components(
+        GridCell[] grid,
+        int width,
+        int height,
+        MaterialId material)
+    {
+        bool[] visited = new bool[grid.Length];
+        int[] queue = new int[grid.Length];
+        int components = 0;
+        int largest = 0;
+        int minX = width;
+        int maxX = 0;
+        int minY = height;
+        int maxY = 0;
+        for (int start = 0; start < grid.Length; start++)
+        {
+            if (visited[start] || grid[start].IsActive == 0 || grid[start].MaterialId != (uint)material)
+            {
+                continue;
+            }
+            components++;
+            int head = 0;
+            int tail = 0;
+            queue[tail++] = start;
+            visited[start] = true;
+            int size = 0;
+            while (head < tail)
+            {
+                int index = queue[head++];
+                int x = index % width;
+                int y = index / width;
+                size++;
+                minX = Math.Min(minX, x);
+                maxX = Math.Max(maxX, x);
+                minY = Math.Min(minY, y);
+                maxY = Math.Max(maxY, y);
+                Enqueue(grid, visited, queue, ref tail, index - 1, x > 0, material);
+                Enqueue(grid, visited, queue, ref tail, index + 1, x + 1 < width, material);
+                Enqueue(grid, visited, queue, ref tail, index - width, y > 0, material);
+                Enqueue(grid, visited, queue, ref tail, index + width, y + 1 < height, material);
+            }
+            largest = Math.Max(largest, size);
+        }
+        return new ComponentMetrics(components, largest, minX, maxX, minY, maxY);
+    }
+
+    private static void Enqueue(
+        GridCell[] grid,
+        bool[] visited,
+        int[] queue,
+        ref int tail,
+        int index,
+        bool valid,
+        MaterialId material)
+    {
+        if (!valid || visited[index] || grid[index].IsActive == 0 || grid[index].MaterialId != (uint)material)
+        {
+            return;
+        }
+        visited[index] = true;
+        queue[tail++] = index;
+    }
+
+    private static float Angle(int[] surface, int edge, int peak)
+    {
+        int horizontal = Math.Max(1, Math.Abs(peak - edge));
+        int vertical = Math.Max(0, surface[edge] - surface[peak]);
+        return MathF.Atan2(vertical, horizontal) * 180 / MathF.PI;
+    }
+
+    private static int SurfaceTop(
+        ReadOnlySpan<GridCell> grid,
+        int width,
+        int left,
+        int right,
+        int top,
+        int bottom)
+    {
+        List<int> tops = [];
+        for (int x = left; x <= right; x++)
+        {
+            for (int y = top; y <= bottom; y++)
+            {
+                GridCell cell = grid[y * width + x];
+                if (cell.IsActive != 0 && cell.MaterialId == (uint)MaterialId.Water)
+                {
+                    tops.Add(y);
+                    break;
+                }
+            }
+        }
+        if (tops.Count == 0) return -1;
+        tops.Sort();
+        return tops[tops.Count / 2];
+    }
+
+    private static int ImageSurfaceTop(string path, int left, int right, int top, int bottom)
+    {
+        if (!File.Exists(path)) return -1000;
+        using Bitmap bitmap = new(path);
+        List<int> tops = [];
+        for (int x = left; x <= right; x++)
+        {
+            for (int y = top; y <= bottom; y++)
+            {
+                if (IsBlue(bitmap.GetPixel(x, y)))
+                {
+                    tops.Add(y);
+                    break;
+                }
+            }
+        }
+        if (tops.Count == 0) return -1000;
+        tops.Sort();
+        return tops[tops.Count / 2];
+    }
+
+    private static ColorMetrics AnalyzeColors(string path)
+    {
+        if (!File.Exists(path)) return default;
+        using Bitmap bitmap = new(path);
+        int red = 0;
+        int blue = 0;
+        int yellow = 0;
+        int metal = 0;
+        for (int y = 0; y < bitmap.Height; y++)
+        {
+            for (int x = 0; x < bitmap.Width; x++)
+            {
+                Color color = bitmap.GetPixel(x, y);
+                red += color.R > 120 && color.R > color.G * 1.35 && color.R > color.B * 1.35 ? 1 : 0;
+                blue += IsBlue(color) ? 1 : 0;
+                yellow += IsYellow(color) ? 1 : 0;
+                metal += IsMetal(color) ? 1 : 0;
+            }
+        }
+        return new ColorMetrics(red, blue, yellow, metal);
+    }
+
+    private static WaterVisualMetrics AnalyzeWater(
+        string path,
+        int left,
+        int right,
+        int top,
+        int bottom)
+    {
+        if (!File.Exists(path)) return default;
+        using Bitmap bitmap = new(path);
+        int columns = 0;
+        int gaps = 0;
+        int minimumTop = bottom;
+        int maximumTop = top;
+        for (int x = left; x <= right; x++)
+        {
+            int first = -1;
+            int last = -1;
+            for (int y = top; y <= bottom; y++)
+            {
+                if (!IsBlue(bitmap.GetPixel(x, y))) continue;
+                first = first < 0 ? y : first;
+                last = y;
+            }
+            if (first < 0) continue;
+            columns++;
+            minimumTop = Math.Min(minimumTop, first);
+            maximumTop = Math.Max(maximumTop, first);
+            for (int y = first; y <= last; y++)
+            {
+                gaps += IsBlue(bitmap.GetPixel(x, y)) ? 0 : 1;
+            }
+        }
+        return new WaterVisualMetrics(columns, gaps, maximumTop - minimumTop);
+    }
+
+    private static int CountColor(
+        string path,
+        int left,
+        int top,
+        int right,
+        int bottom,
+        Func<Color, bool> predicate)
+    {
+        if (!File.Exists(path)) return 0;
+        using Bitmap bitmap = new(path);
+        int count = 0;
+        for (int y = top; y <= bottom; y++)
+        {
+            for (int x = left; x <= right; x++)
+            {
+                count += predicate(bitmap.GetPixel(x, y)) ? 1 : 0;
+            }
+        }
         return count;
     }
 
-    private static int CountRedPixels(string imagePath, Rectangle region)
-    {
-        if (!File.Exists(imagePath))
-        {
-            return int.MaxValue;
-        }
-
-        int red = 0;
-        using Bitmap bitmap = new(imagePath);
-        Rectangle clipped = Rectangle.Intersect(region, new Rectangle(0, 0, bitmap.Width, bitmap.Height));
-        for (int y = clipped.Top; y < clipped.Bottom; y++)
-        {
-            for (int x = clipped.Left; x < clipped.Right; x++)
-            {
-                red += IsStressRed(bitmap.GetPixel(x, y)) ? 1 : 0;
-            }
-        }
-
-        return red;
-    }
-
-    private static bool IsStressRed(Color color)
-    {
-        return color.R > 150 && color.R > color.G * 1.25f && color.R > color.B * 1.15f;
-    }
-
-    private static BodyMetrics MeasureBody(
-        SimulationWorldSnapshot snapshot,
-        uint bodyId,
-        float referenceY,
-        float centerLeft,
-        float centerRight)
-    {
-        ReadOnlySpan<LatticeParticle> particles = MemoryMarshal.Cast<byte, LatticeParticle>(snapshot.Particles);
-        ReadOnlySpan<LatticeBond> bonds = MemoryMarshal.Cast<byte, LatticeBond>(snapshot.Bonds);
-        int nodes = 0;
-        int activeBonds = 0;
-        int fragments = 0;
-        int plastic = 0;
-        float maximumSag = 0;
-        float centerY = 0;
-        int centerCount = 0;
-        float maximumStress = 0;
-        for (int index = 0; index < particles.Length; index++)
-        {
-            LatticeParticle particle = particles[index];
-            if (particle.IsActive == 0 || particle.BodyId != bodyId)
-            {
-                continue;
-            }
-
-            LatticeBond bond = bonds[index];
-            nodes++;
-            activeBonds += BitOperations.PopCount(bond.ActiveNeighborMask);
-            fragments += CountConnections(index, snapshot.Width, particles, bonds) == 0 ? 1 : 0;
-            plastic += (particle.IsDynamic & 2) != 0 ? 1 : 0;
-            float originalY = index / snapshot.Width + 0.5f;
-            maximumSag = Math.Max(maximumSag, particle.PositionY - originalY);
-            maximumStress = Math.Max(maximumStress, Math.Max(particle.Stress, bond.MaximumStrain));
-            if (particle.PositionX >= centerLeft && particle.PositionX <= centerRight)
-            {
-                centerY += particle.PositionY;
-                centerCount++;
-            }
-        }
-
-        return new BodyMetrics(
-            nodes,
-            activeBonds,
-            fragments,
-            plastic,
-            maximumSag,
-            centerY / Math.Max(centerCount, 1) - referenceY,
-            maximumStress);
-    }
-
-    private static float[] BuildBottomBoundary(
-        SimulationWorldSnapshot snapshot,
-        uint bodyId,
-        int originalBottomTop)
-    {
-        ReadOnlySpan<LatticeParticle> particles = MemoryMarshal.Cast<byte, LatticeParticle>(snapshot.Particles);
-        float[] boundary = new float[snapshot.Width];
-        Array.Fill(boundary, -1);
-        for (int index = 0; index < particles.Length; index++)
-        {
-            LatticeParticle particle = particles[index];
-            if (particle.IsActive == 0 || particle.BodyId != bodyId ||
-                index / snapshot.Width < originalBottomTop)
-            {
-                continue;
-            }
-
-            int x = Math.Clamp((int)particle.PositionX, 0, snapshot.Width - 1);
-            boundary[x] = Math.Max(boundary[x], particle.PositionY);
-        }
-
-        for (int x = 1; x < boundary.Length - 1; x++)
-        {
-            if (boundary[x] < 0)
-            {
-                boundary[x] = Math.Max(boundary[x - 1], boundary[x + 1]);
-            }
-        }
-
-        return boundary;
-    }
-
-    private static int CountConnections(
-        int index,
+    private static bool HasMaterial(
+        ReadOnlySpan<GridCell> grid,
         int width,
-        ReadOnlySpan<LatticeParticle> particles,
-        ReadOnlySpan<LatticeBond> bonds)
+        int left,
+        int right,
+        int y,
+        MaterialId material)
     {
-        int x = index % width;
-        int y = index / width;
-        int[] offsets = [-width - 1, -width, -width + 1, -1, 1, width - 1, width, width + 1];
-        int result = 0;
-        for (int neighbor = 0; neighbor < offsets.Length; neighbor++)
+        for (int x = left; x <= right; x++)
         {
-            int otherIndex = index + offsets[neighbor];
-            int otherX = x + (neighbor is 0 or 3 or 5 ? -1 : neighbor is 2 or 4 or 7 ? 1 : 0);
-            int otherY = y + (neighbor < 3 ? -1 : neighbor > 4 ? 1 : 0);
-            if (otherX < 0 || otherY < 0 || otherX >= width || otherIndex < 0 || otherIndex >= particles.Length)
-            {
-                continue;
-            }
-
-            uint mask = neighbor >= 4
-                ? bonds[index].ActiveNeighborMask & (1u << neighbor)
-                : bonds[otherIndex].ActiveNeighborMask & (1u << (7 - neighbor));
-            result += mask != 0 ? 1 : 0;
+            GridCell cell = grid[y * width + x];
+            if (cell.IsActive != 0 && cell.MaterialId == (uint)material) return true;
         }
-
-        return result;
-    }
-
-    private static float FitAngle(
-        IReadOnlyList<(int X, int Y)> surface,
-        int apexX,
-        int baseY,
-        int pileHeight,
-        bool left)
-    {
-        double sumX = 0;
-        double sumY = 0;
-        double sumXX = 0;
-        double sumXY = 0;
-        int count = 0;
-        foreach ((int x, int y) in surface)
-        {
-            int elevation = baseY - y;
-            if (left != x < apexX || elevation < pileHeight * 0.2f || elevation > pileHeight * 0.8f)
-            {
-                continue;
-            }
-
-            sumX += x;
-            sumY += y;
-            sumXX += x * (double)x;
-            sumXY += x * (double)y;
-            count++;
-        }
-
-        double denominator = count * sumXX - sumX * sumX;
-        double slope = count < 3 || Math.Abs(denominator) < 0.001
-            ? 0
-            : (count * sumXY - sumX * sumY) / denominator;
-        return MathF.Atan(MathF.Abs((float)slope)) * 180 / MathF.PI;
-    }
-
-    private static float SurfaceRoughness(IReadOnlyList<(int X, int Y)> surface)
-    {
-        if (surface.Count < 2)
-        {
-            return float.MaxValue;
-        }
-
-        float variation = 0;
-        for (int index = 1; index < surface.Count; index++)
-        {
-            variation += Math.Abs(surface[index].Y - surface[index - 1].Y);
-        }
-
-        return variation / (surface.Count - 1);
-    }
-
-    private static string ImagePath(string directory, string fileName)
-    {
-        return Path.Combine(directory, fileName);
-    }
-
-    private static bool Fail(out string report)
-    {
-        report = "PHYXEL_ACCEPTANCE_UNKNOWN_SCENARIO";
         return false;
     }
 
-    private readonly record struct BodyMetrics(
-        int Nodes,
-        int Bonds,
-        int Fragments,
-        int Plastic,
-        float MaximumSag,
-        float AverageCenterSag,
-        float MaximumStress);
+    private static int CountMaterial(
+        ReadOnlySpan<GridCell> grid,
+        int width,
+        int left,
+        int right,
+        int top,
+        int bottom,
+        MaterialId material)
+    {
+        int count = 0;
+        for (int y = top; y <= bottom; y++)
+        {
+            for (int x = left; x <= right; x++)
+            {
+                GridCell cell = grid[y * width + x];
+                count += cell.IsActive != 0 && cell.MaterialId == (uint)material ? 1 : 0;
+            }
+        }
+        return count;
+    }
+
+    private static bool HasMaterial(
+        ReadOnlySpan<GridCell> grid,
+        int width,
+        int x,
+        int ignored,
+        int top,
+        int bottom,
+        MaterialId material)
+    {
+        for (int y = top; y <= bottom; y++)
+        {
+            GridCell cell = grid[y * width + x];
+            if (cell.IsActive != 0 && cell.MaterialId == (uint)material) return true;
+        }
+        return false;
+    }
+
+    private static ReadOnlySpan<GridCell> Cells(SimulationWorldSnapshot snapshot)
+    {
+        return MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid);
+    }
+
+    private static float Speed(GridCell cell)
+    {
+        return Math.Abs(cell.VelocityX) + Math.Abs(cell.VelocityY);
+    }
+
+    private static bool IsBlue(Color color) => color.B > color.G + 35 && color.G > color.R + 35;
+    private static bool IsYellow(Color color) => color.R > 160 && color.G > 130 && color.B < 130;
+    private static bool IsMetal(Color color) => color.R is >= 125 and <= 160 && color.G is >= 140 and <= 175 && color.B is >= 145 and <= 185;
+    private static bool IsConcrete(Color color) => color.R is >= 75 and <= 110 && color.G is >= 80 and <= 115 && color.B is >= 85 and <= 125;
+    private static bool Fail(out string report)
+    {
+        report = "PHYXEL_ACCEPTANCE_MODE_MISSING";
+        return false;
+    }
+
+    private readonly record struct ColorMetrics(int Red, int Blue, int Yellow, int Metal);
+    private readonly record struct WaterVisualMetrics(int Columns, int Gaps, int SurfaceRange);
 }

@@ -3,36 +3,6 @@ using System.Runtime.InteropServices;
 namespace Phyxel.Physics;
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-public struct LatticeParticle
-{
-    public float PositionX;
-    public float PositionY;
-    public float VelocityX;
-    public float VelocityY;
-    public float Mass;
-    public uint MaterialId;
-    public uint IsActive;
-    public float Stress;
-    public uint BodyId;
-    public uint IsDynamic;
-    public float PlasticOffsetX;
-    public float PlasticOffsetY;
-}
-
-[StructLayout(LayoutKind.Sequential, Pack = 1)]
-public struct LatticeBond
-{
-    public uint ParticleA;
-    public uint ActiveNeighborMask;
-    public float CardinalRestLength;
-    public float DiagonalRestLength;
-    public float ElasticLimit;
-    public float PlasticLimit;
-    public float MaximumStrain;
-    public float AccumulatedLoad;
-}
-
-[StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct GridCell
 {
     public uint MaterialId;
@@ -41,8 +11,8 @@ public struct GridCell
     public float VelocityY;
     public float Pressure;
     public uint IsActive;
-    public uint LatticeParticleIndex;
-    public uint Reserved;
+    public uint BodyId;
+    public uint RestFrames;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -51,13 +21,8 @@ public struct MaterialProperties
     public uint MaterialId;
     public uint SimulationKind;
     public float Density;
-    public float ElasticLimit;
-    public float PlasticLimit;
     public float Friction;
-    public float Restitution;
     public float FlowRate;
-    public uint FailureMode;
-    public float ActivationLoad;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -83,30 +48,26 @@ public struct SimulationFrameConstants
     public uint FrameIndex;
     public uint CommandCount;
     public uint MaximumBrushDiameter;
-    public uint SolverIteration;
-    public uint ParticleCount;
-    public uint BondCount;
-    public uint StressView;
     public uint SimulationPhase;
     public uint DispatchOffsetX;
     public uint DispatchOffsetY;
     public float MaximumVelocity;
-    public float Reserved1;
+    public uint SolidGravity;
+    public uint SolidPass;
+    public uint Reserved0;
+    public uint Reserved1;
+    public uint Reserved2;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct SimulationStatistics
 {
-    public uint ActiveParticles;
-    public uint ActiveBonds;
     public uint ActiveCells;
+    public uint RestingCells;
+    public uint MovingCells;
+    public uint SolidCells;
     public uint FrameIndex;
-    public uint StressSumMilli;
-    public uint LoadSumMilli;
-    public uint StressSampleCount;
-    public uint Reserved;
-    public uint MovingParticles;
-    public uint SleepingParticles;
-    public uint CrackedParticles;
-    public uint BrokenParticles;
+    public uint WaterCells;
+    public uint SandCells;
+    public uint GasCells;
 }

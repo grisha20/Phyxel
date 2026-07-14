@@ -28,7 +28,7 @@ public sealed class SandboxUiCoordinator
     private readonly UiIconButton clearButton = new(UiLocalizationProvider.Clear);
     private readonly UiIconButton saveButton = new(UiLocalizationProvider.Save);
     private readonly UiIconButton loadButton = new(UiLocalizationProvider.Load);
-    private readonly UiIconButton stressButton = new(UiLocalizationProvider.Stress);
+    private readonly UiIconButton solidGravityButton = new(UiLocalizationProvider.SolidGravity);
     private readonly UiValueSlider brushSlider;
     private readonly UiValueSlider densitySlider;
     private readonly UiValueSlider scaleSlider;
@@ -94,10 +94,10 @@ public sealed class SandboxUiCoordinator
             settings.Paused = !settings.Paused;
         }
 
-        stressButton.Active = settings.StressView;
-        if (stressButton.Update(input))
+        solidGravityButton.Active = settings.SolidGravity;
+        if (solidGravityButton.Update(input))
         {
-            settings.StressView = !settings.StressView;
+            settings.SolidGravity = !settings.SolidGravity;
         }
 
         bool clearRequested = false;
@@ -117,7 +117,7 @@ public sealed class SandboxUiCoordinator
         clearButton.Label = clearConfirmationRemaining > 0f
             ? compactLayout ? "Подтвердить" : UiLocalizationProvider.ConfirmClear
             : compactLayout ? "Очистить" : UiLocalizationProvider.Clear;
-        stressButton.Label = compactLayout ? "Напряжение" : UiLocalizationProvider.Stress;
+        solidGravityButton.Label = compactLayout ? "Гравитация тел" : UiLocalizationProvider.SolidGravity;
         saveButton.Label = compactLayout ? "Сохранить" : UiLocalizationProvider.Save;
         loadButton.Label = compactLayout ? "Загрузить" : UiLocalizationProvider.Load;
         bool saveRequested = saveButton.Update(input) || input.SavePressed;
@@ -167,18 +167,13 @@ public sealed class SandboxUiCoordinator
         densitySlider.Draw(spriteBatch, font, panelRenderer, pixel);
         scaleSlider.Draw(spriteBatch, font, panelRenderer, pixel);
         pauseButton.Draw(spriteBatch, font, panelRenderer, pixel);
-        stressButton.Draw(spriteBatch, font, panelRenderer, pixel);
+        solidGravityButton.Draw(spriteBatch, font, panelRenderer, pixel);
         clearButton.Draw(spriteBatch, font, panelRenderer, pixel);
         saveButton.Draw(spriteBatch, font, panelRenderer, pixel);
         loadButton.Draw(spriteBatch, font, panelRenderer, pixel);
         string selectedName = materialRegistry[SelectedMaterial].Name;
-        float averageStress = statistics.StressSampleCount == 0
-            ? 0
-            : statistics.StressSumMilli / (statistics.StressSampleCount * 1000f);
-        float averageLoad = statistics.StressSampleCount == 0
-            ? 0
-            : statistics.LoadSumMilli / (statistics.StressSampleCount * 10f);
-        string info = $"FPS {framesPerSecond,5:0}   Узлы {statistics.ActiveParticles:N0}   Связи {statistics.ActiveBonds:N0}   Материал: {selectedName}   Кисть: {settings.BrushRadius} px   Напряжение {averageStress:0.000}   Нагрузка {averageLoad:0.0}";
+        string gravityState = settings.SolidGravity ? "вкл" : "выкл";
+        string info = $"FPS {framesPerSecond,5:0}   Частицы {statistics.ActiveCells:N0}   Твердые {statistics.SolidCells:N0}   Материал: {selectedName}   Кисть: {settings.BrushRadius} px   Гравитация тел: {gravityState}";
         spriteBatch.DrawString(font, info, new Vector2(InfoPanelBounds.X + 12, InfoPanelBounds.Y + 9), Color.White);
         if (!string.IsNullOrWhiteSpace(transientStatus))
         {
@@ -251,7 +246,7 @@ public sealed class SandboxUiCoordinator
         densitySlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
         cursorY += compactLayout ? 49 : 64;
         scaleSlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
-        UiIconButton[] serviceButtons = [pauseButton, stressButton, clearButton, saveButton, loadButton];
+        UiIconButton[] serviceButtons = [pauseButton, solidGravityButton, clearButton, saveButton, loadButton];
         if (compactLayout)
         {
             int toolbarWidth = CanvasBounds.Width;

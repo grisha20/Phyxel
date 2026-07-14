@@ -1,0 +1,271 @@
+using System;
+using System.Collections.Generic;
+using Phyxel.Materials;
+using Phyxel.Physics;
+
+namespace Phyxel.Diagnostics;
+
+public enum AcceptanceScenarioMode
+{
+    None,
+    Bowl,
+    SolidGravity,
+    Sand,
+    Hydro,
+    Slope,
+    Gas
+}
+
+public static class AcceptanceRegressionScenario
+{
+    public static IReadOnlyList<BrushDrawCommand> CreateCommands(
+        AcceptanceScenarioMode mode,
+        uint frame)
+    {
+        return mode switch
+        {
+            AcceptanceScenarioMode.Bowl => CreateBowl(frame),
+            AcceptanceScenarioMode.SolidGravity => CreateSolidGravity(frame),
+            AcceptanceScenarioMode.Sand => CreateSand(frame),
+            AcceptanceScenarioMode.Hydro => CreateHydro(frame),
+            AcceptanceScenarioMode.Slope => CreateSlope(frame),
+            AcceptanceScenarioMode.Gas => CreateGas(frame),
+            _ => []
+        };
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateBowl(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 114, 115, 114, 225, 8, 5, MaterialId.Metal, 1001);
+            AddLine(commands, 325, 115, 325, 225, 8, 5, MaterialId.Metal, 1001);
+            AddLine(commands, 114, 225, 325, 225, 8, 5, MaterialId.Metal, 1001);
+            return commands;
+        }
+        if (frame == 2)
+        {
+            return AddFill(121, 170, 318, 218, 8, 5, MaterialId.Water, 0);
+        }
+        return frame == 130
+            ? AddFill(121, 130, 318, 158, 8, 5, MaterialId.Sand, 0)
+            : [];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateSolidGravity(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 20, 250, 460, 250, 7, 4, MaterialId.Fixture, 2001);
+            AddLine(commands, 215, 180, 215, 250, 7, 4, MaterialId.Fixture, 2002);
+            AddLine(commands, 415, 180, 415, 250, 7, 4, MaterialId.Fixture, 2003);
+            AddLine(commands, 140, 150, 140, 250, 7, 4, MaterialId.Fixture, 2004);
+            AddLine(commands, 35, 100, 35, 250, 7, 4, MaterialId.Fixture, 2005);
+            AddLine(commands, 130, 100, 130, 250, 7, 4, MaterialId.Fixture, 2005);
+            return commands;
+        }
+        if (frame == 1)
+        {
+            return AddFill(60, 25, 109, 74, 6, 4, MaterialId.Metal, 2101);
+        }
+        if (frame == 2)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 220, 60, 410, 60, 7, 5, MaterialId.Concrete, 2201);
+            return commands;
+        }
+        if (frame == 3)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 130, 100, 200, 100, 7, 5, MaterialId.Metal, 2301);
+            return commands;
+        }
+        if (frame == 4)
+        {
+            return AddFill(43, 205, 122, 240, 7, 4, MaterialId.Water, 0);
+        }
+        if (frame == 5)
+        {
+            return AddFill(43, 229, 122, 240, 7, 4, MaterialId.Sand, 0);
+        }
+        if (frame == 30)
+        {
+            return [Create(165, 100, 6, MaterialId.Eraser, 1, 0)];
+        }
+        if (frame == 200)
+        {
+            return [Create(315, 172, 8, MaterialId.Eraser, 1, 0)];
+        }
+        if (frame == 205)
+        {
+            return
+            [
+                Create(415, 183, 17, MaterialId.Eraser, 1, 0),
+                Create(415, 210, 11, MaterialId.Eraser, 1, 0),
+                Create(415, 232, 11, MaterialId.Eraser, 1, 0),
+                Create(415, 247, 8, MaterialId.Eraser, 1, 0)
+            ];
+        }
+        return [];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateSand(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 80, 245, 400, 245, 7, 4, MaterialId.Fixture, 3001);
+            return commands;
+        }
+        if (frame != 1)
+        {
+            return [];
+        }
+        BrushDrawCommand sand = Create(240, 75, 25, MaterialId.Sand, 0, 0);
+        sand.Density = 0.51f;
+        sand.Seed = 3002;
+        return [sand];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateHydro(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 15, 95, 15, 250, 7, 4, MaterialId.Metal, 4001);
+            AddLine(commands, 260, 95, 260, 250, 7, 4, MaterialId.Metal, 4001);
+            AddLine(commands, 15, 250, 260, 250, 7, 4, MaterialId.Metal, 4001);
+            AddLine(commands, 138, 95, 138, 218, 7, 4, MaterialId.Metal, 4001);
+            return commands;
+        }
+        if (frame == 1)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 290, 150, 290, 250, 7, 4, MaterialId.Metal, 4002);
+            AddLine(commands, 465, 150, 465, 250, 7, 4, MaterialId.Metal, 4002);
+            AddLine(commands, 290, 250, 465, 250, 7, 4, MaterialId.Metal, 4002);
+            return commands;
+        }
+        if (frame == 2)
+        {
+            return AddFill(25, 155, 128, 240, 7, 5, MaterialId.Water, 0);
+        }
+        if (frame is >= 3 and <= 20)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 378, 20, 378, 50, 6, 4, MaterialId.Water, 0);
+            return commands;
+        }
+        return [];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateSlope(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 5, 250, 475, 250, 7, 5, MaterialId.Metal, 5001);
+            AddLine(commands, 300, 225, 390, 70, 7, 5, MaterialId.Metal, 5001);
+            return commands;
+        }
+        if (frame != 1)
+        {
+            return [];
+        }
+        BrushDrawCommand sand = Create(382, 42, 24, MaterialId.Sand, 0, 0);
+        sand.Density = 0.62f;
+        sand.Seed = 5002;
+        return [sand];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateGas(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 50, 30, 430, 30, 7, 5, MaterialId.Metal, 6001);
+            AddLine(commands, 50, 30, 50, 250, 7, 5, MaterialId.Metal, 6001);
+            AddLine(commands, 430, 30, 430, 250, 7, 5, MaterialId.Metal, 6001);
+            AddLine(commands, 50, 250, 430, 250, 7, 5, MaterialId.Metal, 6001);
+            return commands;
+        }
+        if (frame != 1)
+        {
+            return [];
+        }
+        BrushDrawCommand gas = Create(240, 215, 25, MaterialId.Gas, 0, 0);
+        gas.Density = 0.72f;
+        gas.Seed = 6002;
+        return [gas];
+    }
+
+    private static List<BrushDrawCommand> AddFill(
+        int left,
+        int top,
+        int right,
+        int bottom,
+        int spacing,
+        float radius,
+        MaterialId material,
+        uint bodyId)
+    {
+        List<BrushDrawCommand> commands = [];
+        for (int y = top; y <= bottom; y += spacing)
+        {
+            for (int x = left; x <= right; x += spacing)
+            {
+                commands.Add(Create(x, y, radius, material, 0, bodyId));
+            }
+        }
+        return commands;
+    }
+
+    private static void AddLine(
+        List<BrushDrawCommand> commands,
+        int startX,
+        int startY,
+        int endX,
+        int endY,
+        int spacing,
+        float radius,
+        MaterialId material,
+        uint bodyId)
+    {
+        int length = Math.Max(Math.Abs(endX - startX), Math.Abs(endY - startY));
+        int samples = Math.Max(1, length / spacing);
+        for (int sample = 0; sample <= samples; sample++)
+        {
+            float amount = sample / (float)samples;
+            commands.Add(Create(
+                (int)MathF.Round(startX + (endX - startX) * amount),
+                (int)MathF.Round(startY + (endY - startY) * amount),
+                radius,
+                material,
+                0,
+                bodyId));
+        }
+    }
+
+    private static BrushDrawCommand Create(
+        int x,
+        int y,
+        float radius,
+        MaterialId material,
+        uint mode,
+        uint bodyId)
+    {
+        return new BrushDrawCommand
+        {
+            X = x,
+            Y = y,
+            MaterialId = (uint)material,
+            Radius = radius,
+            Density = 1,
+            Mode = mode,
+            Seed = (uint)(x + y * 2048),
+            Reserved = bodyId
+        };
+    }
+}
