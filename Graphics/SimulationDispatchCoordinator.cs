@@ -25,6 +25,7 @@ public sealed class SimulationDispatchCoordinator
     private bool presentationDirty = true;
     private bool finalizeCellularRest;
     private bool waterPressureRoutesDirty = true;
+    private bool solidMotionNeedsCellular = true;
     private int settledObservations;
 
     // Active Region tracking
@@ -82,6 +83,9 @@ public sealed class SimulationDispatchCoordinator
     }
 
     public bool CellularSleeping => cellularSleeping;
+    public bool SolidSleeping => solidSleeping;
+    public bool SolidMotionNeedsCellular => solidMotionNeedsCellular;
+    public int SettledObservations => settledObservations;
 
     public void SetSolidGravityEnabled(bool enabled)
     {
@@ -93,6 +97,7 @@ public sealed class SimulationDispatchCoordinator
             topologyDirty = worldHasMatter;
             solidSleeping = false;
             cellularSleeping = false;
+            solidMotionNeedsCellular = true;
             settledObservations = 0;
             presentationDirty = true;
             return;
@@ -129,6 +134,7 @@ public sealed class SimulationDispatchCoordinator
             solidMatter |= worldHasMatter;
             topologyDirty = true;
             solidSleeping = false;
+            solidMotionNeedsCellular = true;
             settledObservations = 0;
         }
         previousSolidGravity = settings.SolidGravity;
@@ -155,8 +161,14 @@ public sealed class SimulationDispatchCoordinator
                 DispatchSolidGeometry(resources, ref constants);
                 topologyDirty = false;
             }
-            DispatchSolidPass(resources, ref constants, 0);
-            cellularSleeping = false;
+            // Once the liquid is asleep, resting bodies cannot lose support.
+            // Re-evaluate only the still-moving bodies instead of rescanning a
+            // large stationary hull because a few detached pixels are falling.
+            DispatchSolidPass(resources, ref constants, cellularSleeping ? 0u : 1u);
+            if (solidMotionNeedsCellular)
+            {
+                cellularSleeping = false;
+            }
             presentationDirty = true;
         }
 
@@ -225,6 +237,7 @@ public sealed class SimulationDispatchCoordinator
         solidSleeping = false;
         topologyDirty = true;
         waterPressureRoutesDirty = true;
+        solidMotionNeedsCellular = true;
         settledObservations = 0;
         presentationDirty = resources.IsSimulationAllocated;
 
@@ -250,13 +263,29 @@ public sealed class SimulationDispatchCoordinator
         }
         lastObservedStatisticsFrame = statistics.FrameIndex;
         uint cellularCells = statistics.WaterCells + statistics.SandCells + statistics.GasCells;
+        uint movingCellularCells = statistics.MovingCells > statistics.MovingSolidCells
+            ? statistics.MovingCells - statistics.MovingSolidCells
+            : 0;
+        bool minorSolidMotion = statistics.MovingSolidCells is > 0 and <= 64;
+        solidMotionNeedsCellular = statistics.MovingSolidCells > 64;
         uint residualTolerance = statistics.GasCells > 0
             ? Math.Max(64u, cellularCells / 10u)
-            : Math.Max(64u, cellularCells / 50u);
-        bool settled = statistics.ActiveCells > 0 && statistics.PressureMoves == 0 &&
-            statistics.MovingCells <= residualTolerance;
+            : minorSolidMotion
+                ? Math.Max(256u, statistics.MovingSolidCells * 64u)
+                : 1;
+        bool settled = statistics.ActiveCells > 0 && !solidMotionNeedsCellular &&
+            statistics.PressureMoves == 0 && movingCellularCells <= residualTolerance;
         settledObservations = settled ? settledObservations + 1 : 0;
-        if (settledObservations >= 8)
+        int observationsRequired = !minorSolidMotion &&
+            (statistics.GasCells > 0 || movingCellularCells > 0)
+                ? 24
+                : 2;
+        if (!settled)
+        {
+            cellularSleeping = false;
+            solidSleeping = false;
+        }
+        else if (settledObservations >= observationsRequired)
         {
             finalizeCellularRest = cellularMatter && !cellularSleeping;
             cellularSleeping = true;
@@ -360,14 +389,20 @@ public sealed class SimulationDispatchCoordinator
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.SolidAnalyzeShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResource(0, resources.Grid.ReadView);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Grid.ReadView,
+            null,
+            null,
+            null,
+            resources.SolidBodyGeometry.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.BodyFlags.UnorderedView,
             null,
             resources.CellMaterials.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 1, 3);
+        Unbind(context, 5, 3);
 
         // ComponentParents is only labeling scratch after body IDs have been
         // copied into the cells. Reuse it for one-frame displacement targets;
@@ -583,7 +618,7 @@ public sealed class SimulationDispatchCoordinator
         ref SimulationFrameConstants constants)
     {
         DeviceContext context = resources.Context;
-        bool collect = frameIndex % 30 == 0;
+        bool collect = frameIndex % 10 == 0;
         if (collect)
         {
             context.ClearUnorderedAccessView(resources.Statistics.WriteUnorderedView, new RawInt4(0, 0, 0, 0));
@@ -669,6 +704,7 @@ public sealed class SimulationDispatchCoordinator
                 cellularSleeping = false;
                 finalizeCellularRest = false;
                 solidSleeping = false;
+                solidMotionNeedsCellular = true;
                 settledObservations = 0;
                 continue;
             }
@@ -679,6 +715,7 @@ public sealed class SimulationDispatchCoordinator
                 solidMatter = true;
                 topologyDirty = true;
                 solidSleeping = false;
+                solidMotionNeedsCellular = true;
             }
             else if (kind is MaterialSimulationKind.Granular or MaterialSimulationKind.Liquid or MaterialSimulationKind.Gas)
             {
@@ -704,6 +741,7 @@ public sealed class SimulationDispatchCoordinator
         presentationDirty = dirtyPresentation;
         finalizeCellularRest = false;
         waterPressureRoutesDirty = true;
+        solidMotionNeedsCellular = true;
         ResetActiveRegion();
     }
 

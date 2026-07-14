@@ -22,11 +22,11 @@ static const uint GeometryCellCountShift = 12;
 static const uint GeometryCellCountUnit = 1u << GeometryCellCountShift;
 static const uint HullSearchDistance = 512;
 static const uint HullMinimumGap = 8;
-static const uint MaximumDraft = 48;
 static const uint DisplacementStackHeight = 4;
 static const uint DisplacementFallbackAttempts = 64;
 static const uint DisplacementSourceMarker = 0x80000000u;
 static const uint DisplacementBlockedMarker = 0x40000000u;
+static const uint DisplacementHullFloorProbe = 64;
 
 bool IsMovableSolid(GridCell cell)
 {
@@ -54,16 +54,18 @@ bool BodyMoves(GridCell cell)
     {
         uint buoyancy = SourceBodyBuoyancy[cell.BodyId - 1];
         uint hullSpan = max((geometry >> GeometrySpanShift) & GeometrySpanMask, 1);
-        uint waterDepth = buoyancy;
+        uint waterDepth = buoyancy & 0xffff;
+        uint cargoQuarterMass = buoyancy >> 16;
         uint solidCells = geometry >> GeometryCellCountShift;
 
         // Rasterized walls are much thicker than real sheet metal. Treat each
         // metal pixel as 0.75 water pixels (concrete as 1.0), then apply
         // Archimedes' principle in 2D: draft = effective mass / hull width.
         uint weightNumerator = (geometry & GeometryContainsMetal) != 0 ? 3 : 4;
-        uint requiredDraft = (solidCells * weightNumerator + hullSpan * 4 - 1) /
+        uint effectiveQuarterMass = solidCells * weightNumerator + cargoQuarterMass;
+        uint requiredDraft = (effectiveQuarterMass + hullSpan * 4 - 1) /
             (hullSpan * 4);
-        requiredDraft = clamp(requiredDraft, 8, MaximumDraft);
+        requiredDraft = max(requiredDraft, 8);
         if (waterDepth >= requiredDraft)
         {
             return false;
@@ -164,6 +166,50 @@ void AtomicMaxGeometrySpan(uint bodyIndex, uint hullSpan)
     }
 }
 
+void AtomicMaxWaterDepth(uint bodyIndex, uint waterDepth)
+{
+    waterDepth = min(waterDepth, 0xffff);
+    uint expected = BodyBuoyancy[bodyIndex];
+    for (uint attempt = 0; attempt < 32; attempt++)
+    {
+        uint updated = (expected & 0xffff0000u) |
+            max(expected & 0xffff, waterDepth);
+        if (updated == expected)
+        {
+            return;
+        }
+        uint observed;
+        InterlockedCompareExchange(BodyBuoyancy[bodyIndex], expected, updated, observed);
+        if (observed == expected)
+        {
+            return;
+        }
+        expected = observed;
+    }
+}
+
+void AtomicAddCargoMass(uint bodyIndex, uint quarterMass)
+{
+    uint expected = BodyBuoyancy[bodyIndex];
+    for (uint attempt = 0; attempt < 32; attempt++)
+    {
+        uint oldCargo = expected >> 16;
+        uint newCargo = min(0xffff, oldCargo + quarterMass);
+        uint updated = (expected & 0xffff) | (newCargo << 16);
+        if (updated == expected)
+        {
+            return;
+        }
+        uint observed;
+        InterlockedCompareExchange(BodyBuoyancy[bodyIndex], expected, updated, observed);
+        if (observed == expected)
+        {
+            return;
+        }
+        expected = observed;
+    }
+}
+
 [numthreads(16, 16, 1)]
 void AnalyzeSolidGeometry(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -190,6 +236,9 @@ void AnalyzeSolidGeometry(uint3 dispatchThreadId : SV_DispatchThreadID)
     AtomicMaxGeometrySpan(bodyIndex, horizontalSpan);
 }
 
+bool IsBetweenBodyWalls(uint2 coordinate, uint bodyId);
+uint CargoColumnQuarterMass(uint2 floorCoordinate, uint bodyId);
+
 [numthreads(16, 16, 1)]
 void AnalyzeSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -201,6 +250,10 @@ void AnalyzeSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint index = FlattenCoordinate(coordinate);
     GridCell cell = SourceGrid[index];
     if (!IsMovableSolid(cell))
+    {
+        return;
+    }
+    if (SolidPass == 0 && cell.RestFrames >= 2)
     {
         return;
     }
@@ -231,7 +284,21 @@ void AnalyzeSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint bodyIndex = cell.BodyId - 1;
     uint ignored;
     InterlockedOr(BodyFlags[bodyIndex], flags, ignored);
-    InterlockedMax(BodyBuoyancy[bodyIndex], waterDepth, ignored);
+    AtomicMaxWaterDepth(bodyIndex, waterDepth);
+    uint geometry = SourceBodyGeometry[bodyIndex];
+    if ((geometry & GeometryHasHull) != 0 && coordinate.y > 0)
+    {
+        GridCell above = SourceGrid[index - Width];
+        if ((!IsMovableSolid(above) || above.BodyId != cell.BodyId) &&
+            IsBetweenBodyWalls(uint2(coordinate.x, coordinate.y - 1), cell.BodyId))
+        {
+            uint cargoMass = CargoColumnQuarterMass(coordinate, cell.BodyId);
+            if (cargoMass > 0)
+            {
+                AtomicAddCargoMass(bodyIndex, cargoMass);
+            }
+        }
+    }
 }
 
 bool IsBetweenBodyWalls(uint2 coordinate, uint bodyId)
@@ -264,6 +331,39 @@ bool IsBetweenBodyWalls(uint2 coordinate, uint bodyId)
     return false;
 }
 
+uint CargoColumnQuarterMass(uint2 floorCoordinate, uint bodyId)
+{
+    uint cargoMass = 0;
+    for (uint distance = 1;
+        distance <= HullSearchDistance && floorCoordinate.y >= distance;
+        distance++)
+    {
+        GridCell sample = SourceGrid[FlattenCoordinate(
+            uint2(floorCoordinate.x, floorCoordinate.y - distance))];
+        if (IsMovableSolid(sample) && sample.BodyId == bodyId)
+        {
+            break;
+        }
+        if (sample.IsActive == 0)
+        {
+            break;
+        }
+        if (sample.MaterialId == 1)
+        {
+            cargoMass = min(0xffff, cargoMass + 6);
+        }
+        else if (sample.MaterialId == 2)
+        {
+            cargoMass = min(0xffff, cargoMass + 4);
+        }
+        else
+        {
+            break;
+        }
+    }
+    return cargoMass;
+}
+
 void FindBodyRowExtent(uint2 coordinate, uint bodyId, out int left, out int right)
 {
     left = int(coordinate.x);
@@ -282,6 +382,28 @@ void FindBodyRowExtent(uint2 coordinate, uint bodyId, out int left, out int righ
             right = max(right, int(x));
         }
     }
+}
+
+bool IsAboveAnyHullFloor(uint2 coordinate)
+{
+    for (uint distance = 1;
+        distance <= DisplacementHullFloorProbe && coordinate.y + distance < Height;
+        distance++)
+    {
+        GridCell sample = SourceGrid[FlattenCoordinate(
+            uint2(coordinate.x, coordinate.y + distance))];
+        if (sample.IsActive == 0 || sample.MaterialId == 1 ||
+            sample.MaterialId == 2 || sample.MaterialId == 6)
+        {
+            continue;
+        }
+        if (!IsMovableSolid(sample))
+        {
+            return false;
+        }
+        return (SourceBodyGeometry[sample.BodyId - 1] & GeometryHasHull) != 0;
+    }
+    return false;
 }
 
 bool SurfaceTarget(int x, uint sourceY, uint stack, uint bodyId, out uint targetIndex)
@@ -308,7 +430,8 @@ bool SurfaceTarget(int x, uint sourceY, uint stack, uint bodyId, out uint target
     }
     uint2 target = uint2(uint(x), uint(targetY));
     GridCell targetCell = SourceGrid[FlattenCoordinate(target)];
-    if (targetCell.IsActive != 0 || IsBetweenBodyWalls(target, bodyId))
+    if (targetCell.IsActive != 0 || IsBetweenBodyWalls(target, bodyId) ||
+        IsAboveAnyHullFloor(target))
     {
         return false;
     }
@@ -371,6 +494,11 @@ bool ReserveDisplacement(
         ? int(sourceCoordinate.x) - left
         : right - int(sourceCoordinate.x);
     int width = max(right - left + 1, 1);
+    uint geometry = SourceBodyGeometry[bodyId - 1];
+    int hullSpan = int((geometry >> GeometrySpanShift) & GeometrySpanMask);
+    int globalReach = max((hullSpan + 1) / 2, width);
+    int globalLeft = int(sourceCoordinate.x) - globalReach - 2;
+    int globalRight = int(sourceCoordinate.x) + globalReach + 2;
     bool preferLeft = sourceCoordinate.x <= uint(center);
     int candidates[4] =
     {
@@ -397,6 +525,40 @@ bool ReserveDisplacement(
         uint lane = (firstFallback + attempt) % DisplacementFallbackAttempts;
         bool chooseLeft = ((sourceIndex + attempt) & 1) == 0;
         int x = chooseLeft ? left - 2 - int(lane) : right + 2 + int(lane);
+        if (TryReserveDisplacementTarget(
+            x,
+            sourceCoordinate,
+            bodyId,
+            sourceIndex,
+            reservedTarget))
+        {
+            return true;
+        }
+    }
+    int globalCandidates[2] =
+    {
+        preferLeft ? globalLeft : globalRight,
+        preferLeft ? globalRight : globalLeft
+    };
+    for (uint candidate = 0; candidate < 2; candidate++)
+    {
+        if (TryReserveDisplacementTarget(
+            globalCandidates[candidate],
+            sourceCoordinate,
+            bodyId,
+            sourceIndex,
+            reservedTarget))
+        {
+            return true;
+        }
+    }
+    for (uint attempt = 0; attempt < DisplacementFallbackAttempts; attempt++)
+    {
+        uint lane = (firstFallback + attempt) % DisplacementFallbackAttempts;
+        bool chooseLeft = ((sourceIndex + attempt) & 1) == 0;
+        int x = chooseLeft
+            ? globalLeft - int(lane)
+            : globalRight + int(lane);
         if (TryReserveDisplacementTarget(
             x,
             sourceCoordinate,
@@ -496,12 +658,10 @@ void MoveSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
             if ((geometry & GeometryHasHull) != 0 && sample.IsActive != 0 &&
                 sample.MaterialId == 2)
             {
-                uint sourceIndex = y * Width + coordinate.x;
-                uint reservation = SourceDisplacementReservations[sourceIndex];
-                if ((reservation & DisplacementSourceMarker) != 0)
-                {
-                    replacement = CreateEmptyCell();
-                }
+                // Water below a descending hull is either transferred by the
+                // reservation pass or stays in its own interior cell. Pulling
+                // it into the vacated top cell would duplicate/teleport it.
+                replacement = CreateEmptyCell();
             }
             break;
         }
@@ -526,7 +686,13 @@ void ApplyHullWaterDisplacement(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     uint sourceIndex = sourcePlusOne - 1;
     GridCell displaced = SourceGrid[sourceIndex];
-    if (displaced.IsActive == 0 || displaced.MaterialId != 2)
+    GridCell bodyAbove = CreateEmptyCell();
+    if (sourceIndex >= Width)
+    {
+        bodyAbove = SourceGrid[sourceIndex - Width];
+    }
+    if (displaced.IsActive == 0 || displaced.MaterialId != 2 ||
+        !BodyMovesWithDisplacement(bodyAbove))
     {
         return;
     }

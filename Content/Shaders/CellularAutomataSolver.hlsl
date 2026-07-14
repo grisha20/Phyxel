@@ -135,6 +135,31 @@ void SwapCells(uint firstIndex, uint secondIndex, float horizontal, float vertic
     CellMaterials[secondIndex] = firstMaterial;
 }
 
+bool SandCanDisplaceWater(uint2 sandCoordinate, uint sandIndex)
+{
+    // Settled banks must not pump water upward through the granular mass.
+    // Freshly falling sand may still sink when displaced water has a short
+    // lateral route into the surrounding free surface.
+    if (Grid[sandIndex].RestFrames >= SandRestThreshold)
+    {
+        return false;
+    }
+    for (uint distance = 1; distance <= 4; distance++)
+    {
+        if (sandCoordinate.x >= distance &&
+            CellKindAt(uint2(sandCoordinate.x - distance, sandCoordinate.y)) == 4)
+        {
+            return true;
+        }
+        if (sandCoordinate.x + distance < Width &&
+            CellKindAt(uint2(sandCoordinate.x + distance, sandCoordinate.y)) == 4)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void RelaxGasPair(
     uint firstIndex,
     uint secondIndex,
@@ -572,6 +597,11 @@ void ResolveVerticalPair(uint2 upperCoordinate)
     }
     if (upperKind != 0 && CellRankFromMaterial(upperMaterial) > CellRankFromMaterial(lowerMaterial))
     {
+        if (upperKind == 1 && lowerKind == 4 &&
+            !SandCanDisplaceWater(upperCoordinate, upperIndex))
+        {
+            return;
+        }
         SwapCells(upperIndex, lowerIndex, 0, 60);
     }
 }
@@ -608,6 +638,11 @@ void ResolveDiagonalPair(uint2 upperCoordinate, uint2 lowerCoordinate)
     if (supported && upperKind != 0 &&
         CellRankFromMaterial(upperMaterial) > CellRankFromMaterial(lowerMaterial))
     {
+        if (upperKind == 1 && lowerKind == 4 &&
+            !SandCanDisplaceWater(upperCoordinate, upperIndex))
+        {
+            return;
+        }
         float direction = lowerCoordinate.x > upperCoordinate.x ? 32 : -32;
         SwapCells(upperIndex, lowerIndex, direction, 48);
     }

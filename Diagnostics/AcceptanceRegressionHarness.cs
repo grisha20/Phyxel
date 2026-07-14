@@ -30,6 +30,7 @@ public sealed class AcceptanceRegressionHarness
             "saved_isolation" or "isolation" => AcceptanceScenarioMode.SavedIsolation,
             "saved_gravity" => AcceptanceScenarioMode.SavedGravity,
             "buoyancy" or "float" => AcceptanceScenarioMode.Buoyancy,
+            "saved_sand_water" or "sand_basin" => AcceptanceScenarioMode.SavedSandWater,
             _ => AcceptanceScenarioMode.None
         };
     }
@@ -39,7 +40,7 @@ public sealed class AcceptanceRegressionHarness
     public bool RequiresNativeResolution => Mode == AcceptanceScenarioMode.WaterStress;
     public bool RequiresSavedScene => Mode is
         AcceptanceScenarioMode.SavedPressure or AcceptanceScenarioMode.SavedIsolation or
-        AcceptanceScenarioMode.SavedGravity;
+        AcceptanceScenarioMode.SavedGravity or AcceptanceScenarioMode.SavedSandWater;
     public uint CaptureFrame
     {
         get
@@ -66,6 +67,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.SavedIsolation => 600,
                 AcceptanceScenarioMode.SavedGravity => 400,
                 AcceptanceScenarioMode.Buoyancy => 500,
+                AcceptanceScenarioMode.SavedSandWater => 900,
                 _ => uint.MaxValue
             };
         }
@@ -126,6 +128,7 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.SavedIsolation when frame == 599 => "K_saved_isolation",
             AcceptanceScenarioMode.SavedGravity when frame == 399 => "L_saved_gravity",
             AcceptanceScenarioMode.Buoyancy when frame == 499 => "M_buoyancy",
+            AcceptanceScenarioMode.SavedSandWater when frame == 899 => "N_saved_sand_water",
             _ => null
         };
         if (label is null)

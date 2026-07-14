@@ -61,8 +61,13 @@ public static class AcceptanceRegressionVerifier
                 out report),
             AcceptanceScenarioMode.SavedPressure => ValidateSavedPressure(snapshot, out report),
             AcceptanceScenarioMode.SavedIsolation => ValidateSavedIsolation(snapshot, out report),
-            AcceptanceScenarioMode.SavedGravity => ValidateSavedGravity(snapshot, out report),
+            AcceptanceScenarioMode.SavedGravity => ValidateSavedGravity(
+                snapshot,
+                statistics,
+                framesPerSecond,
+                out report),
             AcceptanceScenarioMode.Buoyancy => ValidateBuoyancy(snapshot, framesPerSecond, out report),
+            AcceptanceScenarioMode.SavedSandWater => ValidateSavedSandWater(snapshot, out report),
             _ => Fail(out report)
         };
     }
@@ -288,6 +293,8 @@ public static class AcceptanceRegressionVerifier
 
     private static bool ValidateSavedGravity(
         SimulationWorldSnapshot snapshot,
+        SimulationStatistics statistics,
+        double framesPerSecond,
         out string report)
     {
         ReadOnlySpan<GridCell> grid = Cells(snapshot);
@@ -296,18 +303,47 @@ public static class AcceptanceRegressionVerifier
         int lowerConcrete = CountMaterial(
             grid, snapshot.Width, 0, snapshot.Width - 1, 850, snapshot.Height - 1, MaterialId.Concrete);
         int lowerSolids = lowerMetal + lowerConcrete;
+        Dictionary<uint, (int Count, int Top, int Bottom)> bodies = [];
+        int water = 0;
+        int waterTop = snapshot.Height;
         int movingSolids = 0;
-        foreach (GridCell cell in grid)
+        for (int index = 0; index < grid.Length; index++)
         {
+            GridCell cell = grid[index];
+            int y = index / snapshot.Width;
+            if (IsMaterial(cell, MaterialId.Water))
+            {
+                water++;
+                waterTop = Math.Min(waterTop, y);
+            }
             if (cell.IsActive != 0 &&
                 cell.MaterialId is (uint)MaterialId.Metal or (uint)MaterialId.Concrete &&
                 cell.RestFrames < 2)
             {
                 movingSolids++;
             }
+            if (cell.IsActive != 0 && cell.BodyId != 0 &&
+                cell.MaterialId is (uint)MaterialId.Metal or (uint)MaterialId.Concrete)
+            {
+                bodies.TryGetValue(cell.BodyId, out (int Count, int Top, int Bottom) body);
+                body.Count++;
+                body.Top = body.Count == 1 ? y : Math.Min(body.Top, y);
+                body.Bottom = Math.Max(body.Bottom, y);
+                bodies[cell.BodyId] = body;
+            }
         }
-        bool passed = lowerSolids > 1000 && movingSolids == 0;
-        report = $"PHYXEL_L_SAVED_GRAVITY lowerSolids={lowerSolids} movingSolids={movingSolids}";
+        (int Count, int Top, int Bottom) largestBody = default;
+        foreach ((int Count, int Top, int Bottom) body in bodies.Values)
+        {
+            if (body.Count > largestBody.Count)
+            {
+                largestBody = body;
+            }
+        }
+        int draft = waterTop < snapshot.Height ? largestBody.Bottom - waterTop : 0;
+        bool floating = water > 1000 && largestBody.Count > 1000 && draft >= 20;
+        bool passed = (lowerSolids > 1000 || floating) && movingSolids == 0;
+        report = $"PHYXEL_L_SAVED_GRAVITY lowerSolids={lowerSolids} body={largestBody.Count} bounds={largestBody.Top}-{largestBody.Bottom} water={water} waterTop={waterTop} draft={draft} movingSolids={movingSolids} statsFrame={statistics.FrameIndex} statsMoving={statistics.MovingCells} statsMovingSolids={statistics.MovingSolidCells} pressureMoves={statistics.PressureMoves} fps={framesPerSecond:0.0}";
         return passed;
     }
 
@@ -321,10 +357,12 @@ public static class AcceptanceRegressionVerifier
         int closedBottom = MaterialBottom(grid, snapshot.Width, 45, 195, 60, 250, MaterialId.Metal);
         int openBottom = MaterialBottom(grid, snapshot.Width, 205, 340, 60, 250, MaterialId.Metal);
         int blockBottom = MaterialBottom(grid, snapshot.Width, 365, 435, 60, 250, MaterialId.Metal);
-        int closedHull = CountMaterial(
-            grid, snapshot.Width, 45, 195, Math.Max(0, waterTop - 80), waterTop + 2, MaterialId.Metal);
-        int openHull = CountMaterial(
-            grid, snapshot.Width, 205, 340, Math.Max(0, waterTop - 80), waterTop + 2, MaterialId.Metal);
+        int closedMetal = CountMaterial(
+            grid, snapshot.Width, 45, 195, 60, 250, MaterialId.Metal);
+        int openMetal = CountMaterial(
+            grid, snapshot.Width, 205, 340, 60, 250, MaterialId.Metal);
+        int loadedSand = CountMaterial(
+            grid, snapshot.Width, 205, 340, 60, 250, MaterialId.Sand);
         int sunkBlock = CountMaterial(
             grid, snapshot.Width, 365, 435, waterTop + 3, 250, MaterialId.Metal);
         int closedWater = CountMaterial(
@@ -332,7 +370,7 @@ public static class AcceptanceRegressionVerifier
         int openWater = CountMaterial(
             grid, snapshot.Width, 230, 315, Math.Max(0, waterTop - 80), openBottom - 10, MaterialId.Water);
         int deepHull = CountMaterial(
-            grid, snapshot.Width, 45, 340, waterTop + 25, 250, MaterialId.Metal);
+            grid, snapshot.Width, 45, 340, waterTop + 64, 250, MaterialId.Metal);
         int totalWater = 0;
         int movingSolids = 0;
         foreach (GridCell cell in grid)
@@ -347,12 +385,56 @@ public static class AcceptanceRegressionVerifier
                 movingSolids++;
             }
         }
-        bool passed = waterTop > 0 && closedHull > 1000 && openHull > 1000 && sunkBlock > 1000 &&
-            closedBottom - waterTop is >= 10 and <= 24 &&
-            openBottom - waterTop is >= 10 and <= 24 &&
+        int closedDraft = closedBottom - waterTop;
+        int loadedDraft = openBottom - waterTop;
+        bool passed = waterTop > 0 && closedMetal > 2400 && openMetal > 1300 &&
+            loadedSand > 2500 && sunkBlock > 1000 &&
+            closedDraft is >= 15 and <= 35 &&
+            loadedDraft >= closedDraft + 10 && loadedDraft <= 64 &&
             blockBottom >= 245 && closedWater == 0 && openWater == 0 && deepHull == 0 &&
             totalWater is >= 32300 and <= 32450 && movingSolids == 0;
-        report = $"PHYXEL_M_BUOYANCY waterTop={waterTop} bottoms={closedBottom}/{openBottom}/{blockBottom} closedHull={closedHull} openHull={openHull} sunkBlock={sunkBlock} closedWater={closedWater} openWater={openWater} deepHull={deepHull} water={totalWater} movingSolids={movingSolids} fps={framesPerSecond:0.0}";
+        report = $"PHYXEL_M_BUOYANCY waterTop={waterTop} drafts={closedDraft}/{loadedDraft} bottoms={closedBottom}/{openBottom}/{blockBottom} metal={closedMetal}/{openMetal} sandLoad={loadedSand} sunkBlock={sunkBlock} closedWater={closedWater} openWater={openWater} deepHull={deepHull} water={totalWater} movingSolids={movingSolids} fps={framesPerSecond:0.0}";
+        return passed;
+    }
+
+    private static bool ValidateSavedSandWater(
+        SimulationWorldSnapshot snapshot,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int surfaceTop = SurfaceTop(grid, snapshot.Width, 300, 1600, 550, 1000);
+        int water = 0;
+        int fringeWater = 0;
+        int fringeAdjacentSand = 0;
+        int movingFringe = 0;
+        for (int y = 0; y < snapshot.Height; y++)
+        {
+            for (int x = 0; x < snapshot.Width; x++)
+            {
+                int index = y * snapshot.Width + x;
+                GridCell cell = grid[index];
+                if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+                {
+                    continue;
+                }
+                water++;
+                if (surfaceTop < 0 || y + 10 >= surfaceTop)
+                {
+                    continue;
+                }
+                fringeWater++;
+                movingFringe += cell.RestFrames < 60 ? 1 : 0;
+                bool adjacentSand =
+                    (x > 0 && IsMaterial(grid[index - 1], MaterialId.Sand)) ||
+                    (x + 1 < snapshot.Width && IsMaterial(grid[index + 1], MaterialId.Sand)) ||
+                    (y > 0 && IsMaterial(grid[index - snapshot.Width], MaterialId.Sand)) ||
+                    (y + 1 < snapshot.Height && IsMaterial(grid[index + snapshot.Width], MaterialId.Sand));
+                fringeAdjacentSand += adjacentSand ? 1 : 0;
+            }
+        }
+        bool passed = surfaceTop > 0 && water is >= 192300 and <= 192360 &&
+            fringeWater <= 100 && fringeAdjacentSand <= 80 && movingFringe <= 40;
+        report = $"PHYXEL_N_SAVED_SAND_WATER surface={surfaceTop} water={water} fringe={fringeWater} adjacentSand={fringeAdjacentSand} movingFringe={movingFringe}";
         return passed;
     }
 
@@ -889,6 +971,9 @@ public static class AcceptanceRegressionVerifier
         }
         return false;
     }
+
+    private static bool IsMaterial(GridCell cell, MaterialId material) =>
+        cell.IsActive != 0 && cell.MaterialId == (uint)material;
 
     private static int CountMaterial(
         ReadOnlySpan<GridCell> grid,

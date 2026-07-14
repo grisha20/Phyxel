@@ -277,11 +277,16 @@ public sealed class PhyxelGame : Game
     private void BeginAcceptanceCapture()
     {
         if (acceptanceSuccess || !acceptance.Active || pendingWorldCapture || frameIndex < acceptance.CaptureFrame ||
-            currentResources is null || userInterface is null)
+            currentResources is null || userInterface is null || dispatchCoordinator is null)
         {
             return;
         }
         capturedMaterial = userInterface.SelectedMaterial;
+        Console.WriteLine(
+            $"PHYXEL_ACCEPTANCE_ACTIVITY cellularSleeping={dispatchCoordinator.CellularSleeping} " +
+            $"solidSleeping={dispatchCoordinator.SolidSleeping} " +
+            $"solidNeedsCellular={dispatchCoordinator.SolidMotionNeedsCellular} " +
+            $"settledObservations={dispatchCoordinator.SettledObservations}");
         stateSerializer.BeginWorldCapture(currentResources);
         pendingWorldCapture = true;
         Console.WriteLine("PHYXEL_ACCEPTANCE_CAPTURE_BEGIN");

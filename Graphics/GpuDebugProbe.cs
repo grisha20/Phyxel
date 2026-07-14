@@ -13,7 +13,7 @@ public sealed class GpuDebugProbe
     private bool requestPending;
     private uint lastRequestedFrame;
 
-    public GpuDebugProbe(int interval = 30)
+    public GpuDebugProbe(int interval = 10)
     {
         this.interval = Math.Max(1, interval);
     }

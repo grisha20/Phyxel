@@ -1,2 +1,2 @@
-PHYXEL_D water=12413 leftTop=204 rightTop=205 image2s=203/204 waterfallTop=232 fallingWater=2338 resting=12413 moving=0 leaks=0 leakMass=0,000 leakBounds=480,270-0,0 wallGaps=0 fps=144,0 statsMoving=21 red=0
-PHYXEL_ACCEPTANCE_SUCCESS
+PHYXEL_L_SAVED_GRAVITY lowerSolids=10789 body=29757 bounds=526-937 water=621486 waterTop=704 draft=233 movingSolids=3 statsFrame=110 statsMoving=207 statsMovingSolids=3 pressureMoves=0 fps=105,3
+PHYXEL_ACCEPTANCE_FAILED

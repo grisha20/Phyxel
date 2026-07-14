@@ -21,7 +21,8 @@ public enum AcceptanceScenarioMode
     SavedPressure,
     SavedIsolation,
     SavedGravity,
-    Buoyancy
+    Buoyancy,
+    SavedSandWater
 }
 
 public static class AcceptanceRegressionScenario
@@ -46,6 +47,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.SavedIsolation => CreateSavedIsolation(frame),
             AcceptanceScenarioMode.SavedGravity => [],
             AcceptanceScenarioMode.Buoyancy => CreateBuoyancy(frame),
+            AcceptanceScenarioMode.SavedSandWater => [],
             _ => []
         };
     }
@@ -350,6 +352,10 @@ public static class AcceptanceRegressionScenario
         if (frame == 3)
         {
             return AddFill(240, 175, 460, 247, 8, 5, MaterialId.Water, 0);
+        }
+        if (frame == 4)
+        {
+            return AddFill(235, 92, 310, 128, 6, 4, MaterialId.Sand, 0);
         }
         return [];
     }
