@@ -35,6 +35,7 @@ public sealed class PhyxelGame : Game
     private readonly bool hydrodynamicsRegressionVerification;
     private readonly bool sandWaterRegressionVerification;
     private readonly bool hydrodynamicsPerformanceVerification;
+    private readonly SpecificationRegressionHarness specificationRegression;
     private SpriteBatch? spriteBatch;
     private MaterialRegistry? materialRegistry;
     private GpuResourceLifecycleManager? resourceManager;
@@ -111,8 +112,10 @@ public sealed class PhyxelGame : Game
             Environment.GetEnvironmentVariable("PHYXEL_HYDRO_PERFORMANCE"),
             "1",
             StringComparison.Ordinal);
+        specificationRegression = new SpecificationRegressionHarness();
         if (physicsRegressionVerification || criticalRegressionVerification || solidSpawnRegressionVerification ||
-            hydrodynamicsRegressionVerification || sandWaterRegressionVerification)
+            hydrodynamicsRegressionVerification || sandWaterRegressionVerification ||
+            specificationRegression.RequiresQuarterScale)
         {
             settings.ApplyScale(0.25f);
         }
@@ -179,7 +182,9 @@ public sealed class PhyxelGame : Game
         UiFrameActions actions = userInterface.Update(input, GraphicsDevice.Viewport, settings);
         ProcessUiActions(actions);
         Rectangle worldBounds = FitWorldToCanvas(userInterface.CanvasBounds, settings.Width, settings.Height);
-        IReadOnlyList<BrushDrawCommand> commands = hydrodynamicsRegressionVerification || hydrodynamicsPerformanceVerification
+        IReadOnlyList<BrushDrawCommand> commands = specificationRegression.Active
+            ? specificationRegression.CreateCommands(frameIndex, settings.Width, settings.Height)
+            : hydrodynamicsRegressionVerification || hydrodynamicsPerformanceVerification
             ? HydrodynamicsRegressionScenario.CreateCommands(frameIndex)
             : sandWaterRegressionVerification
                 ? SandWaterRegressionScenario.CreateCommands(frameIndex)
@@ -200,6 +205,7 @@ public sealed class PhyxelGame : Game
         try
         {
             currentResources = dispatchCoordinator.DispatchFrame(settings, commandEncoder.Encode(commands));
+            specificationRegression.CaptureScreenshot(currentResources, frameIndex);
             debugProbe.Update(currentResources, frameIndex++);
             dispatchCoordinator.ObserveStatistics(debugProbe.Latest);
             BeginAutomatedVerificationWhenReady();
@@ -290,6 +296,16 @@ public sealed class PhyxelGame : Game
             Console.WriteLine(hydroPerformancePassed
                 ? "PHYXEL_HYDRO_PERFORMANCE_SUCCESS"
                 : "PHYXEL_HYDRO_PERFORMANCE_FAILED");
+            Exit();
+        }
+
+        if (specificationRegression.RecordPerformanceFrame(
+            dispatchCoordinator!,
+            out bool restingPassed,
+            out string restingReport))
+        {
+            Console.WriteLine(restingReport);
+            Console.WriteLine(restingPassed ? "PHYXEL_REST_PERFORMANCE_SUCCESS" : "PHYXEL_REST_PERFORMANCE_FAILED");
             Exit();
         }
 
@@ -412,6 +428,20 @@ public sealed class PhyxelGame : Game
                 }
             }
 
+            if (specificationRegression.Active && dispatchCoordinator is not null)
+            {
+                bool specificationPassed = specificationRegression.Validate(
+                    snapshot,
+                    debugProbe.Latest,
+                    dispatchCoordinator,
+                    out _);
+                if (!specificationPassed)
+                {
+                    Exit();
+                    return;
+                }
+            }
+
             pendingWorldCapture = false;
             pendingSave = stateSerializer.SaveAsync(scenePath, settings, capturedMaterial, snapshot);
             SetStatus("Сохранение сцены…");
@@ -481,7 +511,9 @@ public sealed class PhyxelGame : Game
 
     private void BeginAutomatedVerificationWhenReady()
     {
-        uint captureFrame = hydrodynamicsRegressionVerification
+        uint captureFrame = specificationRegression.Active
+            ? specificationRegression.CaptureFrame
+            : hydrodynamicsRegressionVerification
             ? 123u
             : sandWaterRegressionVerification
                 ? 302u

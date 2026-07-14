@@ -50,7 +50,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         uint bodyWord = ActivatedBodyWords[particle.BodyId >> 5];
         activated = ((bodyWord >> (particle.BodyId & 31)) & 1) != 0;
-        particle.IsDynamic |= activated ? 1 : 0;
+        particle.IsDynamic |= activated ? 5 : 0;
     }
 
     LatticeBond bond = Bonds[index];

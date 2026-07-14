@@ -36,6 +36,17 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
+    if (command.Mode == 2)
+    {
+        GridCell sourceCell = Grid[index];
+        if (sourceCell.IsActive != 0 && IsCellularMaterial(Materials[sourceCell.MaterialId].SimulationKind))
+        {
+            Grid[index] = (GridCell)0;
+        }
+
+        return;
+    }
+
     if (command.Mode != 0 || command.MaterialId == 5)
     {
         LatticeParticle sourceParticle = Particles[index];

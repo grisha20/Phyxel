@@ -15,6 +15,8 @@ public struct LatticeParticle
     public float Stress;
     public uint BodyId;
     public uint IsDynamic;
+    public float PlasticOffsetX;
+    public float PlasticOffsetY;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -54,6 +56,8 @@ public struct MaterialProperties
     public float Friction;
     public float Restitution;
     public float FlowRate;
+    public uint FailureMode;
+    public float ActivationLoad;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -101,4 +105,8 @@ public struct SimulationStatistics
     public uint LoadSumMilli;
     public uint StressSampleCount;
     public uint Reserved;
+    public uint MovingParticles;
+    public uint SleepingParticles;
+    public uint CrackedParticles;
+    public uint BrokenParticles;
 }

@@ -25,6 +25,12 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         this.graphicsDevice = graphicsDevice;
         this.materialRegistry = materialRegistry;
         Device = (Device)graphicsDevice.GetD3D11Device();
+        using (SharpDX.DXGI.Device dxgiDevice = Device.QueryInterface<SharpDX.DXGI.Device>())
+        using (SharpDX.DXGI.Adapter adapter = dxgiDevice.Adapter)
+        {
+            SharpDX.DXGI.AdapterDescription description = adapter.Description;
+            Console.WriteLine($"PHYXEL_GPU name={description.Description.Trim()} vendor=0x{description.VendorId:X4} device=0x{description.DeviceId:X4}");
+        }
         PixelTexture = CreatePixelTexture();
         CircleTexture = CreateCircleTexture(64);
         BrushOutlineTexture = CreateBrushOutlineTexture(128);

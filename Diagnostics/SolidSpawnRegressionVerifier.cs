@@ -47,9 +47,35 @@ public static class SolidSpawnRegressionVerifier
             counts.GetValueOrDefault(207u) is >= 310 and <= 325;
         int diskParticles = counts.GetValueOrDefault(205u);
         bool solidDisk = diskParticles is >= 1940 and <= 1980 && HasFilledDisk(grid, particles, snapshot.Width, 300, 72, 23, 205);
+        int circleParticles = counts.GetValueOrDefault(208u);
+        int circleBonds = bondCounts.GetValueOrDefault(208u);
+        bool economicalCircle = circleParticles is >= 220 and <= 256 && circleBonds <= circleParticles * 4 &&
+            HasCircleExtent(particles, 208, 98);
         bool linearTopology = activeBonds <= activeParticles * 4;
-        report = $"PHYXEL_SOLID_SPAWN_METRICS line10={counts.GetValueOrDefault(201u)}/{bondCounts.GetValueOrDefault(201u)} line50={counts.GetValueOrDefault(202u)}/{bondCounts.GetValueOrDefault(202u)} line100={counts.GetValueOrDefault(203u)}/{bondCounts.GetValueOrDefault(203u)} line200={counts.GetValueOrDefault(204u)}/{bondCounts.GetValueOrDefault(204u)} disk50={diskParticles} particles={activeParticles} bonds={activeBonds}";
-        return linesExact && multipleStrokes && brushSizes && solidDisk && linearTopology;
+        report = $"PHYXEL_SOLID_SPAWN_METRICS line10={counts.GetValueOrDefault(201u)}/{bondCounts.GetValueOrDefault(201u)} line50={counts.GetValueOrDefault(202u)}/{bondCounts.GetValueOrDefault(202u)} line100={counts.GetValueOrDefault(203u)}/{bondCounts.GetValueOrDefault(203u)} line200={counts.GetValueOrDefault(204u)}/{bondCounts.GetValueOrDefault(204u)} disk50={diskParticles}/{bondCounts.GetValueOrDefault(205u)} circleR50={circleParticles}/{circleBonds} particles={activeParticles} bonds={activeBonds}";
+        return linesExact && multipleStrokes && brushSizes && solidDisk && economicalCircle && linearTopology;
+    }
+
+    private static bool HasCircleExtent(ReadOnlySpan<LatticeParticle> particles, uint bodyId, int minimumExtent)
+    {
+        float minimumX = float.MaxValue;
+        float minimumY = float.MaxValue;
+        float maximumX = float.MinValue;
+        float maximumY = float.MinValue;
+        foreach (LatticeParticle particle in particles)
+        {
+            if (particle.IsActive == 0 || particle.BodyId != bodyId)
+            {
+                continue;
+            }
+
+            minimumX = Math.Min(minimumX, particle.PositionX);
+            minimumY = Math.Min(minimumY, particle.PositionY);
+            maximumX = Math.Max(maximumX, particle.PositionX);
+            maximumY = Math.Max(maximumY, particle.PositionY);
+        }
+
+        return maximumX - minimumX >= minimumExtent && maximumY - minimumY >= minimumExtent;
     }
 
     private static bool ValidateBody(

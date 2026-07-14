@@ -13,7 +13,8 @@ public static class UiLocalizationProvider
             [MaterialId.Metal] = "Металл",
             [MaterialId.Concrete] = "Бетон",
             [MaterialId.Eraser] = "Ластик",
-            [MaterialId.Gas] = "Газ"
+            [MaterialId.Gas] = "Газ",
+            [MaterialId.Fixture] = "Опора"
         };
 
     public static string Material(MaterialId materialId) => MaterialNames[materialId];

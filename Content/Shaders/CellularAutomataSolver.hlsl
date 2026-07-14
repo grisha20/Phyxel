@@ -5,6 +5,9 @@ RWStructuredBuffer<GridCell> SourceGrid : register(u0);
 
 #define DestinationGrid SourceGrid
 
+static const uint RestingThreshold = 240;
+static const float MassTransferEpsilon = 0.0005;
+
 float StableLowerMass(float totalMass)
 {
     const float maximumMass = 1;
@@ -39,9 +42,103 @@ uint CellKind(GridCell cell)
     return cell.IsActive == 0 ? 0 : Materials[cell.MaterialId].SimulationKind;
 }
 
+bool CellIsResting(GridCell cell)
+{
+    uint kind = CellKind(cell);
+    uint threshold = kind == 1 ? 30 : RestingThreshold;
+    return cell.IsActive != 0 && cell.Reserved >= threshold;
+}
+
 float CellDensity(GridCell cell)
 {
     return cell.IsActive == 0 ? 0 : Materials[cell.MaterialId].Density;
+}
+
+bool IsNarrowGranularThroat(uint2 coordinate)
+{
+    bool leftWall = false;
+    bool rightWall = false;
+    for (uint distance = 1; distance <= 12; distance++)
+    {
+        if (coordinate.x >= distance)
+        {
+            GridCell left = SourceGrid[FlattenCoordinate(uint2(coordinate.x - distance, coordinate.y))];
+            leftWall = leftWall || CellKind(left) == 2;
+        }
+        if (coordinate.x + distance < Width)
+        {
+            GridCell right = SourceGrid[FlattenCoordinate(uint2(coordinate.x + distance, coordinate.y))];
+            rightWall = rightWall || CellKind(right) == 2;
+        }
+    }
+
+    return leftWall && rightWall;
+}
+
+bool HasFluidEscape(uint2 coordinate, uint materialId)
+{
+    bool supportedBySolid = false;
+    if (coordinate.y + 1 < Height)
+    {
+        GridCell below = SourceGrid[FlattenCoordinate(coordinate + uint2(0, 1))];
+        if (below.IsActive == 0)
+        {
+            return true;
+        }
+        supportedBySolid = CellKind(below) == 2;
+    }
+
+    for (int direction = -1; direction <= 1; direction += 2)
+    {
+        int sideX = int(coordinate.x) + direction;
+        if (sideX < 0 || sideX >= int(Width))
+        {
+            continue;
+        }
+
+        GridCell side = SourceGrid[FlattenCoordinate(uint2(sideX, coordinate.y))];
+        if (side.IsActive != 0)
+        {
+            continue;
+        }
+
+        if (supportedBySolid)
+        {
+            return true;
+        }
+
+        if (coordinate.y + 1 >= Height)
+        {
+            return true;
+        }
+
+        GridCell diagonal = SourceGrid[FlattenCoordinate(uint2(sideX, coordinate.y + 1))];
+        if (diagonal.IsActive == 0 || diagonal.MaterialId == materialId)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+uint FixtureDepth(uint2 coordinate)
+{
+    for (uint distance = 1; distance <= 8; distance++)
+    {
+        if (coordinate.y + distance >= Height)
+        {
+            break;
+        }
+
+        GridCell cell = SourceGrid[FlattenCoordinate(coordinate + uint2(0, distance))];
+        if (CellKind(cell) == 2)
+        {
+            return distance;
+        }
+    }
+
+    return 9;
 }
 
 void ResolveVerticalPair(uint2 upperCoordinate)
@@ -53,12 +150,21 @@ void ResolveVerticalPair(uint2 upperCoordinate)
     uint upperKind = CellKind(upper);
     uint lowerKind = CellKind(lower);
 
+    if (CellIsResting(upper) && CellIsResting(lower))
+    {
+        return;
+    }
+
     if (lowerKind == 2)
     {
         if (IsCellularMaterial(upperKind))
         {
-            lower.Pressure += upper.Mass * CellDensity(upper) * Gravity * DeltaTime;
+            lower.Pressure = upper.Mass * CellDensity(upper);
             upper.VelocityY = 0;
+        }
+        else
+        {
+            lower.Pressure = 0;
         }
 
         DestinationGrid[upperIndex] = upper;
@@ -91,7 +197,15 @@ void ResolveVerticalPair(uint2 upperCoordinate)
     {
         if (lower.IsActive == 0)
         {
+            if (IsNarrowGranularThroat(upperCoordinate + uint2(0, 1)))
+            {
+                upper.VelocityX *= 0.5;
+                upper.VelocityY = 0;
+                DestinationGrid[upperIndex] = upper;
+                return;
+            }
             upper.VelocityY = min(upper.VelocityY + Gravity * DeltaTime, MaximumVelocity);
+            upper.Reserved = 0;
             DestinationGrid[upperIndex] = CreateEmptyCell();
             DestinationGrid[lowerIndex] = upper;
         }
@@ -134,7 +248,19 @@ void ResolveVerticalPair(uint2 upperCoordinate)
     GridCell resolvedLower = CellWithMass(templateCell, lowerMass);
     resolvedUpper.Pressure = upper.IsActive != 0 ? upper.Pressure : templateCell.Pressure;
     resolvedLower.Pressure = lower.IsActive != 0 ? lower.Pressure : templateCell.Pressure;
+    resolvedUpper.Reserved = upper.IsActive != 0 ? upper.Reserved : 0;
+    resolvedLower.Reserved = lower.IsActive != 0 ? lower.Reserved : 0;
     float transferredMass = lowerMass - lower.Mass;
+    if (abs(transferredMass) <= MassTransferEpsilon)
+    {
+        resolvedUpper.VelocityY = upper.VelocityY;
+        resolvedLower.VelocityY = lower.VelocityY;
+    }
+    if (resolvedUpper.IsActive != upper.IsActive || resolvedLower.IsActive != lower.IsActive)
+    {
+        resolvedUpper.Reserved = 0;
+        resolvedLower.Reserved = 0;
+    }
     resolvedUpper.VelocityY = max(-MaximumVelocity, min(MaximumVelocity, upper.VelocityY - transferredMass * 60));
     resolvedLower.VelocityY = max(-MaximumVelocity, min(MaximumVelocity, lower.VelocityY + transferredMass * 60));
     DestinationGrid[upperIndex] = resolvedUpper;
@@ -148,9 +274,23 @@ bool CanGranularMoveDiagonally(uint2 sourceCoordinate, uint2 destinationCoordina
         return false;
     }
 
+    GridCell source = SourceGrid[FlattenCoordinate(sourceCoordinate)];
+    float staticFriction = Materials[source.MaterialId].Friction;
+    if (HashUnitFloat(FlattenCoordinate(destinationCoordinate) * 2654435761u) < staticFriction * 1.25)
+    {
+        return false;
+    }
+
     GridCell support = SourceGrid[FlattenCoordinate(uint2(sourceCoordinate.x, sourceCoordinate.y + 1))];
     GridCell destinationBelow = SourceGrid[FlattenCoordinate(uint2(destinationCoordinate.x, destinationCoordinate.y + 1))];
-    return support.IsActive != 0 && destinationBelow.IsActive == 0;
+    if (support.IsActive == 0 || destinationBelow.IsActive != 0 || destinationCoordinate.y + 3 >= Height)
+    {
+        return false;
+    }
+
+    GridCell destinationTwoBelow = SourceGrid[FlattenCoordinate(uint2(destinationCoordinate.x, destinationCoordinate.y + 2))];
+    GridCell destinationThreeBelow = SourceGrid[FlattenCoordinate(uint2(destinationCoordinate.x, destinationCoordinate.y + 3))];
+    return destinationTwoBelow.IsActive == 0 && destinationThreeBelow.IsActive == 0;
 }
 
 void ResolveHorizontalPair(uint2 leftCoordinate)
@@ -162,9 +302,15 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
     uint leftKind = CellKind(left);
     uint rightKind = CellKind(right);
 
+    if (CellIsResting(left) && CellIsResting(right))
+    {
+        return;
+    }
+
     if (leftKind == 1 && right.IsActive == 0 && CanGranularMoveDiagonally(leftCoordinate, leftCoordinate + uint2(1, 0)))
     {
         left.VelocityX = 24;
+        left.Reserved = 0;
         DestinationGrid[leftIndex] = CreateEmptyCell();
         DestinationGrid[rightIndex] = left;
         return;
@@ -173,6 +319,7 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
     if (rightKind == 1 && left.IsActive == 0 && CanGranularMoveDiagonally(leftCoordinate + uint2(1, 0), leftCoordinate))
     {
         right.VelocityX = -24;
+        right.Reserved = 0;
         DestinationGrid[leftIndex] = right;
         DestinationGrid[rightIndex] = CreateEmptyCell();
         return;
@@ -192,6 +339,25 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
         float totalMass = left.Mass + right.Mass;
         float pressureDifference = left.Pressure - right.Pressure;
         float desiredLeftMass = clamp(totalMass * 0.5 - pressureDifference * 0.035, 0, totalMass);
+        if (leftCoordinate.y + 1 < Height)
+        {
+            GridCell leftBelow = SourceGrid[leftIndex + Width];
+            GridCell rightBelow = SourceGrid[rightIndex + Width];
+            uint leftFixtureDepth = FixtureDepth(leftCoordinate);
+            uint rightFixtureDepth = FixtureDepth(leftCoordinate + uint2(1, 0));
+            if (left.IsActive != 0 && right.IsActive == 0 &&
+                (leftBelow.IsActive != 0 && rightBelow.IsActive == 0 ||
+                leftFixtureDepth < rightFixtureDepth))
+            {
+                desiredLeftMass = 0;
+            }
+            else if (right.IsActive != 0 && left.IsActive == 0 &&
+                (rightBelow.IsActive != 0 && leftBelow.IsActive == 0 ||
+                rightFixtureDepth < leftFixtureDepth))
+            {
+                desiredLeftMass = totalMass;
+            }
+        }
         float flowRate = Materials[templateCell.MaterialId].FlowRate;
         float leftMass = lerp(left.Mass, desiredLeftMass, saturate(flowRate));
         float rightMass = totalMass - leftMass;
@@ -200,8 +366,23 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
         GridCell resolvedRight = CellWithMass(templateCell, rightMass);
         resolvedLeft.Pressure = left.IsActive != 0 ? left.Pressure : templateCell.Pressure;
         resolvedRight.Pressure = right.IsActive != 0 ? right.Pressure : templateCell.Pressure;
-        resolvedLeft.VelocityX = lerp(left.VelocityX, -transferredMass * 60, 0.55);
-        resolvedRight.VelocityX = lerp(right.VelocityX, transferredMass * 60, 0.55);
+        resolvedLeft.Reserved = left.IsActive != 0 ? left.Reserved : 0;
+        resolvedRight.Reserved = right.IsActive != 0 ? right.Reserved : 0;
+        if (abs(transferredMass) > MassTransferEpsilon)
+        {
+            resolvedLeft.VelocityX = lerp(left.VelocityX, -transferredMass * 60, 0.55);
+            resolvedRight.VelocityX = lerp(right.VelocityX, transferredMass * 60, 0.55);
+        }
+        else
+        {
+            resolvedLeft.VelocityX = left.VelocityX;
+            resolvedRight.VelocityX = right.VelocityX;
+        }
+        if (resolvedLeft.IsActive != left.IsActive || resolvedRight.IsActive != right.IsActive)
+        {
+            resolvedLeft.Reserved = 0;
+            resolvedRight.Reserved = 0;
+        }
         DestinationGrid[leftIndex] = resolvedLeft;
         DestinationGrid[rightIndex] = resolvedRight;
         return;
@@ -265,10 +446,22 @@ void ResolveHorizontalPressureSpan(uint2 leftCoordinate, uint stride)
     float desiredLeftMass = clamp(totalMass * 0.5 - pressureDifference * 0.045, 0, totalMass);
     float leftMass = lerp(left.Mass, desiredLeftMass, 0.88);
     float rightMass = totalMass - leftMass;
+    float transferredMass = rightMass - right.Mass;
+    if (abs(transferredMass) <= MassTransferEpsilon)
+    {
+        return;
+    }
     GridCell resolvedLeft = CellWithMass(templateCell, leftMass);
     GridCell resolvedRight = CellWithMass(templateCell, rightMass);
     resolvedLeft.Pressure = left.IsActive != 0 ? left.Pressure : templateCell.Pressure;
     resolvedRight.Pressure = right.IsActive != 0 ? right.Pressure : templateCell.Pressure;
+    resolvedLeft.Reserved = left.IsActive != 0 ? left.Reserved : 0;
+    resolvedRight.Reserved = right.IsActive != 0 ? right.Reserved : 0;
+    if (resolvedLeft.IsActive != left.IsActive || resolvedRight.IsActive != right.IsActive)
+    {
+        resolvedLeft.Reserved = 0;
+        resolvedRight.Reserved = 0;
+    }
     DestinationGrid[leftIndex] = resolvedLeft;
     DestinationGrid[rightIndex] = resolvedRight;
 }
@@ -303,7 +496,7 @@ void ResolveVerticalPressureSpan(uint2 upperCoordinate, uint stride)
     float pressureDifference = lower.Pressure - upper.Pressure - stride * 0.75;
     float availableCapacity = max(0, 1 - upper.Mass);
     float transfer = min(lower.Mass, min(availableCapacity, max(0, pressureDifference) * 0.08));
-    if (transfer <= 0)
+    if (transfer <= MassTransferEpsilon)
     {
         return;
     }
@@ -313,6 +506,13 @@ void ResolveVerticalPressureSpan(uint2 upperCoordinate, uint stride)
     GridCell resolvedLower = CellWithMass(templateCell, lower.Mass - transfer);
     resolvedUpper.Pressure = upper.IsActive != 0 ? upper.Pressure : lower.Pressure;
     resolvedLower.Pressure = lower.Pressure;
+    resolvedUpper.Reserved = upper.IsActive != 0 ? upper.Reserved : 0;
+    resolvedLower.Reserved = lower.Reserved;
+    if (resolvedUpper.IsActive != upper.IsActive || resolvedLower.IsActive != lower.IsActive)
+    {
+        resolvedUpper.Reserved = 0;
+        resolvedLower.Reserved = 0;
+    }
     DestinationGrid[upperIndex] = resolvedUpper;
     DestinationGrid[lowerIndex] = resolvedLower;
 }
@@ -324,6 +524,39 @@ void ResolvePressure(uint2 coordinate)
     uint kind = CellKind(cell);
     if (!IsCellularMaterial(kind))
     {
+        return;
+    }
+
+    bool fluidCanEscape = kind == 4 && HasFluidEscape(coordinate, cell.MaterialId);
+    uint restingThreshold = kind == 1 ? 30 : RestingThreshold;
+    if (cell.Reserved >= restingThreshold && !fluidCanEscape)
+    {
+        cell.VelocityX = 0;
+        cell.VelocityY = 0;
+        DestinationGrid[index] = cell;
+        return;
+    }
+    if (fluidCanEscape)
+    {
+        cell.Reserved = 0;
+    }
+
+    if (kind == 1)
+    {
+        cell.Pressure = cell.Mass * CellDensity(cell);
+        cell.VelocityX *= 0.5;
+        cell.VelocityY *= 0.5;
+        if (abs(cell.VelocityX) < 0.02 && abs(cell.VelocityY) < 0.02)
+        {
+            cell.VelocityX = 0;
+            cell.VelocityY = 0;
+            cell.Reserved = min(cell.Reserved + 1, restingThreshold);
+        }
+        else
+        {
+            cell.Reserved = 0;
+        }
+        DestinationGrid[index] = cell;
         return;
     }
 
@@ -349,9 +582,27 @@ void ResolvePressure(uint2 coordinate)
     }
 
     float hydrostaticPressure = inheritedPressure + cell.Mass * CellDensity(cell);
+    float pressureChange = abs(hydrostaticPressure - cell.Pressure);
     cell.Pressure = lerp(cell.Pressure, hydrostaticPressure, 0.9);
-    cell.VelocityX *= 0.985;
-    cell.VelocityY *= 0.985;
+    cell.VelocityX *= 0.82;
+    cell.VelocityY *= 0.82;
+    if (abs(cell.VelocityX) < 0.02)
+    {
+        cell.VelocityX = 0;
+    }
+    if (abs(cell.VelocityY) < 0.02)
+    {
+        cell.VelocityY = 0;
+    }
+    bool liquidResting = kind == 4 && !fluidCanEscape;
+    if (liquidResting || pressureChange < 0.02 && cell.VelocityX == 0 && cell.VelocityY == 0)
+    {
+        cell.Reserved = min(cell.Reserved + 1, RestingThreshold);
+    }
+    else
+    {
+        cell.Reserved = 0;
+    }
     DestinationGrid[index] = cell;
 }
 

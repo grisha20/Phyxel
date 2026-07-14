@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Phyxel.Materials;
 using Phyxel.Physics;
@@ -17,8 +18,28 @@ public static class SolidSpawnRegressionScenario
             4 => [CreateCommand(300, 72, 25, 205, 4000)],
             5 => [CreateCommand(380, 30, 2.5f, 206, 5000), CreateCommand(400, 62, 10, 207, 5001)],
             >= 6 and < 16 => CreateLine(240, 100 + ((int)frameIndex - 6) * 12, 20, 210 + frameIndex - 6),
+            16 => CreateCircle(350, 180, 50, 208),
             _ => []
         };
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateCircle(int centerX, int centerY, int radius, uint bodyId)
+    {
+        List<BrushDrawCommand> commands = [];
+        HashSet<int> coordinates = [];
+        for (int sample = 0; sample < 256; sample++)
+        {
+            float angle = sample * MathF.Tau / 256;
+            int x = centerX + (int)MathF.Round(MathF.Cos(angle) * radius);
+            int y = centerY + (int)MathF.Round(MathF.Sin(angle) * radius);
+            int key = y * 1024 + x;
+            if (coordinates.Add(key))
+            {
+                commands.Add(CreateCommand(x, y, 0.5f, bodyId, bodyId * 1000 + (uint)sample));
+            }
+        }
+
+        return commands;
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateLine(int x, int y, int length, uint bodyId)

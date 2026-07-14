@@ -22,6 +22,8 @@ struct LatticeParticle
     float Stress;
     uint BodyId;
     uint IsDynamic;
+    float PlasticOffsetX;
+    float PlasticOffsetY;
 };
 
 struct LatticeBond
@@ -46,6 +48,8 @@ struct MaterialProperties
     float Friction;
     float Restitution;
     float FlowRate;
+    uint FailureMode;
+    float ActivationLoad;
 };
 
 struct BrushDrawCommand
@@ -70,6 +74,10 @@ struct SimulationStatistics
     uint LoadSumMilli;
     uint StressSampleCount;
     uint Reserved;
+    uint MovingParticles;
+    uint SleepingParticles;
+    uint CrackedParticles;
+    uint BrokenParticles;
 };
 
 cbuffer SimulationFrameConstants : register(b0)

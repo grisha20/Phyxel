@@ -11,7 +11,8 @@ public enum MaterialId : uint
     Metal = 3,
     Concrete = 4,
     Eraser = 5,
-    Gas = 6
+    Gas = 6,
+    Fixture = 7
 }
 
 public enum MaterialSimulationKind : uint
@@ -22,6 +23,13 @@ public enum MaterialSimulationKind : uint
     Tool = 3,
     Liquid = 4,
     Gas = 5
+}
+
+public enum MaterialFailureMode : uint
+{
+    None = 0,
+    Ductile = 1,
+    Brittle = 2
 }
 
 public sealed record MaterialDefinition(

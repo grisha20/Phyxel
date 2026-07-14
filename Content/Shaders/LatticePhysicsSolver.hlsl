@@ -54,12 +54,64 @@ float2 SampleEnvironmentalVelocity(float2 position, out float displacedDensity, 
     return fluidSamples > 0 ? velocity / fluidSamples : 0;
 }
 
-float CalculateExternalLoad(uint2 coordinate, LatticeParticle particle)
+bool IsAnchored(uint2 coordinate, LatticeParticle particle)
 {
-    uint index = FlattenCoordinate(coordinate);
+    if (coordinate.y + 2 >= Height)
+    {
+        return true;
+    }
+
+    for (uint neighbor = 0; neighbor < 8; neighbor++)
+    {
+        int2 adjacentCoordinate = int2(coordinate) + NeighborOffsets[neighbor];
+        if (adjacentCoordinate.x < 0 || adjacentCoordinate.y < 0 ||
+            adjacentCoordinate.x >= int(Width) || adjacentCoordinate.y >= int(Height))
+        {
+            continue;
+        }
+
+        LatticeParticle adjacent = SourceParticles[FlattenCoordinate(uint2(adjacentCoordinate))];
+        if (adjacent.IsActive != 0 && adjacent.BodyId != particle.BodyId && adjacent.IsDynamic == 0)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool HasDynamicNeighbor(uint2 coordinate, LatticeParticle particle)
+{
+    for (uint neighbor = 0; neighbor < 8; neighbor++)
+    {
+        int2 adjacentCoordinate = int2(coordinate) + NeighborOffsets[neighbor];
+        if (adjacentCoordinate.x < 0 || adjacentCoordinate.y < 0 ||
+            adjacentCoordinate.x >= int(Width) || adjacentCoordinate.y >= int(Height))
+        {
+            continue;
+        }
+
+        LatticeParticle adjacent = SourceParticles[FlattenCoordinate(uint2(adjacentCoordinate))];
+        if (adjacent.IsActive != 0 && adjacent.BodyId == particle.BodyId && adjacent.IsDynamic != 0)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+float CalculateExternalLoad(uint2 coordinate, LatticeParticle particle, out float granularLoad)
+{
+    uint2 loadCoordinate = uint2(clamp(
+        float2(particle.PositionX, particle.PositionY),
+        float2(0, 0),
+        float2(Width - 1, Height - 1)));
+    uint index = FlattenCoordinate(loadCoordinate);
     GridCell occupiedCell = Grid[index];
     float load = max(0, occupiedCell.Pressure - particle.Stress);
-    for (uint distance = 1; distance <= 6 && coordinate.y >= distance; distance++)
+    granularLoad = 0;
+    for (uint distance = 1; distance <= 128 && loadCoordinate.y >= distance; distance++)
     {
         GridCell cellAbove = Grid[index - Width * distance];
         if (cellAbove.IsActive == 0)
@@ -73,10 +125,49 @@ float CalculateExternalLoad(uint2 coordinate, LatticeParticle particle)
             break;
         }
 
-        load += cellAbove.Mass * Materials[cellAbove.MaterialId].Density * Gravity * DeltaTime;
+        float layerLoad = cellAbove.Mass * Materials[cellAbove.MaterialId].Density;
+        load += layerLoad;
+        granularLoad += kind == 1 ? layerLoad : 0;
     }
 
     return load;
+}
+
+float CalculateNearbyGranularLoad(uint2 coordinate)
+{
+    float nearbyLoad = 0;
+    for (int offset = -64; offset <= 64; offset += 8)
+    {
+        int sampleX = int(coordinate.x) + offset;
+        if (sampleX < 0 || sampleX >= int(Width))
+        {
+            continue;
+        }
+
+        uint sampleIndex = FlattenCoordinate(uint2(sampleX, coordinate.y));
+        float columnLoad = 0;
+        for (uint distance = 1; distance <= 128 && coordinate.y >= distance; distance++)
+        {
+            GridCell cellAbove = Grid[sampleIndex - Width * distance];
+            if (cellAbove.IsActive == 0)
+            {
+                break;
+            }
+
+            uint kind = Materials[cellAbove.MaterialId].SimulationKind;
+            if (!IsCellularMaterial(kind))
+            {
+                break;
+            }
+
+            columnLoad += kind == 1 ? cellAbove.Mass * Materials[cellAbove.MaterialId].Density : 0;
+        }
+
+        float weight = 1 - abs(offset) / 72.0;
+        nearbyLoad = max(nearbyLoad, columnLoad * weight);
+    }
+
+    return nearbyLoad;
 }
 
 [numthreads(16, 16, 1)]
@@ -87,7 +178,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    uint index = FlattenCoordinate(dispatchThreadId.xy);
+    uint2 coordinate = dispatchThreadId.xy + uint2(DispatchOffsetX, DispatchOffsetY);
+    if (coordinate.x >= Width || coordinate.y >= Height)
+    {
+        return;
+    }
+
+    uint index = FlattenCoordinate(coordinate);
     LatticeParticle particle = SourceParticles[index];
     if (particle.IsActive == 0)
     {
@@ -96,13 +193,92 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     MaterialProperties material = Materials[particle.MaterialId];
     LatticeBond bond = SourceBonds[index];
+    float granularLoad;
+    float externalLoad = CalculateExternalLoad(coordinate, particle, granularLoad);
+    float loadStrain = externalLoad * 0.004 / max(material.Density, 0.1);
+    bool anchored = IsAnchored(coordinate, particle);
+    if (anchored)
+    {
+        particle.IsDynamic = 0;
+    }
+    else if (particle.IsDynamic == 0 &&
+        (granularLoad >= material.ActivationLoad || HasDynamicNeighbor(coordinate, particle)))
+    {
+        particle.IsDynamic = 1;
+    }
+
+    if (material.FailureMode == 1 && loadStrain > material.PlasticLimit)
+    {
+        particle.IsDynamic |= 2;
+    }
+
     if (particle.IsDynamic == 0)
     {
         particle.VelocityX = 0;
         particle.VelocityY = 0;
+        particle.Stress = loadStrain;
+        bond.MaximumStrain = loadStrain;
+        bond.AccumulatedLoad = lerp(bond.AccumulatedLoad, externalLoad, 0.18);
+        DestinationParticles[index] = particle;
+        DestinationBonds[index] = bond;
+        return;
+    }
+
+    if ((particle.IsDynamic & 4) != 0)
+    {
+        float forcedSubstep = DeltaTime / 4;
+        float2 forcedVelocity = float2(particle.VelocityX, particle.VelocityY);
+        if (SolverIteration == 0)
+        {
+            forcedVelocity.y += Gravity * DeltaTime;
+        }
+
+        float2 forcedPosition = float2(particle.PositionX, particle.PositionY) + forcedVelocity * forcedSubstep;
+        forcedPosition.x = clamp(forcedPosition.x, 0.5, Width - 0.5);
+        if (forcedPosition.y >= Height - 0.5)
+        {
+            forcedPosition.y = Height - 0.5;
+            forcedVelocity.y = min(0, -forcedVelocity.y * material.Restitution);
+            forcedVelocity.x *= 1 - material.Friction;
+        }
+
+        particle.PositionX = forcedPosition.x;
+        particle.PositionY = forcedPosition.y;
+        particle.VelocityX = clamp(forcedVelocity.x, -MaximumVelocity, MaximumVelocity);
+        particle.VelocityY = clamp(forcedVelocity.y, -MaximumVelocity, MaximumVelocity);
         particle.Stress = 0;
-        bond.MaximumStrain = 0;
-        bond.AccumulatedLoad = 0;
+        DestinationParticles[index] = particle;
+        DestinationBonds[index] = bond;
+        return;
+    }
+
+    if (material.FailureMode == 1)
+    {
+        uint2 loadCoordinate = uint2(clamp(
+            float2(particle.PositionX, particle.PositionY),
+            float2(0, 0),
+            float2(Width - 1, Height - 1)));
+        float nearbyGranularLoad = max(granularLoad, CalculateNearbyGranularLoad(loadCoordinate));
+        float nearbyStrain = nearbyGranularLoad * 0.004 / max(material.Density, 0.1);
+        float yieldStrain = max(loadStrain, nearbyStrain);
+        if (yieldStrain > material.PlasticLimit)
+        {
+            particle.IsDynamic |= 2;
+            float plasticTarget = min(18, (yieldStrain - material.PlasticLimit) * 1400);
+            particle.PlasticOffsetY = lerp(particle.PlasticOffsetY, plasticTarget, 0.16);
+        }
+
+        float loadSag = min(36, nearbyGranularLoad * 0.65);
+        float2 targetPosition = float2(coordinate) + 0.5 +
+            float2(particle.PlasticOffsetX, particle.PlasticOffsetY + loadSag);
+        float2 resolvedPosition = lerp(float2(particle.PositionX, particle.PositionY), targetPosition, 0.16);
+        particle.PositionX = resolvedPosition.x;
+        particle.PositionY = resolvedPosition.y;
+        particle.VelocityX = 0;
+        particle.VelocityY = 0;
+        particle.Stress = nearbyStrain;
+        bond.MaximumStrain = nearbyStrain;
+        bond.AccumulatedLoad = lerp(bond.AccumulatedLoad, nearbyGranularLoad, 0.18);
         DestinationParticles[index] = particle;
         DestinationBonds[index] = bond;
         return;
@@ -117,7 +293,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (SolverIteration == 0)
     {
         float buoyancyRatio = displacedDensity / max(material.Density, 0.01);
-        velocity.y += Gravity * (1 - buoyancyRatio) * DeltaTime;
+        float structuralGravity = countbits(bond.ActiveNeighborMask) > 0 && (particle.IsDynamic & 4) == 0 ? 0.01 : 1;
+        velocity.y += Gravity * (1 - buoyancyRatio) * DeltaTime * structuralGravity;
         float fluidDrag = saturate(displacedDensity * 0.045);
         velocity = lerp(velocity, environmentalVelocity, fluidDrag);
     }
@@ -137,7 +314,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     for (uint neighbor = 0; neighbor < 8; neighbor++)
     {
         uint neighborBit = 1u << neighbor;
-        int2 neighborCoordinate = int2(dispatchThreadId.xy) + NeighborOffsets[neighbor];
+        int2 neighborCoordinate = int2(coordinate) + NeighborOffsets[neighbor];
         if (neighborCoordinate.x < 0 || neighborCoordinate.y < 0 || neighborCoordinate.x >= int(Width) || neighborCoordinate.y >= int(Height))
         {
             if (neighbor >= 4)
@@ -181,7 +358,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         float restLength = diagonal ? constraintBond.DiagonalRestLength : constraintBond.CardinalRestLength;
         float strain = abs(currentLength - restLength) / max(restLength, 0.0001);
         maximumStrain = max(maximumStrain, strain);
-        if (strain > constraintBond.PlasticLimit)
+        if (strain > constraintBond.PlasticLimit && material.FailureMode == 2 &&
+            (particle.IsDynamic & 4) == 0)
         {
             if (ownsConstraint)
             {
@@ -214,10 +392,24 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         correction /= activeConstraints;
     }
 
-    float externalLoad = CalculateExternalLoad(dispatchThreadId.xy, particle);
-    float loadStrain = externalLoad * 0.0025 / max(material.Density, 0.1);
+    float shapeMemory = 0;
+    if (material.FailureMode == 2 && loadStrain < material.PlasticLimit &&
+        (particle.IsDynamic & 4) == 0)
+    {
+        shapeMemory = 0.08;
+    }
+    if (activeConstraints > 0 && shapeMemory > 0)
+    {
+        float2 restPosition = float2(coordinate) + 0.5 +
+            float2(particle.PlasticOffsetX, particle.PlasticOffsetY);
+        correction += (restPosition - predictedPosition) * shapeMemory;
+    }
+
     maximumStrain = max(maximumStrain, loadStrain);
-    if (loadStrain > material.PlasticLimit)
+    float loadForceScale = material.FailureMode == 2 ? 0.35 : 3;
+    velocity.y += externalLoad / max(material.Density, 0.1) * DeltaTime * loadForceScale;
+    if (loadStrain > material.PlasticLimit && material.FailureMode == 2 &&
+        (particle.IsDynamic & 4) == 0)
     {
         uint weakestNeighbor = 4 + (HashValue(index ^ FrameIndex) & 3);
         activeMask &= ~(1u << weakestNeighbor);
@@ -240,22 +432,41 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         uint otherIndex = min(collisionCell.LatticeParticleIndex, ParticleCount - 1);
         LatticeParticle otherParticle = SourceParticles[otherIndex];
-        float2 otherVelocity = float2(otherParticle.VelocityX, otherParticle.VelocityY);
-        float relativeSpeed = length(velocity - otherVelocity);
-        float combinedMass = max(particle.Mass + otherParticle.Mass, 0.01);
-        velocity = (velocity * particle.Mass + otherVelocity * otherParticle.Mass) / combinedMass;
-        resolvedPosition = sourcePosition;
-        externalLoad += relativeSpeed * otherParticle.Mass;
-        maximumStrain = max(maximumStrain, relativeSpeed * 0.0015);
+        if (otherParticle.BodyId != particle.BodyId)
+        {
+            float2 otherVelocity = float2(otherParticle.VelocityX, otherParticle.VelocityY);
+            float relativeSpeed = length(velocity - otherVelocity);
+            float combinedMass = max(particle.Mass + otherParticle.Mass, 0.01);
+            velocity = (velocity * particle.Mass + otherVelocity * otherParticle.Mass) / combinedMass;
+            resolvedPosition = sourcePosition;
+            externalLoad += relativeSpeed * otherParticle.Mass;
+            maximumStrain = max(maximumStrain, relativeSpeed * 0.0015);
+        }
     }
 
     velocity += (resolvedPosition - predictedPosition) / max(substep, 0.0001) * 0.28;
-    velocity *= 0.996;
+    velocity *= activeConstraints > 0 ? 0.97 : 0.996;
+    if (length(velocity) < 0.02 && length(correction) < 0.001)
+    {
+        velocity = 0;
+    }
     particle.PositionX = resolvedPosition.x;
     particle.PositionY = resolvedPosition.y;
     particle.VelocityX = clamp(velocity.x, -MaximumVelocity, MaximumVelocity);
     particle.VelocityY = clamp(velocity.y, -MaximumVelocity, MaximumVelocity);
     particle.Stress = maximumStrain;
+    if (material.FailureMode == 1 && loadStrain > material.PlasticLimit)
+    {
+        float2 originalPosition = float2(coordinate) + 0.5;
+        float2 targetOffset = resolvedPosition - originalPosition;
+        targetOffset.y = max(targetOffset.y, min(30, (loadStrain - material.PlasticLimit) * 1000));
+        float2 plasticOffset = lerp(
+            float2(particle.PlasticOffsetX, particle.PlasticOffsetY),
+            targetOffset,
+            0.08);
+        particle.PlasticOffsetX = plasticOffset.x;
+        particle.PlasticOffsetY = plasticOffset.y;
+    }
     DestinationParticles[index] = particle;
 
     bond.ActiveNeighborMask = activeMask;
@@ -269,6 +480,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (diagonalPlasticSamples > 0)
     {
         bond.DiagonalRestLength = lerp(bond.DiagonalRestLength, diagonalPlasticLength / diagonalPlasticSamples, 0.035);
+    }
+
+    if (material.FailureMode == 1 && loadStrain > material.PlasticLimit)
+    {
+        float plasticGrowth = min((loadStrain - material.PlasticLimit) * 0.002, 0.001);
+        bond.CardinalRestLength *= 1 + plasticGrowth;
+        bond.DiagonalRestLength *= 1 + plasticGrowth;
     }
 
     DestinationBonds[index] = bond;

@@ -49,12 +49,13 @@ bool TryDisplaceCell(uint2 origin, GridCell displacedCell, LatticeParticle parti
 [numthreads(16, 16, 1)]
 void ClearLatticeOccupancy(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    if (dispatchThreadId.x >= Width || dispatchThreadId.y >= Height)
+    uint2 coordinate = dispatchThreadId.xy + uint2(DispatchOffsetX, DispatchOffsetY);
+    if (coordinate.x >= Width || coordinate.y >= Height)
     {
         return;
     }
 
-    uint index = FlattenCoordinate(dispatchThreadId.xy);
+    uint index = FlattenCoordinate(coordinate);
     GridCell cell = SourceGrid[index];
     if (cell.IsActive != 0 && Materials[cell.MaterialId].SimulationKind == 2)
     {

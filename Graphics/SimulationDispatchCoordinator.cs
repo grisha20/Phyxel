@@ -19,17 +19,21 @@ public sealed class SimulationDispatchCoordinator
     private bool presentationDirty = true;
     private bool lastStressView;
     private bool cellularMatter;
+    private bool fluidCellularMatter;
+    private bool cellularSleeping;
+    private int settledCellularObservations;
     private bool staticLatticeMatter;
+    private bool deformableLatticeMatter;
     private bool dynamicLatticeMatter;
-    private bool cellularRegionActive;
-    private int cellularMinimumX;
-    private int cellularMinimumY;
-    private int cellularMaximumX;
-    private int cellularMaximumY;
+    private bool latticeSleeping;
+    private int settledLatticeObservations;
+    private readonly SimulationDispatchRegion latticeRegion = new();
+    private readonly SimulationDispatchRegion cellularRegion = new();
 
     public ulong FullGridPhysicsDispatches { get; private set; }
     public ulong LocalTopologyDispatches { get; private set; }
     public ulong CompositionDispatches { get; private set; }
+    public bool CellularSleeping => cellularSleeping;
 
     public SimulationDispatchCoordinator(
         GpuResourceLifecycleManager lifecycleManager,
@@ -52,9 +56,16 @@ public sealed class SimulationDispatchCoordinator
             boundResources = resources;
             worldHasMatter = false;
             cellularMatter = false;
+            fluidCellularMatter = false;
+            cellularSleeping = false;
+            settledCellularObservations = 0;
             staticLatticeMatter = false;
+            deformableLatticeMatter = false;
             dynamicLatticeMatter = false;
-            cellularRegionActive = false;
+            latticeSleeping = false;
+            settledLatticeObservations = 0;
+            latticeRegion.Reset();
+            cellularRegion.Reset();
             presentationDirty = resources.IsSimulationAllocated;
         }
 
@@ -68,7 +79,7 @@ public sealed class SimulationDispatchCoordinator
             presentationDirty = true;
         }
 
-        if (!settings.Paused && dynamicLatticeMatter)
+        if (!settings.Paused && dynamicLatticeMatter && !latticeSleeping)
         {
             int iterations = Math.Clamp(settings.SolverIterations, 1, 8);
             for (int iteration = 0; iteration < iterations; iteration++)
@@ -81,11 +92,20 @@ public sealed class SimulationDispatchCoordinator
             presentationDirty = true;
         }
 
-        if (!settings.Paused && cellularMatter)
+        if (!settings.Paused && cellularMatter && !cellularSleeping)
         {
+            cellularRegion.Grow(
+                resources.Width,
+                resources.Height,
+                fluidCellularMatter ? 1 : 0,
+                fluidCellularMatter ? 1 : 0,
+                fluidCellularMatter ? 1 : 2);
             DispatchCellularAutomata(resources, ref constants);
-            DispatchCellularAutomata(resources, ref constants);
-            presentationDirty = true;
+            if (fluidCellularMatter)
+            {
+                DispatchCellularAutomata(resources, ref constants);
+            }
+            presentationDirty |= fluidCellularMatter || frameIndex % 2 == 0;
         }
 
         presentationDirty |= resources.IsSimulationAllocated && lastStressView != settings.StressView;
@@ -108,9 +128,16 @@ public sealed class SimulationDispatchCoordinator
         boundResources = resources;
         worldHasMatter = false;
         cellularMatter = false;
+        fluidCellularMatter = false;
+        cellularSleeping = false;
+        settledCellularObservations = 0;
         staticLatticeMatter = false;
+        deformableLatticeMatter = false;
         dynamicLatticeMatter = false;
-        cellularRegionActive = false;
+        latticeSleeping = false;
+        settledLatticeObservations = 0;
+        latticeRegion.Reset();
+        cellularRegion.Reset();
         presentationDirty = resources.IsSimulationAllocated;
     }
 
@@ -119,13 +146,16 @@ public sealed class SimulationDispatchCoordinator
         boundResources = resources;
         worldHasMatter = containsMatter;
         cellularMatter = containsMatter;
+        fluidCellularMatter = containsMatter;
+        cellularSleeping = false;
+        settledCellularObservations = 0;
         staticLatticeMatter = containsMatter;
+        deformableLatticeMatter = containsMatter;
         dynamicLatticeMatter = containsMatter;
-        cellularRegionActive = containsMatter;
-        cellularMinimumX = 0;
-        cellularMinimumY = 0;
-        cellularMaximumX = resources.Width;
-        cellularMaximumY = resources.Height;
+        latticeSleeping = false;
+        settledLatticeObservations = 0;
+        latticeRegion.SetFull(resources.Width, resources.Height);
+        cellularRegion.SetFull(resources.Width, resources.Height);
         presentationDirty = resources.IsSimulationAllocated;
     }
 
@@ -137,13 +167,35 @@ public sealed class SimulationDispatchCoordinator
         }
 
         lastObservedStatisticsFrame = statistics.FrameIndex;
+        bool cellularSettled = statistics.ActiveCells > 0 && statistics.Reserved >= statistics.ActiveCells;
+        settledCellularObservations = cellularSettled ? settledCellularObservations + 1 : 0;
+        if (cellularMatter && settledCellularObservations >= 2)
+        {
+            cellularSleeping = true;
+        }
+
+        bool latticeSettled = dynamicLatticeMatter && statistics.MovingParticles == 0 &&
+            (!cellularMatter || cellularSleeping);
+        settledLatticeObservations = latticeSettled ? settledLatticeObservations + 1 : 0;
+        if (settledLatticeObservations >= 2)
+        {
+            latticeSleeping = true;
+        }
+
         if (statistics.ActiveParticles == 0 && statistics.ActiveCells == 0)
         {
             worldHasMatter = false;
             cellularMatter = false;
+            fluidCellularMatter = false;
+            cellularSleeping = false;
+            settledCellularObservations = 0;
             staticLatticeMatter = false;
+            deformableLatticeMatter = false;
             dynamicLatticeMatter = false;
-            cellularRegionActive = false;
+            latticeSleeping = false;
+            settledLatticeObservations = 0;
+            latticeRegion.Reset();
+            cellularRegion.Reset();
         }
     }
 
@@ -199,18 +251,15 @@ public sealed class SimulationDispatchCoordinator
         ref SimulationFrameConstants constants)
     {
         DeviceContext context = resources.Context;
-        GrowCellularRegion(resources.Width, resources.Height, 5);
-        int regionWidth = Math.Max(1, cellularMaximumX - cellularMinimumX);
-        int regionHeight = Math.Max(1, cellularMaximumY - cellularMinimumY);
-        constants.DispatchOffsetX = (uint)cellularMinimumX;
-        constants.DispatchOffsetY = (uint)cellularMinimumY;
-        ReadOnlySpan<uint> phases =
-        [
-            4, 5, 6, 7, 8, 9,
-            2, 3, 2, 3, 2, 3, 2, 3,
-            0, 1, 0, 1, 0, 1, 0, 1,
-            0, 1, 0, 1, 0, 1, 0, 1
-        ];
+        cellularRegion.Get(resources.Width, resources.Height, out int x, out int y, out int regionWidth, out int regionHeight);
+        constants.DispatchOffsetX = (uint)x;
+        constants.DispatchOffsetY = (uint)y;
+        ReadOnlySpan<uint> phases = fluidCellularMatter && (frameIndex >= 32 || frameIndex % 4 != 1)
+            ? [4, 5, 6, 7, 8, 9, 2, 3, 2, 3, 2, 3, 2, 3,
+                0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+            : fluidCellularMatter
+            ? [4, 2, 3, 2, 3, 0, 1, 0, 1]
+            : [4, 2, 3, 0, 1];
         foreach (uint phase in phases)
         {
             constants.SimulationPhase = phase;
@@ -234,17 +283,24 @@ public sealed class SimulationDispatchCoordinator
         ref SimulationFrameConstants constants)
     {
         DeviceContext context = resources.Context;
+        latticeRegion.Get(resources.Width, resources.Height, out int x, out int y, out int width, out int height);
+        context.CopyResource(resources.Grid.ReadBuffer, resources.Grid.WriteBuffer);
+        constants.DispatchOffsetX = (uint)x;
+        constants.DispatchOffsetY = (uint)y;
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.LatticeOccupancyClearShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
         context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, null!, resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.WriteUnorderedView);
-        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        context.Dispatch(DivideRoundUp(width, 16), DivideRoundUp(height, 16), 1);
         FullGridPhysicsDispatches++;
         Unbind(context, 3, 1);
         resources.Grid.Swap();
 
         context.CopyResource(resources.Grid.ReadBuffer, resources.Grid.WriteBuffer);
+        constants.DispatchOffsetX = 0;
+        constants.DispatchOffsetY = 0;
+        UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.LatticeProjectionShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
         context.ComputeShader.SetShaderResources(0, null!, resources.Particles.ReadView, resources.Materials.View);
@@ -260,6 +316,9 @@ public sealed class SimulationDispatchCoordinator
         ref SimulationFrameConstants constants)
     {
         DeviceContext context = resources.Context;
+        latticeRegion.Get(resources.Width, resources.Height, out int x, out int y, out int width, out int height);
+        constants.DispatchOffsetX = (uint)x;
+        constants.DispatchOffsetY = (uint)y;
         context.CopyResource(resources.Particles.ReadBuffer, resources.Particles.WriteBuffer);
         context.CopyResource(resources.Bonds.ReadBuffer, resources.Bonds.WriteBuffer);
         UpdateConstants(context, resources, ref constants);
@@ -275,11 +334,13 @@ public sealed class SimulationDispatchCoordinator
             0,
             resources.Particles.WriteUnorderedView,
             resources.Bonds.WriteUnorderedView);
-        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        context.Dispatch(DivideRoundUp(width, 16), DivideRoundUp(height, 16), 1);
         FullGridPhysicsDispatches++;
         Unbind(context, 4, 2);
         resources.Particles.Swap();
         resources.Bonds.Swap();
+        constants.DispatchOffsetX = 0;
+        constants.DispatchOffsetY = 0;
     }
 
     private void DispatchComposition(
@@ -287,7 +348,12 @@ public sealed class SimulationDispatchCoordinator
         ref SimulationFrameConstants constants)
     {
         DeviceContext context = resources.Context;
-        context.ClearUnorderedAccessView(resources.Statistics.WriteUnorderedView, new RawInt4(0, 0, 0, 0));
+        bool collectStatistics = frameIndex % 30 == 0;
+        if (collectStatistics)
+        {
+            context.ClearUnorderedAccessView(resources.Statistics.WriteUnorderedView, new RawInt4(0, 0, 0, 0));
+        }
+        constants.SimulationPhase = collectStatistics ? 1u : 0u;
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.CompositionShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
@@ -304,7 +370,11 @@ public sealed class SimulationDispatchCoordinator
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
         CompositionDispatches++;
         Unbind(context, 4, 2);
-        resources.Statistics.Swap();
+        if (collectStatistics)
+        {
+            resources.Statistics.Swap();
+        }
+        constants.SimulationPhase = 0;
         context.CopyResource(resources.CompositionTargets.WriteTexture, resources.NativePresentationTexture);
         resources.CompositionTargets.Swap();
     }
@@ -414,7 +484,7 @@ public sealed class SimulationDispatchCoordinator
         int maximumY = 0;
         foreach (BrushDrawCommand command in commands)
         {
-            requiresBodyActivation |= command.Mode != 0 || command.MaterialId == 5;
+            requiresBodyActivation |= command.Mode == 1 || command.MaterialId == 5;
             int radius = (int)MathF.Ceiling(command.Radius) + 1;
             minimumX = Math.Min(minimumX, command.X - radius);
             minimumY = Math.Min(minimumY, command.Y - radius);
@@ -443,9 +513,23 @@ public sealed class SimulationDispatchCoordinator
     {
         foreach (BrushDrawCommand command in commands)
         {
+            if (command.Mode == 2)
+            {
+                cellularSleeping = false;
+                settledCellularObservations = 0;
+                cellularRegion.Include(command, 2);
+                dynamicLatticeMatter |= deformableLatticeMatter;
+                latticeSleeping = false;
+                settledLatticeObservations = 0;
+                continue;
+            }
+
             if (command.Mode != 0 || command.MaterialId == (uint)MaterialId.Eraser)
             {
-                dynamicLatticeMatter |= staticLatticeMatter;
+                dynamicLatticeMatter |= deformableLatticeMatter;
+                latticeSleeping = false;
+                settledLatticeObservations = 0;
+                latticeRegion.Reset();
                 continue;
             }
 
@@ -454,53 +538,34 @@ public sealed class SimulationDispatchCoordinator
             if (kind == MaterialSimulationKind.Lattice)
             {
                 staticLatticeMatter = true;
+                deformableLatticeMatter |= materialRegistry[(MaterialId)command.MaterialId].Properties.FailureMode != 0;
+                latticeRegion.Include(command, 16);
+                if (cellularMatter && deformableLatticeMatter)
+                {
+                    dynamicLatticeMatter = true;
+                    latticeSleeping = false;
+                    settledLatticeObservations = 0;
+                }
             }
             else if (kind is MaterialSimulationKind.Granular or MaterialSimulationKind.Liquid or MaterialSimulationKind.Gas)
             {
                 cellularMatter = true;
-                IncludeCellularCommand(command);
+                fluidCellularMatter |= kind is MaterialSimulationKind.Liquid or MaterialSimulationKind.Gas;
+                cellularSleeping = false;
+                settledCellularObservations = 0;
+                cellularRegion.Include(command, 2);
+                if (kind is MaterialSimulationKind.Liquid or MaterialSimulationKind.Gas && staticLatticeMatter)
+                {
+                    cellularRegion.Include(latticeRegion);
+                }
+                if (kind == MaterialSimulationKind.Granular && deformableLatticeMatter)
+                {
+                    dynamicLatticeMatter = true;
+                    latticeSleeping = false;
+                    settledLatticeObservations = 0;
+                }
             }
         }
     }
 
-    private void IncludeCellularCommand(BrushDrawCommand command)
-    {
-        int radius = (int)MathF.Ceiling(command.Radius) + 2;
-        int left = command.X - radius;
-        int top = command.Y - radius;
-        int right = command.X + radius + 1;
-        int bottom = command.Y + radius + 1;
-        if (!cellularRegionActive)
-        {
-            cellularMinimumX = left;
-            cellularMinimumY = top;
-            cellularMaximumX = right;
-            cellularMaximumY = bottom;
-            cellularRegionActive = true;
-            return;
-        }
-
-        cellularMinimumX = Math.Min(cellularMinimumX, left);
-        cellularMinimumY = Math.Min(cellularMinimumY, top);
-        cellularMaximumX = Math.Max(cellularMaximumX, right);
-        cellularMaximumY = Math.Max(cellularMaximumY, bottom);
-    }
-
-    private void GrowCellularRegion(int width, int height, int amount)
-    {
-        if (!cellularRegionActive)
-        {
-            cellularMinimumX = 0;
-            cellularMinimumY = 0;
-            cellularMaximumX = width;
-            cellularMaximumY = height;
-            cellularRegionActive = true;
-            return;
-        }
-
-        cellularMinimumX = Math.Max(0, cellularMinimumX - amount);
-        cellularMinimumY = Math.Max(0, cellularMinimumY - amount);
-        cellularMaximumX = Math.Min(width, cellularMaximumX + amount);
-        cellularMaximumY = Math.Min(height, cellularMaximumY + amount);
-    }
 }
