@@ -52,6 +52,7 @@ void ComposePixel(uint2 coordinate, bool collectStatistics)
 {
     uint index = FlattenCoordinate(coordinate);
     GridCell cell = Grid[index];
+    bool exactLatticeCell = cell.IsActive != 0;
     float visualWater = cell.IsActive == 0 ? WaterCoverage(coordinate) : 0;
     if (cell.IsActive == 0 && visualWater <= 0.02)
     {
@@ -70,6 +71,7 @@ void ComposePixel(uint2 coordinate, bool collectStatistics)
                 if (neighborCell.IsActive != 0 && Materials[neighborCell.MaterialId].SimulationKind == 2)
                 {
                     cell = neighborCell;
+                    exactLatticeCell = false;
                     break;
                 }
             }
@@ -104,13 +106,15 @@ void ComposePixel(uint2 coordinate, bool collectStatistics)
             LatticeParticle particle = Particles[particleIndex];
             LatticeBond bond = Bonds[particleIndex];
             float stress = max(particle.Stress, bond.MaximumStrain);
-            if (Materials[cell.MaterialId].FailureMode == 2 && stress > bond.ElasticLimit)
+            uint failureMode = Materials[cell.MaterialId].FailureMode;
+            if (exactLatticeCell && failureMode != 0 && stress > bond.ElasticLimit)
             {
-                float crack = saturate((stress - bond.ElasticLimit) /
+                float overload = saturate((stress - bond.ElasticLimit) /
                     max(bond.PlasticLimit - bond.ElasticLimit, 0.001));
-                color.rgb = lerp(color.rgb, float3(0.95, 0.025, 0.015), crack);
+                float overlay = failureMode == 1 ? 0.18 + overload * 0.5 : overload;
+                color.rgb = lerp(color.rgb, float3(0.95, 0.025, 0.015), overlay);
             }
-            if (StressView != 0)
+            if (StressView != 0 && exactLatticeCell)
             {
                 color.rgb = lerp(color.rgb, float3(1, 0.08, 0.03), saturate(stress * 8));
             }

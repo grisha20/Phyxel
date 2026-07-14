@@ -25,8 +25,146 @@ public static class SpecificationRegressionScenario
             SpecificationScenarioMode.RestWater => CreateWaterRest(frame, height),
             SpecificationScenarioMode.WaterSlope => CreateWaterSlope(frame),
             SpecificationScenarioMode.SandSlope => CreateSandSlope(frame, height),
+            SpecificationScenarioMode.AcceptanceBowl => CreateAcceptanceBowl(frame),
+            SpecificationScenarioMode.AcceptanceBeam => CreateAcceptanceBeam(frame, height),
+            SpecificationScenarioMode.AcceptanceSand => CreateAcceptanceSand(frame),
+            SpecificationScenarioMode.AcceptanceColors => CreateAcceptanceColors(frame, height),
+            SpecificationScenarioMode.AcceptanceMetalCritical => CreateAcceptanceMetalCritical(frame, height),
             _ => []
         };
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateAcceptanceBowl(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> bowl = [];
+            AddLine(bowl, 114, 114, 114, 225, 4, 4.5f, MaterialId.Metal, 8001);
+            AddLine(bowl, 115, 114, 115, 225, 4, 4.5f, MaterialId.Metal, 8001);
+            AddLine(bowl, 324, 114, 324, 225, 4, 4.5f, MaterialId.Metal, 8001);
+            AddLine(bowl, 325, 114, 325, 225, 4, 4.5f, MaterialId.Metal, 8001);
+            AddLine(bowl, 114, 224, 325, 224, 4, 4.5f, MaterialId.Metal, 8001);
+            AddLine(bowl, 114, 225, 325, 225, 4, 4.5f, MaterialId.Metal, 8001);
+            return bowl;
+        }
+
+        if (frame == 2)
+        {
+            return AddFill(120, 170, 319, 219, 7, 5, MaterialId.Water);
+        }
+
+        return frame == 140
+            ? AddFill(125, 130, 314, 159, 7, 4, MaterialId.Sand)
+            : [];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateAcceptanceBeam(uint frame, int height)
+    {
+        const int beamY = 150;
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> supports = [];
+            AddLine(supports, 116, beamY, 116, height - 8, 5, 4, MaterialId.Fixture, 8102);
+            AddLine(supports, 324, beamY, 324, height - 8, 5, 4, MaterialId.Fixture, 8103);
+            return supports;
+        }
+
+        if (frame is 1 or 2)
+        {
+            List<BrushDrawCommand> beam = [];
+            AddLine(beam, 120, beamY + (int)frame - 2, 319, beamY + (int)frame - 2,
+                1, 0.49f, MaterialId.Metal, 8101);
+            return beam;
+        }
+
+        if (frame == 10)
+        {
+            return AddFill(174, 95, 266, 119, 4, 4, MaterialId.Sand);
+        }
+
+        return frame switch
+        {
+            11 => AddFill(174, 123, 266, 145, 4, 4, MaterialId.Sand),
+            190 => AddFill(174, 44, 266, 68, 4, 4, MaterialId.Sand),
+            191 => AddFill(174, 72, 266, 94, 4, 4, MaterialId.Sand),
+            _ => []
+        };
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateAcceptanceSand(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> floor = [];
+            AddLine(floor, 90, 245, 390, 245, 5, 4, MaterialId.Fixture, 8201);
+            return floor;
+        }
+
+        if (frame != 1)
+        {
+            return [];
+        }
+
+        BrushDrawCommand command = Create(240, 75, 25, MaterialId.Sand, 0, 0);
+        command.Density = 0.51f;
+        command.Seed = 820001;
+        return [command];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateAcceptanceColors(uint frame, int height)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> supports = [];
+            AddLine(supports, 15, 175, 15, 240, 5, 4, MaterialId.Fixture, 8301);
+            AddLine(supports, 115, 175, 115, 240, 5, 4, MaterialId.Fixture, 8301);
+            AddLine(supports, 15, 240, 115, 240, 5, 4, MaterialId.Fixture, 8301);
+            AddLine(supports, 120, 240, 250, 240, 5, 4, MaterialId.Fixture, 8302);
+            AddLine(supports, 260, 150, 260, height - 8, 5, 4, MaterialId.Fixture, 8304);
+            AddLine(supports, 468, 150, 468, height - 8, 5, 4, MaterialId.Fixture, 8305);
+            return supports;
+        }
+
+        if (frame is 1 or 2)
+        {
+            List<BrushDrawCommand> beam = [];
+            AddLine(beam, 264, 149 + (int)frame - 1, 463, 149 + (int)frame - 1,
+                1, 0.49f, MaterialId.Metal, 8303);
+            return beam;
+        }
+
+        return frame switch
+        {
+            3 => AddFill(22, 195, 108, 233, 7, 5, MaterialId.Water),
+            4 => AddFill(148, 170, 222, 234, 7, 3.5f, MaterialId.Sand),
+            5 => AddFill(325, 40, 402, 145, 7, 3.5f, MaterialId.Sand),
+            _ => []
+        };
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateAcceptanceMetalCritical(uint frame, int height)
+    {
+        const int beamY = 150;
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> supports = [];
+            AddLine(supports, 116, beamY, 116, height - 8, 5, 4, MaterialId.Fixture, 8402);
+            AddLine(supports, 324, beamY, 324, height - 8, 5, 4, MaterialId.Fixture, 8403);
+            return supports;
+        }
+
+        if (frame is 1 or 2)
+        {
+            List<BrushDrawCommand> beam = [];
+            AddLine(beam, 120, beamY + (int)frame - 2, 319, beamY + (int)frame - 2,
+                1, 0.49f, MaterialId.Metal, 8401);
+            return beam;
+        }
+
+        return frame == 10
+            ? [Create(220, 48, 48, MaterialId.Sand, 0, 0),
+                Create(220, 101, 48, MaterialId.Sand, 0, 0)]
+            : [];
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateSandSlope(uint frame, int height)

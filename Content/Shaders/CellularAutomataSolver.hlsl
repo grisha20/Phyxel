@@ -7,6 +7,7 @@ RWStructuredBuffer<GridCell> SourceGrid : register(u0);
 
 static const uint RestingThreshold = 240;
 static const float MassTransferEpsilon = 0.0005;
+static const float QuiescentTransferThreshold = 0.04;
 
 float StableLowerMass(float totalMass)
 {
@@ -150,7 +151,9 @@ void ResolveVerticalPair(uint2 upperCoordinate)
     uint upperKind = CellKind(upper);
     uint lowerKind = CellKind(lower);
 
-    if (CellIsResting(upper) && CellIsResting(lower))
+    bool unstableDensityOrder = upper.IsActive != 0 && lower.IsActive != 0 &&
+        upper.MaterialId != lower.MaterialId && CellDensity(upper) > CellDensity(lower);
+    if (CellIsResting(upper) && CellIsResting(lower) && !unstableDensityOrder)
     {
         return;
     }
@@ -251,18 +254,21 @@ void ResolveVerticalPair(uint2 upperCoordinate)
     resolvedUpper.Reserved = upper.IsActive != 0 ? upper.Reserved : 0;
     resolvedLower.Reserved = lower.IsActive != 0 ? lower.Reserved : 0;
     float transferredMass = lowerMass - lower.Mass;
-    if (abs(transferredMass) <= MassTransferEpsilon)
+    if (abs(transferredMass) <= QuiescentTransferThreshold)
     {
-        resolvedUpper.VelocityY = upper.VelocityY;
-        resolvedLower.VelocityY = lower.VelocityY;
+        resolvedUpper.VelocityY = 0;
+        resolvedLower.VelocityY = 0;
+    }
+    else
+    {
+        resolvedUpper.VelocityY = max(-MaximumVelocity, min(MaximumVelocity, upper.VelocityY - transferredMass * 60));
+        resolvedLower.VelocityY = max(-MaximumVelocity, min(MaximumVelocity, lower.VelocityY + transferredMass * 60));
     }
     if (resolvedUpper.IsActive != upper.IsActive || resolvedLower.IsActive != lower.IsActive)
     {
         resolvedUpper.Reserved = 0;
         resolvedLower.Reserved = 0;
     }
-    resolvedUpper.VelocityY = max(-MaximumVelocity, min(MaximumVelocity, upper.VelocityY - transferredMass * 60));
-    resolvedLower.VelocityY = max(-MaximumVelocity, min(MaximumVelocity, lower.VelocityY + transferredMass * 60));
     DestinationGrid[upperIndex] = resolvedUpper;
     DestinationGrid[lowerIndex] = resolvedLower;
 }
@@ -274,23 +280,9 @@ bool CanGranularMoveDiagonally(uint2 sourceCoordinate, uint2 destinationCoordina
         return false;
     }
 
-    GridCell source = SourceGrid[FlattenCoordinate(sourceCoordinate)];
-    float staticFriction = Materials[source.MaterialId].Friction;
-    if (HashUnitFloat(FlattenCoordinate(destinationCoordinate) * 2654435761u) < staticFriction * 1.25)
-    {
-        return false;
-    }
-
     GridCell support = SourceGrid[FlattenCoordinate(uint2(sourceCoordinate.x, sourceCoordinate.y + 1))];
     GridCell destinationBelow = SourceGrid[FlattenCoordinate(uint2(destinationCoordinate.x, destinationCoordinate.y + 1))];
-    if (support.IsActive == 0 || destinationBelow.IsActive != 0 || destinationCoordinate.y + 3 >= Height)
-    {
-        return false;
-    }
-
-    GridCell destinationTwoBelow = SourceGrid[FlattenCoordinate(uint2(destinationCoordinate.x, destinationCoordinate.y + 2))];
-    GridCell destinationThreeBelow = SourceGrid[FlattenCoordinate(uint2(destinationCoordinate.x, destinationCoordinate.y + 3))];
-    return destinationTwoBelow.IsActive == 0 && destinationThreeBelow.IsActive == 0;
+    return support.IsActive != 0 && destinationBelow.IsActive == 0;
 }
 
 void ResolveHorizontalPair(uint2 leftCoordinate)
@@ -368,15 +360,15 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
         resolvedRight.Pressure = right.IsActive != 0 ? right.Pressure : templateCell.Pressure;
         resolvedLeft.Reserved = left.IsActive != 0 ? left.Reserved : 0;
         resolvedRight.Reserved = right.IsActive != 0 ? right.Reserved : 0;
-        if (abs(transferredMass) > MassTransferEpsilon)
+        if (abs(transferredMass) > QuiescentTransferThreshold)
         {
             resolvedLeft.VelocityX = lerp(left.VelocityX, -transferredMass * 60, 0.55);
             resolvedRight.VelocityX = lerp(right.VelocityX, transferredMass * 60, 0.55);
         }
         else
         {
-            resolvedLeft.VelocityX = left.VelocityX;
-            resolvedRight.VelocityX = right.VelocityX;
+            resolvedLeft.VelocityX = 0;
+            resolvedRight.VelocityX = 0;
         }
         if (resolvedLeft.IsActive != left.IsActive || resolvedRight.IsActive != right.IsActive)
         {

@@ -167,7 +167,9 @@ public sealed class SimulationDispatchCoordinator
         }
 
         lastObservedStatisticsFrame = statistics.FrameIndex;
-        bool cellularSettled = statistics.ActiveCells > 0 && statistics.Reserved >= statistics.ActiveCells;
+        uint unsettledTolerance = Math.Max(1u, statistics.ActiveCells / 50000);
+        bool cellularSettled = statistics.ActiveCells > 0 &&
+            statistics.Reserved + unsettledTolerance >= statistics.ActiveCells;
         settledCellularObservations = cellularSettled ? settledCellularObservations + 1 : 0;
         if (cellularMatter && settledCellularObservations >= 2)
         {

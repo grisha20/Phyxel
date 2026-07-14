@@ -437,9 +437,15 @@ public sealed class PhyxelGame : Game
                     out _);
                 if (!specificationPassed)
                 {
+                    Environment.ExitCode = 1;
                     Exit();
                     return;
                 }
+
+                pendingWorldCapture = false;
+                Console.WriteLine("PHYXEL_VERIFY_SUCCESS");
+                Exit();
+                return;
             }
 
             pendingWorldCapture = false;

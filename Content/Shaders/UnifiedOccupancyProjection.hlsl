@@ -7,40 +7,31 @@ RWStructuredBuffer<GridCell> DestinationGrid : register(u0);
 
 bool TryDisplaceCell(uint2 origin, GridCell displacedCell, LatticeParticle particle)
 {
-    int horizontalDirection = particle.VelocityX < 0 ? -1 : 1;
-    int2 offsets[8] =
+    for (int verticalDistance = 1; verticalDistance <= 8; verticalDistance++)
     {
-        int2(horizontalDirection, 0),
-        int2(-horizontalDirection, 0),
-        int2(0, -1),
-        int2(horizontalDirection, -1),
-        int2(-horizontalDirection, -1),
-        int2(horizontalDirection, 1),
-        int2(-horizontalDirection, 1),
-        int2(0, 1)
-    };
-    for (uint candidate = 0; candidate < 8; candidate++)
-    {
-        int2 coordinate = int2(origin) + offsets[candidate];
-        if (coordinate.x < 0 || coordinate.y < 0 || coordinate.x >= int(Width) || coordinate.y >= int(Height))
+        for (int horizontalOffset = -verticalDistance; horizontalOffset <= verticalDistance; horizontalOffset++)
         {
-            continue;
-        }
+            int2 coordinate = int2(origin) + int2(horizontalOffset, -verticalDistance);
+            if (coordinate.x < 0 || coordinate.y < 0 || coordinate.x >= int(Width) || coordinate.y >= int(Height))
+            {
+                continue;
+            }
 
-        uint destinationIndex = FlattenCoordinate(uint2(coordinate));
-        uint originalState;
-        InterlockedCompareExchange(DestinationGrid[destinationIndex].IsActive, 0, 2, originalState);
-        if (originalState != 0)
-        {
-            continue;
-        }
+            uint destinationIndex = FlattenCoordinate(uint2(coordinate));
+            uint originalState;
+            InterlockedCompareExchange(DestinationGrid[destinationIndex].IsActive, 0, 2, originalState);
+            if (originalState != 0)
+            {
+                continue;
+            }
 
-        displacedCell.VelocityX += particle.VelocityX * 0.65;
-        displacedCell.VelocityY += particle.VelocityY * 0.65;
-        displacedCell.Pressure += length(float2(particle.VelocityX, particle.VelocityY)) * particle.Mass * 0.01;
-        displacedCell.IsActive = 1;
-        DestinationGrid[destinationIndex] = displacedCell;
-        return true;
+            displacedCell.VelocityX += particle.VelocityX * 0.65;
+            displacedCell.VelocityY += particle.VelocityY * 0.65;
+            displacedCell.Pressure += length(float2(particle.VelocityX, particle.VelocityY)) * particle.Mass * 0.01;
+            displacedCell.IsActive = 1;
+            DestinationGrid[destinationIndex] = displacedCell;
+            return true;
+        }
     }
 
     return false;

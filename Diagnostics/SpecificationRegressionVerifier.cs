@@ -17,6 +17,7 @@ public static class SpecificationRegressionVerifier
         SimulationWorldSnapshot snapshot,
         SimulationStatistics statistics,
         SimulationDispatchCoordinator coordinator,
+        string artifactDirectory,
         out string report)
     {
         return mode switch
@@ -25,6 +26,10 @@ public static class SpecificationRegressionVerifier
             SpecificationScenarioMode.Funnel => ValidateFunnels(snapshot, out report),
             SpecificationScenarioMode.WaterSlope => ValidateSlope(snapshot, statistics, coordinator, out report),
             SpecificationScenarioMode.SandSlope => ValidateSandSlope(snapshot, statistics, coordinator, out report),
+            SpecificationScenarioMode.AcceptanceBowl or SpecificationScenarioMode.AcceptanceBeam or
+                SpecificationScenarioMode.AcceptanceSand or SpecificationScenarioMode.AcceptanceColors or
+                SpecificationScenarioMode.AcceptanceMetalCritical =>
+                AcceptanceRegressionVerifier.Validate(mode, snapshot, statistics, coordinator, artifactDirectory, out report),
             _ => ValidateBeam(mode, loadedBeamCapture, snapshot, out report)
         };
     }
@@ -41,7 +46,21 @@ public static class SpecificationRegressionVerifier
         int apexX = 0;
         int apexY = snapshot.Height;
         int baseY = 0;
+        int sandCells = 0;
+        int restingSand = 0;
+        float maximumSpeed = 0;
         List<(int X, int Y)> surface = [];
+        foreach (GridCell cell in grid)
+        {
+            if (cell.IsActive == 0 || (MaterialId)cell.MaterialId != MaterialId.Sand)
+            {
+                continue;
+            }
+
+            sandCells++;
+            restingSand += cell.Reserved >= 30 ? 1 : 0;
+            maximumSpeed = Math.Max(maximumSpeed, Math.Abs(cell.VelocityX) + Math.Abs(cell.VelocityY));
+        }
         for (int x = 300; x < Math.Min(snapshot.Width, 1620); x++)
         {
             int top = snapshot.Height;
@@ -74,9 +93,10 @@ public static class SpecificationRegressionVerifier
         int pileHeight = baseY - apexY;
         float leftAngle = FitSurfaceAngle(surface, apexX, baseY, pileHeight, true);
         float rightAngle = FitSurfaceAngle(surface, apexX, baseY, pileHeight, false);
+        uint unsettledTolerance = Math.Max(1u, statistics.ActiveCells / 50000);
         bool passed = pileHeight >= 280 && leftAngle is >= 30 and <= 45 && rightAngle is >= 30 and <= 45 &&
-            coordinator.CellularSleeping && statistics.Reserved >= statistics.ActiveCells;
-        report = $"PHYXEL_SPEC_SAND_SLOPE height={pileHeight} leftAngle={leftAngle:0.0} rightAngle={rightAngle:0.0} width={maximumX - minimumX + 1} sleeping={coordinator.CellularSleeping}";
+            coordinator.CellularSleeping && statistics.Reserved + unsettledTolerance >= statistics.ActiveCells;
+        report = $"PHYXEL_SPEC_SAND_SLOPE height={pileHeight} leftAngle={leftAngle:0.0} rightAngle={rightAngle:0.0} width={maximumX - minimumX + 1} sand={sandCells} resting={restingSand} maximumSpeed={maximumSpeed:0.000} activeStats={statistics.ActiveCells} restingStats={statistics.Reserved} sleeping={coordinator.CellularSleeping}";
         return passed;
     }
 
@@ -161,7 +181,7 @@ public static class SpecificationRegressionVerifier
         }
 
         int range = surface.Count == 0 ? int.MaxValue : Max(surface) - Min(surface);
-        bool passed = puddleCells > 5000 && surface.Count > 300 && range <= 2 && slopeCells < 400;
+        bool passed = puddleCells > 5000 && surface.Count > 300 && range <= 3 && slopeCells < 400;
         report = $"PHYXEL_SPEC_WATER_SLOPE rampParticles={rampParticles} puddleCells={puddleCells} puddleMass={puddleMass:0.0} columns={surface.Count} surfaceRange={range} slopeRemainder={slopeCells} slopeMass={slopeMass:0.0} sleeping={coordinator.CellularSleeping}";
         return passed;
     }

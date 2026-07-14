@@ -19,7 +19,12 @@ public enum SpecificationScenarioMode
     RestSand,
     RestWater,
     WaterSlope,
-    SandSlope
+    SandSlope,
+    AcceptanceBowl,
+    AcceptanceBeam,
+    AcceptanceSand,
+    AcceptanceColors,
+    AcceptanceMetalCritical
 }
 
 public sealed class SpecificationRegressionHarness
@@ -46,6 +51,11 @@ public sealed class SpecificationRegressionHarness
             "rest_water" => SpecificationScenarioMode.RestWater,
             "water_slope" => SpecificationScenarioMode.WaterSlope,
             "sand_slope" => SpecificationScenarioMode.SandSlope,
+            "acceptance_bowl" => SpecificationScenarioMode.AcceptanceBowl,
+            "acceptance_beam" => SpecificationScenarioMode.AcceptanceBeam,
+            "acceptance_sand" => SpecificationScenarioMode.AcceptanceSand,
+            "acceptance_colors" => SpecificationScenarioMode.AcceptanceColors,
+            "acceptance_metal_critical" => SpecificationScenarioMode.AcceptanceMetalCritical,
             _ => SpecificationScenarioMode.None
         };
         if (Mode is SpecificationScenarioMode.RestSand or SpecificationScenarioMode.RestWater)
@@ -58,7 +68,9 @@ public sealed class SpecificationRegressionHarness
     public bool Active => Mode != SpecificationScenarioMode.None;
     public bool RequiresQuarterScale => Mode is SpecificationScenarioMode.MetalElastic or
         SpecificationScenarioMode.MetalPlastic or SpecificationScenarioMode.ConcreteCrack or
-        SpecificationScenarioMode.ConcreteBreak;
+        SpecificationScenarioMode.ConcreteBreak or SpecificationScenarioMode.AcceptanceBowl or
+        SpecificationScenarioMode.AcceptanceBeam or SpecificationScenarioMode.AcceptanceSand or
+        SpecificationScenarioMode.AcceptanceColors or SpecificationScenarioMode.AcceptanceMetalCritical;
     public uint CaptureFrame => loadedBeamCapture && Mode is SpecificationScenarioMode.MetalElastic or
         SpecificationScenarioMode.MetalPlastic
         ? 230
@@ -69,7 +81,12 @@ public sealed class SpecificationRegressionHarness
         SpecificationScenarioMode.MetalElastic or SpecificationScenarioMode.MetalPlastic => 420,
         SpecificationScenarioMode.ConcreteCrack or SpecificationScenarioMode.ConcreteBreak => 300,
         SpecificationScenarioMode.WaterSlope => 900,
-        SpecificationScenarioMode.SandSlope => 600,
+        SpecificationScenarioMode.SandSlope => 720,
+        SpecificationScenarioMode.AcceptanceBowl => 540,
+        SpecificationScenarioMode.AcceptanceBeam => 360,
+        SpecificationScenarioMode.AcceptanceSand => 190,
+        SpecificationScenarioMode.AcceptanceColors => 320,
+        SpecificationScenarioMode.AcceptanceMetalCritical => 300,
         _ => uint.MaxValue
     };
 
@@ -107,7 +124,14 @@ public sealed class SpecificationRegressionHarness
             SpecificationScenarioMode.ConcreteCrack when frameIndex == 280 => "cracks",
             SpecificationScenarioMode.ConcreteBreak when frameIndex == 280 => "broken",
             SpecificationScenarioMode.WaterSlope when frameIndex == 29 => "flow",
-            SpecificationScenarioMode.SandSlope when frameIndex == 570 => "angle",
+            SpecificationScenarioMode.SandSlope when frameIndex == 719 => "angle",
+            SpecificationScenarioMode.AcceptanceBowl when frameIndex == 125 => "A_water_2s",
+            SpecificationScenarioMode.AcceptanceBowl when frameIndex == 539 => "A_water_sand",
+            SpecificationScenarioMode.AcceptanceBeam when frameIndex == 180 => "B_load_50",
+            SpecificationScenarioMode.AcceptanceBeam when frameIndex == 359 => "B_load_100",
+            SpecificationScenarioMode.AcceptanceSand when frameIndex == 189 => "C_pile_3s",
+            SpecificationScenarioMode.AcceptanceColors when frameIndex == 319 => "D_colors",
+            SpecificationScenarioMode.AcceptanceMetalCritical when frameIndex == 299 => "critical_fracture",
             _ => null
         };
         if (label is null)
@@ -115,8 +139,7 @@ public sealed class SpecificationRegressionHarness
             return;
         }
 
-        string directory = Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR") ??
-            Path.Combine(Environment.CurrentDirectory, "artifacts", "specification");
+        string directory = ArtifactDirectory;
         Directory.CreateDirectory(directory);
         SimulationScreenshotWriter.Save(resources, Path.Combine(directory, $"{Mode}_{label}.png"));
     }
@@ -133,9 +156,14 @@ public sealed class SpecificationRegressionHarness
             snapshot,
             statistics,
             coordinator,
+            ArtifactDirectory,
             out report);
         Console.WriteLine(report);
         Console.WriteLine(passed ? "PHYXEL_SPEC_REGRESSION_SUCCESS" : "PHYXEL_SPEC_REGRESSION_FAILED");
         return passed;
     }
+
+    private static string ArtifactDirectory =>
+        Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR") ??
+        Path.Combine(Environment.CurrentDirectory, "artifacts", "specification");
 }

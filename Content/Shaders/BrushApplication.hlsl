@@ -68,6 +68,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     MaterialProperties material = Materials[command.MaterialId];
+    GridCell existingCell = Grid[index];
+    if (IsCellularMaterial(material.SimulationKind) && existingCell.IsActive != 0 &&
+        Materials[existingCell.MaterialId].SimulationKind == 2)
+    {
+        return;
+    }
+
     GridCell cell = (GridCell)0;
     cell.MaterialId = command.MaterialId;
     cell.Mass = material.SimulationKind == 2 ? material.Density : 1;

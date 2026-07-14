@@ -101,7 +101,11 @@ bool HasDynamicNeighbor(uint2 coordinate, LatticeParticle particle)
     return false;
 }
 
-float CalculateExternalLoad(uint2 coordinate, LatticeParticle particle, out float granularLoad)
+float CalculateExternalLoad(
+    uint2 coordinate,
+    LatticeParticle particle,
+    out float granularLoad,
+    out float liquidImpactLoad)
 {
     uint2 loadCoordinate = uint2(clamp(
         float2(particle.PositionX, particle.PositionY),
@@ -111,6 +115,7 @@ float CalculateExternalLoad(uint2 coordinate, LatticeParticle particle, out floa
     GridCell occupiedCell = Grid[index];
     float load = max(0, occupiedCell.Pressure - particle.Stress);
     granularLoad = 0;
+    liquidImpactLoad = 0;
     for (uint distance = 1; distance <= 128 && loadCoordinate.y >= distance; distance++)
     {
         GridCell cellAbove = Grid[index - Width * distance];
@@ -128,14 +133,41 @@ float CalculateExternalLoad(uint2 coordinate, LatticeParticle particle, out floa
         float layerLoad = cellAbove.Mass * Materials[cellAbove.MaterialId].Density;
         load += layerLoad;
         granularLoad += kind == 1 ? layerLoad : 0;
+        float impactSpeed = abs(cellAbove.VelocityY) + abs(cellAbove.VelocityX) * 0.35;
+        liquidImpactLoad += kind == 4 ? layerLoad * saturate(impactSpeed * 0.02) : 0;
     }
 
     return load;
 }
 
+float CalculateGranularColumnLoad(int sampleX, uint centerY)
+{
+    if (sampleX < 0 || sampleX >= int(Width))
+    {
+        return 0;
+    }
+
+    float columnLoad = 0;
+    for (int distance = -128; distance <= 128; distance++)
+    {
+        int sampleY = int(centerY) + distance;
+        if (sampleY < 0 || sampleY >= int(Height))
+        {
+            continue;
+        }
+
+        GridCell cell = Grid[FlattenCoordinate(uint2(sampleX, sampleY))];
+        uint kind = cell.IsActive == 0 ? 0 : Materials[cell.MaterialId].SimulationKind;
+        columnLoad += kind == 1 ? cell.Mass * Materials[cell.MaterialId].Density : 0;
+    }
+
+    return columnLoad;
+}
+
 float CalculateNearbyGranularLoad(uint2 coordinate)
 {
     float nearbyLoad = 0;
+    float totalWeight = 0;
     for (int offset = -64; offset <= 64; offset += 8)
     {
         int sampleX = int(coordinate.x) + offset;
@@ -144,30 +176,45 @@ float CalculateNearbyGranularLoad(uint2 coordinate)
             continue;
         }
 
-        uint sampleIndex = FlattenCoordinate(uint2(sampleX, coordinate.y));
-        float columnLoad = 0;
-        for (uint distance = 1; distance <= 128 && coordinate.y >= distance; distance++)
-        {
-            GridCell cellAbove = Grid[sampleIndex - Width * distance];
-            if (cellAbove.IsActive == 0)
-            {
-                break;
-            }
-
-            uint kind = Materials[cellAbove.MaterialId].SimulationKind;
-            if (!IsCellularMaterial(kind))
-            {
-                break;
-            }
-
-            columnLoad += kind == 1 ? cellAbove.Mass * Materials[cellAbove.MaterialId].Density : 0;
-        }
-
+        float columnLoad = CalculateGranularColumnLoad(sampleX, coordinate.y);
         float weight = 1 - abs(offset) / 72.0;
-        nearbyLoad = max(nearbyLoad, columnLoad * weight);
+        nearbyLoad += columnLoad * weight;
+        totalWeight += weight;
     }
 
-    return nearbyLoad;
+    return nearbyLoad / max(totalWeight, 0.001);
+}
+
+float ConstrainDuctileSag(uint2 coordinate, LatticeParticle particle, float proposedSag)
+{
+    float minimumSag = -10000;
+    float maximumSag = 10000;
+    uint samples = 0;
+    uint cardinalNeighbors[4] = { 1, 3, 4, 6 };
+    for (uint sample = 0; sample < 4; sample++)
+    {
+        uint neighbor = cardinalNeighbors[sample];
+        int2 neighborCoordinate = int2(coordinate) + NeighborOffsets[neighbor];
+        if (neighborCoordinate.x < 0 || neighborCoordinate.y < 0 ||
+            neighborCoordinate.x >= int(Width) || neighborCoordinate.y >= int(Height))
+        {
+            continue;
+        }
+
+        LatticeParticle neighborParticle = SourceParticles[FlattenCoordinate(uint2(neighborCoordinate))];
+        if (neighborParticle.IsActive == 0 || neighborParticle.BodyId != particle.BodyId)
+        {
+            continue;
+        }
+
+        float neighborSag = neighborParticle.PositionY - (neighborCoordinate.y + 0.5);
+        float tolerance = NeighborOffsets[neighbor].y == 0 ? 0.75 : 0.5;
+        minimumSag = max(minimumSag, neighborSag - tolerance);
+        maximumSag = min(maximumSag, neighborSag + tolerance);
+        samples++;
+    }
+
+    return samples > 0 ? clamp(proposedSag, minimumSag, maximumSag) : proposedSag;
 }
 
 [numthreads(16, 16, 1)]
@@ -194,15 +241,18 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     MaterialProperties material = Materials[particle.MaterialId];
     LatticeBond bond = SourceBonds[index];
     float granularLoad;
-    float externalLoad = CalculateExternalLoad(coordinate, particle, granularLoad);
-    float loadStrain = externalLoad * 0.004 / max(material.Density, 0.1);
+    float liquidImpactLoad;
+    float externalLoad = CalculateExternalLoad(coordinate, particle, granularLoad, liquidImpactLoad);
+    float failureLoad = granularLoad + liquidImpactLoad;
+    float loadStrain = failureLoad * 0.004 / max(material.Density, 0.1);
     bool anchored = IsAnchored(coordinate, particle);
     if (anchored)
     {
         particle.IsDynamic = 0;
     }
     else if (particle.IsDynamic == 0 &&
-        (granularLoad >= material.ActivationLoad || HasDynamicNeighbor(coordinate, particle)))
+        (material.FailureMode == 1 || granularLoad >= material.ActivationLoad ||
+        HasDynamicNeighbor(coordinate, particle)))
     {
         particle.IsDynamic = 1;
     }
@@ -254,11 +304,29 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     if (material.FailureMode == 1)
     {
-        uint2 loadCoordinate = uint2(clamp(
-            float2(particle.PositionX, particle.PositionY),
-            float2(0, 0),
-            float2(Width - 1, Height - 1)));
-        float nearbyGranularLoad = max(granularLoad, CalculateNearbyGranularLoad(loadCoordinate));
+        float nearbyGranularLoad = max(granularLoad, CalculateNearbyGranularLoad(coordinate));
+        float criticalLoad = material.Density * material.PlasticLimit * 1.95 / 0.004;
+        uint fractureSampleY = coordinate.y / 16 * 16;
+        float columnLoad = CalculateGranularColumnLoad(coordinate.x, fractureSampleY);
+        bool criticallyLoaded = columnLoad >= criticalLoad;
+        bool nearCriticalBoundary = columnLoad >= criticalLoad * 0.8;
+        if ((particle.IsDynamic & 8) == 0 && nearCriticalBoundary)
+        {
+            bool leftCriticallyLoaded = coordinate.x > 0 &&
+                CalculateGranularColumnLoad(int(coordinate.x) - 1, fractureSampleY) >= criticalLoad;
+            bool rightCriticallyLoaded = coordinate.x + 1 < Width &&
+                CalculateGranularColumnLoad(int(coordinate.x) + 1, fractureSampleY) >= criticalLoad;
+            if (criticallyLoaded != rightCriticallyLoaded)
+            {
+                bond.ActiveNeighborMask &= ~((1u << 4) | (1u << 7));
+            }
+            if (criticallyLoaded != leftCriticallyLoaded)
+            {
+                bond.ActiveNeighborMask &= ~(1u << 5);
+            }
+            particle.IsDynamic |= criticallyLoaded ? 12 : 8;
+        }
+
         float nearbyStrain = nearbyGranularLoad * 0.004 / max(material.Density, 0.1);
         float yieldStrain = max(loadStrain, nearbyStrain);
         if (yieldStrain > material.PlasticLimit)
@@ -272,6 +340,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         float2 targetPosition = float2(coordinate) + 0.5 +
             float2(particle.PlasticOffsetX, particle.PlasticOffsetY + loadSag);
         float2 resolvedPosition = lerp(float2(particle.PositionX, particle.PositionY), targetPosition, 0.16);
+        float proposedSag = resolvedPosition.y - (coordinate.y + 0.5);
+        resolvedPosition.y = coordinate.y + 0.5 + ConstrainDuctileSag(coordinate, particle, proposedSag);
         particle.PositionX = resolvedPosition.x;
         particle.PositionY = resolvedPosition.y;
         particle.VelocityX = 0;
