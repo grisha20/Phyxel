@@ -18,7 +18,8 @@ public enum AcceptanceScenarioMode
     WaterDrain,
     CommunicatingVessels,
     PressureTube,
-    SavedPressure
+    SavedPressure,
+    SavedIsolation
 }
 
 public static class AcceptanceRegressionScenario
@@ -40,6 +41,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.CommunicatingVessels => CreateCommunicatingVessels(frame),
             AcceptanceScenarioMode.PressureTube => CreatePressureTube(frame),
             AcceptanceScenarioMode.SavedPressure => [],
+            AcceptanceScenarioMode.SavedIsolation => CreateSavedIsolation(frame),
             _ => []
         };
     }
@@ -304,6 +306,18 @@ public static class AcceptanceRegressionScenario
             return AddFill(315, 145, 455, 245, 8, 5, MaterialId.Water, 0);
         }
         return [];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateSavedIsolation(uint frame)
+    {
+        if (frame is < 40 or > 80)
+        {
+            return [];
+        }
+        BrushDrawCommand water = Create(780, 320, 24, MaterialId.Water, 0, 0);
+        water.Density = 0.82f;
+        water.Seed = 9200 + frame;
+        return [water];
     }
 
     private static List<BrushDrawCommand> AddFill(

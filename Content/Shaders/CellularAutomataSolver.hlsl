@@ -17,7 +17,7 @@ static const uint PathBlockerTileWidth = 32;
 // Keeps the connectivity check local even for tall maps. Horizontal reach is
 // provided by the power-of-two column spans dispatched by the coordinator.
 static const uint HydraulicConnectionSearchDepth = 128;
-static const uint HydraulicHeadRouteTolerance = 1;
+static const uint HydraulicHeadRouteTolerance = 0;
 static const uint HydraulicSurfaceTolerance = 1;
 static const uint HydraulicTransfersPerColumn = 8;
 static const uint HydraulicActivityRow = 9;
@@ -833,6 +833,19 @@ uint PressureSourceHead(uint route)
     return sourceTop;
 }
 
+uint PressureOwnSourceHead(uint2 coordinate)
+{
+    uint sourceTop;
+    uint sourceBase;
+    if (!UnpackWaterColumn(WaterColumnState[coordinate.x], sourceTop, sourceBase) ||
+        coordinate.y < sourceTop || coordinate.y > sourceBase ||
+        sourceBase < sourceTop + 3 || !WaterSupported(uint2(coordinate.x, sourceBase)))
+    {
+        return Height;
+    }
+    return sourceTop;
+}
+
 void RelaxWaterPressureRoute(uint2 coordinate)
 {
     uint index = FlattenCoordinate(coordinate);
@@ -844,7 +857,10 @@ void RelaxWaterPressureRoute(uint2 coordinate)
     uint bestRoute = WaterPressureRoutes[index];
     uint bestHead = PressureSourceHead(bestRoute);
     uint ownRoute = coordinate.x + 1;
-    uint ownHead = PressureSourceHead(ownRoute);
+    // A column can contain several disconnected vertical water segments. The
+    // compact cache describes only the bottom segment, so seed its route only
+    // from cells that actually belong to that continuous segment.
+    uint ownHead = PressureOwnSourceHead(coordinate);
     if (ownHead + HydraulicHeadRouteTolerance < bestHead)
     {
         bestRoute = ownRoute;

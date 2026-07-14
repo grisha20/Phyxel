@@ -27,6 +27,7 @@ public sealed class AcceptanceRegressionHarness
             "communicating_vessels" or "vessels" or "hydrostatic" => AcceptanceScenarioMode.CommunicatingVessels,
             "pressure_tube" or "tube" => AcceptanceScenarioMode.PressureTube,
             "saved_pressure" => AcceptanceScenarioMode.SavedPressure,
+            "saved_isolation" or "isolation" => AcceptanceScenarioMode.SavedIsolation,
             _ => AcceptanceScenarioMode.None
         };
     }
@@ -34,7 +35,8 @@ public sealed class AcceptanceRegressionHarness
     public AcceptanceScenarioMode Mode { get; }
     public bool Active => Mode != AcceptanceScenarioMode.None;
     public bool RequiresNativeResolution => Mode == AcceptanceScenarioMode.WaterStress;
-    public bool RequiresSavedScene => Mode == AcceptanceScenarioMode.SavedPressure;
+    public bool RequiresSavedScene => Mode is
+        AcceptanceScenarioMode.SavedPressure or AcceptanceScenarioMode.SavedIsolation;
     public uint CaptureFrame
     {
         get
@@ -58,6 +60,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.CommunicatingVessels => 1200,
                 AcceptanceScenarioMode.PressureTube => 1200,
                 AcceptanceScenarioMode.SavedPressure => 2000,
+                AcceptanceScenarioMode.SavedIsolation => 600,
                 _ => uint.MaxValue
             };
         }
@@ -108,6 +111,7 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.PressureTube when frame == 300 => "I_pressure_tube_fill",
             AcceptanceScenarioMode.PressureTube when frame == 1199 => "I_pressure_tube_rest",
             AcceptanceScenarioMode.SavedPressure when frame == 1199 => "J_saved_pressure",
+            AcceptanceScenarioMode.SavedIsolation when frame == 599 => "K_saved_isolation",
             _ => null
         };
         if (label is null)

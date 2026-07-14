@@ -60,6 +60,7 @@ public static class AcceptanceRegressionVerifier
                 artifactDirectory,
                 out report),
             AcceptanceScenarioMode.SavedPressure => ValidateSavedPressure(snapshot, out report),
+            AcceptanceScenarioMode.SavedIsolation => ValidateSavedIsolation(snapshot, out report),
             _ => Fail(out report)
         };
     }
@@ -254,6 +255,32 @@ public static class AcceptanceRegressionVerifier
         bool passed = water > 100000 && tubeTop > 0 && tankTop > 0 &&
             Math.Abs(tubeTop - tankTop) <= 3 && moving == 0;
         report = $"PHYXEL_J_SAVED_PRESSURE water={water} tubeTop={tubeTop} tubeWidth={tubeWidth} tankTop={tankTop} difference={Math.Abs(tubeTop - tankTop)} moving={moving} routed={routed} minHead={(minimumHead == float.MaxValue ? -1 : minimumHead):0}";
+        return passed;
+    }
+
+    private static bool ValidateSavedIsolation(
+        SimulationWorldSnapshot snapshot,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int vesselWater = CountMaterial(
+            grid,
+            snapshot.Width,
+            600,
+            1100,
+            200,
+            850,
+            MaterialId.Water);
+        int water = CountMaterial(
+            grid,
+            snapshot.Width,
+            0,
+            snapshot.Width - 1,
+            0,
+            snapshot.Height - 1,
+            MaterialId.Water);
+        bool passed = vesselWater > 1000;
+        report = $"PHYXEL_K_SAVED_ISOLATION water={water} vesselWater={vesselWater}";
         return passed;
     }
 
