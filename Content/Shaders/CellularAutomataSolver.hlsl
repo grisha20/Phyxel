@@ -2,25 +2,50 @@
 
 StructuredBuffer<MaterialProperties> Materials : register(t0);
 RWStructuredBuffer<GridCell> Grid : register(u0);
-// Shared with the solid-body flags. During the hydraulic phases the first nine
+struct WaterPressureRouteData
+{
+    uint Route;
+    uint SourceIndex;
+};
+// Shared with the solid-body flags. During the hydraulic phases the first ten
 // rows store packed column bounds, transfer slots, and the pressure activity count.
 RWStructuredBuffer<uint> WaterColumnState : register(u1);
 RWStructuredBuffer<uint> PathBlockerMasks : register(u2);
 RWStructuredBuffer<uint> CellMaterials : register(u3);
-RWStructuredBuffer<uint> WaterPressureRoutes : register(u4);
+RWStructuredBuffer<WaterPressureRouteData> WaterPressureRoutes : register(u4);
+RWStructuredBuffer<WaterPressureRouteData> WaterPressureRouteScratch : register(u5);
+RWStructuredBuffer<uint> WaterComponents : register(u6);
 
 static const uint SandRestThreshold = 30;
 static const uint FluidRestThreshold = 60;
 static const float GasMinimumMass = 0.01;
 static const float GasTransferThreshold = 0.03;
 static const uint PathBlockerTileWidth = 32;
-// Keeps the connectivity check local even for tall maps. Horizontal reach is
-// provided by the power-of-two column spans dispatched by the coordinator.
+// Keeps the vertical connectivity scan bounded even for tall maps. Column
+// balancing itself is deliberately limited to immediately adjacent columns.
 static const uint HydraulicConnectionSearchDepth = 128;
 static const uint HydraulicHeadRouteTolerance = 0;
-static const uint HydraulicSurfaceTolerance = 1;
-static const uint HydraulicTransfersPerColumn = 8;
-static const uint HydraulicActivityRow = 9;
+// Keep pressure move/return hysteresis wider than the one-cell local balance
+// tolerance so the two solvers cannot undo each other every frame.
+static const uint HydraulicSurfaceTolerance = 2;
+static const uint HydraulicTransfersPerColumn = 16;
+static const uint HydraulicActivityRow = HydraulicTransfersPerColumn + 1;
+static const uint PressureChannelHalfWidth = 32;
+static const uint PressureChannelWallSpan = 4;
+static const uint PressureRouteSourceBits = 11;
+static const uint PressureRouteSourceMask = (1u << PressureRouteSourceBits) - 1u;
+static const uint PressureRouteDistanceMask = 0x7fffffffu >> PressureRouteSourceBits;
+static const uint PressureRouteReservation = 0x80000000u;
+
+uint FarColumnMoveCounterIndex()
+{
+    return ((Width + PathBlockerTileWidth - 1) / PathBlockerTileWidth) * Height;
+}
+
+uint PressurePlanCounterIndex()
+{
+    return FarColumnMoveCounterIndex() + 1;
+}
 
 uint CellKind(GridCell cell)
 {
@@ -474,6 +499,7 @@ void BuildWaterColumnInfo(uint x)
     if (x == 0)
     {
         WaterColumnState[Width * HydraulicActivityRow] = 0;
+        PathBlockerMasks[PressurePlanCounterIndex()] = 0;
     }
 }
 
@@ -766,7 +792,11 @@ void ResolveWaterSpan(uint2 leftCoordinate, uint stride)
 
 void ResolveWaterColumnSpan(uint2 leftCoordinate, uint stride)
 {
-    if (leftCoordinate.y != 0)
+    // A deep connection only proves that two columns belong to the same body
+    // of water; it does not prove that a surface particle can cross every wall
+    // between distant columns. Keep this shortcut strictly local and let the
+    // regular horizontal/diagonal passes carry water over longer distances.
+    if (leftCoordinate.y != 0 || stride != 1)
     {
         return;
     }
@@ -841,44 +871,210 @@ void ApplyWaterColumnMove(uint x)
     Grid[destinationIndex] = water;
     CellMaterials[sourceIndex] = 0;
     CellMaterials[destinationIndex] = water.MaterialId;
+    if (max(sourceX, destinationX) - min(sourceX, destinationX) > 1)
+    {
+        uint ignored;
+        InterlockedAdd(PathBlockerMasks[FarColumnMoveCounterIndex()], 1, ignored);
+    }
     WaterColumnState[sourceX] = sourceTop == sourceBase
         ? 0
         : PackWaterColumn(sourceTop + 1, sourceBase);
     WaterColumnState[destinationX] = PackWaterColumn(destinationTop - 1, destinationBase);
 }
 
-uint PressureSourceHead(uint route)
+uint PackPressureRoute(uint sourceX, uint distance)
 {
-    if (route == 0 || (route & 0x80000000u) != 0)
+    if (sourceX >= Width || sourceX + 1 > PressureRouteSourceMask)
+    {
+        return 0;
+    }
+    return (min(distance, PressureRouteDistanceMask) << PressureRouteSourceBits) |
+        (sourceX + 1);
+}
+
+bool UnpackPressureRoute(uint route, out uint sourceX, out uint distance)
+{
+    if (route == 0 || (route & PressureRouteReservation) != 0)
+    {
+        sourceX = 0;
+        distance = 0;
+        return false;
+    }
+    uint encodedSource = route & PressureRouteSourceMask;
+    if (encodedSource == 0)
+    {
+        sourceX = 0;
+        distance = 0;
+        return false;
+    }
+    sourceX = encodedSource - 1;
+    distance = (route >> PressureRouteSourceBits) & PressureRouteDistanceMask;
+    return sourceX < Width;
+}
+
+WaterPressureRouteData MakePressureRoute(uint sourceIndex, uint distance)
+{
+    WaterPressureRouteData result;
+    result.Route = PackPressureRoute(sourceIndex % Width, distance);
+    result.SourceIndex = sourceIndex;
+    return result;
+}
+
+WaterPressureRouteData EmptyPressureRoute()
+{
+    WaterPressureRouteData result;
+    result.Route = 0;
+    result.SourceIndex = 0;
+    return result;
+}
+
+bool WaterSurfaceHasStableAnchor(uint2 coordinate)
+{
+    if (coordinate.y == 0 || coordinate.y + 1 >= Height ||
+        CellKindAt(coordinate) != 4 ||
+        CellKindAt(coordinate - uint2(0, 1)) != 0 ||
+        CellKindAt(coordinate + uint2(0, 1)) != 4)
+    {
+        return false;
+    }
+    if (coordinate.x > 0 && CellKindAt(coordinate - uint2(1, 0)) == 4 &&
+        CellKindAt(uint2(coordinate.x - 1, coordinate.y + 1)) != 4)
+    {
+        return false;
+    }
+    if (coordinate.x + 1 < Width && CellKindAt(coordinate + uint2(1, 0)) == 4 &&
+        CellKindAt(coordinate + uint2(1, 1)) != 4)
+    {
+        return false;
+    }
+    return true;
+}
+
+uint PressureSourceHead(WaterPressureRouteData routeData)
+{
+    uint sourceX;
+    uint distance;
+    if (!UnpackPressureRoute(routeData.Route, sourceX, distance) ||
+        routeData.SourceIndex >= Width * Height || routeData.SourceIndex % Width != sourceX)
     {
         return Height;
     }
-    uint sourceX = route - 1;
-    if (sourceX >= Width)
+    uint sourceBase = routeData.SourceIndex / Width;
+    if (CellKindAt(uint2(sourceX, sourceBase)) != 4 ||
+        !WaterSupported(uint2(sourceX, sourceBase)))
     {
         return Height;
     }
-    uint sourceTop;
-    uint sourceBase;
-    if (!UnpackWaterColumn(WaterColumnState[sourceX], sourceTop, sourceBase) ||
-        sourceBase < sourceTop + 3 || !WaterSupported(uint2(sourceX, sourceBase)))
+    uint sourceTop = sourceBase;
+    while (sourceTop > 0 && CellKindAt(uint2(sourceX, sourceTop - 1)) == 4)
+    {
+        sourceTop--;
+    }
+    if (sourceBase < sourceTop + 3 ||
+        !WaterSurfaceHasStableAnchor(uint2(sourceX, sourceTop)))
     {
         return Height;
     }
     return sourceTop;
 }
 
-uint PressureOwnSourceHead(uint2 coordinate)
+uint PressureOwnSourceHead(uint2 coordinate, out uint sourceIndex)
 {
-    uint sourceTop;
-    uint sourceBase;
-    if (!UnpackWaterColumn(WaterColumnState[coordinate.x], sourceTop, sourceBase) ||
-        coordinate.y < sourceTop || coordinate.y > sourceBase ||
-        sourceBase < sourceTop + 3 || !WaterSupported(uint2(coordinate.x, sourceBase)))
+    sourceIndex = 0;
+    if (coordinate.y > 0 && CellKindAt(coordinate - uint2(0, 1)) == 4)
     {
         return Height;
     }
-    return sourceTop;
+    uint sourceBase = coordinate.y;
+    while (sourceBase + 1 < Height && CellKindAt(uint2(coordinate.x, sourceBase + 1)) == 4)
+    {
+        sourceBase++;
+    }
+    if (sourceBase < coordinate.y + 3 || !WaterSupported(uint2(coordinate.x, sourceBase)) ||
+        !WaterSurfaceHasStableAnchor(coordinate))
+    {
+        return Height;
+    }
+    sourceIndex = FlattenCoordinate(uint2(coordinate.x, sourceBase));
+    return coordinate.y;
+}
+
+WaterPressureRouteData ReadPressureRoute(uint index)
+{
+    if (SimulationPhase == 34)
+    {
+        return WaterPressureRoutes[index];
+    }
+    return WaterPressureRouteScratch[index];
+}
+
+void WritePressureRoute(uint index, WaterPressureRouteData route)
+{
+    if (SimulationPhase == 34)
+    {
+        WaterPressureRouteScratch[index] = route;
+    }
+    else
+    {
+        WaterPressureRoutes[index] = route;
+    }
+}
+
+bool PressureRouteIsConnected(uint2 coordinate, WaterPressureRouteData routeData)
+{
+    uint sourceX;
+    uint distance;
+    uint sourceHead = PressureSourceHead(routeData);
+    if (!UnpackPressureRoute(routeData.Route, sourceX, distance) || sourceHead >= Height ||
+        CellKindAt(coordinate) != 4)
+    {
+        return false;
+    }
+    uint coordinateIndex = FlattenCoordinate(coordinate);
+    uint currentSourceIndex = FlattenCoordinate(uint2(sourceX, sourceHead));
+    // The route itself is the connectivity proof: every relaxation step is
+    // copied from an orthogonally adjacent water cell with the same exact
+    // source and a smaller distance. Brush/topology edits clear all routes,
+    // so a newly created disconnected puddle cannot inherit this chain.
+    return CellKindAtIndex(coordinateIndex) == 4 &&
+        CellKindAtIndex(currentSourceIndex) == 4;
+}
+
+bool WaterRemovalPreservesConnectivity(uint2 coordinate)
+{
+    if (!WaterSurfaceHasStableAnchor(coordinate))
+    {
+        return false;
+    }
+    // The cell below is the surviving anchor. Any horizontal water neighbor
+    // must have a diagonal route to that anchor, so removing this surface cell
+    // cannot split the component proven above. This remains safe when several
+    // source columns are processed concurrently.
+    // A reserved empty neighbor was planned from this water cell. Keep the
+    // live attachment in place until that destination has been filled.
+    for (int offsetY = -1; offsetY <= 1; offsetY++)
+    {
+        for (int offsetX = -1; offsetX <= 1; offsetX++)
+        {
+            if (offsetX == 0 && offsetY == 0)
+            {
+                continue;
+            }
+            int2 neighbor = int2(coordinate) + int2(offsetX, offsetY);
+            if (neighbor.x < 0 || neighbor.y < 0 ||
+                neighbor.x >= int(Width) || neighbor.y >= int(Height))
+            {
+                continue;
+            }
+            WaterPressureRouteData neighborRoute = WaterPressureRoutes[
+                FlattenCoordinate(uint2(neighbor))];
+            if ((neighborRoute.Route & PressureRouteReservation) != 0)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 void RelaxWaterPressureRoute(uint2 coordinate)
@@ -886,20 +1082,25 @@ void RelaxWaterPressureRoute(uint2 coordinate)
     uint index = FlattenCoordinate(coordinate);
     if (CellKindAtIndex(index) != 4)
     {
-        WaterPressureRoutes[index] = 0;
+        WritePressureRoute(index, EmptyPressureRoute());
         return;
     }
-    uint bestRoute = WaterPressureRoutes[index];
-    uint bestHead = PressureSourceHead(bestRoute);
-    uint ownRoute = coordinate.x + 1;
-    // A column can contain several disconnected vertical water segments. The
-    // compact cache describes only the bottom segment, so seed its route only
-    // from cells that actually belong to that continuous segment.
-    uint ownHead = PressureOwnSourceHead(coordinate);
-    if (ownHead + HydraulicHeadRouteTolerance < bestHead)
+    WaterPressureRouteData bestRoute = EmptyPressureRoute();
+    uint bestHead = Height;
+    uint bestDistance = PressureRouteDistanceMask;
+    uint bestSourceIndex = Width * Height;
+    // Every exposed, supported vertical segment seeds its own route. This is
+    // essential when a spiral crosses the same X coordinate several times.
+    // Neighbor routes still need a strictly smaller distance, so stale routes
+    // left by a dried bridge collapse instead of becoming remote connections.
+    uint ownSourceIndex;
+    uint ownHead = PressureOwnSourceHead(coordinate, ownSourceIndex);
+    if (ownHead < Height)
     {
-        bestRoute = ownRoute;
+        bestRoute = MakePressureRoute(ownSourceIndex, 0);
         bestHead = ownHead;
+        bestDistance = 0;
+        bestSourceIndex = ownSourceIndex;
     }
     int2 offsets[4] =
     {
@@ -921,47 +1122,111 @@ void RelaxWaterPressureRoute(uint2 coordinate)
         {
             continue;
         }
-        uint candidateRoute = WaterPressureRoutes[candidateIndex];
+        WaterPressureRouteData candidateRoute = ReadPressureRoute(candidateIndex);
         uint candidateHead = PressureSourceHead(candidateRoute);
-        if (candidateHead + HydraulicHeadRouteTolerance < bestHead)
+        uint candidateSourceX;
+        uint candidateDistance;
+        if (!UnpackPressureRoute(candidateRoute.Route, candidateSourceX, candidateDistance) ||
+            candidateDistance >= PressureRouteDistanceMask)
         {
-            bestRoute = candidateRoute;
+            continue;
+        }
+        if (candidateHead >= Height)
+        {
+            continue;
+        }
+        uint nextDistance = candidateDistance + 1;
+        if (candidateHead + HydraulicHeadRouteTolerance < bestHead ||
+            (candidateHead == bestHead &&
+                (nextDistance < bestDistance ||
+                    (nextDistance == bestDistance && candidateRoute.SourceIndex < bestSourceIndex))))
+        {
+            bestRoute = MakePressureRoute(candidateRoute.SourceIndex, nextDistance);
             bestHead = candidateHead;
+            bestDistance = nextDistance;
+            bestSourceIndex = candidateRoute.SourceIndex;
         }
     }
-    WaterPressureRoutes[index] = bestHead < Height ? bestRoute : 0;
+    WaterPressureRouteData outputRoute = bestRoute;
+    if (bestHead >= Height)
+    {
+        outputRoute = EmptyPressureRoute();
+    }
+    WritePressureRoute(index, outputRoute);
     GridCell routedCell = Grid[index];
     routedCell.Pressure = bestHead < Height ? float(bestHead + 1) : 0;
     Grid[index] = routedCell;
 }
 
+bool IsSolidAt(int2 coordinate)
+{
+    return coordinate.x >= 0 && coordinate.y >= 0 &&
+        coordinate.x < int(Width) && coordinate.y < int(Height) &&
+        CellKindAt(uint2(coordinate)) == 2;
+}
+
+bool HasPressureWallPairAt(int2 coordinate, int2 normal)
+{
+    bool wallOnLeft = false;
+    bool wallOnRight = false;
+    for (uint distance = 1; distance <= PressureChannelHalfWidth; distance++)
+    {
+        int2 first = coordinate + normal * int(distance);
+        int2 second = coordinate - normal * int(distance);
+        if (!wallOnLeft && IsSolidAt(first))
+        {
+            wallOnLeft = true;
+        }
+        if (!wallOnRight && IsSolidAt(second))
+        {
+            wallOnRight = true;
+        }
+        if (wallOnLeft && wallOnRight)
+        {
+            break;
+        }
+    }
+    return wallOnLeft && wallOnRight;
+}
+
+bool HasPressureChannelWalls(uint2 coordinate, int2 movement)
+{
+    int2 normal = int2(-movement.y, movement.x);
+    int2 firstSlice = int2(coordinate);
+    int2 secondSlice = firstSlice - movement * int(PressureChannelWallSpan);
+    // A pair of isolated solid pixels is not a pipe. Confirm the same channel
+    // at a second slice inside the water before allowing a remote pressure move.
+    return HasPressureWallPairAt(firstSlice, normal) &&
+        HasPressureWallPairAt(secondSlice, normal);
+}
+
 void PlanPressurizedWaterMove(uint2 coordinate)
 {
     uint index = FlattenCoordinate(coordinate);
-    if (CellKindAtIndex(index) != 4)
+    if (coordinate.y == 0 || CellKindAtIndex(index) != 4)
     {
         return;
     }
-    uint route = WaterPressureRoutes[index];
+    WaterPressureRouteData route = WaterPressureRoutes[index];
     uint sourceHead = PressureSourceHead(route);
-    if (sourceHead >= Height)
+    uint sourceX;
+    uint routeDistance;
+    if (sourceHead >= Height ||
+        !UnpackPressureRoute(route.Route, sourceX, routeDistance) ||
+        routeDistance >= PressureRouteDistanceMask)
     {
         return;
     }
-    uint sourceX = route - 1;
     int sideDirection = ((FrameIndex + coordinate.x) & 1) == 0 ? -1 : 1;
-    int2 offsets[8] =
+    int2 offsets[5] =
     {
         int2(0, -1),
         int2(sideDirection, -1),
         int2(-sideDirection, -1),
         int2(sideDirection, 0),
-        int2(-sideDirection, 0),
-        int2(sideDirection, 1),
-        int2(-sideDirection, 1),
-        int2(0, 1)
+        int2(-sideDirection, 0)
     };
-    for (uint attempt = 0; attempt < 8; attempt++)
+    for (uint attempt = 0; attempt < 5; attempt++)
     {
         int2 destinationCoordinate = int2(coordinate) + offsets[attempt];
         if (destinationCoordinate.x < 0 ||
@@ -976,16 +1241,29 @@ void PlanPressurizedWaterMove(uint2 coordinate)
         {
             continue;
         }
+        bool movesStraightUp = offsets[attempt].x == 0 && offsets[attempt].y == -1;
+        if (!movesStraightUp && !HasPressureChannelWalls(destination, offsets[attempt]))
+        {
+            continue;
+        }
         if (offsets[attempt].x != 0 && offsets[attempt].y != 0 &&
             CellKindAt(uint2(destinationCoordinate.x, coordinate.y)) == 2 &&
             CellKindAt(uint2(coordinate.x, destinationCoordinate.y)) == 2)
         {
             continue;
         }
-        uint reservation = 0x80000000u | route;
+        // A validated, strictly descending route is enough for vertical
+        // pressure in a wide or curved vessel. Sideways shortcuts still need
+        // two confirmed channel slices; gravity owns open lateral spreading.
+        if (!PressureRouteIsConnected(coordinate, route))
+        {
+            return;
+        }
+        uint destinationRoute = PackPressureRoute(sourceX, routeDistance + 1);
+        uint reservation = PressureRouteReservation | destinationRoute;
         uint previousReservation;
         InterlockedCompareExchange(
-            WaterPressureRoutes[destinationIndex],
+            WaterPressureRoutes[destinationIndex].Route,
             0,
             reservation,
             previousReservation);
@@ -993,6 +1271,7 @@ void PlanPressurizedWaterMove(uint2 coordinate)
         {
             continue;
         }
+        WaterPressureRoutes[destinationIndex].SourceIndex = route.SourceIndex;
         uint firstLane = (destinationIndex + FrameIndex) % HydraulicTransfersPerColumn;
         for (uint laneAttempt = 0; laneAttempt < HydraulicTransfersPerColumn; laneAttempt++)
         {
@@ -1005,12 +1284,14 @@ void PlanPressurizedWaterMove(uint2 coordinate)
                 previousDestination);
             if (previousDestination == 0)
             {
+                uint ignored;
+                InterlockedAdd(PathBlockerMasks[PressurePlanCounterIndex()], 1, ignored);
                 return;
             }
         }
         uint ignored;
         InterlockedCompareExchange(
-            WaterPressureRoutes[destinationIndex],
+            WaterPressureRoutes[destinationIndex].Route,
             reservation,
             0,
             ignored);
@@ -1025,13 +1306,16 @@ void PlanPressurizedWaterReturn(uint2 coordinate)
     {
         return;
     }
-    uint route = WaterPressureRoutes[index];
+    WaterPressureRouteData route = WaterPressureRoutes[index];
     uint sourceHead = PressureSourceHead(route);
-    if (sourceHead >= Height || coordinate.y + HydraulicSurfaceTolerance >= sourceHead)
+    uint sourceX;
+    uint routeDistance;
+    if (sourceHead >= Height || coordinate.y + HydraulicSurfaceTolerance >= sourceHead ||
+        !UnpackPressureRoute(route.Route, sourceX, routeDistance) ||
+        !PressureRouteIsConnected(coordinate, route))
     {
         return;
     }
-    uint sourceX = route - 1;
     uint encodedSource = 0x80000000u | (index + 1);
     uint firstLane = (index + FrameIndex) % HydraulicTransfersPerColumn;
     for (uint laneAttempt = 0; laneAttempt < HydraulicTransfersPerColumn; laneAttempt++)
@@ -1050,22 +1334,27 @@ void PlanPressurizedWaterReturn(uint2 coordinate)
     }
 }
 
-void ApplyPressurizedWaterReturnSlot(uint sourceX, uint lane)
+void ApplyPressurizedWaterReturnSlot(uint sourceX, uint lane, uint donorParity)
 {
     uint slot = Width * (lane + 1) + sourceX;
     uint encodedSource = WaterColumnState[slot];
-    WaterColumnState[slot] = 0;
     if ((encodedSource & 0x80000000u) == 0)
     {
         return;
     }
     uint sourceWaterIndex = (encodedSource & 0x7fffffffu) - 1;
-    uint route = sourceX + 1;
-    uint sourceTop;
-    uint sourceBase;
-    if (WaterPressureRoutes[sourceWaterIndex] != route ||
-        !UnpackWaterColumn(WaterColumnState[sourceX], sourceTop, sourceBase) ||
-        sourceTop == 0)
+    uint sourceWaterX = sourceWaterIndex % Width;
+    if ((sourceWaterX & 1) != donorParity)
+    {
+        return;
+    }
+    WaterColumnState[slot] = 0;
+    WaterPressureRouteData route = WaterPressureRoutes[sourceWaterIndex];
+    uint routeSourceX;
+    uint routeDistance;
+    uint sourceTop = PressureSourceHead(route);
+    if (!UnpackPressureRoute(route.Route, routeSourceX, routeDistance) ||
+        routeSourceX != sourceX || sourceTop == 0 || sourceTop >= Height)
     {
         return;
     }
@@ -1075,31 +1364,49 @@ void ApplyPressurizedWaterReturnSlot(uint sourceX, uint lane)
         return;
     }
     uint destinationIndex = FlattenCoordinate(uint2(sourceX, sourceTop - 1));
-    if (CellKindAtIndex(sourceWaterIndex) != 4 || CellKindAtIndex(destinationIndex) != 0)
+    uint2 sourceWaterCoordinate = uint2(sourceWaterX, sourceWaterY);
+    uint sourceComponent = WaterComponents[sourceWaterIndex];
+    if (CellKindAtIndex(sourceWaterIndex) != 4 || CellKindAtIndex(destinationIndex) != 0 ||
+        !PressureRouteIsConnected(sourceWaterCoordinate, route) ||
+        !WaterRemovalPreservesConnectivity(sourceWaterCoordinate))
     {
         return;
     }
     GridCell water = Grid[sourceWaterIndex];
     GridCell empty = CreateEmptyCell();
-    uint sourceWaterX = sourceWaterIndex % Width;
     float horizontal = sourceX == sourceWaterX ? 0 : sourceX > sourceWaterX ? 54 : -54;
     MarkMovement(water, empty, horizontal, 38);
     Grid[sourceWaterIndex] = empty;
     Grid[destinationIndex] = water;
     CellMaterials[sourceWaterIndex] = 0;
     CellMaterials[destinationIndex] = water.MaterialId;
-    WaterPressureRoutes[sourceWaterIndex] = 0;
-    WaterPressureRoutes[destinationIndex] = route;
+    WaterPressureRoutes[sourceWaterIndex] = EmptyPressureRoute();
+    WaterPressureRoutes[destinationIndex] = MakePressureRoute(route.SourceIndex, 0);
+    WaterComponents[sourceWaterIndex] = 0xffffffff;
+    WaterComponents[destinationIndex] = sourceComponent;
     uint ignored;
     InterlockedAdd(WaterColumnState[Width * HydraulicActivityRow], 1, ignored);
-    WaterColumnState[sourceX] = PackWaterColumn(sourceTop - 1, sourceBase);
 }
 
-void ApplyPressurizedWaterReturn(uint sourceX)
+void ApplyPressurizedWaterReturn(uint sourceX, uint donorParity)
 {
     for (uint lane = 0; lane < HydraulicTransfersPerColumn; lane++)
     {
-        ApplyPressurizedWaterReturnSlot(sourceX, lane);
+        ApplyPressurizedWaterReturnSlot(sourceX, lane, donorParity);
+    }
+}
+
+void ReleasePressureReservation(uint destinationIndex, uint reservation)
+{
+    uint ignored;
+    InterlockedCompareExchange(
+        WaterPressureRoutes[destinationIndex].Route,
+        reservation,
+        0,
+        ignored);
+    if (ignored == reservation)
+    {
+        WaterPressureRoutes[destinationIndex].SourceIndex = 0;
     }
 }
 
@@ -1113,22 +1420,35 @@ void ApplyPressurizedWaterMoveSlot(uint sourceX, uint lane)
         return;
     }
     uint destinationIndex = encodedDestination - 1;
-    uint route = sourceX + 1;
-    if (WaterPressureRoutes[destinationIndex] != (0x80000000u | route))
+    WaterPressureRouteData reservationData = WaterPressureRoutes[destinationIndex];
+    uint reservation = reservationData.Route;
+    WaterPressureRouteData route = reservationData;
+    route.Route &= 0x7fffffffu;
+    uint routeSourceX;
+    uint routeDistance;
+    if ((reservation & PressureRouteReservation) == 0)
     {
         return;
     }
-    uint sourceTop;
-    uint sourceBase;
-    if (!UnpackWaterColumn(WaterColumnState[sourceX], sourceTop, sourceBase))
+    if (!UnpackPressureRoute(route.Route, routeSourceX, routeDistance) ||
+        routeSourceX != sourceX)
     {
-        WaterPressureRoutes[destinationIndex] = 0;
+        ReleasePressureReservation(destinationIndex, reservation);
+        return;
+    }
+    uint sourceTop = PressureSourceHead(route);
+    if (sourceTop >= Height)
+    {
+        ReleasePressureReservation(destinationIndex, reservation);
         return;
     }
     uint sourceIndex = FlattenCoordinate(uint2(sourceX, sourceTop));
-    if (CellKindAtIndex(sourceIndex) != 4 || CellKindAtIndex(destinationIndex) != 0)
+    uint2 sourceCoordinate = uint2(sourceX, sourceTop);
+    uint destinationComponent = WaterComponents[sourceIndex];
+    if (CellKindAtIndex(sourceIndex) != 4 || CellKindAtIndex(destinationIndex) != 0 ||
+        !WaterRemovalPreservesConnectivity(sourceCoordinate))
     {
-        WaterPressureRoutes[destinationIndex] = 0;
+        ReleasePressureReservation(destinationIndex, reservation);
         return;
     }
     GridCell water = Grid[sourceIndex];
@@ -1140,16 +1460,15 @@ void ApplyPressurizedWaterMoveSlot(uint sourceX, uint lane)
     Grid[destinationIndex] = water;
     CellMaterials[sourceIndex] = 0;
     CellMaterials[destinationIndex] = water.MaterialId;
-    WaterPressureRoutes[sourceIndex] = 0;
+    WaterPressureRoutes[sourceIndex] = EmptyPressureRoute();
     WaterPressureRoutes[destinationIndex] = route;
+    WaterComponents[sourceIndex] = 0xffffffff;
+    WaterComponents[destinationIndex] = destinationComponent;
     uint ignored;
     InterlockedAdd(
         WaterColumnState[Width * HydraulicActivityRow],
         1,
         ignored);
-    WaterColumnState[sourceX] = sourceTop == sourceBase
-        ? 0
-        : PackWaterColumn(sourceTop + 1, sourceBase);
 }
 
 void ApplyPressurizedWaterMove(uint sourceX)
@@ -1482,17 +1801,17 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         ForceCellularRest(coordinate);
         return;
     }
-    if (SimulationPhase >= 13 && SimulationPhase <= 23)
+    if (SimulationPhase == 13)
     {
-        uint stride = 1u << (SimulationPhase - 13);
-        uint blockPosition = coordinate.x % (stride * 2);
-        if (blockPosition < stride)
+        uint pairOffset = FrameIndex & 1;
+        if (coordinate.x >= pairOffset &&
+            ((coordinate.x - pairOffset) & 1) == 0)
         {
-            ResolveWaterColumnSpan(coordinate, stride);
+            ResolveWaterColumnSpan(coordinate, 1);
         }
         return;
     }
-    if (SimulationPhase == 34)
+    if (SimulationPhase == 34 || SimulationPhase == 35)
     {
         RelaxWaterPressureRoute(coordinate);
         return;
@@ -1504,7 +1823,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     if (SimulationPhase == 37)
     {
-        ApplyPressurizedWaterMove(coordinate.x);
+        if ((coordinate.x & 1) == 0)
+        {
+            ApplyPressurizedWaterMove(coordinate.x);
+        }
         return;
     }
     if (SimulationPhase == 38)
@@ -1514,7 +1836,20 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     if (SimulationPhase == 39)
     {
-        ApplyPressurizedWaterReturn(coordinate.x);
+        ApplyPressurizedWaterReturn(coordinate.x, 0);
+        return;
+    }
+    if (SimulationPhase == 70)
+    {
+        ApplyPressurizedWaterReturn(coordinate.x, 1);
+        return;
+    }
+    if (SimulationPhase == 71)
+    {
+        if ((coordinate.x & 1) != 0)
+        {
+            ApplyPressurizedWaterMove(coordinate.x);
+        }
         return;
     }
     if (SimulationPhase >= 40 && SimulationPhase <= 47)

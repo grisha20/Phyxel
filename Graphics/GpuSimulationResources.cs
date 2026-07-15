@@ -20,6 +20,9 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuStructuredBuffer<uint> SolidBodyGeometry { get; init; }
     public required GpuStructuredBuffer<uint> PathBlockerMasks { get; init; }
     public required GpuStructuredBuffer<uint> CellMaterials { get; init; }
+    public required GpuStructuredBuffer<WaterPressureRouteData> WaterPressureRoutes { get; init; }
+    public required GpuStructuredBuffer<WaterPressureRouteData> WaterPressureRouteScratch { get; init; }
+    public required GpuStructuredBuffer<uint> WaterComponents { get; init; }
     public required GpuBufferPair<SimulationStatistics> Statistics { get; init; }
     public required GpuUploadBuffer<BrushDrawCommand> Commands { get; init; }
     public required GpuUploadBuffer<MaterialProperties> Materials { get; init; }
@@ -41,6 +44,8 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? ComponentUnionShader { get; init; }
     public ComputeShader? ComponentCompressShader { get; init; }
     public ComputeShader? ComponentFinalizeShader { get; init; }
+    public ComputeShader? WaterComponentInitializeShader { get; init; }
+    public ComputeShader? WaterComponentUnionShader { get; init; }
     public ComputeShader? SolidGeometryAnalyzeShader { get; init; }
     public ComputeShader? SolidAnalyzeShader { get; init; }
     public ComputeShader? SolidDisplacementPlanShader { get; init; }
@@ -52,7 +57,7 @@ public sealed class GpuSimulationResources : IDisposable
     {
         Context.ComputeShader.Set(null);
         Context.ComputeShader.SetShaderResources(0, null, null, null, null);
-        Context.ComputeShader.SetUnorderedAccessViews(0, null, null, null, null, null);
+        Context.ComputeShader.SetUnorderedAccessViews(0, null, null, null, null, null, null, null);
         CompositionShader?.Dispose();
         SolidDisplacementApplyShader?.Dispose();
         SolidMoveShader?.Dispose();
@@ -60,6 +65,8 @@ public sealed class GpuSimulationResources : IDisposable
         SolidAnalyzeShader?.Dispose();
         SolidGeometryAnalyzeShader?.Dispose();
         ComponentFinalizeShader?.Dispose();
+        WaterComponentUnionShader?.Dispose();
+        WaterComponentInitializeShader?.Dispose();
         ComponentCompressShader?.Dispose();
         ComponentUnionShader?.Dispose();
         ComponentInitializeShader?.Dispose();
@@ -78,6 +85,9 @@ public sealed class GpuSimulationResources : IDisposable
         Materials.Dispose();
         Commands.Dispose();
         Statistics.Dispose();
+        WaterComponents.Dispose();
+        WaterPressureRouteScratch.Dispose();
+        WaterPressureRoutes.Dispose();
         CellMaterials.Dispose();
         PathBlockerMasks.Dispose();
         BodyFlags.Dispose();

@@ -43,8 +43,8 @@ struct SimulationStatistics
     uint GasCells;
     uint PressureMoves;
     uint MovingSolidCells;
-    uint Reserved1;
-    uint Reserved2;
+    uint FarColumnMoves;
+    uint PressurePlans;
 };
 
 cbuffer SimulationFrameConstants : register(b0)

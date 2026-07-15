@@ -316,14 +316,10 @@ public static class AcceptanceRegressionScenario
 
     private static IReadOnlyList<BrushDrawCommand> CreateSavedIsolation(uint frame)
     {
-        if (frame is < 40 or > 80)
-        {
-            return [];
-        }
-        BrushDrawCommand water = Create(780, 320, 24, MaterialId.Water, 0, 0);
-        water.Density = 0.82f;
-        water.Seed = 9200 + frame;
-        return [water];
+        // Saved-scene pressure regressions must preserve the captured mass.
+        // Injecting water here can imitate a rising spiral even when pressure
+        // routing is stalled, because this coordinate drains into the vessel.
+        return [];
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateBuoyancy(uint frame)

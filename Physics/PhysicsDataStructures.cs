@@ -72,6 +72,13 @@ public struct SimulationStatistics
     public uint GasCells;
     public uint PressureMoves;
     public uint MovingSolidCells;
-    public uint Reserved1;
-    public uint Reserved2;
+    public uint FarColumnMoves;
+    public uint PressurePlans;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct WaterPressureRouteData
+{
+    public uint Route;
+    public uint SourceIndex;
 }

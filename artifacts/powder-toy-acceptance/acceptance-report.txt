@@ -1,2 +1,2 @@
-PHYXEL_L_SAVED_GRAVITY lowerSolids=10789 body=29757 bounds=526-937 water=621486 waterTop=704 draft=233 movingSolids=3 statsFrame=110 statsMoving=207 statsMovingSolids=3 pressureMoves=0 fps=105,3
+PHYXEL_K_SAVED_SPIRAL water=331350 upperWater=300010 bottomWater=31340 tankTop=232 outerRise=0 firstBend=7 innerRise=6087 moving=18 pressureMoves=0 pressurePlans=0 farColumnMoves=0
 PHYXEL_ACCEPTANCE_FAILED

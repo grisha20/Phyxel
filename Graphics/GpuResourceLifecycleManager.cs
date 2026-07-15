@@ -100,14 +100,21 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         int cellCount = allocateSimulation ? checked(width * height) : 1;
         GpuBufferPair<GridCell> grid = new(Device, cellCount);
         GpuStructuredBuffer<uint> componentParents = new(Device, cellCount);
-        // The cellular solver reuses the first nine rows for its compact
-        // water-column cache and pressure-transfer scratch space.
-        int bodyFlagCount = allocateSimulation ? Math.Max(cellCount, checked(width * 9 + 1)) : 10;
+        // The cellular solver reuses the first 18 rows for its compact water
+        // column cache, 16 pressure-transfer lanes, and activity counter.
+        int bodyFlagCount = allocateSimulation ? Math.Max(cellCount, checked(width * 18 + 1)) : 19;
         GpuStructuredBuffer<uint> bodyFlags = new(Device, bodyFlagCount);
         GpuStructuredBuffer<uint> solidBodyGeometry = new(Device, cellCount);
-        int blockerMaskCount = allocateSimulation ? checked(((width + 31) / 32) * height) : 1;
+        // One extra element is a persistent diagnostic counter for forbidden
+        // non-adjacent column transfers; blocker-mask rebuilds never touch it.
+        int blockerMaskCount = allocateSimulation
+            ? checked(((width + 31) / 32) * height + 2)
+            : 3;
         GpuStructuredBuffer<uint> pathBlockerMasks = new(Device, blockerMaskCount);
         GpuStructuredBuffer<uint> cellMaterials = new(Device, cellCount);
+        GpuStructuredBuffer<WaterPressureRouteData> waterPressureRoutes = new(Device, cellCount);
+        GpuStructuredBuffer<WaterPressureRouteData> waterPressureRouteScratch = new(Device, cellCount);
+        GpuStructuredBuffer<uint> waterComponents = new(Device, cellCount);
         GpuBufferPair<SimulationStatistics> statistics = new(Device, 1);
         GpuUploadBuffer<BrushDrawCommand> commands = new(Device, SimulationSettings.MaximumBrushCommands);
         MaterialProperties[] materialTable = materialRegistry.CreateGpuTable();
@@ -175,6 +182,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SolidBodyGeometry = solidBodyGeometry,
             PathBlockerMasks = pathBlockerMasks,
             CellMaterials = cellMaterials,
+            WaterPressureRoutes = waterPressureRoutes,
+            WaterPressureRouteScratch = waterPressureRouteScratch,
+            WaterComponents = waterComponents,
             Statistics = statistics,
             Commands = commands,
             Materials = materials,
@@ -192,6 +202,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ComponentUnionShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "UnionComponents") : null,
             ComponentCompressShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "CompressComponents") : null,
             ComponentFinalizeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "FinalizeComponents") : null,
+            WaterComponentInitializeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "InitializeWaterComponents") : null,
+            WaterComponentUnionShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "UnionWaterComponents") : null,
             SolidGeometryAnalyzeShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "AnalyzeSolidGeometry") : null,
             SolidAnalyzeShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "AnalyzeSolidBodies") : null,
             SolidDisplacementPlanShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "PlanHullWaterDisplacement") : null,

@@ -10,6 +10,11 @@ bool IsComponentCell(GridCell cell)
     return cell.IsActive != 0 && IsFallingSolid(cell.MaterialId);
 }
 
+bool IsWaterComponentCell(GridCell cell)
+{
+    return cell.IsActive != 0 && cell.MaterialId == 2;
+}
+
 uint FindRoot(uint index)
 {
     uint root = index;
@@ -50,6 +55,17 @@ void InitializeComponents(uint3 dispatchThreadId : SV_DispatchThreadID)
     Parents[index] = IsComponentCell(Grid[index]) ? index : 0xffffffff;
 }
 
+[numthreads(256, 1, 1)]
+void InitializeWaterComponents(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint index = dispatchThreadId.x;
+    if (index >= Width * Height)
+    {
+        return;
+    }
+    Parents[index] = IsWaterComponentCell(Grid[index]) ? index : 0xffffffff;
+}
+
 [numthreads(16, 16, 1)]
 void UnionComponents(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -68,6 +84,29 @@ void UnionComponents(uint3 dispatchThreadId : SV_DispatchThreadID)
         Join(index, index + 1);
     }
     if (coordinate.y + 1 < Height && IsComponentCell(Grid[index + Width]))
+    {
+        Join(index, index + Width);
+    }
+}
+
+[numthreads(16, 16, 1)]
+void UnionWaterComponents(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coordinate = dispatchThreadId.xy;
+    if (coordinate.x >= Width || coordinate.y >= Height)
+    {
+        return;
+    }
+    uint index = FlattenCoordinate(coordinate);
+    if (!IsWaterComponentCell(Grid[index]))
+    {
+        return;
+    }
+    if (coordinate.x + 1 < Width && IsWaterComponentCell(Grid[index + 1]))
+    {
+        Join(index, index + 1);
+    }
+    if (coordinate.y + 1 < Height && IsWaterComponentCell(Grid[index + Width]))
     {
         Join(index, index + Width);
     }

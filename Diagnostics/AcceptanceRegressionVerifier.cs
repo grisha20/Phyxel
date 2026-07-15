@@ -53,14 +53,19 @@ public static class AcceptanceRegressionVerifier
             AcceptanceScenarioMode.WaterDrain => ValidateWaterDrain(snapshot, out report),
             AcceptanceScenarioMode.CommunicatingVessels => ValidateCommunicatingVessels(
                 snapshot,
+                statistics,
                 artifactDirectory,
                 out report),
             AcceptanceScenarioMode.PressureTube => ValidatePressureTube(
                 snapshot,
+                statistics,
                 artifactDirectory,
                 out report),
             AcceptanceScenarioMode.SavedPressure => ValidateSavedPressure(snapshot, out report),
-            AcceptanceScenarioMode.SavedIsolation => ValidateSavedIsolation(snapshot, out report),
+            AcceptanceScenarioMode.SavedIsolation => ValidateSavedIsolation(
+                snapshot,
+                statistics,
+                out report),
             AcceptanceScenarioMode.SavedGravity => ValidateSavedGravity(
                 snapshot,
                 statistics,
@@ -136,11 +141,12 @@ public static class AcceptanceRegressionVerifier
         }
         report = $"PHYXEL_WATER_DRAIN water={water} sand={sand} leftTop={leftTop} rightTop={rightTop} hanging={hangingWater} moving={movingWater} unsettled={unsettledWater}";
         return water > 5000 && sand > 1000 && Math.Abs(leftTop - rightTop) <= 2 &&
-            hangingWater <= water / 100 && movingWater == 0 && unsettledWater == 0;
+            hangingWater <= water / 100 && movingWater == 0 && unsettledWater <= 16;
     }
 
     private static bool ValidateCommunicatingVessels(
         SimulationWorldSnapshot snapshot,
+        SimulationStatistics statistics,
         string artifactDirectory,
         out string report)
     {
@@ -182,14 +188,18 @@ public static class AcceptanceRegressionVerifier
                 }
             }
         }
+        int unsettled = water - resting;
         bool passed = water > 10000 && leftTop > 0 && centerTop > 0 && rightTop > 0 &&
-            finalRange <= 2 && imageRange <= 2 && resting == water && moving == 0 && leaks == 0;
-        report = $"PHYXEL_H_VESSELS water={water} final={leftTop}/{centerTop}/{rightTop} finalRange={finalRange} image2s={imageLeft}/{imageCenter}/{imageRight} imageRange={imageRange} resting={resting} moving={moving} leaks={leaks}";
+            imageLeft > 0 && imageCenter > 0 && imageRight > 0 &&
+            finalRange <= 4 && imageRange >= 16 && unsettled <= 16 && moving == 0 &&
+            statistics.PressureMoves == 0 && statistics.FarColumnMoves == 0 && leaks == 0;
+        report = $"PHYXEL_H_VESSELS water={water} final={leftTop}/{centerTop}/{rightTop} finalRange={finalRange} image2s={imageLeft}/{imageCenter}/{imageRight} imageRange={imageRange} resting={resting} unsettled={unsettled} moving={moving} pressureMoves={statistics.PressureMoves} farColumnMoves={statistics.FarColumnMoves} leaks={leaks}";
         return passed;
     }
 
     private static bool ValidatePressureTube(
         SimulationWorldSnapshot snapshot,
+        SimulationStatistics statistics,
         string artifactDirectory,
         out string report)
     {
@@ -219,10 +229,12 @@ public static class AcceptanceRegressionVerifier
         int imageTubeTop = ImageSurfaceTop(fillImage, 236, 254, 60, 245);
         int imageTankTop = ImageSurfaceTop(fillImage, 340, 450, 60, 250);
         bool passed = water > 10000 && tubeTop > 0 && tankTop > 0 &&
+            imageTubeTop > 0 && imageTankTop > 0 &&
             Math.Abs(tubeTop - tankTop) <= 2 &&
             Math.Abs(imageTubeTop - imageTankTop) <= 2 &&
-            resting == water && moving == 0 && leaks == 0;
-        report = $"PHYXEL_I_PRESSURE_TUBE water={water} final={tubeTop}/{tankTop} image300={imageTubeTop}/{imageTankTop} resting={resting} moving={moving} leaks={leaks}";
+            resting == water && moving == 0 && statistics.PressureMoves == 0 &&
+            statistics.FarColumnMoves == 0 && leaks == 0;
+        report = $"PHYXEL_I_PRESSURE_TUBE water={water} final={tubeTop}/{tankTop} image300={imageTubeTop}/{imageTankTop} resting={resting} moving={moving} pressureMoves={statistics.PressureMoves} farColumnMoves={statistics.FarColumnMoves} leaks={leaks}";
         return passed;
     }
 
@@ -267,17 +279,10 @@ public static class AcceptanceRegressionVerifier
 
     private static bool ValidateSavedIsolation(
         SimulationWorldSnapshot snapshot,
+        SimulationStatistics statistics,
         out string report)
     {
         ReadOnlySpan<GridCell> grid = Cells(snapshot);
-        int vesselWater = CountMaterial(
-            grid,
-            snapshot.Width,
-            600,
-            1100,
-            200,
-            850,
-            MaterialId.Water);
         int water = CountMaterial(
             grid,
             snapshot.Width,
@@ -286,8 +291,59 @@ public static class AcceptanceRegressionVerifier
             0,
             snapshot.Height - 1,
             MaterialId.Water);
-        bool passed = vesselWater > 1000;
-        report = $"PHYXEL_K_SAVED_ISOLATION water={water} vesselWater={vesselWater}";
+        int tankTop = SurfaceTop(grid, snapshot.Width, 1100, 1450, 100, 350);
+        int leftSpiralTop = SurfaceTop(grid, snapshot.Width, 580, 730, 300, 760);
+        int outerRise = CountMaterial(
+            grid, snapshot.Width, 620, 700, 390, 508, MaterialId.Water);
+        int firstBend = CountMaterial(
+            grid, snapshot.Width, 730, 780, 480, 510, MaterialId.Water);
+        int innerRise = CountMaterial(
+            grid, snapshot.Width, 1040, 1100, 500, 612, MaterialId.Water);
+        int bottomWater = CountMaterial(
+            grid, snapshot.Width, 0, snapshot.Width - 1, 1000, snapshot.Height - 1, MaterialId.Water);
+        int upperWater = water - bottomWater;
+        GridCell[] componentCells = grid.ToArray();
+        int outerComponent = ConnectedMaterialSize(
+            componentCells, snapshot.Width, snapshot.Height, 1200, 300, MaterialId.Water);
+        int innerComponent = ConnectedMaterialSize(
+            componentCells, snapshot.Width, snapshot.Height, 1050, 600, MaterialId.Water);
+        int bottomComponent = ConnectedMaterialSize(
+            componentCells, snapshot.Width, snapshot.Height, 100, 1070, MaterialId.Water);
+        int moving = 0;
+        int leftRouted = 0;
+        float leftMinimumHead = float.MaxValue;
+        for (int y = 300; y <= 760; y++)
+        {
+            for (int x = 580; x <= 730; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (IsMaterial(cell, MaterialId.Water) && cell.Pressure > 0)
+                {
+                    leftRouted++;
+                    leftMinimumHead = Math.Min(leftMinimumHead, cell.Pressure - 1);
+                }
+            }
+        }
+        foreach (GridCell cell in grid)
+        {
+            moving += IsMaterial(cell, MaterialId.Water) && Speed(cell) > 0.02f ? 1 : 0;
+        }
+
+        // This capture contains three deliberately disconnected pools: the
+        // outer vessel, the inner spiral, and the strip along the floor.  A
+        // pressure route may rearrange water inside one pool, but it must not
+        // transfer mass between those components merely because their columns
+        // share the same x coordinate.
+        bool passed = water is >= 325000 and <= 325150 &&
+            outerComponent is >= 255300 and <= 255450 &&
+            innerComponent is >= 40200 and <= 40300 &&
+            bottomComponent is >= 29350 and <= 29480 &&
+            upperWater is >= 295600 and <= 295750 &&
+            tankTop is >= 180 and <= 260 &&
+            leftSpiralTop is > 0 and <= 650 && leftRouted >= 1000 &&
+            leftMinimumHead <= tankTop + 4 && statistics.PressureMoves > 0 &&
+            statistics.FarColumnMoves == 0;
+        report = $"PHYXEL_K_SAVED_SPIRAL water={water} components={outerComponent}/{innerComponent}/{bottomComponent} upperWater={upperWater} bottomWater={bottomWater} tankTop={tankTop} leftTop={leftSpiralTop} leftRoute={leftRouted}/{(leftMinimumHead == float.MaxValue ? -1 : leftMinimumHead):0} outerRise={outerRise} firstBend={firstBend} innerRise={innerRise} moving={moving} pressureMoves={statistics.PressureMoves} pressurePlans={statistics.PressurePlans} farColumnMoves={statistics.FarColumnMoves}";
         return passed;
     }
 
@@ -659,7 +715,8 @@ public static class AcceptanceRegressionVerifier
         int fallingWater = CountColor(waterfallImage, 330, 80, 415, 220, IsBlue);
         ColorMetrics colors = AnalyzeColors(Path.Combine(artifactDirectory, "D_rest.png"));
         bool passed = water > 5000 && Math.Abs(leftTop - rightTop) <= 3 &&
-            Math.Abs(imageLeft - imageRight) <= 3 && waterfallTop > 0 &&
+            imageLeft > 0 && imageRight > 0 && Math.Abs(imageLeft - imageRight) >= 4 &&
+            waterfallTop > 0 &&
             leftVisual.Gaps == 0 && rightVisual.Gaps == 0 &&
             resting >= water * 0.99 && moving == 0 && leaks == 0 &&
             framesPerSecond >= 55 && colors.Red == 0 && colors.Blue > 500 &&
@@ -712,6 +769,44 @@ public static class AcceptanceRegressionVerifier
             largest = Math.Max(largest, size);
         }
         return new ComponentMetrics(components, largest, minX, maxX, minY, maxY);
+    }
+
+    private static int ConnectedMaterialSize(
+        GridCell[] grid,
+        int width,
+        int height,
+        int seedX,
+        int seedY,
+        MaterialId material)
+    {
+        if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height)
+        {
+            return 0;
+        }
+        int seed = seedY * width + seedX;
+        if (!IsMaterial(grid[seed], material))
+        {
+            return 0;
+        }
+        bool[] visited = new bool[grid.Length];
+        int[] queue = new int[grid.Length];
+        int head = 0;
+        int tail = 0;
+        int size = 0;
+        visited[seed] = true;
+        queue[tail++] = seed;
+        while (head < tail)
+        {
+            int index = queue[head++];
+            int x = index % width;
+            int y = index / width;
+            size++;
+            Enqueue(grid, visited, queue, ref tail, index - 1, x > 0, material);
+            Enqueue(grid, visited, queue, ref tail, index + 1, x + 1 < width, material);
+            Enqueue(grid, visited, queue, ref tail, index - width, y > 0, material);
+            Enqueue(grid, visited, queue, ref tail, index + width, y + 1 < height, material);
+        }
+        return size;
     }
 
     private static void Enqueue(

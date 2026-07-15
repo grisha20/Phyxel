@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "Z:\\Chichiryaka\\Documents\\GitHub\\Phyxel-pjct\\Phyxel.csproj": {}
+    "C:\\Users\\Chichiryaka\\Documents\\GitHub\\Phyxel-pjct\\Phyxel.csproj": {}
   },
   "projects": {
-    "Z:\\Chichiryaka\\Documents\\GitHub\\Phyxel-pjct\\Phyxel.csproj": {
+    "C:\\Users\\Chichiryaka\\Documents\\GitHub\\Phyxel-pjct\\Phyxel.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "Z:\\Chichiryaka\\Documents\\GitHub\\Phyxel-pjct\\Phyxel.csproj",
+        "projectUniqueName": "C:\\Users\\Chichiryaka\\Documents\\GitHub\\Phyxel-pjct\\Phyxel.csproj",
         "projectName": "Phyxel",
-        "projectPath": "Z:\\Chichiryaka\\Documents\\GitHub\\Phyxel-pjct\\Phyxel.csproj",
+        "projectPath": "C:\\Users\\Chichiryaka\\Documents\\GitHub\\Phyxel-pjct\\Phyxel.csproj",
         "packagesPath": "C:\\Users\\Chichiryaka\\.nuget\\packages\\",
-        "outputPath": "Z:\\Chichiryaka\\Documents\\GitHub\\Phyxel-pjct\\obj\\",
+        "outputPath": "C:\\Users\\Chichiryaka\\Documents\\GitHub\\Phyxel-pjct\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

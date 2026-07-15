@@ -3,6 +3,7 @@
 StructuredBuffer<GridCell> Grid : register(t0);
 StructuredBuffer<MaterialProperties> Materials : register(t1);
 StructuredBuffer<uint> WaterActivity : register(t2);
+StructuredBuffer<uint> WaterDiagnostics : register(t3);
 RWTexture2D<unorm float4> OutputTexture : register(u0);
 RWStructuredBuffer<SimulationStatistics> Statistics : register(u1);
 
@@ -105,9 +106,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         if (coordinate.x == 0 && coordinate.y == 0)
         {
             Statistics[0].FrameIndex = FrameIndex;
-            Statistics[0].PressureMoves = WaterActivity[Width * 9];
-            Statistics[0].Reserved1 = 0;
-            Statistics[0].Reserved2 = 0;
+            Statistics[0].PressureMoves = WaterActivity[Width * 17];
+            uint blockerCount = ((Width + 31) / 32) * Height;
+            Statistics[0].FarColumnMoves = WaterDiagnostics[blockerCount];
+            Statistics[0].PressurePlans = WaterDiagnostics[blockerCount + 1];
         }
     }
 }

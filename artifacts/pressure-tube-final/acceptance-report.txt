@@ -1,0 +1,2 @@
+PHYXEL_I_PRESSURE_TUBE water=15021 final=174/173 image300=173/172 resting=15021 moving=0 pressureMoves=0 farColumnMoves=0 leaks=0
+PHYXEL_ACCEPTANCE_SUCCESS

@@ -1,0 +1,2 @@
+PHYXEL_K_SAVED_SPIRAL water=325084 components=255387/40238/29410 upperWater=295674 bottomWater=29410 tankTop=200 leftTop=744 leftRoute=1715/594 outerRise=0 firstBend=7 innerRise=1123 moving=17 pressureMoves=0 pressurePlans=1 farColumnMoves=0
+PHYXEL_ACCEPTANCE_FAILED
