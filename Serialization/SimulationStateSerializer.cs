@@ -23,7 +23,8 @@ public sealed record SimulationSceneState(
     float SpawnDensity,
     bool SolidGravity,
     MaterialId SelectedMaterial,
-    DateTimeOffset SavedAt);
+    DateTimeOffset SavedAt,
+    bool HydraulicPressure = false);
 
 public sealed record SimulationWorldSnapshot(int Width, int Height, byte[] Grid);
 
@@ -103,7 +104,8 @@ public sealed class SimulationStateSerializer
             settings.SpawnDensity,
             settings.SolidGravity,
             selectedMaterial,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            settings.HydraulicPressure);
         string directory = Path.GetDirectoryName(path) ?? AppContext.BaseDirectory;
         Directory.CreateDirectory(directory);
         await using (FileStream stream = File.Create(path))
@@ -156,6 +158,7 @@ public sealed class SimulationStateSerializer
         settings.BrushRadius = Math.Clamp(state.BrushRadius, 1, 96);
         settings.SpawnDensity = Math.Clamp(state.SpawnDensity, 0.05f, 1);
         settings.SolidGravity = state.SolidGravity;
+        settings.HydraulicPressure = state.HydraulicPressure;
     }
 
     public static bool ContainsMatter(SimulationWorldSnapshot world)

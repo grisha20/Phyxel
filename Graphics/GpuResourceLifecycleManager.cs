@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Core;
@@ -114,7 +116,6 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         GpuStructuredBuffer<uint> cellMaterials = new(Device, cellCount);
         GpuStructuredBuffer<WaterPressureRouteData> waterPressureRoutes = new(Device, cellCount);
         GpuStructuredBuffer<WaterPressureRouteData> waterPressureRouteScratch = new(Device, cellCount);
-        GpuStructuredBuffer<uint> waterComponents = new(Device, cellCount);
         GpuBufferPair<SimulationStatistics> statistics = new(Device, 1);
         GpuUploadBuffer<BrushDrawCommand> commands = new(Device, SimulationSettings.MaximumBrushCommands);
         MaterialProperties[] materialTable = materialRegistry.CreateGpuTable();
@@ -184,7 +185,6 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             CellMaterials = cellMaterials,
             WaterPressureRoutes = waterPressureRoutes,
             WaterPressureRouteScratch = waterPressureRouteScratch,
-            WaterComponents = waterComponents,
             Statistics = statistics,
             Commands = commands,
             Materials = materials,
@@ -202,8 +202,6 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ComponentUnionShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "UnionComponents") : null,
             ComponentCompressShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "CompressComponents") : null,
             ComponentFinalizeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "FinalizeComponents") : null,
-            WaterComponentInitializeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "InitializeWaterComponents") : null,
-            WaterComponentUnionShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "UnionWaterComponents") : null,
             SolidGeometryAnalyzeShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "AnalyzeSolidGeometry") : null,
             SolidAnalyzeShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "AnalyzeSolidBodies") : null,
             SolidDisplacementPlanShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "PlanHullWaterDisplacement") : null,
@@ -222,6 +220,29 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             "#include \"PhysicsShared.hlsli\"",
             sharedStructures,
             StringComparison.Ordinal);
+        string cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            $"phyxel-compute-shader-v1\0{entryPoint}\0{shaderSource}")));
+        string cachePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Phyxel",
+            "ShaderCache",
+            cacheKey + ".cso");
+
+        try
+        {
+            if (File.Exists(cachePath))
+            {
+                using ShaderBytecode cachedBytecode = new(File.ReadAllBytes(cachePath));
+                return new ComputeShader(Device, cachedBytecode);
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or SharpDX.SharpDXException)
+        {
+            // A stale or partially written cache entry must never prevent startup.
+            TryDeleteShaderCacheEntry(cachePath);
+        }
+
         using CompilationResult compilation = ShaderBytecode.Compile(
             shaderSource,
             entryPoint,
@@ -231,7 +252,38 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             null,
             null,
             path);
+        TryWriteShaderCacheEntry(cachePath, compilation.Bytecode.Data);
         return new ComputeShader(Device, compilation.Bytecode);
+    }
+
+    private static void TryWriteShaderCacheEntry(string cachePath, byte[] bytecode)
+    {
+        try
+        {
+            string? cacheDirectory = Path.GetDirectoryName(cachePath);
+            if (cacheDirectory is null)
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(cacheDirectory);
+            File.WriteAllBytes(cachePath, bytecode);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Caching is an optimization; compiled bytecode remains usable this run.
+        }
+    }
+
+    private static void TryDeleteShaderCacheEntry(string cachePath)
+    {
+        try
+        {
+            File.Delete(cachePath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private Buffer CreateStagingBuffer(int sizeInBytes)

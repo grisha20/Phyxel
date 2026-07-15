@@ -64,7 +64,7 @@ cbuffer SimulationFrameConstants : register(b0)
     uint SolidPass;
     uint DispatchExtentX;
     uint DispatchExtentY;
-    uint Reserved2;
+    uint HydraulicPressure;
 };
 
 uint FlattenCoordinate(uint2 coordinate)

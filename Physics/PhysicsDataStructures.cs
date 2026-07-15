@@ -56,7 +56,7 @@ public struct SimulationFrameConstants
     public uint SolidPass;
     public uint DispatchExtentX;
     public uint DispatchExtentY;
-    public uint Reserved2;
+    public uint HydraulicPressure;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

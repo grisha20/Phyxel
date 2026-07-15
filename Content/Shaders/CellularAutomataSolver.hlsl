@@ -14,7 +14,6 @@ RWStructuredBuffer<uint> PathBlockerMasks : register(u2);
 RWStructuredBuffer<uint> CellMaterials : register(u3);
 RWStructuredBuffer<WaterPressureRouteData> WaterPressureRoutes : register(u4);
 RWStructuredBuffer<WaterPressureRouteData> WaterPressureRouteScratch : register(u5);
-RWStructuredBuffer<uint> WaterComponents : register(u6);
 
 static const uint SandRestThreshold = 30;
 static const uint FluidRestThreshold = 60;
@@ -1203,7 +1202,9 @@ bool HasPressureChannelWalls(uint2 coordinate, int2 movement)
 void PlanPressurizedWaterMove(uint2 coordinate)
 {
     uint index = FlattenCoordinate(coordinate);
-    if (coordinate.y == 0 || CellKindAtIndex(index) != 4)
+    // Communicating-vessel pressure is an explicit opt-in feature. Ordinary
+    // Powder Toy-style water must never rise into sealed air pockets.
+    if (HydraulicPressure == 0 || coordinate.y == 0 || CellKindAtIndex(index) != 4)
     {
         return;
     }
@@ -1365,7 +1366,6 @@ void ApplyPressurizedWaterReturnSlot(uint sourceX, uint lane, uint donorParity)
     }
     uint destinationIndex = FlattenCoordinate(uint2(sourceX, sourceTop - 1));
     uint2 sourceWaterCoordinate = uint2(sourceWaterX, sourceWaterY);
-    uint sourceComponent = WaterComponents[sourceWaterIndex];
     if (CellKindAtIndex(sourceWaterIndex) != 4 || CellKindAtIndex(destinationIndex) != 0 ||
         !PressureRouteIsConnected(sourceWaterCoordinate, route) ||
         !WaterRemovalPreservesConnectivity(sourceWaterCoordinate))
@@ -1382,8 +1382,6 @@ void ApplyPressurizedWaterReturnSlot(uint sourceX, uint lane, uint donorParity)
     CellMaterials[destinationIndex] = water.MaterialId;
     WaterPressureRoutes[sourceWaterIndex] = EmptyPressureRoute();
     WaterPressureRoutes[destinationIndex] = MakePressureRoute(route.SourceIndex, 0);
-    WaterComponents[sourceWaterIndex] = 0xffffffff;
-    WaterComponents[destinationIndex] = sourceComponent;
     uint ignored;
     InterlockedAdd(WaterColumnState[Width * HydraulicActivityRow], 1, ignored);
 }
@@ -1444,7 +1442,6 @@ void ApplyPressurizedWaterMoveSlot(uint sourceX, uint lane)
     }
     uint sourceIndex = FlattenCoordinate(uint2(sourceX, sourceTop));
     uint2 sourceCoordinate = uint2(sourceX, sourceTop);
-    uint destinationComponent = WaterComponents[sourceIndex];
     if (CellKindAtIndex(sourceIndex) != 4 || CellKindAtIndex(destinationIndex) != 0 ||
         !WaterRemovalPreservesConnectivity(sourceCoordinate))
     {
@@ -1462,8 +1459,6 @@ void ApplyPressurizedWaterMoveSlot(uint sourceX, uint lane)
     CellMaterials[destinationIndex] = water.MaterialId;
     WaterPressureRoutes[sourceIndex] = EmptyPressureRoute();
     WaterPressureRoutes[destinationIndex] = route;
-    WaterComponents[sourceIndex] = 0xffffffff;
-    WaterComponents[destinationIndex] = destinationComponent;
     uint ignored;
     InterlockedAdd(
         WaterColumnState[Width * HydraulicActivityRow],
@@ -1596,29 +1591,32 @@ bool CanMoveWater(uint2 coordinate, GridCell cell)
                 return true;
             }
         }
-        static const uint spans[8] = { 2, 4, 8, 16, 32, 64, 128, 256 };
-        for (uint spanIndex = 0; spanIndex < 8; spanIndex++)
+        if (HydraulicPressure != 0)
         {
-            int stride = int(spans[spanIndex]);
-            for (int direction = -1; direction <= 1; direction += 2)
+            static const uint spans[8] = { 2, 4, 8, 16, 32, 64, 128, 256 };
+            for (uint spanIndex = 0; spanIndex < 8; spanIndex++)
             {
-                int x = int(coordinate.x) + direction * stride;
-                if (x < 0 || x >= int(Width))
+                int stride = int(spans[spanIndex]);
+                for (int direction = -1; direction <= 1; direction += 2)
                 {
-                    continue;
-                }
-                uint2 destination = uint2(x, coordinate.y);
-                if (WaterCanFlowSideOpt(
-                    coordinate,
-                    destination,
-                    cell.MaterialId,
-                    CellMaterials[FlattenCoordinate(destination)],
-                    hasWaterAbove,
-                    hasWaterLeft,
-                    hasWaterRight) &&
-                    WaterPathFilledBetween(coordinate.x, destination.x, coordinate.y))
-                {
-                    return true;
+                    int x = int(coordinate.x) + direction * stride;
+                    if (x < 0 || x >= int(Width))
+                    {
+                        continue;
+                    }
+                    uint2 destination = uint2(x, coordinate.y);
+                    if (WaterCanFlowSideOpt(
+                        coordinate,
+                        destination,
+                        cell.MaterialId,
+                        CellMaterials[FlattenCoordinate(destination)],
+                        hasWaterAbove,
+                        hasWaterLeft,
+                        hasWaterRight) &&
+                        WaterPathFilledBetween(coordinate.x, destination.x, coordinate.y))
+                    {
+                        return true;
+                    }
                 }
             }
         }
@@ -1690,7 +1688,10 @@ void UpdateRestState(uint2 coordinate)
     }
     else
     {
-        cell.RestFrames = min(cell.RestFrames + 1, threshold);
+        // Rest state is evaluated once per rendered frame. The solver used to
+        // run this pass after both cellular substeps, so advance by two to keep
+        // the existing sleep timing while avoiding the duplicate global scan.
+        cell.RestFrames = min(cell.RestFrames + 2, threshold);
         cell.VelocityX = 0;
         cell.VelocityY = 0;
     }

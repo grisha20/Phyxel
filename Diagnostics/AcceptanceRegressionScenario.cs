@@ -15,6 +15,7 @@ public enum AcceptanceScenarioMode
     Slope,
     Gas,
     WaterStress,
+    FlatSurface,
     WaterDrain,
     CommunicatingVessels,
     PressureTube,
@@ -40,6 +41,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.Slope => CreateSlope(frame),
             AcceptanceScenarioMode.Gas => CreateGas(frame),
             AcceptanceScenarioMode.WaterStress => CreateWaterStress(frame),
+            AcceptanceScenarioMode.FlatSurface => CreateFlatSurface(frame),
             AcceptanceScenarioMode.WaterDrain => CreateWaterDrain(frame),
             AcceptanceScenarioMode.CommunicatingVessels => CreateCommunicatingVessels(frame),
             AcceptanceScenarioMode.PressureTube => CreatePressureTube(frame),
@@ -242,6 +244,36 @@ public static class AcceptanceRegressionScenario
             return commands;
         }
         return commands;
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateFlatSurface(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 10, 255, 470, 255, 7, 5, MaterialId.Metal, 7101);
+            AddLine(commands, 10, 90, 10, 255, 7, 5, MaterialId.Metal, 7101);
+            AddLine(commands, 470, 90, 470, 255, 7, 5, MaterialId.Metal, 7101);
+            return commands;
+        }
+        if (frame == 1)
+        {
+            BrushDrawCommand sand = Create(355, 178, 30, MaterialId.Sand, 0, 0);
+            sand.Density = 0.72f;
+            sand.Seed = 7102;
+            return [sand];
+        }
+        if (frame == 2)
+        {
+            return AddFill(275, 165, 455, 245, 8, 5, MaterialId.Water, 0);
+        }
+        if (frame is >= 3 and <= 300)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 240, 25, 240, 55, 6, 4, MaterialId.Water, 0);
+            return commands;
+        }
+        return [];
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateWaterDrain(uint frame)

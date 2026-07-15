@@ -209,6 +209,12 @@ public sealed class PhyxelGame : Game
             dispatchCoordinator.SetSolidGravityEnabled(settings.SolidGravity);
             SetStatus(settings.SolidGravity ? "Гравитация включена" : "Гравитация выключена");
         }
+        if (actions.HydraulicsChanged)
+        {
+            SetStatus(settings.HydraulicPressure
+                ? "Гидравлика сосудов включена (медленнее)"
+                : "Быстрая вода включена");
+        }
         if (actions.SaveRequested && pendingSave is null && !pendingWorldCapture && currentResources is not null)
         {
             stateSerializer.BeginWorldCapture(currentResources);
@@ -263,7 +269,10 @@ public sealed class PhyxelGame : Game
                 bool containsMatter = SimulationStateSerializer.ContainsMatter(loaded.World);
                 currentResources = resourceManager.CreateOrResize(settings, containsMatter);
                 stateSerializer.ApplyWorldSnapshot(currentResources, loaded.World);
-                dispatchCoordinator?.RestoreWorldActivity(currentResources, containsMatter);
+                dispatchCoordinator?.RestoreWorldActivity(
+                    currentResources,
+                    containsMatter,
+                    settings.HydraulicPressure);
                 SetStatus("Сцена загружена");
             }
         }

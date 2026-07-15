@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using Phyxel.Core;
 using Phyxel.Materials;
 using Phyxel.Physics;
@@ -10,6 +9,68 @@ namespace Phyxel.Graphics;
 
 public sealed class SimulationDispatchCoordinator
 {
+    private static readonly uint[] PrimaryEvenPhases =
+    [
+        32, 0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
+        2, 3, 2, 3, 2, 3, 2, 3,
+        40, 41, 42, 43, 44, 45, 46, 47,
+        33, 13, 29,
+        34, 35, 34, 35, 34, 35, 34, 35,
+        36, 37, 71, 38, 39, 70,
+        4
+    ];
+
+    private static readonly uint[] PrimaryOddPhases =
+    [
+        32, 1, 0, 1, 0, 1, 0, 1, 0, 6, 5, 8, 7, 10, 9, 12, 11,
+        3, 2, 3, 2, 3, 2, 3, 2,
+        47, 46, 45, 44, 43, 42, 41, 40,
+        33, 13, 29,
+        34, 35, 34, 35, 34, 35, 34, 35,
+        36, 37, 71, 38, 39, 70,
+        4
+    ];
+
+    private static readonly uint[] SecondaryEvenPhases =
+    [
+        0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
+        2, 3, 2, 3, 2, 3, 2, 3,
+        40, 41, 42, 43, 44, 45, 46, 47,
+        33, 13, 29,
+        4
+    ];
+
+    private static readonly uint[] SecondaryOddPhases =
+    [
+        1, 0, 1, 0, 1, 0, 1, 0, 6, 5, 8, 7, 10, 9, 12, 11,
+        3, 2, 3, 2, 3, 2, 3, 2,
+        47, 46, 45, 44, 43, 42, 41, 40,
+        33, 13, 29,
+        4
+    ];
+
+    private static readonly uint[] OptimizedEvenPhases =
+    [
+        32, 0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
+        2, 3, 2, 3, 2, 3, 2, 3,
+        40, 42, 44, 46,
+        33, 13, 29,
+        34, 35, 34, 35,
+        36, 37, 71, 38, 39, 70,
+        4
+    ];
+
+    private static readonly uint[] OptimizedOddPhases =
+    [
+        32, 1, 0, 1, 0, 1, 0, 1, 0, 6, 5, 8, 7, 10, 9, 12, 11,
+        3, 2, 3, 2, 3, 2, 3, 2,
+        47, 45, 43, 41,
+        33, 13, 29,
+        34, 35, 34, 35,
+        36, 37, 71, 38, 39, 70,
+        4
+    ];
+
     private readonly GpuResourceLifecycleManager lifecycleManager;
     private readonly MaterialRegistry materialRegistry;
     private GpuSimulationResources? boundResources;
@@ -18,17 +79,23 @@ public sealed class SimulationDispatchCoordinator
     private bool worldHasMatter;
     private bool cellularMatter;
     private bool fluidMatter;
+    private bool waterMatter;
+    private bool gasMatter;
     private bool solidMatter;
     private bool cellularSleeping;
     private bool solidSleeping;
     private bool topologyDirty;
     private bool previousSolidGravity;
+    private bool previousHydraulicPressure;
     private bool presentationDirty = true;
     private bool finalizeCellularRest;
     private bool waterPressureRoutesDirty = true;
     private bool solidMotionNeedsCellular = true;
+    private bool cellMaterialsDirty;
     private int settledObservations;
     private int hydraulicWarmupFrames;
+    private int fastSettleFrames;
+    private int fastMaximumAwakeFrames;
 
     // Active Region tracking
     private int activeMinX;
@@ -107,6 +174,38 @@ public sealed class SimulationDispatchCoordinator
         solidSleeping = true;
     }
 
+    private void ApplyHydraulicMode(GpuSimulationResources resources, bool enabled)
+    {
+        waterPressureRoutesDirty = true;
+        hydraulicWarmupFrames = enabled ? 128 : 0;
+        fastSettleFrames = enabled ? 0 : 300;
+        fastMaximumAwakeFrames = enabled ? 0 : 3600;
+        settledObservations = 0;
+        finalizeCellularRest = false;
+        presentationDirty = true;
+
+        if (!enabled && resources.IsSimulationAllocated)
+        {
+            // Pressure activity shares this scratch buffer with the solid-body
+            // flags. Solid analysis rebuilds its entries later in the frame.
+            resources.Context.ClearUnorderedAccessView(
+                resources.BodyFlags.UnorderedView,
+                new RawInt4(0, 0, 0, 0));
+        }
+
+        if (!worldHasMatter)
+        {
+            return;
+        }
+
+        cellularSleeping = false;
+        activeMinX = 0;
+        activeMinY = 0;
+        activeMaxX = resources.Width - 1;
+        activeMaxY = resources.Height - 1;
+        activeRegionValid = true;
+    }
+
     public GpuSimulationResources DispatchFrame(
         SimulationSettings settings,
         ReadOnlySpan<BrushDrawCommand> commands)
@@ -121,12 +220,23 @@ public sealed class SimulationDispatchCoordinator
             ResetActivity(resources.IsSimulationAllocated);
         }
 
+        if (settings.HydraulicPressure != previousHydraulicPressure)
+        {
+            ApplyHydraulicMode(resources, settings.HydraulicPressure);
+            previousHydraulicPressure = settings.HydraulicPressure;
+        }
+
         SimulationFrameConstants constants = CreateConstants(settings, commands);
         if (commands.Length > 0)
         {
             resources.Commands.Upload(resources.Context, commands);
             DispatchBrush(resources, ref constants);
-            RegisterActivity(commands, settings.Width, settings.Height);
+            cellMaterialsDirty = true;
+            RegisterActivity(
+                commands,
+                settings.Width,
+                settings.Height,
+                settings.HydraulicPressure);
             worldHasMatter |= ContainsMatterCommand(commands);
             presentationDirty = true;
         }
@@ -167,6 +277,7 @@ public sealed class SimulationDispatchCoordinator
             // Re-evaluate only the still-moving bodies instead of rescanning a
             // large stationary hull because a few detached pixels are falling.
             DispatchSolidPass(resources, ref constants, cellularSleeping ? 0u : 1u);
+            cellMaterialsDirty = true;
             if (solidMotionNeedsCellular)
             {
                 cellularSleeping = false;
@@ -174,7 +285,8 @@ public sealed class SimulationDispatchCoordinator
             presentationDirty = true;
         }
 
-        if (waterPressureRoutesDirty && resources.IsSimulationAllocated)
+        if (settings.HydraulicPressure && waterMatter && waterPressureRoutesDirty &&
+            resources.IsSimulationAllocated)
         {
             resources.Context.ClearUnorderedAccessView(
                 resources.WaterPressureRoutes.UnorderedView,
@@ -205,12 +317,49 @@ public sealed class SimulationDispatchCoordinator
                 activeRegionValid = true;
             }
 
-            DispatchCellularAutomata(resources, ref constants, true);
-            if (fluidMatter)
+            // At medium/native resolutions one complete cellular step already
+            // saturates the GPU. The second step only doubles memory traffic;
+            // alternating the wide spans preserves their total reach over two
+            // rendered frames without freezing the UI on mid-range hardware.
+            bool useOptimizedSchedule = settings.Scale >= 0.5f;
+            // Quarter-resolution has enough headroom for a full second ordinary-
+            // water step. Larger grids retain the single-step schedule so the
+            // same scene remains practical on mid-range GPUs.
+            bool boostOrdinaryWater = !settings.HydraulicPressure && !gasMatter;
+            bool runSecondaryStep = fluidMatter && !useOptimizedSchedule &&
+                (settings.HydraulicPressure || gasMatter || boostOrdinaryWater);
+            bool runLongRangeFluid = fluidMatter;
+            DispatchCellularAutomata(
+                resources,
+                ref constants,
+                cellMaterialsDirty,
+                primaryStep: true,
+                runPressureRoutes: waterMatter && settings.HydraulicPressure,
+                runLongRangeFluid,
+                updateRestState: !runSecondaryStep,
+                useOptimizedSchedule);
+            cellMaterialsDirty = false;
+            if (runSecondaryStep)
             {
-                DispatchCellularAutomata(resources, ref constants, false);
+                DispatchCellularAutomata(
+                    resources,
+                    ref constants,
+                    rebuildCellMaterials: false,
+                    primaryStep: false,
+                    runPressureRoutes: false,
+                    runLongRangeFluid,
+                    updateRestState: true,
+                    useOptimizedSchedule: false);
             }
-            hydraulicWarmupFrames = Math.Max(0, hydraulicWarmupFrames - 1);
+            hydraulicWarmupFrames = settings.HydraulicPressure
+                ? Math.Max(0, hydraulicWarmupFrames - 1)
+                : 0;
+            fastSettleFrames = settings.HydraulicPressure
+                ? 0
+                : Math.Max(0, fastSettleFrames - 1);
+            fastMaximumAwakeFrames = settings.HydraulicPressure
+                ? 0
+                : Math.Max(0, fastMaximumAwakeFrames - 1);
             presentationDirty = true;
         }
 
@@ -232,7 +381,10 @@ public sealed class SimulationDispatchCoordinator
         ResetActivity(resources.IsSimulationAllocated);
     }
 
-    public void RestoreWorldActivity(GpuSimulationResources resources, bool containsMatter)
+    public void RestoreWorldActivity(
+        GpuSimulationResources resources,
+        bool containsMatter,
+        bool hydraulicPressure)
     {
         resources.Context.ClearUnorderedAccessView(
             resources.PathBlockerMasks.UnorderedView,
@@ -241,14 +393,20 @@ public sealed class SimulationDispatchCoordinator
         worldHasMatter = containsMatter;
         cellularMatter = containsMatter;
         fluidMatter = containsMatter;
+        waterMatter = containsMatter;
+        gasMatter = containsMatter;
         solidMatter = containsMatter;
         cellularSleeping = false;
         solidSleeping = false;
         topologyDirty = true;
         waterPressureRoutesDirty = true;
+        previousHydraulicPressure = hydraulicPressure;
         solidMotionNeedsCellular = true;
+        cellMaterialsDirty = containsMatter;
         settledObservations = 0;
-        hydraulicWarmupFrames = 128;
+        hydraulicWarmupFrames = hydraulicPressure ? 128 : 0;
+        fastSettleFrames = hydraulicPressure ? 0 : 300;
+        fastMaximumAwakeFrames = hydraulicPressure ? 0 : 3600;
         presentationDirty = resources.IsSimulationAllocated;
 
         if (containsMatter)
@@ -273,6 +431,9 @@ public sealed class SimulationDispatchCoordinator
         }
         lastObservedStatisticsFrame = statistics.FrameIndex;
         uint cellularCells = statistics.WaterCells + statistics.SandCells + statistics.GasCells;
+        fluidMatter = statistics.WaterCells > 0 || statistics.GasCells > 0;
+        waterMatter = statistics.WaterCells > 0;
+        gasMatter = statistics.GasCells > 0;
         uint movingCellularCells = statistics.MovingCells > statistics.MovingSolidCells
             ? statistics.MovingCells - statistics.MovingSolidCells
             : 0;
@@ -287,12 +448,18 @@ public sealed class SimulationDispatchCoordinator
                     // after pressure and every visible surface have settled.
                     ? 8u
                     : 1u;
-        bool settled = hydraulicWarmupFrames == 0 && statistics.ActiveCells > 0 &&
-            !solidMotionNeedsCellular &&
-            statistics.PressureMoves == 0 && movingCellularCells <= residualTolerance;
+        bool settleDelayElapsed = fastSettleFrames == 0 && hydraulicWarmupFrames == 0;
+        bool fastSafetyTimeout = !previousHydraulicPressure &&
+            fastMaximumAwakeFrames == 0 && statistics.GasCells == 0;
+        bool settled = statistics.ActiveCells > 0 && !solidMotionNeedsCellular &&
+            (fastSafetyTimeout ||
+                (settleDelayElapsed &&
+                    (!previousHydraulicPressure || statistics.PressureMoves == 0) &&
+                    movingCellularCells <= residualTolerance));
         settledObservations = settled ? settledObservations + 1 : 0;
-        int observationsRequired = !minorSolidMotion &&
-            (statistics.GasCells > 0 || movingCellularCells > 0)
+        int observationsRequired = fastSafetyTimeout
+            ? 2
+            : !minorSolidMotion && (statistics.GasCells > 0 || movingCellularCells > 0)
                 ? 24
                 : 2;
         if (!settled)
@@ -362,37 +529,6 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetUnorderedAccessViews(0, null, resources.Grid.ReadUnorderedView);
         context.Dispatch(DivideRoundUp(cells, 256), 1, 1);
         Unbind(context, 2, 2);
-    }
-
-    private static void DispatchWaterComponentLabeling(
-        GpuSimulationResources resources,
-        ref SimulationFrameConstants constants)
-    {
-        DeviceContext context = resources.Context;
-        int cells = resources.Width * resources.Height;
-        UpdateConstants(context, resources, ref constants);
-        context.ComputeShader.Set(resources.WaterComponentInitializeShader);
-        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResource(0, resources.Grid.ReadView);
-        context.ComputeShader.SetUnorderedAccessView(0, resources.WaterComponents.UnorderedView);
-        context.Dispatch(DivideRoundUp(cells, 256), 1, 1);
-        Unbind(context, 1, 1);
-
-        for (int iteration = 0; iteration < 4; iteration++)
-        {
-            context.ComputeShader.Set(resources.WaterComponentUnionShader);
-            context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-            context.ComputeShader.SetShaderResource(0, resources.Grid.ReadView);
-            context.ComputeShader.SetUnorderedAccessView(0, resources.WaterComponents.UnorderedView);
-            context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-            Unbind(context, 1, 1);
-
-            context.ComputeShader.Set(resources.ComponentCompressShader);
-            context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-            context.ComputeShader.SetUnorderedAccessView(0, resources.WaterComponents.UnorderedView);
-            context.Dispatch(DivideRoundUp(cells, 256), 1, 1);
-            Unbind(context, 0, 1);
-        }
     }
 
     private static void DispatchSolidGeometry(
@@ -504,36 +640,22 @@ public sealed class SimulationDispatchCoordinator
     private void DispatchCellularAutomata(
         GpuSimulationResources resources,
         ref SimulationFrameConstants constants,
-        bool rebuildCellMaterials)
+        bool rebuildCellMaterials,
+        bool primaryStep,
+        bool runPressureRoutes,
+        bool runLongRangeFluid,
+        bool updateRestState,
+        bool useOptimizedSchedule)
     {
         DeviceContext context = resources.Context;
         // Resolve gravity and ordinary lateral flow before consulting the
         // hydraulic caches. Phase 13 balances adjacent columns only; phase 29
         // applies that local plan before the pressure-only passes run.
-        List<uint> phases = (frameIndex & 1) == 0
-            ? [32, 0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
-                2, 3, 2, 3, 2, 3, 2, 3,
-                40, 41, 42, 43, 44, 45, 46, 47,
-                33, 13, 29,
-                34, 35, 34, 35, 34, 35, 34, 35]
-            : [32, 1, 0, 1, 0, 1, 0, 1, 0, 6, 5, 8, 7, 10, 9, 12, 11,
-                3, 2, 3, 2, 3, 2, 3, 2,
-                47, 46, 45, 44, 43, 42, 41, 40,
-                33, 13, 29,
-                34, 35, 34, 35, 34, 35, 34, 35];
-        if (rebuildCellMaterials)
-        {
-            // One hydraulic impulse per rendered frame keeps the surface
-            // smooth. Wide per-source queues provide throughput through a
-            // narrow neck without batching several impulses together.
-            phases.Add(36);
-            phases.Add(37);
-            phases.Add(71);
-            phases.Add(38);
-            phases.Add(39);
-            phases.Add(70);
-        }
-        phases.Add(4);
+        ReadOnlySpan<uint> phases = useOptimizedSchedule
+            ? (frameIndex & 1) == 0 ? OptimizedEvenPhases : OptimizedOddPhases
+            : primaryStep
+                ? (frameIndex & 1) == 0 ? PrimaryEvenPhases : PrimaryOddPhases
+            : (frameIndex & 1) == 0 ? SecondaryEvenPhases : SecondaryOddPhases;
 
         // Bind common compute states once before the loop
         context.ComputeShader.Set(resources.CellularAutomataShader);
@@ -546,10 +668,7 @@ public sealed class SimulationDispatchCoordinator
             resources.PathBlockerMasks.UnorderedView,
             resources.CellMaterials.UnorderedView,
             resources.WaterPressureRoutes.UnorderedView,
-            resources.WaterPressureRouteScratch.UnorderedView,
-            resources.WaterComponents.UnorderedView);
-
-        bool waterComponentsBuilt = false;
+            resources.WaterPressureRouteScratch.UnorderedView);
 
         foreach (uint phase in phases)
         {
@@ -557,31 +676,22 @@ public sealed class SimulationDispatchCoordinator
             {
                 continue;
             }
-            bool hydraulicPhase = phase == 33 || phase == 29 || phase == 34 || phase == 35 ||
-                phase == 36 || phase == 37 || phase == 38 || phase == 39 ||
-                phase == 70 || phase == 71 || phase == 13;
-            if (hydraulicPhase && !rebuildCellMaterials)
+            if (phase == 4 && !updateRestState)
             {
                 continue;
             }
-
-            if (phase == 34 && !waterComponentsBuilt)
+            // Adjacent-column leveling is ordinary liquid behavior. Only the
+            // pressure-route phases belong to communicating vessels.
+            bool pressureRoutePhase = phase == 34 || phase == 35 || phase == 36 ||
+                phase == 37 || phase == 38 || phase == 39 || phase == 70 || phase == 71;
+            if (pressureRoutePhase && !runPressureRoutes)
             {
-                Unbind(context, 1, 7);
-                DispatchWaterComponentLabeling(resources, ref constants);
-                context.ComputeShader.Set(resources.CellularAutomataShader);
-                context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-                context.ComputeShader.SetShaderResource(0, resources.Materials.View);
-                context.ComputeShader.SetUnorderedAccessViews(
-                    0,
-                    resources.Grid.ReadUnorderedView,
-                    resources.BodyFlags.UnorderedView,
-                    resources.PathBlockerMasks.UnorderedView,
-                    resources.CellMaterials.UnorderedView,
-                    resources.WaterPressureRoutes.UnorderedView,
-                    resources.WaterPressureRouteScratch.UnorderedView,
-                    resources.WaterComponents.UnorderedView);
-                waterComponentsBuilt = true;
+                continue;
+            }
+            bool longRangeFluidPhase = phase is >= 40 and <= 47;
+            if (longRangeFluidPhase && !runLongRangeFluid)
+            {
+                continue;
             }
 
             constants.SimulationPhase = phase;
@@ -651,7 +761,7 @@ public sealed class SimulationDispatchCoordinator
         }
 
         // Unbind once at the end
-        Unbind(context, 1, 7);
+        Unbind(context, 1, 6);
         constants.SimulationPhase = 0;
     }
 
@@ -734,14 +844,12 @@ public sealed class SimulationDispatchCoordinator
         {
             resources.Context.ClearUnorderedAccessView(view, zero);
         }
-        resources.Context.ClearUnorderedAccessView(resources.ComponentParents.UnorderedView, zero);
+        // Component labels, rigid-body geometry, and hydraulic routes are large
+        // scratch buffers. Their owning passes fully initialize them before use,
+        // so clearing them here only stalls the first brush stroke.
         resources.Context.ClearUnorderedAccessView(resources.BodyFlags.UnorderedView, zero);
-        resources.Context.ClearUnorderedAccessView(resources.SolidBodyGeometry.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.PathBlockerMasks.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.CellMaterials.UnorderedView, zero);
-        resources.Context.ClearUnorderedAccessView(resources.WaterPressureRoutes.UnorderedView, zero);
-        resources.Context.ClearUnorderedAccessView(resources.WaterPressureRouteScratch.UnorderedView, zero);
-        resources.Context.ClearUnorderedAccessView(resources.WaterComponents.UnorderedView, zero);
         foreach (UnorderedAccessView view in resources.Statistics.UnorderedAccessViews)
         {
             resources.Context.ClearUnorderedAccessView(view, zero);
@@ -767,16 +875,23 @@ public sealed class SimulationDispatchCoordinator
             CommandCount = (uint)commands.Length,
             MaximumBrushDiameter = (uint)(MathF.Ceiling(maximumRadius) * 2 + 1),
             MaximumVelocity = 2200,
-            SolidGravity = settings.SolidGravity ? 1u : 0u
+            SolidGravity = settings.SolidGravity ? 1u : 0u,
+            HydraulicPressure = settings.HydraulicPressure ? 1u : 0u
         };
     }
 
-    private void RegisterActivity(ReadOnlySpan<BrushDrawCommand> commands, int width, int height)
+    private void RegisterActivity(
+        ReadOnlySpan<BrushDrawCommand> commands,
+        int width,
+        int height,
+        bool hydraulicPressure)
     {
         if (commands.Length > 0)
         {
             waterPressureRoutesDirty = true;
-            hydraulicWarmupFrames = 128;
+            hydraulicWarmupFrames = hydraulicPressure ? 128 : 0;
+            fastSettleFrames = hydraulicPressure ? 0 : 300;
+            fastMaximumAwakeFrames = hydraulicPressure ? 0 : 3600;
         }
         foreach (BrushDrawCommand command in commands)
         {
@@ -805,6 +920,8 @@ public sealed class SimulationDispatchCoordinator
             {
                 cellularMatter = true;
                 fluidMatter |= kind is MaterialSimulationKind.Liquid or MaterialSimulationKind.Gas;
+                waterMatter |= kind == MaterialSimulationKind.Liquid;
+                gasMatter |= kind == MaterialSimulationKind.Gas;
                 cellularSleeping = false;
                 finalizeCellularRest = false;
             }
@@ -817,6 +934,8 @@ public sealed class SimulationDispatchCoordinator
         worldHasMatter = false;
         cellularMatter = false;
         fluidMatter = false;
+        waterMatter = false;
+        gasMatter = false;
         solidMatter = false;
         cellularSleeping = false;
         solidSleeping = false;
@@ -826,6 +945,9 @@ public sealed class SimulationDispatchCoordinator
         finalizeCellularRest = false;
         waterPressureRoutesDirty = true;
         solidMotionNeedsCellular = true;
+        fastSettleFrames = 0;
+        fastMaximumAwakeFrames = 0;
+        cellMaterialsDirty = false;
         ResetActiveRegion();
     }
 

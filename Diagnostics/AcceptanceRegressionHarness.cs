@@ -23,6 +23,7 @@ public sealed class AcceptanceRegressionHarness
             "slope" or "acceptance_slope" => AcceptanceScenarioMode.Slope,
             "gas" or "acceptance_gas" => AcceptanceScenarioMode.Gas,
             "water_stress" or "stress_water" => AcceptanceScenarioMode.WaterStress,
+            "flat_surface" or "surface" => AcceptanceScenarioMode.FlatSurface,
             "water_drain" or "drain" => AcceptanceScenarioMode.WaterDrain,
             "communicating_vessels" or "vessels" or "hydrostatic" => AcceptanceScenarioMode.CommunicatingVessels,
             "pressure_tube" or "tube" => AcceptanceScenarioMode.PressureTube,
@@ -60,6 +61,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.Slope => 600,
                 AcceptanceScenarioMode.Gas => 900,
                 AcceptanceScenarioMode.WaterStress => 180,
+                AcceptanceScenarioMode.FlatSurface => 1200,
                 AcceptanceScenarioMode.WaterDrain => 1800,
                 AcceptanceScenarioMode.CommunicatingVessels => 3600,
                 AcceptanceScenarioMode.PressureTube => 1800,
@@ -80,6 +82,24 @@ public sealed class AcceptanceRegressionHarness
 
     public void ConfigureSettings(uint frame, SimulationSettings settings)
     {
+        if (!Active)
+        {
+            return;
+        }
+
+        bool scenarioHydraulics = Mode is
+            AcceptanceScenarioMode.Hydro or
+            AcceptanceScenarioMode.WaterDrain or
+            AcceptanceScenarioMode.CommunicatingVessels or
+            AcceptanceScenarioMode.PressureTube or
+            AcceptanceScenarioMode.SavedPressure or
+            AcceptanceScenarioMode.SavedIsolation;
+        settings.HydraulicPressure = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_HYDRAULICS") switch
+        {
+            "0" => false,
+            "1" => true,
+            _ => scenarioHydraulics
+        };
         if (Mode is AcceptanceScenarioMode.SolidGravity or AcceptanceScenarioMode.Buoyancy)
         {
             settings.SolidGravity = frame >= 60;
@@ -119,6 +139,11 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.Slope when frame == 599 => "E_slope_rest",
             AcceptanceScenarioMode.Gas when frame == 30 => "F_gas_rise",
             AcceptanceScenarioMode.Gas when frame == 899 => "F_gas_spread",
+            AcceptanceScenarioMode.FlatSurface when frame == 15 => "O_flat_stream_early",
+            AcceptanceScenarioMode.FlatSurface when frame == 100 => "O_flat_stream_mid1",
+            AcceptanceScenarioMode.FlatSurface when frame == 200 => "O_flat_stream_mid2",
+            AcceptanceScenarioMode.FlatSurface when frame == 299 => "O_flat_stream_late",
+            AcceptanceScenarioMode.FlatSurface when frame + 1 == CaptureFrame => "O_flat_surface",
             AcceptanceScenarioMode.WaterDrain when frame == 1799 => "G_water_drain",
             AcceptanceScenarioMode.CommunicatingVessels when frame == 125 => "H_vessels_2s",
             AcceptanceScenarioMode.CommunicatingVessels when frame == 3599 => "H_vessels_rest",

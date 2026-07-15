@@ -50,6 +50,11 @@ public static class AcceptanceRegressionVerifier
                 snapshot,
                 framesPerSecond,
                 out report),
+            AcceptanceScenarioMode.FlatSurface => ValidateFlatSurface(
+                snapshot,
+                framesPerSecond,
+                artifactDirectory,
+                out report),
             AcceptanceScenarioMode.WaterDrain => ValidateWaterDrain(snapshot, out report),
             AcceptanceScenarioMode.CommunicatingVessels => ValidateCommunicatingVessels(
                 snapshot,
@@ -97,6 +102,76 @@ public static class AcceptanceRegressionVerifier
         }
         report = $"PHYXEL_STRESS_WATER water={water} resting={resting} moving={moving} fps={framesPerSecond:0.0}";
         return water >= 500000;
+    }
+
+    private static bool ValidateFlatSurface(
+        SimulationWorldSnapshot snapshot,
+        double framesPerSecond,
+        string artifactDirectory,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int leftTop = SurfaceTop(grid, snapshot.Width, 25, 190, 100, 250);
+        int rightTop = SurfaceTop(grid, snapshot.Width, 405, 455, 100, 250);
+        int water = 0;
+        int leaks = 0;
+        int minimumLeakX = snapshot.Width;
+        int maximumLeakX = 0;
+        int minimumLeakY = snapshot.Height;
+        int maximumLeakY = 0;
+        for (int y = 0; y < snapshot.Height; y++)
+        {
+            for (int x = 0; x < snapshot.Width; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+                {
+                    continue;
+                }
+                water++;
+                if (x < 8 || x > 472 || y > 256)
+                {
+                    leaks++;
+                    minimumLeakX = Math.Min(minimumLeakX, x);
+                    maximumLeakX = Math.Max(maximumLeakX, x);
+                    minimumLeakY = Math.Min(minimumLeakY, y);
+                    maximumLeakY = Math.Max(maximumLeakY, y);
+                }
+            }
+        }
+        int difference = leftTop > 0 && rightTop > 0
+            ? Math.Abs(leftTop - rightTop)
+            : snapshot.Height;
+        string[] streamImages =
+        [
+            "O_flat_stream_early.png",
+            "O_flat_stream_mid1.png",
+            "O_flat_stream_mid2.png",
+            "O_flat_stream_late.png"
+        ];
+        int minimumFallingWater = int.MaxValue;
+        int sideWater = 0;
+        int stripedWater = 0;
+        foreach (string streamImageName in streamImages)
+        {
+            string streamImage = Path.Combine(artifactDirectory, streamImageName);
+            minimumFallingWater = Math.Min(
+                minimumFallingWater,
+                CountColor(streamImage, 225, 20, 255, 100, IsBlue));
+            sideWater +=
+                CountColor(streamImage, 15, 20, 215, 100, IsBlue) +
+                CountColor(streamImage, 265, 20, 465, 100, IsBlue);
+            stripedWater +=
+                CountVerticalColorRuns(streamImage, 15, 20, 215, 100, 8, IsBlue) +
+                CountVerticalColorRuns(streamImage, 265, 20, 465, 100, 8, IsBlue);
+        }
+        // Ordinary Powder Toy-style water settles locally rather than solving
+        // a global hydrostatic surface. A small residual ripple is expected;
+        // pressure-enabled vessel tests enforce the stricter equal level.
+        bool passed = water > 10000 && difference <= 6 && leaks == 0 &&
+            minimumFallingWater > 100 && stripedWater == 0 && framesPerSecond >= 55;
+        report = $"PHYXEL_FLAT_SURFACE water={water} levels={leftTop}/{rightTop} difference={difference} streamMin={minimumFallingWater} striped={stripedWater} stray={sideWater} leaks={leaks} leakBounds={minimumLeakX},{minimumLeakY}-{maximumLeakX},{maximumLeakY} fps={framesPerSecond:0.0}";
+        return passed;
     }
 
     private static bool ValidateWaterDrain(
@@ -1049,6 +1124,36 @@ public static class AcceptanceRegressionVerifier
             }
         }
         return count;
+    }
+
+    private static int CountVerticalColorRuns(
+        string path,
+        int left,
+        int top,
+        int right,
+        int bottom,
+        int minimumLength,
+        Func<Color, bool> predicate)
+    {
+        if (!File.Exists(path)) return 0;
+        using Bitmap bitmap = new(path);
+        int runs = 0;
+        for (int x = left; x <= right; x++)
+        {
+            int length = 0;
+            for (int y = top; y <= bottom; y++)
+            {
+                if (predicate(bitmap.GetPixel(x, y)))
+                {
+                    length++;
+                    continue;
+                }
+                runs += length >= minimumLength ? 1 : 0;
+                length = 0;
+            }
+            runs += length >= minimumLength ? 1 : 0;
+        }
+        return runs;
     }
 
     private static bool HasMaterial(

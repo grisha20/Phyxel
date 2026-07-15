@@ -15,7 +15,8 @@ public readonly record struct UiFrameActions(
     bool SaveRequested,
     bool LoadRequested,
     bool ScaleChanged,
-    bool GravityChanged);
+    bool GravityChanged,
+    bool HydraulicsChanged);
 
 public sealed class SandboxUiCoordinator
 {
@@ -30,6 +31,7 @@ public sealed class SandboxUiCoordinator
     private readonly UiIconButton saveButton = new(UiLocalizationProvider.Save);
     private readonly UiIconButton loadButton = new(UiLocalizationProvider.Load);
     private readonly UiIconButton solidGravityButton = new(UiLocalizationProvider.SolidGravity);
+    private readonly UiIconButton hydraulicsButton = new(UiLocalizationProvider.HydraulicPressure);
     private readonly UiValueSlider brushSlider;
     private readonly UiValueSlider densitySlider;
     private readonly UiValueSlider scaleSlider;
@@ -57,7 +59,13 @@ public sealed class SandboxUiCoordinator
 
         brushSlider = new UiValueSlider(UiLocalizationProvider.BrushSize, 1, 96, 1, 18, " px");
         densitySlider = new UiValueSlider(UiLocalizationProvider.SpawnDensity, 5, 100, 1, 82, "%");
-        scaleSlider = new UiValueSlider("Масштаб симуляции", 25, 100, 25, 100, "%");
+        scaleSlider = new UiValueSlider(
+            "Масштаб симуляции",
+            25,
+            100,
+            25,
+            SimulationSettings.DefaultScale * 100,
+            "%");
     }
 
     public MaterialId SelectedMaterial { get; set; } = MaterialId.Sand;
@@ -104,6 +112,15 @@ public sealed class SandboxUiCoordinator
             gravityChanged = true;
         }
 
+        hydraulicsButton.Active = settings.HydraulicPressure;
+        bool hydraulicsChanged = false;
+        if (hydraulicsButton.Update(input))
+        {
+            settings.HydraulicPressure = !settings.HydraulicPressure;
+            hydraulicsButton.Active = settings.HydraulicPressure;
+            hydraulicsChanged = true;
+        }
+
         bool clearRequested = false;
         if (clearButton.Update(input))
         {
@@ -122,6 +139,7 @@ public sealed class SandboxUiCoordinator
             ? compactLayout ? "Подтвердить" : UiLocalizationProvider.ConfirmClear
             : compactLayout ? "Очистить" : UiLocalizationProvider.Clear;
         solidGravityButton.Label = UiLocalizationProvider.SolidGravity;
+        hydraulicsButton.Label = compactLayout ? "Сосуды" : UiLocalizationProvider.HydraulicPressure;
         saveButton.Label = compactLayout ? "Сохранить" : UiLocalizationProvider.Save;
         loadButton.Label = compactLayout ? "Загрузить" : UiLocalizationProvider.Load;
         bool saveRequested = saveButton.Update(input) || input.SavePressed;
@@ -145,7 +163,13 @@ public sealed class SandboxUiCoordinator
         brushSlider.Value = settings.BrushRadius;
         densitySlider.Value = settings.SpawnDensity * 100f;
         scaleSlider.Value = settings.Scale * 100f;
-        return new UiFrameActions(clearRequested, saveRequested, loadRequested, scaleChanged, gravityChanged);
+        return new UiFrameActions(
+            clearRequested,
+            saveRequested,
+            loadRequested,
+            scaleChanged,
+            gravityChanged,
+            hydraulicsChanged);
     }
 
     public void Draw(
@@ -172,12 +196,14 @@ public sealed class SandboxUiCoordinator
         scaleSlider.Draw(spriteBatch, font, panelRenderer, pixel);
         pauseButton.Draw(spriteBatch, font, panelRenderer, pixel);
         solidGravityButton.Draw(spriteBatch, font, panelRenderer, pixel);
+        hydraulicsButton.Draw(spriteBatch, font, panelRenderer, pixel);
         clearButton.Draw(spriteBatch, font, panelRenderer, pixel);
         saveButton.Draw(spriteBatch, font, panelRenderer, pixel);
         loadButton.Draw(spriteBatch, font, panelRenderer, pixel);
         string selectedName = materialRegistry[SelectedMaterial].Name;
         string gravityState = settings.SolidGravity ? "вкл" : "выкл";
-        string info = $"FPS {framesPerSecond,5:0}   Частицы {statistics.ActiveCells:N0}   Твердые {statistics.SolidCells:N0}   Материал: {selectedName}   Кисть: {settings.BrushRadius} px   Гравитация: {gravityState}";
+        string hydraulicsState = settings.HydraulicPressure ? "вкл" : "выкл";
+        string info = $"FPS {framesPerSecond,5:0}   Частицы {statistics.ActiveCells:N0}   Твердые {statistics.SolidCells:N0}   Материал: {selectedName}   Кисть: {settings.BrushRadius} px   Гравитация: {gravityState}   Сосуды: {hydraulicsState}";
         spriteBatch.DrawString(font, info, new Vector2(InfoPanelBounds.X + 12, InfoPanelBounds.Y + 9), Color.White);
         if (!string.IsNullOrWhiteSpace(transientStatus))
         {
@@ -250,7 +276,8 @@ public sealed class SandboxUiCoordinator
         densitySlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
         cursorY += compactLayout ? 49 : 64;
         scaleSlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
-        UiIconButton[] serviceButtons = [pauseButton, solidGravityButton, clearButton, saveButton, loadButton];
+        UiIconButton[] serviceButtons =
+            [pauseButton, solidGravityButton, hydraulicsButton, clearButton, saveButton, loadButton];
         if (compactLayout)
         {
             int toolbarWidth = CanvasBounds.Width;
