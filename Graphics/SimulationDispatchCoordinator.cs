@@ -14,7 +14,8 @@ public sealed class SimulationDispatchCoordinator
         32, 0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
         2, 3, 2, 3, 2, 3, 2, 3,
         40, 41, 42, 43, 44, 45, 46, 47,
-        33, 13, 29,
+        48, 49, 50, 51, 52, 53, 54, 55,
+        33, 56, 57, 13, 29,
         34, 35, 34, 35, 34, 35, 34, 35,
         36, 37, 71, 38, 39, 70,
         4
@@ -25,7 +26,8 @@ public sealed class SimulationDispatchCoordinator
         32, 1, 0, 1, 0, 1, 0, 1, 0, 6, 5, 8, 7, 10, 9, 12, 11,
         3, 2, 3, 2, 3, 2, 3, 2,
         47, 46, 45, 44, 43, 42, 41, 40,
-        33, 13, 29,
+        48, 49, 50, 51, 52, 53, 54, 55,
+        33, 56, 57, 13, 29,
         34, 35, 34, 35, 34, 35, 34, 35,
         36, 37, 71, 38, 39, 70,
         4
@@ -36,7 +38,7 @@ public sealed class SimulationDispatchCoordinator
         0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
         2, 3, 2, 3, 2, 3, 2, 3,
         40, 41, 42, 43, 44, 45, 46, 47,
-        33, 13, 29,
+        33, 56, 57, 13, 29,
         4
     ];
 
@@ -45,7 +47,7 @@ public sealed class SimulationDispatchCoordinator
         1, 0, 1, 0, 1, 0, 1, 0, 6, 5, 8, 7, 10, 9, 12, 11,
         3, 2, 3, 2, 3, 2, 3, 2,
         47, 46, 45, 44, 43, 42, 41, 40,
-        33, 13, 29,
+        33, 56, 57, 13, 29,
         4
     ];
 
@@ -54,7 +56,8 @@ public sealed class SimulationDispatchCoordinator
         32, 0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
         2, 3, 2, 3, 2, 3, 2, 3,
         40, 42, 44, 46,
-        33, 13, 29,
+        48, 52,
+        33, 56, 57, 13, 29,
         34, 35, 34, 35,
         36, 37, 71, 38, 39, 70,
         4
@@ -65,7 +68,8 @@ public sealed class SimulationDispatchCoordinator
         32, 1, 0, 1, 0, 1, 0, 1, 0, 6, 5, 8, 7, 10, 9, 12, 11,
         3, 2, 3, 2, 3, 2, 3, 2,
         47, 45, 43, 41,
-        33, 13, 29,
+        48, 52,
+        33, 56, 57, 13, 29,
         34, 35, 34, 35,
         36, 37, 71, 38, 39, 70,
         4
@@ -688,6 +692,11 @@ public sealed class SimulationDispatchCoordinator
             {
                 continue;
             }
+            bool ordinaryFlowPhase = phase is >= 48 and <= 57;
+            if (ordinaryFlowPhase && runPressureRoutes)
+            {
+                continue;
+            }
             bool longRangeFluidPhase = phase is >= 40 and <= 47;
             if (longRangeFluidPhase && !runLongRangeFluid)
             {
@@ -698,7 +707,8 @@ public sealed class SimulationDispatchCoordinator
 
             bool buildPathBlockers = phase == 31;
             bool buildCellMaterials = phase == 32;
-            bool waterColumnPhase = phase == 33 || phase == 29 || phase == 37 ||
+            bool waterColumnPhase = phase == 33 || phase == 56 || phase == 57 ||
+                phase == 29 || phase == 37 ||
                 phase == 39 || phase == 70 || phase == 71 || phase == 13;
             int startX = buildPathBlockers || buildCellMaterials || waterColumnPhase
                 ? 0

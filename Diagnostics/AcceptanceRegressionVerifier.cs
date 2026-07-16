@@ -114,6 +114,8 @@ public static class AcceptanceRegressionVerifier
         int leftTop = SurfaceTop(grid, snapshot.Width, 25, 190, 100, 250);
         int rightTop = SurfaceTop(grid, snapshot.Width, 405, 455, 100, 250);
         int water = 0;
+        int resting = 0;
+        int moving = 0;
         int leaks = 0;
         int minimumLeakX = snapshot.Width;
         int maximumLeakX = 0;
@@ -129,6 +131,8 @@ public static class AcceptanceRegressionVerifier
                     continue;
                 }
                 water++;
+                resting += cell.RestFrames >= 60 ? 1 : 0;
+                moving += Speed(cell) > 0.02f ? 1 : 0;
                 if (x < 8 || x > 472 || y > 256)
                 {
                     leaks++;
@@ -165,12 +169,12 @@ public static class AcceptanceRegressionVerifier
                 CountVerticalColorRuns(streamImage, 15, 20, 215, 100, 8, IsBlue) +
                 CountVerticalColorRuns(streamImage, 265, 20, 465, 100, 8, IsBlue);
         }
-        // Ordinary Powder Toy-style water settles locally rather than solving
-        // a global hydrostatic surface. A small residual ripple is expected;
-        // pressure-enabled vessel tests enforce the stricter equal level.
-        bool passed = water > 10000 && difference <= 6 && leaks == 0 &&
+        // A conserved cellular liquid may have one partially filled final row,
+        // but a broad multi-pixel wave is never an acceptable resting surface.
+        bool passed = water > 10000 && difference <= 1 && leaks == 0 &&
+            moving == 0 &&
             minimumFallingWater > 100 && stripedWater == 0 && framesPerSecond >= 55;
-        report = $"PHYXEL_FLAT_SURFACE water={water} levels={leftTop}/{rightTop} difference={difference} streamMin={minimumFallingWater} striped={stripedWater} stray={sideWater} leaks={leaks} leakBounds={minimumLeakX},{minimumLeakY}-{maximumLeakX},{maximumLeakY} fps={framesPerSecond:0.0}";
+        report = $"PHYXEL_FLAT_SURFACE water={water} levels={leftTop}/{rightTop} difference={difference} resting={resting} moving={moving} streamMin={minimumFallingWater} striped={stripedWater} stray={sideWater} leaks={leaks} leakBounds={minimumLeakX},{minimumLeakY}-{maximumLeakX},{maximumLeakY} fps={framesPerSecond:0.0}";
         return passed;
     }
 

@@ -17,6 +17,10 @@ RWStructuredBuffer<WaterPressureRouteData> WaterPressureRouteScratch : register(
 
 static const uint SandRestThreshold = 30;
 static const uint FluidRestThreshold = 60;
+static const uint OrdinaryHorizontalSearch = 8;
+static const uint OrdinarySurfaceBlockWidth = 2048;
+static const uint OrdinaryLocalSurfaceBlockWidth = 256;
+static const float OrdinaryLandingFrames = 1;
 static const float GasMinimumMass = 0.01;
 static const float GasTransferThreshold = 0.03;
 static const uint PathBlockerTileWidth = 32;
@@ -145,6 +149,11 @@ void MarkMovement(inout GridCell first, inout GridCell second, float horizontal,
     first.VelocityY = vertical;
     second.VelocityX = -horizontal;
     second.VelocityY = -vertical;
+    if (HydraulicPressure == 0)
+    {
+        if (CellKind(first) == 4) first.Pressure = 0;
+        if (CellKind(second) == 4) second.Pressure = 0;
+    }
 }
 
 void SwapCells(uint firstIndex, uint secondIndex, float horizontal, float vertical)
@@ -162,26 +171,20 @@ void SwapCells(uint firstIndex, uint secondIndex, float horizontal, float vertic
 bool SandCanDisplaceWater(uint2 sandCoordinate, uint sandIndex)
 {
     // Settled banks must not pump water upward through the granular mass.
-    // Freshly falling sand may still sink when displaced water has a short
-    // lateral route into the surrounding free surface.
-    if (Grid[sandIndex].RestFrames >= SandRestThreshold)
+    // Falling or unsupported sand sinks through water; the displaced water
+    // swaps into the sand's previous cell above it, conserving both materials.
+    GridCell sand = Grid[sandIndex];
+    if (sand.RestFrames >= SandRestThreshold)
     {
         return false;
     }
-    for (uint distance = 1; distance <= 4; distance++)
+    bool supported = sandCoordinate.y + 1 >= Height;
+    if (!supported)
     {
-        if (sandCoordinate.x >= distance &&
-            CellKindAt(uint2(sandCoordinate.x - distance, sandCoordinate.y)) == 4)
-        {
-            return true;
-        }
-        if (sandCoordinate.x + distance < Width &&
-            CellKindAt(uint2(sandCoordinate.x + distance, sandCoordinate.y)) == 4)
-        {
-            return true;
-        }
+        uint belowKind = CellKindAt(sandCoordinate + uint2(0, 1));
+        supported = belowKind == 1 || belowKind == 2;
     }
-    return false;
+    return sand.VelocityY > 8 || !supported;
 }
 
 void RelaxGasPair(
@@ -289,6 +292,15 @@ bool IsWaterAt(int x, int y)
     return CellKindAt(uint2(x, y)) == 4;
 }
 
+bool OrdinaryWaterCanLeaveLedge(uint2 source)
+{
+    uint sourceIndex = FlattenCoordinate(source);
+    return HydraulicPressure == 0 &&
+        !IsWaterAt(int(source.x), int(source.y) - 1) &&
+        abs(Grid[sourceIndex].VelocityY) <= 8 &&
+        Grid[sourceIndex].Pressure >= OrdinaryLandingFrames;
+}
+
 bool WaterCanFlowSide(
     uint2 source,
     uint2 destination,
@@ -305,9 +317,13 @@ bool WaterCanFlowSide(
             return false;
         }
     }
-    if (!WaterCanEnter(waterMaterial, targetMaterial) || !WaterSupported(destination))
+    if (!WaterCanEnter(waterMaterial, targetMaterial))
     {
         return false;
+    }
+    if (!WaterSupported(destination))
+    {
+        return stride == 1 && OrdinaryWaterCanLeaveLedge(source);
     }
     int direction = destination.x > source.x ? 1 : -1;
     if (IsWaterAt(int(source.x), int(source.y) - 1))
@@ -339,9 +355,13 @@ bool WaterCanFlowSideOpt(
             return false;
         }
     }
-    if (!WaterCanEnter(waterMaterial, targetMaterial) || !WaterSupported(destination))
+    if (!WaterCanEnter(waterMaterial, targetMaterial))
     {
         return false;
+    }
+    if (!WaterSupported(destination))
+    {
+        return stride == 1 && OrdinaryWaterCanLeaveLedge(source);
     }
     if (hasWaterAbove)
     {
@@ -351,6 +371,136 @@ bool WaterCanFlowSideOpt(
     bool hasWaterBehind = direction == 1 ? hasWaterLeft : hasWaterRight;
     int destinationShoulder = int(destination.x) + direction;
     return hasWaterBehind && !IsWaterAt(destinationShoulder, int(destination.y));
+}
+
+bool FindOrdinaryWaterDestination(
+    uint2 source,
+    uint waterMaterial,
+    int direction,
+    out uint2 destination)
+{
+    destination = source;
+    if (HydraulicPressure != 0 || !WaterSupported(source))
+    {
+        return false;
+    }
+
+    uint sourceIndex = FlattenCoordinate(source);
+    bool hasWaterAbove = IsWaterAt(int(source.x), int(source.y) - 1);
+    bool supportedByFallingWater = false;
+    if (source.y + 1 < Height)
+    {
+        uint belowIndex = sourceIndex + Width;
+        supportedByFallingWater = CellKindAtIndex(belowIndex) == 4 &&
+            abs(Grid[belowIndex].VelocityY) > 8;
+    }
+    if (Grid[sourceIndex].Pressure < OrdinaryLandingFrames ||
+        hasWaterAbove || supportedByFallingWater ||
+        abs(Grid[sourceIndex].VelocityY) > 8)
+    {
+        return false;
+    }
+
+    // A surface edge is pushed by water behind or directly below it. The latter
+    // lets the narrow apex of a mound drain away, while an isolated droplet on
+    // a solid floor does not skate forever.
+    bool hasWaterBehind = IsWaterAt(int(source.x) - direction, int(source.y));
+    bool hasWaterBelow = IsWaterAt(int(source.x), int(source.y) + 1);
+    if (!hasWaterBehind && !hasWaterBelow)
+    {
+        return false;
+    }
+
+    bool found = false;
+    for (uint distance = 1; distance <= OrdinaryHorizontalSearch; distance++)
+    {
+        int x = int(source.x) + direction * int(distance);
+        if (x < 0 || x >= int(Width))
+        {
+            break;
+        }
+        uint2 candidate = uint2(x, source.y);
+        uint candidateMaterial = CellMaterials[FlattenCoordinate(candidate)];
+        uint candidateKind = CellKindFromMaterial(candidateMaterial);
+
+        // Check every traversed cell. Water, solids, granular matter and every
+        // other material terminate the search; nothing can be jumped over.
+        if (candidateKind != 0 && candidateKind != 5)
+        {
+            break;
+        }
+
+        if (!WaterCanEnter(waterMaterial, candidateMaterial))
+        {
+            break;
+        }
+        bool meaningfulDrop = WaterSupported(candidate);
+        if (!meaningfulDrop && candidate.y + 2 < Height)
+        {
+            uint firstBelowKind = CellKindAt(candidate + uint2(0, 1));
+            uint secondBelowKind = CellKindAt(candidate + uint2(0, 2));
+            meaningfulDrop = (firstBelowKind == 0 || firstBelowKind == 5) &&
+                (secondBelowKind == 0 || secondBelowKind == 5);
+        }
+        if (meaningfulDrop)
+        {
+            destination = candidate;
+            found = true;
+        }
+    }
+    return found;
+}
+
+void MoveOrdinaryWater(uint sourceIndex, uint destinationIndex, int direction)
+{
+    GridCell water = Grid[sourceIndex];
+    GridCell target = Grid[destinationIndex];
+    MarkMovement(water, target, direction * 58, 0);
+    water.BodyId = FrameIndex + 1;
+    Grid[sourceIndex] = target;
+    Grid[destinationIndex] = water;
+    uint targetMaterial = CellMaterials[destinationIndex];
+    CellMaterials[sourceIndex] = targetMaterial;
+    CellMaterials[destinationIndex] = water.MaterialId;
+}
+
+void ResolveOrdinaryWaterBlock(uint2 coordinate)
+{
+    if (HydraulicPressure != 0 || coordinate.x >= Width || coordinate.y >= Height)
+    {
+        return;
+    }
+    uint blockStart = (coordinate.x / 16) * 16;
+    uint lane = SimulationPhase - 48;
+    if (coordinate.x != blockStart + lane || blockStart + 8 >= Width)
+    {
+        return;
+    }
+
+    uint2 left = uint2(blockStart + lane, coordinate.y);
+    uint2 right = uint2(blockStart + lane + 8, coordinate.y);
+    uint leftIndex = FlattenCoordinate(left);
+    uint rightIndex = FlattenCoordinate(right);
+    uint leftKind = CellKindAtIndex(leftIndex);
+    uint rightKind = CellKindAtIndex(rightIndex);
+    if ((leftKind == 4) == (rightKind == 4))
+    {
+        return;
+    }
+
+    uint2 source = leftKind == 4 ? left : right;
+    uint sourceIndex = leftKind == 4 ? leftIndex : rightIndex;
+    int direction = leftKind == 4 ? 1 : -1;
+    uint2 destination;
+    if (!FindOrdinaryWaterDestination(
+        source,
+        CellMaterials[sourceIndex],
+        direction,
+        destination))
+    {
+        return;
+    }
+    MoveOrdinaryWater(sourceIndex, FlattenCoordinate(destination), direction);
 }
 
 bool WaterPathClear(uint2 first, uint2 second)
@@ -835,6 +985,301 @@ void ResolveWaterColumnSpan(uint2 leftCoordinate, uint stride)
         rightTop);
 }
 
+bool FindOrdinarySurfaceDestination(
+    uint sourceX,
+    uint sourceTop,
+    uint blockLeft,
+    uint blockRight,
+    out uint destinationX,
+    out uint destinationTop)
+{
+    uint reachableLeft = sourceX;
+    while (reachableLeft > blockLeft)
+    {
+        uint kind = CellKindAt(uint2(reachableLeft - 1, sourceTop));
+        // Existing liquid is part of the open surface, not a wall. Rejecting it
+        // made a wide pool level one adjacent swap at a time and left a broad
+        // ripple behind. Solids and granular matter still stop the transfer, so
+        // this cannot jump through a vessel wall or a sand bank.
+        if (kind != 0 && kind != 4 && kind != 5)
+        {
+            break;
+        }
+        reachableLeft--;
+    }
+    uint reachableRight = sourceX;
+    while (reachableRight < blockRight)
+    {
+        uint kind = CellKindAt(uint2(reachableRight + 1, sourceTop));
+        if (kind != 0 && kind != 4 && kind != 5)
+        {
+            break;
+        }
+        reachableRight++;
+    }
+
+    uint rejected[4] = { Width, Width, Width, Width };
+    for (uint attempt = 0; attempt < 4; attempt++)
+    {
+        destinationX = Width;
+        destinationTop = 0;
+        uint bestDistance = Width + 1;
+        for (uint column = reachableLeft; column <= reachableRight; column++)
+        {
+            bool wasRejected = false;
+            for (uint rejectedIndex = 0; rejectedIndex < attempt; rejectedIndex++)
+            {
+                wasRejected = wasRejected || rejected[rejectedIndex] == column;
+            }
+            uint top;
+            uint ignoredBase;
+            if (wasRejected ||
+                !UnpackWaterColumn(WaterColumnState[column], top, ignoredBase) ||
+                top <= sourceTop + 1)
+            {
+                continue;
+            }
+            uint destinationKind = CellKindAt(uint2(column, top - 1));
+            if (destinationKind != 0 && destinationKind != 5)
+            {
+                continue;
+            }
+            uint distance = max(sourceX, column) - min(sourceX, column);
+            if (destinationX == Width || top > destinationTop ||
+                (top == destinationTop && distance < bestDistance))
+            {
+                destinationX = column;
+                destinationTop = top;
+                bestDistance = distance;
+            }
+        }
+        if (destinationX == Width)
+        {
+            return false;
+        }
+
+        // Only the selected candidate pays for a vertical scan. Water droplets
+        // in the open shaft are harmless; solid and granular shelves are true
+        // blockers and force the search to try the next-lowest column.
+        bool verticalPathClear = true;
+        for (uint y = sourceTop; y < destinationTop; y++)
+        {
+            uint kind = CellKindAt(uint2(destinationX, y));
+            if (kind != 0 && kind != 4 && kind != 5)
+            {
+                verticalPathClear = false;
+                break;
+            }
+        }
+        if (verticalPathClear)
+        {
+            return true;
+        }
+        rejected[attempt] = destinationX;
+    }
+    return false;
+}
+
+bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight)
+{
+    uint sourceLeft = Width;
+    uint sourceRight = Width;
+    uint sourceTop = Height;
+    for (uint column = blockLeft; column <= blockRight; column++)
+    {
+        uint top;
+        uint base;
+        if (!UnpackWaterColumn(WaterColumnState[column], top, base))
+        {
+            continue;
+        }
+        uint surfaceIndex = FlattenCoordinate(uint2(column, top));
+        GridCell surface = Grid[surfaceIndex];
+        // Horizontal swaps reset the ordinary landing marker every frame even
+        // when the column is already a stable pool. Vertical velocity is the
+        // reliable distinction here: a falling stream is fast, a resting
+        // surface is not.
+        bool sourceReady = abs(surface.VelocityY) <= 8;
+        if (sourceReady && (sourceLeft == Width || top < sourceTop))
+        {
+            sourceLeft = column;
+            sourceRight = column;
+            sourceTop = top;
+        }
+        else if (sourceReady && top == sourceTop)
+        {
+            sourceRight = column;
+        }
+    }
+    if (sourceLeft == Width)
+    {
+        return false;
+    }
+
+    uint sourceCandidates[2] = { sourceLeft, sourceRight };
+    uint sourceX = Width;
+    uint destinationX = Width;
+    uint destinationTop = 0;
+    uint bestDistance = Width + 1;
+    for (uint sourceCandidate = 0; sourceCandidate < 2; sourceCandidate++)
+    {
+        uint candidateSourceX = sourceCandidates[sourceCandidate];
+        uint candidateDestinationX;
+        uint candidateDestinationTop;
+        if (!FindOrdinarySurfaceDestination(
+            candidateSourceX,
+            sourceTop,
+            blockLeft,
+            blockRight,
+            candidateDestinationX,
+            candidateDestinationTop))
+        {
+            continue;
+        }
+        uint distance = max(candidateSourceX, candidateDestinationX) -
+            min(candidateSourceX, candidateDestinationX);
+        if (sourceX == Width || candidateDestinationTop > destinationTop ||
+            (candidateDestinationTop == destinationTop && distance < bestDistance))
+        {
+            sourceX = candidateSourceX;
+            destinationX = candidateDestinationX;
+            destinationTop = candidateDestinationTop;
+            bestDistance = distance;
+        }
+    }
+    if (sourceX == Width || destinationX == Width)
+    {
+        return false;
+    }
+    uint ignoredTop;
+    uint sourceBase;
+    uint destinationBase;
+    if (!UnpackWaterColumn(WaterColumnState[sourceX], ignoredTop, sourceBase) ||
+        !UnpackWaterColumn(WaterColumnState[destinationX], ignoredTop, destinationBase))
+    {
+        return false;
+    }
+    uint sourceIndex = FlattenCoordinate(uint2(sourceX, sourceTop));
+    uint destinationIndex = FlattenCoordinate(uint2(destinationX, destinationTop - 1));
+    uint destinationSurfaceIndex = FlattenCoordinate(uint2(destinationX, destinationTop));
+    uint destinationKind = CellKindAtIndex(destinationIndex);
+    GridCell destinationSurface = Grid[destinationSurfaceIndex];
+    if (CellKindAtIndex(sourceIndex) != 4 ||
+        (destinationKind != 0 && destinationKind != 5) ||
+        abs(destinationSurface.VelocityY) > 8)
+    {
+        return false;
+    }
+    int direction = destinationX > sourceX ? 1 : -1;
+    MoveOrdinaryWater(sourceIndex, destinationIndex, direction);
+    WaterColumnState[sourceX] = sourceTop == sourceBase
+        ? 0
+        : PackWaterColumn(sourceTop + 1, sourceBase);
+    WaterColumnState[destinationX] = PackWaterColumn(
+        destinationTop - 1,
+        destinationBase);
+    return true;
+}
+
+void ResolveOrdinarySurfaceBlock(uint x)
+{
+    if (HydraulicPressure != 0)
+    {
+        return;
+    }
+    int blockStart;
+    if ((FrameIndex & 1) == 0)
+    {
+        if ((x % OrdinarySurfaceBlockWidth) != 0)
+        {
+            return;
+        }
+        blockStart = int(x);
+    }
+    else
+    {
+        if (x == 0)
+        {
+            blockStart = -int(OrdinarySurfaceBlockWidth / 2);
+        }
+        else if ((x % OrdinarySurfaceBlockWidth) == OrdinarySurfaceBlockWidth / 2)
+        {
+            blockStart = int(x);
+        }
+        else
+        {
+            return;
+        }
+    }
+    uint blockLeft = uint(max(blockStart, 0));
+    uint blockRight = uint(min(
+        blockStart + int(OrdinarySurfaceBlockWidth) - 1,
+        int(Width) - 1));
+    if (blockRight <= blockLeft)
+    {
+        return;
+    }
+    // Quarter-resolution grids can level aggressively. Native grids get a
+    // bounded budget so a very large water body cannot monopolize one GPU lane.
+    uint transferBudget = Width <= 640 ? 64 : Width <= 1280 ? 16 : 4;
+    for (uint transfer = 0; transfer < transferBudget; transfer++)
+    {
+        if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight))
+        {
+            break;
+        }
+    }
+}
+
+void ResolveOrdinaryLocalSurfaceBlock(uint x)
+{
+    if (HydraulicPressure != 0)
+    {
+        return;
+    }
+    int blockStart;
+    if ((FrameIndex & 1) == 0)
+    {
+        if ((x % OrdinaryLocalSurfaceBlockWidth) != 0)
+        {
+            return;
+        }
+        blockStart = int(x);
+    }
+    else
+    {
+        if (x == 0)
+        {
+            blockStart = -int(OrdinaryLocalSurfaceBlockWidth / 2);
+        }
+        else if ((x % OrdinaryLocalSurfaceBlockWidth) ==
+            OrdinaryLocalSurfaceBlockWidth / 2)
+        {
+            blockStart = int(x);
+        }
+        else
+        {
+            return;
+        }
+    }
+    uint blockLeft = uint(max(blockStart, 0));
+    uint blockRight = uint(min(
+        blockStart + int(OrdinaryLocalSurfaceBlockWidth) - 1,
+        int(Width) - 1));
+    if (blockRight <= blockLeft)
+    {
+        return;
+    }
+    uint transferBudget = Width <= 640 ? 16 : 2;
+    for (uint transfer = 0; transfer < transferBudget; transfer++)
+    {
+        if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight))
+        {
+            break;
+        }
+    }
+}
+
 void ApplyWaterColumnMove(uint x)
 {
     uint encodedSource = WaterColumnState[Width + x];
@@ -870,7 +1315,8 @@ void ApplyWaterColumnMove(uint x)
     Grid[destinationIndex] = water;
     CellMaterials[sourceIndex] = 0;
     CellMaterials[destinationIndex] = water.MaterialId;
-    if (max(sourceX, destinationX) - min(sourceX, destinationX) > 1)
+    if (HydraulicPressure != 0 &&
+        max(sourceX, destinationX) - min(sourceX, destinationX) > 1)
     {
         uint ignored;
         InterlockedAdd(PathBlockerMasks[FarColumnMoveCounterIndex()], 1, ignored);
@@ -1620,6 +2066,23 @@ bool CanMoveWater(uint2 coordinate, GridCell cell)
                 }
             }
         }
+        else
+        {
+            uint2 ignoredDestination;
+            if (FindOrdinaryWaterDestination(
+                coordinate,
+                cell.MaterialId,
+                -1,
+                ignoredDestination) ||
+                FindOrdinaryWaterDestination(
+                    coordinate,
+                    cell.MaterialId,
+                    1,
+                    ignoredDestination))
+            {
+                return true;
+            }
+        }
     }
     return false;
 }
@@ -1681,6 +2144,33 @@ void UpdateRestState(uint2 coordinate)
             : kind == 4
                 ? CanMoveWater(coordinate, cell)
                 : CanMoveGas(coordinate, cell);
+    }
+    if (kind == 4 && HydraulicPressure == 0)
+    {
+        bool freeSurface = !IsWaterAt(
+            int(coordinate.x),
+            int(coordinate.y) - 1);
+        bool supportedByFallingWater = false;
+        if (coordinate.y + 1 < Height)
+        {
+            uint belowIndex = index + Width;
+            supportedByFallingWater = CellKindAtIndex(belowIndex) == 4 &&
+                abs(Grid[belowIndex].VelocityY) > 8;
+        }
+        if (freeSurface && WaterSupported(coordinate) &&
+            !supportedByFallingWater)
+        {
+            // A free-surface particle resting on settled water has landed.
+            // A particle in a falling column keeps its vertical motion.
+            cell.VelocityY = 0;
+            cell.Pressure = min(
+                cell.Pressure + 1,
+                OrdinaryLandingFrames);
+        }
+        else
+        {
+            cell.Pressure = 0;
+        }
     }
     if (canMove)
     {
@@ -1795,6 +2285,21 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (SimulationPhase == 29)
     {
         ApplyWaterColumnMove(coordinate.x);
+        return;
+    }
+    if (SimulationPhase >= 48 && SimulationPhase <= 55)
+    {
+        ResolveOrdinaryWaterBlock(coordinate);
+        return;
+    }
+    if (SimulationPhase == 56)
+    {
+        ResolveOrdinarySurfaceBlock(coordinate.x);
+        return;
+    }
+    if (SimulationPhase == 57)
+    {
+        ResolveOrdinaryLocalSurfaceBlock(coordinate.x);
         return;
     }
     if (SimulationPhase == 30)
