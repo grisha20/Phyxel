@@ -1219,9 +1219,9 @@ void ResolveOrdinarySurfaceBlock(uint x)
     {
         return;
     }
-    // Quarter-resolution grids can level aggressively. Native grids get a
-    // bounded budget so a very large water body cannot monopolize one GPU lane.
-    uint transferBudget = Width <= 640 ? 64 : Width <= 1280 ? 16 : 4;
+    // Keep this serial pass short. Repeating a small budget over several frames
+    // produces the same surface without a long single-frame GPU stall.
+    uint transferBudget = 2;
     for (uint transfer = 0; transfer < transferBudget; transfer++)
     {
         if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight))
@@ -1270,7 +1270,7 @@ void ResolveOrdinaryLocalSurfaceBlock(uint x)
     {
         return;
     }
-    uint transferBudget = Width <= 640 ? 16 : 2;
+    uint transferBudget = 1;
     for (uint transfer = 0; transfer < transferBudget; transfer++)
     {
         if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight))
