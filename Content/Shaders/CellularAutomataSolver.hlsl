@@ -224,8 +224,20 @@ void RelaxGasPair(
         return;
     }
     GridCell templateCell = GasTemplate(first, second);
+    float heatCapacity = Materials[templateCell.MaterialIndex].HeatCapacity;
+    float firstCapacity = heatCapacity * firstMass;
+    float secondCapacity = heatCapacity * secondMass;
+    float totalCapacity = firstCapacity + secondCapacity;
+    float thermalEnergy =
+        (firstIsGas ? firstCapacity * first.Temperature : 0) +
+        (secondIsGas ? secondCapacity * second.Temperature : 0);
+    float mixedTemperature = totalCapacity > 0
+        ? thermalEnergy / totalCapacity
+        : templateCell.Temperature;
     GridCell resolvedFirst = GasWithMass(templateCell, targetFirst);
     GridCell resolvedSecond = GasWithMass(templateCell, targetSecond);
+    if (resolvedFirst.IsActive != 0) resolvedFirst.Temperature = mixedTemperature;
+    if (resolvedSecond.IsActive != 0) resolvedSecond.Temperature = mixedTemperature;
     MarkMovement(resolvedFirst, resolvedSecond, horizontal, vertical);
     Grid[firstIndex] = resolvedFirst;
     Grid[secondIndex] = resolvedSecond;

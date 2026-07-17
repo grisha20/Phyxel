@@ -13,6 +13,7 @@ public struct GridCell
     public uint IsActive;
     public uint BodyId;
     public uint RestFrames;
+    public float Temperature;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

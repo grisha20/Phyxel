@@ -31,7 +31,8 @@ public enum AcceptanceScenarioMode
     UnderwaterGranularPile,
     GranularWaterDisplacement,
     GranularBarrier,
-    GranularBarrierHydraulic
+    GranularBarrierHydraulic,
+    TemperatureBrush
 }
 
 public static class AcceptanceRegressionScenario
@@ -74,8 +75,25 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.GranularWaterDisplacement => CreateUnderwaterGranular(frame),
             AcceptanceScenarioMode.GranularBarrier => CreateGranularBarrier(frame),
             AcceptanceScenarioMode.GranularBarrierHydraulic => CreateGranularBarrier(frame),
+            AcceptanceScenarioMode.TemperatureBrush => CreateTemperatureBrush(frame),
             _ => []
         };
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateTemperatureBrush(uint frame)
+    {
+        if (frame == 0)
+        {
+            return
+            [
+                Create(100, 60, 10, materials.Sand, 0, 0),
+                Create(200, 60, 10, materials.Resolve("acceptance:temperature_probe"), 0, 0),
+                Create(300, 60, 10, materials.Sand, 0, 0)
+            ];
+        }
+        return frame == 1
+            ? [Create(300, 60, 14, materials.Eraser, 1, 0)]
+            : [];
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateBowl(uint frame)

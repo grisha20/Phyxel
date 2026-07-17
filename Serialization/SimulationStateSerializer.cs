@@ -53,7 +53,8 @@ public sealed class SimulationStateSerializer
 
     private const uint WorldFileMagic = 0x5058594C;
     private const int LegacyWorldHeaderSize = 20;
-    private const int CurrentVersion = 4;
+    private const int CurrentWorldHeaderSize = 24;
+    private const int CurrentVersion = 5;
     private const string RemovedGoldSandId = "core:gold_sand";
     private const string RenamedConcreteId = "core:concrete";
     private readonly JsonSerializerOptions options = new() { WriteIndented = true };
@@ -192,7 +193,8 @@ public sealed class SimulationStateSerializer
                 materialRegistry,
                 warnings,
                 options),
-            CurrentVersion => LoadV4(sceneJson, world, materialRegistry, warnings),
+            4 => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, true),
+            CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
             _ => null
         };
     }
@@ -233,11 +235,12 @@ public sealed class SimulationStateSerializer
         return false;
     }
 
-    private LoadedSimulationScene LoadV4(
+    private LoadedSimulationScene LoadPaletteScene(
         byte[] sceneJson,
         SimulationWorldSnapshot? world,
         MaterialRegistry materialRegistry,
-        List<string> warnings)
+        List<string> warnings,
+        bool initializeLegacyTemperature)
     {
         SceneFileV4 state = JsonSerializer.Deserialize<SceneFileV4>(sceneJson, options) ??
             throw new InvalidDataException("Сцена v4 не содержит состояния.");
@@ -266,7 +269,12 @@ public sealed class SimulationStateSerializer
         }
         if (world is not null)
         {
-            RemapSnapshotToRuntime(world, state.MaterialPalette, materialRegistry, warnings);
+            RemapSnapshotToRuntime(
+                world,
+                state.MaterialPalette,
+                materialRegistry,
+                warnings,
+                initializeLegacyTemperature);
         }
 
         return new LoadedSimulationScene(
@@ -339,7 +347,8 @@ public sealed class SimulationStateSerializer
         SimulationWorldSnapshot world,
         IReadOnlyList<string> scenePalette,
         MaterialRegistry materialRegistry,
-        List<string> warnings)
+        List<string> warnings,
+        bool initializeLegacyTemperature)
     {
         ValidateSnapshotSize(world);
         if (scenePalette.Count is 0 or > MaterialRegistry.MaximumMaterials)
@@ -384,7 +393,12 @@ public sealed class SimulationStateSerializer
                 cells[index] = default;
                 continue;
             }
-            cells[index].MaterialIndex = sceneToRuntime[sceneIndex];
+            uint runtimeIndex = sceneToRuntime[sceneIndex];
+            cells[index].MaterialIndex = runtimeIndex;
+            if (initializeLegacyTemperature)
+            {
+                cells[index].Temperature = materialRegistry[runtimeIndex].Properties.InitialTemperature;
+            }
         }
     }
 
@@ -460,12 +474,20 @@ public sealed class SimulationStateSerializer
         SimulationWorldSnapshot world,
         CancellationToken cancellationToken)
     {
+        if (version != CurrentVersion)
+        {
+            throw new InvalidDataException($"Запись world v{version} не поддерживается.");
+        }
+        ValidateSnapshotSize(world);
+        byte[] header = new byte[CurrentWorldHeaderSize];
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0, 4), WorldFileMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(4, 4), version);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(8, 4), world.Width);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(12, 4), world.Height);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(16, 4), WorldCellCodec.CurrentCellStride);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(20, 4), world.Grid.Length);
         await using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, true);
-        await stream.WriteAsync(BitConverter.GetBytes(WorldFileMagic), cancellationToken);
-        await stream.WriteAsync(BitConverter.GetBytes(version), cancellationToken);
-        await stream.WriteAsync(BitConverter.GetBytes(world.Width), cancellationToken);
-        await stream.WriteAsync(BitConverter.GetBytes(world.Height), cancellationToken);
-        await stream.WriteAsync(BitConverter.GetBytes(world.Grid.Length), cancellationToken);
+        await stream.WriteAsync(header, cancellationToken);
         await stream.WriteAsync(world.Grid, cancellationToken);
     }
 
@@ -478,30 +500,44 @@ public sealed class SimulationStateSerializer
             return null;
         }
         await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, true);
-        byte[] header = new byte[LegacyWorldHeaderSize];
+        byte[] prefix = new byte[8];
         try
         {
-            await stream.ReadExactlyAsync(header, cancellationToken);
+            await stream.ReadExactlyAsync(prefix, cancellationToken);
         }
         catch (EndOfStreamException exception)
         {
             throw new InvalidDataException("Заголовок файла мира обрезан.", exception);
         }
 
-        uint magic = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(0, 4));
-        int version = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(4, 4));
-        if (magic != WorldFileMagic || version is not (3 or CurrentVersion))
+        uint magic = BinaryPrimitives.ReadUInt32LittleEndian(prefix.AsSpan(0, 4));
+        int version = BinaryPrimitives.ReadInt32LittleEndian(prefix.AsSpan(4, 4));
+        if (magic != WorldFileMagic || version is not (3 or 4 or CurrentVersion))
         {
             throw new InvalidDataException("Формат снимка мира не поддерживается.");
         }
 
-        int width = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(8, 4));
-        int height = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(12, 4));
-        int length = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(16, 4));
-        const int storedCellStride = WorldCellCodec.LegacyCellStride;
-        WorldCellCodec.ValidateStoredWorld(width, height, storedCellStride, length);
+        int headerSize = version == CurrentVersion ? CurrentWorldHeaderSize : LegacyWorldHeaderSize;
+        byte[] remainder = new byte[headerSize - prefix.Length];
+        try
+        {
+            await stream.ReadExactlyAsync(remainder, cancellationToken);
+        }
+        catch (EndOfStreamException exception)
+        {
+            throw new InvalidDataException("Заголовок файла мира обрезан.", exception);
+        }
 
-        long expectedFileLength = checked((long)LegacyWorldHeaderSize + length);
+        int width = BinaryPrimitives.ReadInt32LittleEndian(remainder.AsSpan(0, 4));
+        int height = BinaryPrimitives.ReadInt32LittleEndian(remainder.AsSpan(4, 4));
+        int storedCellStride = version == CurrentVersion
+            ? BinaryPrimitives.ReadInt32LittleEndian(remainder.AsSpan(8, 4))
+            : WorldCellCodec.LegacyCellStride;
+        int length = BinaryPrimitives.ReadInt32LittleEndian(
+            remainder.AsSpan(version == CurrentVersion ? 12 : 8, 4));
+        WorldCellCodec.ValidateStoredWorld(version, width, height, storedCellStride, length);
+
+        long expectedFileLength = checked((long)headerSize + length);
         if (stream.Length < expectedFileLength)
         {
             throw new InvalidDataException("Секция клеток файла мира обрезана.");

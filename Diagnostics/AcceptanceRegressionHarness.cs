@@ -43,6 +43,7 @@ public sealed class AcceptanceRegressionHarness
             "granular_displacement" or "soft_displacement" => AcceptanceScenarioMode.GranularWaterDisplacement,
             "granular_barrier" or "granular_barrier_off" => AcceptanceScenarioMode.GranularBarrier,
             "granular_barrier_hydraulic" or "granular_barrier_on" => AcceptanceScenarioMode.GranularBarrierHydraulic,
+            "temperature_brush" => AcceptanceScenarioMode.TemperatureBrush,
             _ => AcceptanceScenarioMode.None
         };
     }
@@ -94,6 +95,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.GranularWaterDisplacement => 13,
                 AcceptanceScenarioMode.GranularBarrier => 900,
                 AcceptanceScenarioMode.GranularBarrierHydraulic => 900,
+                AcceptanceScenarioMode.TemperatureBrush => 3,
                 _ => uint.MaxValue
             };
         }
@@ -213,6 +215,8 @@ public sealed class AcceptanceRegressionHarness
             framesPerSecond,
             ArtifactDirectory,
             out report);
+        report += Environment.NewLine +
+            $"PHYXEL_ACCEPTANCE_METRICS size={snapshot.Width}x{snapshot.Height} fps={framesPerSecond:0.0}";
         Directory.CreateDirectory(ArtifactDirectory);
         File.WriteAllText(
             Path.Combine(ArtifactDirectory, "acceptance-report.txt"),

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using Phyxel.Materials;
 using Phyxel.Physics;
 
 namespace Phyxel.Serialization;
@@ -15,7 +16,7 @@ internal sealed record RawWorldFile(
 internal static class WorldCellCodec
 {
     public const int LegacyCellStride = 32;
-    public const int CurrentCellStride = 32;
+    public const int CurrentCellStride = 36;
 
     public static void ValidateLayoutContracts()
     {
@@ -35,6 +36,7 @@ internal static class WorldCellCodec
     }
 
     public static long ValidateStoredWorld(
+        int version,
         int width,
         int height,
         int storedCellStride,
@@ -45,9 +47,16 @@ internal static class WorldCellCodec
         {
             throw new InvalidDataException("World dimensions must be positive.");
         }
-        if (storedCellStride != LegacyCellStride)
+        int expectedStride = version switch
         {
-            throw new InvalidDataException($"Unsupported world cell stride {storedCellStride}.");
+            3 or 4 => LegacyCellStride,
+            5 => CurrentCellStride,
+            _ => throw new InvalidDataException($"Unsupported world version {version}.")
+        };
+        if (storedCellStride != expectedStride)
+        {
+            throw new InvalidDataException(
+                $"Unsupported world cell stride {storedCellStride} for version {version}; expected {expectedStride}.");
         }
         if (storedDataLength < 0)
         {
@@ -67,7 +76,7 @@ internal static class WorldCellCodec
         {
             throw new InvalidDataException("World cell section exceeds the supported size.");
         }
-        // v3/v4 use a zero-length section for a world that never allocated a simulation grid.
+        // A zero-length section represents a world that never allocated a simulation grid.
         if (storedDataLength != 0 && storedDataLength != expectedLength)
         {
             throw new InvalidDataException(
@@ -78,12 +87,8 @@ internal static class WorldCellCodec
 
     public static SimulationWorldSnapshot Decode(RawWorldFile world)
     {
-        if (world.Version is not (3 or 4))
-        {
-            throw new InvalidDataException($"Unsupported world version {world.Version}.");
-        }
-
         long expectedLength = ValidateStoredWorld(
+            world.Version,
             world.Width,
             world.Height,
             world.StoredCellStride,
@@ -97,6 +102,16 @@ internal static class WorldCellCodec
             throw new InvalidDataException("World cell section length is invalid.");
         }
 
+        return world.Version switch
+        {
+            3 or 4 => DecodeLegacy(world),
+            5 => DecodeCurrent(world),
+            _ => throw new InvalidDataException($"Unsupported world version {world.Version}.")
+        };
+    }
+
+    private static SimulationWorldSnapshot DecodeLegacy(RawWorldFile world)
+    {
         ReadOnlySpan<LegacyGridCellV3V4> legacyCells =
             MemoryMarshal.Cast<byte, LegacyGridCellV3V4>(world.CellBytes);
         byte[] currentBytes = new byte[checked(legacyCells.Length * CurrentCellStride)];
@@ -113,10 +128,34 @@ internal static class WorldCellCodec
                 Pressure = source.Pressure,
                 IsActive = source.IsActive,
                 BodyId = source.BodyId,
-                RestFrames = source.RestFrames
+                RestFrames = source.RestFrames,
+                Temperature = 0
             };
         }
 
+        return new SimulationWorldSnapshot(world.Width, world.Height, currentBytes);
+    }
+
+    private static SimulationWorldSnapshot DecodeCurrent(RawWorldFile world)
+    {
+        byte[] currentBytes = (byte[])world.CellBytes.Clone();
+        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(currentBytes);
+        for (int index = 0; index < cells.Length; index++)
+        {
+            if (cells[index].IsActive == 0)
+            {
+                cells[index] = default;
+                continue;
+            }
+            float temperature = cells[index].Temperature;
+            if (!float.IsFinite(temperature) ||
+                temperature < MaterialRegistry.MinimumInitialTemperature ||
+                temperature > MaterialRegistry.MaximumInitialTemperature)
+            {
+                throw new InvalidDataException(
+                    $"World cell {index} contains invalid temperature {temperature}.");
+            }
+        }
         return new SimulationWorldSnapshot(world.Width, world.Height, currentBytes);
     }
 }

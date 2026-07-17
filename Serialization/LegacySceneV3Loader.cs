@@ -97,7 +97,9 @@ internal static class LegacySceneV3Loader
                 }
                 continue;
             }
-            cells[index].MaterialIndex = legacyToRuntime[legacyIndex];
+            uint runtimeIndex = legacyToRuntime[legacyIndex];
+            cells[index].MaterialIndex = runtimeIndex;
+            cells[index].Temperature = materialRegistry[runtimeIndex].Properties.InitialTemperature;
         }
     }
 

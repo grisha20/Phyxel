@@ -17,6 +17,7 @@ internal static class WorldCellCodecRegressionVerifier
 {
     private const uint WorldFileMagic = 0x5058594C;
     private const int LegacyHeaderSize = 20;
+    private const int CurrentHeaderSize = 24;
 
     public static int Run()
     {
@@ -47,9 +48,11 @@ internal static class WorldCellCodecRegressionVerifier
             SimulationStateSerializer serializer = new();
 
             VerifyLayoutContracts();
+            VerifyGasThermalMixingContract();
             await VerifyV3Async(directory, serializer, materials);
             await VerifyV4MigrationsAsync(directory, serializer, materials);
-            await VerifyV4RoundTripAsync(directory, serializer, materials);
+            await VerifyV5RoundTripAsync(directory, serializer, materials);
+            await VerifyV5RuntimeRemapAsync(directory);
             await VerifyCorruptWorldsAsync(directory);
         }
         finally
@@ -66,7 +69,80 @@ internal static class WorldCellCodecRegressionVerifier
             "LegacyGridCellV3V4 must remain 32 bytes.");
         Require(
             Marshal.SizeOf<GridCell>() == WorldCellCodec.CurrentCellStride,
-            "GridCell must remain 32 bytes in this commit.");
+            "GridCell must be 36 bytes.");
+        string shaderPath = Path.Combine(AppContext.BaseDirectory, "Content", "Shaders", "PhysicsShared.hlsli");
+        string shader = File.ReadAllText(shaderPath);
+        int layoutStart = shader.IndexOf("struct GridCell", StringComparison.Ordinal);
+        int layoutEnd = shader.IndexOf("};", layoutStart, StringComparison.Ordinal);
+        Require(layoutStart >= 0 && layoutEnd > layoutStart, "HLSL GridCell declaration is missing.");
+        string layout = shader[layoutStart..layoutEnd];
+        string[] fields =
+        [
+            "uint MaterialIndex;", "float Mass;", "float VelocityX;", "float VelocityY;",
+            "float Pressure;", "uint IsActive;", "uint BodyId;", "uint RestFrames;",
+            "float Temperature;"
+        ];
+        int previous = -1;
+        foreach (string field in fields)
+        {
+            int position = layout.IndexOf(field, StringComparison.Ordinal);
+            Require(position > previous, $"HLSL GridCell field '{field}' is missing or out of order.");
+            previous = position;
+        }
+    }
+
+    private static void VerifyGasThermalMixingContract()
+    {
+        string shaderPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "Content",
+            "Shaders",
+            "CellularAutomataSolver.hlsl");
+        string shader = File.ReadAllText(shaderPath);
+        int functionStart = shader.IndexOf("void RelaxGasPair(", StringComparison.Ordinal);
+        int functionEnd = shader.IndexOf("bool SandSupported(", functionStart, StringComparison.Ordinal);
+        Require(functionStart >= 0 && functionEnd > functionStart, "RelaxGasPair is missing.");
+        string function = shader[functionStart..functionEnd];
+        Require(
+            function.Contains("first.MaterialIndex != second.MaterialIndex", StringComparison.Ordinal),
+            "RelaxGasPair must not mix different gases.");
+        Require(
+            function.Contains("heatCapacity * firstMass", StringComparison.Ordinal) &&
+            function.Contains("heatCapacity * secondMass", StringComparison.Ordinal) &&
+            function.Contains("firstCapacity * first.Temperature", StringComparison.Ordinal) &&
+            function.Contains("secondCapacity * second.Temperature", StringComparison.Ordinal),
+            "RelaxGasPair does not calculate mass-weighted thermal energy.");
+        Require(
+            function.Contains("resolvedFirst.Temperature = mixedTemperature", StringComparison.Ordinal) &&
+            function.Contains("resolvedSecond.Temperature = mixedTemperature", StringComparison.Ordinal),
+            "RelaxGasPair does not assign the mixed temperature to both gas portions.");
+
+        const float heatCapacity = 1.5f;
+        const float firstMass = 0.8f;
+        const float secondMass = 0.4f;
+        const float firstTemperature = 100f;
+        const float secondTemperature = 400f;
+        float initialMass = firstMass + secondMass;
+        float initialEnergy = heatCapacity * firstMass * firstTemperature +
+            heatCapacity * secondMass * secondTemperature;
+        float mixedTemperature = initialEnergy / (heatCapacity * initialMass);
+        float resolvedFirstMass = initialMass * 0.5f;
+        float resolvedSecondMass = initialMass - resolvedFirstMass;
+        float resolvedEnergy = heatCapacity * resolvedFirstMass * mixedTemperature +
+            heatCapacity * resolvedSecondMass * mixedTemperature;
+        Require(MathF.Abs(mixedTemperature - 200f) <= 0.0001f, "Gas mixed temperature is incorrect.");
+        Require(
+            MathF.Abs(initialMass - resolvedFirstMass - resolvedSecondMass) <= 0.00001f,
+            "Gas reference redistribution does not conserve mass.");
+        Require(
+            MathF.Abs(initialEnergy - resolvedEnergy) <= 0.0001f,
+            "Gas reference redistribution does not conserve thermal energy.");
+
+        float splitTemperature =
+            (heatCapacity * firstMass * firstTemperature) / (heatCapacity * firstMass);
+        Require(
+            splitTemperature == firstTemperature,
+            "Splitting one gas cell must preserve its temperature.");
     }
 
     private static async Task VerifyV3Async(
@@ -102,7 +178,7 @@ internal static class WorldCellCodecRegressionVerifier
         Require(loaded.State.SelectedMaterial == stoneIndex, "v3 selected material index 4 did not map to core:stone.");
         AssertCells(
             loaded.World,
-            CreateCurrentCell(stone, stoneIndex),
+            CreateCurrentCell(stone, stoneIndex, 20f),
             default);
     }
 
@@ -144,12 +220,12 @@ internal static class WorldCellCodecRegressionVerifier
         Require(ContainsWarning(loaded.Warnings, "core:concrete"), "core:concrete migration warning is missing.");
         AssertCells(
             loaded.World,
-            CreateCurrentCell(goldSand, sandIndex),
-            CreateCurrentCell(concrete, stoneIndex),
+            CreateCurrentCell(goldSand, sandIndex, 20f),
+            CreateCurrentCell(concrete, stoneIndex, 20f),
             default);
     }
 
-    private static async Task VerifyV4RoundTripAsync(
+    private static async Task VerifyV5RoundTripAsync(
         string directory,
         SimulationStateSerializer serializer,
         MaterialRegistry materials)
@@ -165,7 +241,8 @@ internal static class WorldCellCodecRegressionVerifier
             Pressure = 0.75f,
             IsActive = 1,
             BodyId = 0,
-            RestFrames = 11
+            RestFrames = 11,
+            Temperature = -120.5f
         };
         GridCell stone = new()
         {
@@ -176,10 +253,23 @@ internal static class WorldCellCodecRegressionVerifier
             Pressure = 1.25f,
             IsActive = 1,
             BodyId = 701,
-            RestFrames = 19
+            RestFrames = 19,
+            Temperature = 1450.25f
         };
-        SimulationWorldSnapshot source = CreateSnapshot(3, 1, sand, stone, default);
-        string scenePath = Path.Combine(directory, "roundtrip-v4.json");
+        GridCell dirtyInactive = new()
+        {
+            MaterialIndex = uint.MaxValue,
+            Mass = 9,
+            VelocityX = 8,
+            VelocityY = 7,
+            Pressure = 6,
+            IsActive = 0,
+            BodyId = 5,
+            RestFrames = 4,
+            Temperature = float.NaN
+        };
+        SimulationWorldSnapshot source = CreateSnapshot(3, 1, sand, stone, dirtyInactive);
+        string scenePath = Path.Combine(directory, "roundtrip-v5.json");
         SimulationSettings settings = new();
         await serializer.SaveAsync(
             scenePath,
@@ -190,14 +280,56 @@ internal static class WorldCellCodecRegressionVerifier
 
         string worldPath = Path.ChangeExtension(scenePath, ".world");
         RawWorldFile raw = await SimulationStateSerializer.ReadWorldAsync(worldPath, CancellationToken.None) ??
-            throw new InvalidOperationException("Saved v4 world file is missing.");
-        Require(raw.Version == 4, "CurrentVersion changed from 4.");
-        Require(raw.StoredCellStride == 32, "v4 reader did not report the fixed 32-byte stride.");
-        Require(new FileInfo(worldPath).Length == LegacyHeaderSize + raw.CellBytes.Length, "v4 world header format changed.");
+            throw new InvalidOperationException("Saved v5 world file is missing.");
+        Require(raw.Version == 5, "CurrentVersion is not 5.");
+        Require(raw.StoredCellStride == 36, "v5 did not store the explicit 36-byte stride.");
+        Require(new FileInfo(worldPath).Length == CurrentHeaderSize + raw.CellBytes.Length,
+            "v5 world header is not 24 bytes.");
 
         LoadedSimulationScene loaded = await serializer.LoadAsync(scenePath, materials) ??
-            throw new InvalidOperationException("Saved v4 scene did not reload.");
+            throw new InvalidOperationException("Saved v5 scene did not reload.");
         AssertCells(loaded.World, sand, stone, default);
+    }
+
+    private static async Task VerifyV5RuntimeRemapAsync(string directory)
+    {
+        string firstMaterials = Path.Combine(directory, "runtime-order-a");
+        string secondMaterials = Path.Combine(directory, "runtime-order-b");
+        Directory.CreateDirectory(firstMaterials);
+        Directory.CreateDirectory(secondMaterials);
+        string zMaterial = CreateExternalMaterialJson("test:z_material");
+        await File.WriteAllTextAsync(Path.Combine(firstMaterials, "z.json"), zMaterial);
+        await File.WriteAllTextAsync(Path.Combine(secondMaterials, "a.json"), CreateExternalMaterialJson("test:a_material"));
+        await File.WriteAllTextAsync(Path.Combine(secondMaterials, "z.json"), zMaterial);
+
+        MaterialRegistry firstRegistry = new(firstMaterials);
+        MaterialRegistry secondRegistry = new(secondMaterials);
+        ushort firstIndex = firstRegistry["test:z_material"].RuntimeIndex;
+        ushort secondIndex = secondRegistry["test:z_material"].RuntimeIndex;
+        Require(firstIndex != secondIndex, "Runtime-order test did not move the material index.");
+        GridCell sourceCell = new()
+        {
+            MaterialIndex = firstIndex,
+            Mass = 2.5f,
+            VelocityX = 3,
+            VelocityY = 4,
+            IsActive = 1,
+            RestFrames = 5,
+            Temperature = 777.25f
+        };
+        string scenePath = Path.Combine(directory, "runtime-remap-v5.json");
+        SimulationStateSerializer serializer = new();
+        await serializer.SaveAsync(
+            scenePath,
+            new SimulationSettings(),
+            firstIndex,
+            CreateSnapshot(1, 1, sourceCell),
+            firstRegistry);
+
+        LoadedSimulationScene loaded = await serializer.LoadAsync(scenePath, secondRegistry) ??
+            throw new InvalidOperationException("Runtime-remap v5 scene did not load.");
+        sourceCell.MaterialIndex = secondIndex;
+        AssertCells(loaded.World, sourceCell);
     }
 
     private static async Task VerifyCorruptWorldsAsync(string directory)
@@ -215,8 +347,53 @@ internal static class WorldCellCodecRegressionVerifier
         await File.WriteAllBytesAsync(truncatedHeader, new byte[LegacyHeaderSize - 1]);
         await ExpectInvalidAsync(() => SimulationStateSerializer.ReadWorldAsync(truncatedHeader, CancellationToken.None));
 
+        string truncatedV5Header = Path.Combine(directory, "truncated-v5-header.world");
+        byte[] v5Header = new byte[CurrentHeaderSize - 1];
+        BinaryPrimitives.WriteUInt32LittleEndian(v5Header.AsSpan(0, 4), WorldFileMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(v5Header.AsSpan(4, 4), 5);
+        await File.WriteAllBytesAsync(truncatedV5Header, v5Header);
+        await ExpectInvalidAsync(() =>
+            SimulationStateSerializer.ReadWorldAsync(truncatedV5Header, CancellationToken.None));
+
         ExpectInvalid(() => WorldCellCodec.Decode(new RawWorldFile(4, 1, 1, 31, oneCell)));
         ExpectInvalid(() => WorldCellCodec.Decode(new RawWorldFile(4, 1, 1, 36, oneCell)));
+
+        GridCell valid = new() { MaterialIndex = 0, Mass = 1, IsActive = 1, Temperature = 20 };
+        byte[] currentCell = EncodeCurrentCells(valid);
+        await ExpectInvalidCurrentWorldAsync(directory, "v5-wrong-stride", 35, 36, currentCell);
+        await ExpectInvalidCurrentWorldAsync(directory, "v5-truncated", 36, 36, currentCell[..^1]);
+        await ExpectInvalidCurrentWorldAsync(directory, "v5-trailing", 36, 36, [.. currentCell, 0x7f]);
+        await ExpectInvalidTemperatureAsync(directory, "v5-nan", float.NaN);
+        await ExpectInvalidTemperatureAsync(directory, "v5-infinity", float.PositiveInfinity);
+        await ExpectInvalidTemperatureAsync(directory, "v5-too-cold", -273.16f);
+        await ExpectInvalidTemperatureAsync(directory, "v5-too-hot", 5000.01f);
+        WorldCellCodec.Decode(new RawWorldFile(
+            5,
+            2,
+            1,
+            WorldCellCodec.CurrentCellStride,
+            EncodeCurrentCells(
+                new GridCell { IsActive = 1, Temperature = -273.15f },
+                new GridCell { IsActive = 1, Temperature = 5000f })));
+        Require(
+            WorldCellCodec.Decode(new RawWorldFile(5, 1, 1, 36, [])).Grid.Length == 0,
+            "v5 zero-length unallocated world was rejected.");
+
+        GridCell dirtyInactive = new()
+        {
+            MaterialIndex = uint.MaxValue,
+            Mass = 9,
+            VelocityX = 8,
+            VelocityY = 7,
+            Pressure = 6,
+            IsActive = 0,
+            BodyId = 5,
+            RestFrames = 4,
+            Temperature = float.NaN
+        };
+        SimulationWorldSnapshot normalized = WorldCellCodec.Decode(
+            new RawWorldFile(5, 1, 1, 36, EncodeCurrentCells(dirtyInactive)));
+        AssertCells(normalized, default(GridCell));
     }
 
     private static async Task ExpectInvalidWorldAsync(
@@ -231,6 +408,36 @@ internal static class WorldCellCodecRegressionVerifier
         string path = Path.Combine(directory, $"{name}.world");
         await WriteRawWorldAsync(path, version, width, height, declaredLength, actualBytes);
         await ExpectInvalidAsync(() => SimulationStateSerializer.ReadWorldAsync(path, CancellationToken.None));
+    }
+
+    private static async Task ExpectInvalidCurrentWorldAsync(
+        string directory,
+        string name,
+        int stride,
+        int declaredLength,
+        byte[] actualBytes)
+    {
+        string path = Path.Combine(directory, $"{name}.world");
+        await WriteCurrentWorldAsync(path, 1, 1, stride, declaredLength, actualBytes);
+        await ExpectInvalidAsync(() => SimulationStateSerializer.ReadWorldAsync(path, CancellationToken.None));
+    }
+
+    private static async Task ExpectInvalidTemperatureAsync(
+        string directory,
+        string name,
+        float temperature)
+    {
+        GridCell cell = new() { MaterialIndex = 0, Mass = 1, IsActive = 1, Temperature = temperature };
+        byte[] cells = EncodeCurrentCells(cell);
+        string path = Path.Combine(directory, $"{name}.world");
+        await WriteCurrentWorldAsync(path, 1, 1, WorldCellCodec.CurrentCellStride, cells.Length, cells);
+        await ExpectInvalidAsync(async () =>
+        {
+            RawWorldFile raw = await SimulationStateSerializer.ReadWorldAsync(path, CancellationToken.None) ??
+                throw new InvalidOperationException("Invalid temperature world is missing.");
+            WorldCellCodec.Decode(raw);
+            return raw;
+        });
     }
 
     private static async Task ExpectInvalidAsync(Func<Task<RawWorldFile?>> action)
@@ -288,6 +495,26 @@ internal static class WorldCellCodecRegressionVerifier
         await stream.WriteAsync(actualBytes);
     }
 
+    private static async Task WriteCurrentWorldAsync(
+        string path,
+        int width,
+        int height,
+        int stride,
+        int declaredLength,
+        byte[] actualBytes)
+    {
+        byte[] header = new byte[CurrentHeaderSize];
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0, 4), WorldFileMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(4, 4), 5);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(8, 4), width);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(12, 4), height);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(16, 4), stride);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(20, 4), declaredLength);
+        await using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        await stream.WriteAsync(header);
+        await stream.WriteAsync(actualBytes);
+    }
+
     private static byte[] EncodeLegacyCells(params LegacyGridCellV3V4[] cells)
     {
         byte[] bytes = new byte[checked(cells.Length * WorldCellCodec.LegacyCellStride)];
@@ -304,6 +531,13 @@ internal static class WorldCellCodecRegressionVerifier
             BinaryPrimitives.WriteUInt32LittleEndian(destination[24..28], cell.BodyId);
             BinaryPrimitives.WriteUInt32LittleEndian(destination[28..32], cell.RestFrames);
         }
+        return bytes;
+    }
+
+    private static byte[] EncodeCurrentCells(params GridCell[] cells)
+    {
+        byte[] bytes = new byte[checked(cells.Length * WorldCellCodec.CurrentCellStride)];
+        cells.AsSpan().CopyTo(MemoryMarshal.Cast<byte, GridCell>(bytes));
         return bytes;
     }
 
@@ -331,7 +565,10 @@ internal static class WorldCellCodecRegressionVerifier
             RestFrames = restFrames
         };
 
-    private static GridCell CreateCurrentCell(LegacyGridCellV3V4 source, uint materialIndex) =>
+    private static GridCell CreateCurrentCell(
+        LegacyGridCellV3V4 source,
+        uint materialIndex,
+        float temperature) =>
         new()
         {
             MaterialIndex = materialIndex,
@@ -341,7 +578,8 @@ internal static class WorldCellCodecRegressionVerifier
             Pressure = source.Pressure,
             IsActive = source.IsActive,
             BodyId = source.BodyId,
-            RestFrames = source.RestFrames
+            RestFrames = source.RestFrames,
+            Temperature = temperature
         };
 
     private static SimulationWorldSnapshot CreateSnapshot(int width, int height, params GridCell[] cells)
@@ -368,6 +606,7 @@ internal static class WorldCellCodecRegressionVerifier
             Require(left.IsActive == right.IsActive, $"Cell {index} IsActive changed.");
             Require(left.BodyId == right.BodyId, $"Cell {index} BodyId changed.");
             Require(left.RestFrames == right.RestFrames, $"Cell {index} RestFrames changed.");
+            Require(SameFloat(left.Temperature, right.Temperature), $"Cell {index} Temperature changed.");
         }
     }
 
@@ -388,6 +627,19 @@ internal static class WorldCellCodecRegressionVerifier
 
     private static Task WriteJsonAsync(string path, object value) =>
         File.WriteAllBytesAsync(path, JsonSerializer.SerializeToUtf8Bytes(value));
+
+    private static string CreateExternalMaterialJson(string id) => $$"""
+        {
+          "schema": 1,
+          "id": "{{id}}",
+          "name": "Runtime order probe",
+          "kind": "granular",
+          "color": "#ABCDEF",
+          "physics": { "density": 2.5, "friction": 0.4, "flowRate": 0.2 },
+          "thermal": { "initialTemperature": 123.0, "conductivity": 0.2, "heatCapacity": 1.5 },
+          "ui": { "hidden": false }
+        }
+        """;
 
     private static void Require(bool condition, string message)
     {

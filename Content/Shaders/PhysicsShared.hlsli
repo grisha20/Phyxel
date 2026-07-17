@@ -8,6 +8,7 @@ struct GridCell
     uint IsActive;
     uint BodyId;
     uint RestFrames;
+    float Temperature;
 };
 
 struct MaterialProperties

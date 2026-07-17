@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "acceptance:temperature_probe",
+  "kind": "granular",
+  "name": {
+    "ru": "Температурный тест",
+    "en": "Temperature probe"
+  },
+  "color": "#DC50DC",
+  "physics": {
+    "density": 1.7,
+    "friction": 0.5,
+    "flowRate": 0.0
+  },
+  "flags": [],
+  "thermal": {
+    "initialTemperature": 123.5,
+    "conductivity": 0.2,
+    "heatCapacity": 1.5
+  },
+  "ui": {
+    "hidden": false,
+    "order": 999
+  }
+}

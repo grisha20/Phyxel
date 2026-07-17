@@ -141,8 +141,55 @@ public static class AcceptanceRegressionVerifier
                 true,
                 artifactDirectory,
                 out report),
+            AcceptanceScenarioMode.TemperatureBrush => ValidateTemperatureBrush(snapshot, out report),
             _ => Fail(out report)
         };
+    }
+
+    private static bool ValidateTemperatureBrush(
+        SimulationWorldSnapshot snapshot,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        uint probeIndex = materials.Resolve("acceptance:temperature_probe");
+        int sandCount = 0;
+        int probeCount = 0;
+        foreach (GridCell cell in grid)
+        {
+            if (cell.IsActive == 0)
+            {
+                continue;
+            }
+            if (cell.MaterialIndex == materials.Sand)
+            {
+                sandCount++;
+                if (cell.Temperature != 20.0f)
+                {
+                    report = $"TEMPERATURE_BRUSH_FAILED sand_temperature={cell.Temperature:R}";
+                    return false;
+                }
+            }
+            else if (cell.MaterialIndex == probeIndex)
+            {
+                probeCount++;
+                if (cell.Temperature != 123.5f)
+                {
+                    report = $"TEMPERATURE_BRUSH_FAILED probe_temperature={cell.Temperature:R}";
+                    return false;
+                }
+            }
+        }
+
+        GridCell erased = grid[60 * snapshot.Width + 300];
+        bool erasedIsDefault = erased.MaterialIndex == 0 && erased.Mass == 0 &&
+            erased.VelocityX == 0 && erased.VelocityY == 0 && erased.Pressure == 0 &&
+            erased.IsActive == 0 && erased.BodyId == 0 && erased.RestFrames == 0 &&
+            erased.Temperature == 0;
+        bool passed = sandCount > 0 && probeCount > 0 && erasedIsDefault;
+        report = passed
+            ? $"TEMPERATURE_BRUSH_OK sand={sandCount} probe={probeCount} erasedDefault=true"
+            : $"TEMPERATURE_BRUSH_FAILED sand={sandCount} probe={probeCount} erasedDefault={erasedIsDefault}";
+        return passed;
     }
 
     private static bool ValidateUnderwaterGranularPile(
