@@ -61,11 +61,10 @@ public sealed class SandboxUiCoordinator
         densitySlider = new UiValueSlider(UiLocalizationProvider.SpawnDensity, 5, 100, 1, 82, "%");
         scaleSlider = new UiValueSlider(
             "Масштаб симуляции",
-            25,
-            100,
-            25,
+            [25, 35, 50, 75, 85, 100],
             SimulationSettings.DefaultScale * 100,
-            "%");
+            "%",
+            "0");
         SelectedMaterial = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
     }
 
