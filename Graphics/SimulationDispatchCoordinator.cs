@@ -9,6 +9,9 @@ namespace Phyxel.Graphics;
 
 public sealed class SimulationDispatchCoordinator
 {
+    public const float FixedThermalStep = 0.05f;
+    public const float ThermalExchangeRate = 4f;
+    public const int MaximumThermalTicksPerFrame = 4;
     private static readonly uint[] PrimaryEvenPhases =
     [
         32, 0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
@@ -96,6 +99,13 @@ public sealed class SimulationDispatchCoordinator
     private bool waterPressureRoutesDirty = true;
     private bool solidMotionNeedsCellular = true;
     private bool cellMaterialsDirty;
+    private bool thermalActive;
+    private readonly FixedStepThermalScheduler thermalScheduler = new();
+    private bool thermalTimingPending;
+    private int thermalTimingSamples;
+    private double thermalTimingTotalMilliseconds;
+    private double thermalTimingMinimumMilliseconds = double.PositiveInfinity;
+    private double thermalTimingMaximumMilliseconds;
     private int settledObservations;
     private int hydraulicWarmupFrames;
     private int fastSettleFrames;
@@ -159,6 +169,13 @@ public sealed class SimulationDispatchCoordinator
     public bool SolidSleeping => solidSleeping;
     public bool SolidMotionNeedsCellular => solidMotionNeedsCellular;
     public int SettledObservations => settledObservations;
+    public bool ThermalActive => thermalActive;
+    public ulong ThermalTicks => thermalScheduler.TotalTicks;
+    public ThermalGpuTimingStatistics ThermalGpuTiming => new(
+        thermalTimingSamples,
+        thermalTimingSamples == 0 ? 0 : thermalTimingTotalMilliseconds / thermalTimingSamples,
+        thermalTimingSamples == 0 ? 0 : thermalTimingMinimumMilliseconds,
+        thermalTimingMaximumMilliseconds);
 
     public void SetSolidGravityEnabled(bool enabled)
     {
@@ -212,11 +229,12 @@ public sealed class SimulationDispatchCoordinator
 
     public GpuSimulationResources DispatchFrame(
         SimulationSettings settings,
-        ReadOnlySpan<BrushDrawCommand> commands)
+        ReadOnlySpan<BrushDrawCommand> commands,
+        float elapsedSeconds)
     {
         GpuSimulationResources resources = lifecycleManager.CreateOrResize(
             settings,
-            worldHasMatter || commands.Length > 0);
+            worldHasMatter || thermalActive || commands.Length > 0);
         if (!ReferenceEquals(resources, boundResources))
         {
             Clear(resources);
@@ -367,6 +385,17 @@ public sealed class SimulationDispatchCoordinator
             presentationDirty = true;
         }
 
+        PollThermalTiming(resources);
+        int thermalTicks = thermalScheduler.Advance(
+            elapsedSeconds,
+            settings.Paused,
+            thermalActive && resources.IsSimulationAllocated);
+        for (int tick = 0; tick < thermalTicks; tick++)
+        {
+            bool measure = thermalScheduler.TotalTicks >= 40 && !thermalTimingPending;
+            DispatchThermalDiffusion(resources, measure);
+        }
+
         constants.SolidGravity = settings.SolidGravity ? 1u : 0u;
         if (presentationDirty && resources.IsSimulationAllocated)
         {
@@ -395,6 +424,9 @@ public sealed class SimulationDispatchCoordinator
             new RawInt4(0, 0, 0, 0));
         boundResources = resources;
         worldHasMatter = containsMatter;
+        thermalActive = containsMatter;
+        thermalScheduler.Reset();
+        ResetThermalTiming();
         cellularMatter = containsMatter;
         fluidMatter = containsMatter;
         liquidMatter = containsMatter;
@@ -480,7 +512,7 @@ public sealed class SimulationDispatchCoordinator
         }
         if (statistics.ActiveCells == 0)
         {
-            ResetActivity(false);
+            ResetActivity(false, resetThermal: false);
         }
     }
 
@@ -949,6 +981,7 @@ public sealed class SimulationDispatchCoordinator
                 settledObservations = 0;
                 continue;
             }
+            thermalActive = true;
             MaterialSimulationKind kind = (MaterialSimulationKind)materialRegistry[command.MaterialIndex]
                 .Properties.SimulationKind;
             if (kind == MaterialSimulationKind.Solid)
@@ -971,7 +1004,7 @@ public sealed class SimulationDispatchCoordinator
         }
     }
 
-    private void ResetActivity(bool dirtyPresentation)
+    private void ResetActivity(bool dirtyPresentation, bool resetThermal = true)
     {
         worldHasMatter = false;
         cellularMatter = false;
@@ -990,7 +1023,94 @@ public sealed class SimulationDispatchCoordinator
         fastSettleFrames = 0;
         fastMaximumAwakeFrames = 0;
         cellMaterialsDirty = false;
+        if (resetThermal)
+        {
+            thermalActive = false;
+            thermalScheduler.Reset();
+            ResetThermalTiming();
+        }
         ResetActiveRegion();
+    }
+
+    private void DispatchThermalDiffusion(GpuSimulationResources resources, bool measure)
+    {
+        ThermalSimulationConstants constants = new()
+        {
+            DeltaTime = FixedThermalStep,
+            ExchangeRate = ThermalExchangeRate,
+            Width = (uint)resources.Width,
+            Height = (uint)resources.Height
+        };
+        DeviceContext context = resources.Context;
+        if (measure)
+        {
+            context.Begin(resources.ThermalTimestampDisjointQuery);
+            context.End(resources.ThermalTimestampStartQuery);
+        }
+        context.UpdateSubresource(ref constants, resources.ThermalConstants);
+        context.ComputeShader.Set(resources.ThermalDiffusionShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.ThermalConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Grid.ReadView,
+            resources.Materials.View);
+        context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.WriteUnorderedView);
+        context.Dispatch(
+            DivideRoundUp(resources.Width, 16),
+            DivideRoundUp(resources.Height, 16),
+            1);
+        if (measure)
+        {
+            context.End(resources.ThermalTimestampEndQuery);
+            context.End(resources.ThermalTimestampDisjointQuery);
+            thermalTimingPending = true;
+        }
+        Unbind(context, 2, 1);
+        resources.Grid.Swap();
+    }
+
+    private void PollThermalTiming(GpuSimulationResources resources)
+    {
+        if (!thermalTimingPending)
+        {
+            return;
+        }
+        DeviceContext context = resources.Context;
+        bool disjointReady = context.GetData(
+            resources.ThermalTimestampDisjointQuery,
+            AsynchronousFlags.DoNotFlush,
+            out QueryDataTimestampDisjoint disjoint);
+        bool startReady = context.GetData(
+            resources.ThermalTimestampStartQuery,
+            AsynchronousFlags.DoNotFlush,
+            out long start);
+        bool endReady = context.GetData(
+            resources.ThermalTimestampEndQuery,
+            AsynchronousFlags.DoNotFlush,
+            out long end);
+        if (!disjointReady || !startReady || !endReady)
+        {
+            return;
+        }
+        thermalTimingPending = false;
+        if (disjoint.Disjoint || disjoint.Frequency <= 0 || end < start)
+        {
+            return;
+        }
+        double milliseconds = (end - start) * 1000d / disjoint.Frequency;
+        thermalTimingSamples++;
+        thermalTimingTotalMilliseconds += milliseconds;
+        thermalTimingMinimumMilliseconds = Math.Min(thermalTimingMinimumMilliseconds, milliseconds);
+        thermalTimingMaximumMilliseconds = Math.Max(thermalTimingMaximumMilliseconds, milliseconds);
+    }
+
+    private void ResetThermalTiming()
+    {
+        thermalTimingPending = false;
+        thermalTimingSamples = 0;
+        thermalTimingTotalMilliseconds = 0;
+        thermalTimingMinimumMilliseconds = double.PositiveInfinity;
+        thermalTimingMaximumMilliseconds = 0;
     }
 
     private static bool ContainsMatterCommand(ReadOnlySpan<BrushDrawCommand> commands)

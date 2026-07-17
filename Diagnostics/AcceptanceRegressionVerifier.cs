@@ -28,6 +28,8 @@ public static class AcceptanceRegressionVerifier
         SimulationWorldSnapshot snapshot,
         SimulationStatistics statistics,
         double framesPerSecond,
+        ulong thermalTicks,
+        TemperatureProbeResult? temperatureProbe,
         string artifactDirectory,
         out string report)
     {
@@ -142,6 +144,20 @@ public static class AcceptanceRegressionVerifier
                 artifactDirectory,
                 out report),
             AcceptanceScenarioMode.TemperatureBrush => ValidateTemperatureBrush(snapshot, out report),
+            AcceptanceScenarioMode.ThermalUniform or
+            AcceptanceScenarioMode.ThermalContact or
+            AcceptanceScenarioMode.ThermalCapacity or
+            AcceptanceScenarioMode.ThermalFast or
+            AcceptanceScenarioMode.ThermalSlow or
+            AcceptanceScenarioMode.ThermalInsulator or
+            AcceptanceScenarioMode.ThermalVacuum or
+            AcceptanceScenarioMode.ThermalGas => ThermalAcceptanceVerifier.Validate(
+                mode,
+                materialRegistry,
+                snapshot,
+                thermalTicks,
+                temperatureProbe,
+                out report),
             _ => Fail(out report)
         };
     }

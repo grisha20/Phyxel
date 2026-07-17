@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "acceptance:thermal_low_capacity",
+  "name": "Thermal Low Capacity",
+  "kind": "solid",
+  "color": "#D09090",
+  "physics": { "density": 2.0, "friction": 0.6, "flowRate": 0.0 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.8, "heatCapacity": 0.25 },
+  "ui": { "order": 1105, "hidden": true }
+}

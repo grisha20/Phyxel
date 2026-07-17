@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "acceptance:thermal_hot",
+  "name": "Thermal Hot",
+  "kind": "solid",
+  "color": "#E05040",
+  "physics": { "density": 2.0, "friction": 0.6, "flowRate": 0.0 },
+  "thermal": { "initialTemperature": 400.0, "conductivity": 0.8, "heatCapacity": 1.0 },
+  "ui": { "order": 1100, "hidden": true }
+}

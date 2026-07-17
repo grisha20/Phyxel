@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "acceptance:thermal_insulator",
+  "name": "Thermal Insulator",
+  "kind": "solid",
+  "color": "#707070",
+  "physics": { "density": 2.0, "friction": 0.6, "flowRate": 0.0 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.0, "heatCapacity": 1.0 },
+  "ui": { "order": 1102, "hidden": true }
+}

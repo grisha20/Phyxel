@@ -18,6 +18,11 @@ public static class Program
             Environment.ExitCode = ThermalMaterialPropertiesRegressionVerifier.Run();
             return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_THERMAL_DIFFUSION") == "1")
+        {
+            Environment.ExitCode = ThermalDiffusionRegressionVerifier.Run();
+            return;
+        }
 
         using PhyxelGame game = new();
         game.Run();

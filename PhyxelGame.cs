@@ -26,6 +26,7 @@ public sealed class PhyxelGame : Game
     private readonly GpuCommandEncoder commandEncoder = new();
     private readonly SimulationStateSerializer stateSerializer = new();
     private readonly GpuDebugProbe debugProbe = new();
+    private readonly GpuTemperatureProbe temperatureProbe = new();
     private readonly AcceptanceRegressionHarness acceptance = new();
     private readonly string scenePath;
     private SpriteBatch? spriteBatch;
@@ -75,6 +76,16 @@ public sealed class PhyxelGame : Game
                 ? parsedScale
                 : acceptance.RequiresNativeResolution ? 1f : 0.25f;
             settings.ApplyScale(acceptanceScale);
+            if (int.TryParse(
+                Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_TARGET_FPS"),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out int targetFramesPerSecond) && targetFramesPerSecond is >= 1 and <= 240)
+            {
+                graphics.SynchronizeWithVerticalRetrace = false;
+                IsFixedTimeStep = true;
+                TargetElapsedTime = TimeSpan.FromSeconds(1d / targetFramesPerSecond);
+            }
         }
         scenePath = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SCENE_PATH") ??
             Path.Combine(
@@ -93,6 +104,18 @@ public sealed class PhyxelGame : Game
         resourceManager.PrepareSimulation(settings);
         dispatchCoordinator = new SimulationDispatchCoordinator(resourceManager, materialRegistry);
         userInterface = new SandboxUiCoordinator(materialRegistry, font, resourceManager);
+        SimulationWorldSnapshot? initialAcceptanceWorld = acceptance.CreateInitialWorld(
+            settings.Width,
+            settings.Height);
+        if (initialAcceptanceWorld is not null)
+        {
+            currentResources = resourceManager.CreateOrResize(settings, true);
+            stateSerializer.ApplyWorldSnapshot(currentResources, initialAcceptanceWorld);
+            dispatchCoordinator.RestoreWorldActivity(
+                currentResources,
+                true,
+                settings.HydraulicPressure);
+        }
         if (acceptance.RequiresSavedScene)
         {
             pendingLoad = stateSerializer.LoadAsync(scenePath, materialRegistry);
@@ -131,9 +154,18 @@ public sealed class PhyxelGame : Game
                 userInterface.PointerConsumed);
         try
         {
-            currentResources = dispatchCoordinator.DispatchFrame(settings, commandEncoder.Encode(commands));
+            currentResources = dispatchCoordinator.DispatchFrame(
+                settings,
+                commandEncoder.Encode(commands),
+                input.DeltaSeconds);
             acceptance.CaptureScreenshot(currentResources, frameIndex);
             debugProbe.Update(currentResources, frameIndex++);
+            Point? probeCoordinate = acceptance.ProbeCoordinate ?? GpuTemperatureProbe.MapPointerToCell(
+                input.MousePosition,
+                worldBounds,
+                currentResources.Width,
+                currentResources.Height);
+            temperatureProbe.Update(currentResources, probeCoordinate, input.DeltaSeconds);
             dispatchCoordinator.ObserveStatistics(debugProbe.Latest);
             BeginAcceptanceCapture();
         }
@@ -141,6 +173,7 @@ public sealed class PhyxelGame : Game
             exception.ResultCode.Code == unchecked((int)0x8007000E) && settings.Scale > 0.25f)
         {
             settings.ApplyScale(settings.Scale - 0.25f);
+            temperatureProbe.Reset();
             SetStatus("Видеопамять ограничена: масштаб снижен");
         }
         transientStatusRemaining = Math.Max(0, transientStatusRemaining - input.DeltaSeconds);
@@ -183,7 +216,13 @@ public sealed class PhyxelGame : Game
             worldBounds,
             settings,
             latestInput.RightDown);
-        userInterface.Draw(spriteBatch, settings, debugProbe.Latest, displayedFrameRate, transientStatus);
+        userInterface.Draw(
+            spriteBatch,
+            settings,
+            debugProbe.Latest,
+            displayedFrameRate,
+            transientStatus,
+            temperatureProbe.Latest);
         spriteBatch.End();
         UpdateFrameRate(gameTime);
         base.Draw(gameTime);
@@ -205,12 +244,17 @@ public sealed class PhyxelGame : Game
         if (actions.ClearRequested)
         {
             dispatchCoordinator.ClearCurrentWorld(settings);
+            temperatureProbe.Reset();
             SetStatus("Сцена очищена");
         }
         if (actions.GravityChanged)
         {
             dispatchCoordinator.SetSolidGravityEnabled(settings.SolidGravity);
             SetStatus(settings.SolidGravity ? "Гравитация включена" : "Гравитация выключена");
+        }
+        if (actions.ScaleChanged)
+        {
+            temperatureProbe.Reset();
         }
         if (actions.HydraulicsChanged)
         {
@@ -227,6 +271,7 @@ public sealed class PhyxelGame : Game
         }
         if (actions.LoadRequested && pendingLoad is null)
         {
+            temperatureProbe.Reset();
             pendingLoad = stateSerializer.LoadAsync(scenePath, materialRegistry);
             SetStatus("Загрузка…");
         }
@@ -245,6 +290,10 @@ public sealed class PhyxelGame : Game
                     snapshot,
                     debugProbe.Latest,
                     displayedFrameRate,
+                    dispatchCoordinator?.ThermalTicks ?? 0,
+                    temperatureProbe.Latest,
+                    dispatchCoordinator?.ThermalGpuTiming ?? default,
+                    temperatureProbe.GpuTiming,
                     out _);
                 Environment.ExitCode = passed ? 0 : 1;
                 acceptanceSuccess = true;
@@ -265,6 +314,7 @@ public sealed class PhyxelGame : Game
         }
         if (pendingLoad.IsCompletedSuccessfully && pendingLoad.Result is { } loaded)
         {
+            temperatureProbe.Reset();
             SimulationStateSerializer.Apply(loaded.State, settings);
             userInterface.SelectedMaterial = loaded.State.SelectedMaterial;
             if (loaded.World is not null && resourceManager is not null)

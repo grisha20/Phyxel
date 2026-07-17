@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Microsoft.Xna.Framework;
 using Phyxel.Core;
 using Phyxel.Graphics;
 using Phyxel.Materials;
@@ -44,6 +45,14 @@ public sealed class AcceptanceRegressionHarness
             "granular_barrier" or "granular_barrier_off" => AcceptanceScenarioMode.GranularBarrier,
             "granular_barrier_hydraulic" or "granular_barrier_on" => AcceptanceScenarioMode.GranularBarrierHydraulic,
             "temperature_brush" => AcceptanceScenarioMode.TemperatureBrush,
+            "thermal_uniform" => AcceptanceScenarioMode.ThermalUniform,
+            "thermal_contact" => AcceptanceScenarioMode.ThermalContact,
+            "thermal_capacity" => AcceptanceScenarioMode.ThermalCapacity,
+            "thermal_fast" => AcceptanceScenarioMode.ThermalFast,
+            "thermal_slow" => AcceptanceScenarioMode.ThermalSlow,
+            "thermal_insulator" => AcceptanceScenarioMode.ThermalInsulator,
+            "thermal_vacuum" => AcceptanceScenarioMode.ThermalVacuum,
+            "thermal_gas" => AcceptanceScenarioMode.ThermalGas,
             _ => AcceptanceScenarioMode.None
         };
     }
@@ -96,6 +105,14 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.GranularBarrier => 900,
                 AcceptanceScenarioMode.GranularBarrierHydraulic => 900,
                 AcceptanceScenarioMode.TemperatureBrush => 3,
+                AcceptanceScenarioMode.ThermalGas => 120,
+                AcceptanceScenarioMode.ThermalUniform or
+                AcceptanceScenarioMode.ThermalContact or
+                AcceptanceScenarioMode.ThermalCapacity or
+                AcceptanceScenarioMode.ThermalFast or
+                AcceptanceScenarioMode.ThermalSlow or
+                AcceptanceScenarioMode.ThermalInsulator or
+                AcceptanceScenarioMode.ThermalVacuum => 300,
                 _ => uint.MaxValue
             };
         }
@@ -105,6 +122,15 @@ public sealed class AcceptanceRegressionHarness
     {
         return AcceptanceRegressionScenario.CreateCommands(Mode, frame, materialRegistry);
     }
+
+    public SimulationWorldSnapshot? CreateInitialWorld(int width, int height) =>
+        materialRegistry is null
+            ? null
+            : ThermalAcceptanceScenario.Create(Mode, width, height, materialRegistry);
+
+    public Point? ProbeCoordinate => Mode == AcceptanceScenarioMode.ThermalUniform
+        ? new Point(200, 120)
+        : null;
 
     public void ConfigureSettings(uint frame, SimulationSettings settings)
     {
@@ -205,6 +231,10 @@ public sealed class AcceptanceRegressionHarness
         SimulationWorldSnapshot snapshot,
         SimulationStatistics statistics,
         double framesPerSecond,
+        ulong thermalTicks,
+        TemperatureProbeResult? temperatureProbe,
+        ThermalGpuTimingStatistics thermalGpuTiming,
+        ThermalGpuTimingStatistics probeGpuTiming,
         out string report)
     {
         bool passed = AcceptanceRegressionVerifier.Validate(
@@ -213,10 +243,18 @@ public sealed class AcceptanceRegressionHarness
             snapshot,
             statistics,
             framesPerSecond,
+            thermalTicks,
+            temperatureProbe,
             ArtifactDirectory,
             out report);
         report += Environment.NewLine +
-            $"PHYXEL_ACCEPTANCE_METRICS size={snapshot.Width}x{snapshot.Height} fps={framesPerSecond:0.0}";
+            $"PHYXEL_ACCEPTANCE_METRICS size={snapshot.Width}x{snapshot.Height} fps={framesPerSecond:0.0} " +
+            $"thermalGpuMs={thermalGpuTiming.AverageMilliseconds:0.0000}/" +
+            $"{thermalGpuTiming.MinimumMilliseconds:0.0000}/" +
+            $"{thermalGpuTiming.MaximumMilliseconds:0.0000} samples={thermalGpuTiming.Samples} " +
+            $"probeGpuMs={probeGpuTiming.AverageMilliseconds:0.0000}/" +
+            $"{probeGpuTiming.MinimumMilliseconds:0.0000}/" +
+            $"{probeGpuTiming.MaximumMilliseconds:0.0000} probeSamples={probeGpuTiming.Samples}";
         Directory.CreateDirectory(ArtifactDirectory);
         File.WriteAllText(
             Path.Combine(ArtifactDirectory, "acceptance-report.txt"),

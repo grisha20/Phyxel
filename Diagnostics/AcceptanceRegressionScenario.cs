@@ -32,7 +32,15 @@ public enum AcceptanceScenarioMode
     GranularWaterDisplacement,
     GranularBarrier,
     GranularBarrierHydraulic,
-    TemperatureBrush
+    TemperatureBrush,
+    ThermalUniform,
+    ThermalContact,
+    ThermalCapacity,
+    ThermalFast,
+    ThermalSlow,
+    ThermalInsulator,
+    ThermalVacuum,
+    ThermalGas
 }
 
 public static class AcceptanceRegressionScenario
@@ -76,6 +84,14 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.GranularBarrier => CreateGranularBarrier(frame),
             AcceptanceScenarioMode.GranularBarrierHydraulic => CreateGranularBarrier(frame),
             AcceptanceScenarioMode.TemperatureBrush => CreateTemperatureBrush(frame),
+            AcceptanceScenarioMode.ThermalUniform or
+            AcceptanceScenarioMode.ThermalContact or
+            AcceptanceScenarioMode.ThermalCapacity or
+            AcceptanceScenarioMode.ThermalFast or
+            AcceptanceScenarioMode.ThermalSlow or
+            AcceptanceScenarioMode.ThermalInsulator or
+            AcceptanceScenarioMode.ThermalVacuum or
+            AcceptanceScenarioMode.ThermalGas => [],
             _ => []
         };
     }

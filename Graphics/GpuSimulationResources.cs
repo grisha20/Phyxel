@@ -27,6 +27,17 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuUploadBuffer<BrushDrawCommand> Commands { get; init; }
     public required GpuUploadBuffer<MaterialProperties> Materials { get; init; }
     public required Buffer FrameConstants { get; init; }
+    public required Buffer ThermalConstants { get; init; }
+    public required Buffer TemperatureProbeConstants { get; init; }
+    public required GpuStructuredBuffer<TemperatureProbeResult> TemperatureProbeResult { get; init; }
+    public required Buffer TemperatureProbeStaging { get; init; }
+    public required Query TemperatureProbeQuery { get; init; }
+    public required Query ThermalTimestampDisjointQuery { get; init; }
+    public required Query ThermalTimestampStartQuery { get; init; }
+    public required Query ThermalTimestampEndQuery { get; init; }
+    public required Query ProbeTimestampDisjointQuery { get; init; }
+    public required Query ProbeTimestampStartQuery { get; init; }
+    public required Query ProbeTimestampEndQuery { get; init; }
     public required Buffer StatisticsStaging { get; init; }
     public required Query StatisticsQuery { get; init; }
     public required Buffer GridStaging { get; init; }
@@ -50,6 +61,8 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? SolidMoveShader { get; init; }
     public ComputeShader? SolidDisplacementApplyShader { get; init; }
     public ComputeShader? CompositionShader { get; init; }
+    public ComputeShader? ThermalDiffusionShader { get; init; }
+    public ComputeShader? TemperatureProbeShader { get; init; }
 
     public void Dispose()
     {
@@ -57,6 +70,8 @@ public sealed class GpuSimulationResources : IDisposable
         Context.ComputeShader.SetShaderResources(0, null, null, null, null, null, null, null);
         Context.ComputeShader.SetUnorderedAccessViews(0, null, null, null, null, null, null);
         CompositionShader?.Dispose();
+        TemperatureProbeShader?.Dispose();
+        ThermalDiffusionShader?.Dispose();
         SolidDisplacementApplyShader?.Dispose();
         SolidMoveShader?.Dispose();
         SolidDisplacementPlanShader?.Dispose();
@@ -78,6 +93,17 @@ public sealed class GpuSimulationResources : IDisposable
         SceneTransferQuery.Dispose();
         GridStaging.Dispose();
         FrameConstants.Dispose();
+        TemperatureProbeQuery.Dispose();
+        ThermalTimestampEndQuery.Dispose();
+        ThermalTimestampStartQuery.Dispose();
+        ThermalTimestampDisjointQuery.Dispose();
+        ProbeTimestampEndQuery.Dispose();
+        ProbeTimestampStartQuery.Dispose();
+        ProbeTimestampDisjointQuery.Dispose();
+        TemperatureProbeStaging.Dispose();
+        TemperatureProbeResult.Dispose();
+        TemperatureProbeConstants.Dispose();
+        ThermalConstants.Dispose();
         Materials.Dispose();
         Commands.Dispose();
         Statistics.Dispose();

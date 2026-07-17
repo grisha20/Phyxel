@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Core;
@@ -177,7 +178,8 @@ public sealed class SandboxUiCoordinator
         SimulationSettings settings,
         SimulationStatistics statistics,
         double framesPerSecond,
-        string transientStatus)
+        string transientStatus,
+        TemperatureProbeResult? temperatureProbe)
     {
         panelRenderer.Draw(spriteBatch, SidePanelBounds, 12);
         panelRenderer.Draw(spriteBatch, InfoPanelBounds, 8);
@@ -203,7 +205,8 @@ public sealed class SandboxUiCoordinator
         string selectedName = materialRegistry[SelectedMaterial].Name;
         string gravityState = settings.SolidGravity ? "вкл" : "выкл";
         string hydraulicsState = settings.HydraulicPressure ? "вкл" : "выкл";
-        string info = $"FPS {framesPerSecond,5:0}   Частицы {statistics.ActiveCells:N0}   Твердые {statistics.SolidCells:N0}   Материал: {selectedName}   Кисть: {settings.BrushRadius} px   Гравитация: {gravityState}   Сосуды: {hydraulicsState}";
+        string probeInfo = FormatTemperatureProbe(materialRegistry, temperatureProbe);
+        string info = $"FPS {framesPerSecond,5:0}   Частицы {statistics.ActiveCells:N0}   Твердые {statistics.SolidCells:N0}   Выбрано: {selectedName}   {probeInfo}   Кисть: {settings.BrushRadius} px   Гравитация: {gravityState}   Сосуды: {hydraulicsState}";
         spriteBatch.DrawString(font, info, new Vector2(InfoPanelBounds.X + 12, InfoPanelBounds.Y + 9), Color.White);
         if (!string.IsNullOrWhiteSpace(transientStatus))
         {
@@ -214,6 +217,31 @@ public sealed class SandboxUiCoordinator
                 new Vector2(InfoPanelBounds.Right - statusSize.X - 12, InfoPanelBounds.Y + 9),
                 new Color(128, 198, 238));
         }
+    }
+
+    public static string FormatTemperatureProbe(
+        MaterialRegistry materialRegistry,
+        TemperatureProbeResult? probe)
+    {
+        if (probe is null)
+        {
+            return "Температура: —";
+        }
+        TemperatureProbeResult value = probe.Value;
+        if (value.IsActive == 0)
+        {
+            return $"Материал: {materialRegistry[CoreMaterialIds.Empty].Name}   Температура: —";
+        }
+        if (value.MaterialIndex > ushort.MaxValue ||
+            !materialRegistry.TryGet((ushort)value.MaterialIndex, out MaterialDefinition material) ||
+            !float.IsFinite(value.Temperature))
+        {
+            return "Материал: Неизвестно   Температура: —";
+        }
+        string temperature = value.Temperature.ToString(
+            "0.0",
+            CultureInfo.GetCultureInfo("ru-RU"));
+        return $"Материал: {material.Name}   Температура: {temperature} °C";
     }
 
     public void DrawBrushIndicator(

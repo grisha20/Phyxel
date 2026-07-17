@@ -68,6 +68,33 @@ public struct SimulationFrameConstants
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ThermalSimulationConstants
+{
+    public float DeltaTime;
+    public float ExchangeRate;
+    public uint Width;
+    public uint Height;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct TemperatureProbeConstants
+{
+    public uint X;
+    public uint Y;
+    public uint Width;
+    public uint Height;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct TemperatureProbeResult
+{
+    public uint IsActive;
+    public uint MaterialIndex;
+    public float Temperature;
+    public uint Reserved;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct SimulationStatistics
 {
     public uint ActiveCells;

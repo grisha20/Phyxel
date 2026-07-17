@@ -131,6 +131,45 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             OptionFlags = ResourceOptionFlags.None,
             StructureByteStride = 0
         });
+        Buffer thermalConstants = CreateConstantBuffer<ThermalSimulationConstants>();
+        Buffer temperatureProbeConstants = CreateConstantBuffer<TemperatureProbeConstants>();
+        GpuStructuredBuffer<TemperatureProbeResult> temperatureProbeResult = new(Device, 1);
+        Buffer temperatureProbeStaging = CreateReadStagingBuffer(Marshal.SizeOf<TemperatureProbeResult>());
+        Query temperatureProbeQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Event,
+            Flags = QueryFlags.None
+        });
+        Query thermalTimestampDisjointQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.TimestampDisjoint,
+            Flags = QueryFlags.None
+        });
+        Query thermalTimestampStartQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Timestamp,
+            Flags = QueryFlags.None
+        });
+        Query thermalTimestampEndQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Timestamp,
+            Flags = QueryFlags.None
+        });
+        Query probeTimestampDisjointQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.TimestampDisjoint,
+            Flags = QueryFlags.None
+        });
+        Query probeTimestampStartQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Timestamp,
+            Flags = QueryFlags.None
+        });
+        Query probeTimestampEndQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Timestamp,
+            Flags = QueryFlags.None
+        });
         Buffer statisticsStaging = new(Device, new BufferDescription
         {
             SizeInBytes = Marshal.SizeOf<SimulationStatistics>(),
@@ -191,6 +230,17 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Commands = commands,
             Materials = materials,
             FrameConstants = constants,
+            ThermalConstants = thermalConstants,
+            TemperatureProbeConstants = temperatureProbeConstants,
+            TemperatureProbeResult = temperatureProbeResult,
+            TemperatureProbeStaging = temperatureProbeStaging,
+            TemperatureProbeQuery = temperatureProbeQuery,
+            ThermalTimestampDisjointQuery = thermalTimestampDisjointQuery,
+            ThermalTimestampStartQuery = thermalTimestampStartQuery,
+            ThermalTimestampEndQuery = thermalTimestampEndQuery,
+            ProbeTimestampDisjointQuery = probeTimestampDisjointQuery,
+            ProbeTimestampStartQuery = probeTimestampStartQuery,
+            ProbeTimestampEndQuery = probeTimestampEndQuery,
             StatisticsStaging = statisticsStaging,
             StatisticsQuery = statisticsQuery,
             GridStaging = gridStaging,
@@ -209,8 +259,28 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SolidDisplacementPlanShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "PlanHullWaterDisplacement") : null,
             SolidMoveShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "MoveSolidBodies") : null,
             SolidDisplacementApplyShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "ApplyHullWaterDisplacement") : null,
-            CompositionShader = allocateSimulation ? CompileShader("RenderComposition.hlsl") : null
+            CompositionShader = allocateSimulation ? CompileShader("RenderComposition.hlsl") : null,
+            ThermalDiffusionShader = allocateSimulation ? CompileShader("ThermalDiffusion.hlsl") : null,
+            TemperatureProbeShader = allocateSimulation ? CompileShader("TemperatureProbe.hlsl") : null
         };
+    }
+
+    private Buffer CreateConstantBuffer<T>() where T : struct
+    {
+        int size = Marshal.SizeOf<T>();
+        if (size % 16 != 0)
+        {
+            throw new InvalidOperationException($"Constant buffer {typeof(T).Name} size {size} is not a multiple of 16.");
+        }
+        return new Buffer(Device, new BufferDescription
+        {
+            SizeInBytes = size,
+            Usage = ResourceUsage.Default,
+            BindFlags = BindFlags.ConstantBuffer,
+            CpuAccessFlags = CpuAccessFlags.None,
+            OptionFlags = ResourceOptionFlags.None,
+            StructureByteStride = 0
+        });
     }
 
     private ComputeShader CompileShader(string fileName, string entryPoint = "CSMain")
@@ -296,6 +366,19 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Usage = ResourceUsage.Staging,
             BindFlags = BindFlags.None,
             CpuAccessFlags = CpuAccessFlags.Read | CpuAccessFlags.Write,
+            OptionFlags = ResourceOptionFlags.None,
+            StructureByteStride = 0
+        });
+    }
+
+    private Buffer CreateReadStagingBuffer(int sizeInBytes)
+    {
+        return new Buffer(Device, new BufferDescription
+        {
+            SizeInBytes = sizeInBytes,
+            Usage = ResourceUsage.Staging,
+            BindFlags = BindFlags.None,
+            CpuAccessFlags = CpuAccessFlags.Read,
             OptionFlags = ResourceOptionFlags.None,
             StructureByteStride = 0
         });

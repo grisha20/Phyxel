@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "acceptance:thermal_gas",
+  "name": "Thermal Gas",
+  "kind": "gas",
+  "color": "#C080E0",
+  "physics": { "density": 0.1, "friction": 0.0, "flowRate": 0.9 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.4, "heatCapacity": 1.2 },
+  "ui": { "order": 1107, "hidden": true }
+}
