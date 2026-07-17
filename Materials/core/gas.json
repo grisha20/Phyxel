@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "core:gas",
+  "name": { "ru": "Газ", "en": "Gas" },
+  "kind": "gas",
+  "color": "#9BC4D29B",
+  "physics": { "density": 0.08, "friction": 0.005, "flowRate": 1.2 },
+  "ui": { "order": 60, "hidden": false }
+}

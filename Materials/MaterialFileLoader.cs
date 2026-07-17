@@ -47,10 +47,69 @@ internal static partial class MaterialFileLoader
         ReadCommentHandling = JsonCommentHandling.Skip
     };
 
-    public static IReadOnlyList<MaterialDefinition> Load(
+    public static IReadOnlyList<MaterialDefinition> LoadCore(
+        string directory,
+        int maximumCount)
+    {
+        if (!Directory.Exists(directory))
+        {
+            throw new InvalidDataException($"Core material directory '{directory}' does not exist.");
+        }
+
+        string[] files;
+        try
+        {
+            files = Directory.EnumerateFiles(directory, "*.json", SearchOption.AllDirectories)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidDataException($"Could not enumerate core material files in '{directory}'.", exception);
+        }
+
+        if (files.Length == 0)
+        {
+            throw new InvalidDataException($"Core material directory '{directory}' contains no JSON files.");
+        }
+        if (files.Length > maximumCount)
+        {
+            throw new InvalidDataException($"Core material count exceeds the limit of {maximumCount}.");
+        }
+
+        List<MaterialDefinition> loaded = [];
+        HashSet<string> ids = new(StringComparer.Ordinal);
+        foreach (string path in files)
+        {
+            try
+            {
+                MaterialDefinition definition = Parse(path);
+                if (!definition.Id.StartsWith("core:", StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException($"Bundled material ID '{definition.Id}' must use the core namespace.");
+                }
+                if (!ids.Add(definition.Id))
+                {
+                    throw new InvalidDataException($"Duplicate bundled material ID '{definition.Id}'.");
+                }
+
+                loaded.Add(definition);
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or FormatException)
+            {
+                throw new InvalidDataException($"Invalid core material file '{path}': {exception.Message}", exception);
+            }
+        }
+
+        return loaded;
+    }
+
+    public static IReadOnlyList<MaterialDefinition> LoadExternal(
         string directory,
         IReadOnlySet<string> reservedIds,
-        int maximumCount)
+        int maximumCount,
+        string? excludedDirectory = null)
     {
         if (!Directory.Exists(directory) || maximumCount <= 0)
         {
@@ -63,6 +122,7 @@ internal static partial class MaterialFileLoader
         try
         {
             files = Directory.EnumerateFiles(directory, "*.json", SearchOption.AllDirectories)
+                .Where(path => !IsInsideDirectory(path, excludedDirectory))
                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
@@ -83,6 +143,11 @@ internal static partial class MaterialFileLoader
             try
             {
                 MaterialDefinition definition = Parse(path);
+                if (definition.Id.StartsWith("core:", StringComparison.Ordinal))
+                {
+                    LogError(path, $"External material cannot declare the reserved core ID '{definition.Id}'.");
+                    continue;
+                }
                 if (reservedIds.Contains(definition.Id))
                 {
                     LogError(path, $"Внешний материал не может заменить встроенный ID '{definition.Id}'.");
@@ -108,6 +173,18 @@ internal static partial class MaterialFileLoader
             .OrderBy(item => item.Definition.Id, StringComparer.Ordinal)
             .Select(item => item.Definition)
             .ToArray();
+    }
+
+    private static bool IsInsideDirectory(string path, string? directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return false;
+        }
+
+        string fullPath = Path.GetFullPath(path);
+        string fullDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        return fullPath.StartsWith(fullDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     private static MaterialDefinition Parse(string path)

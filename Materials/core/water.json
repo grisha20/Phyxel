@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "core:water",
+  "name": { "ru": "Вода", "en": "Water" },
+  "kind": "liquid",
+  "color": "#2B84CF",
+  "physics": { "density": 1.0, "friction": 0.025, "flowRate": 0.92 },
+  "ui": { "order": 20, "hidden": false }
+}

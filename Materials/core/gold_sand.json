@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "core:gold_sand",
+  "name": { "ru": "Золотой песок", "en": "Gold Sand" },
+  "kind": "granular",
+  "color": "#D4AF37",
+  "physics": { "density": 1.65, "friction": 0.75, "flowRate": 0.18 },
+  "ui": { "order": 15, "hidden": false }
+}

@@ -19,25 +19,32 @@ public sealed class MaterialRegistry
 
     public MaterialRegistry(string? externalDirectory = null)
     {
-        List<MaterialDefinition> definitions = CreateBuiltIns();
+        string coreDirectory = ResolveCoreDirectory();
+        List<MaterialDefinition> coreDefinitions = MaterialFileLoader
+            .LoadCore(coreDirectory, MaximumMaterials)
+            .ToList();
+        ValidateRequiredCoreMaterials(coreDefinitions);
 
-        HashSet<string> reservedIds = definitions
+        HashSet<string> reservedIds = coreDefinitions
             .Select(material => material.Id)
             .ToHashSet(StringComparer.Ordinal);
         string directory = externalDirectory ?? ResolveExternalDirectory();
-        definitions.AddRange(MaterialFileLoader.Load(
-            directory,
-            reservedIds,
-            MaximumMaterials - definitions.Count));
+        List<MaterialDefinition> definitions = coreDefinitions
+            .Concat(MaterialFileLoader.LoadExternal(
+                directory,
+                reservedIds,
+                MaximumMaterials - coreDefinitions.Count,
+                coreDirectory))
+            .OrderBy(material => material.Id == CoreMaterialIds.Empty ? 0 : 1)
+            .ThenBy(material => material.Id, StringComparer.Ordinal)
+            .ToList();
 
         for (int index = 0; index < definitions.Count; index++)
         {
             MaterialDefinition definition = definitions[index];
-            MaterialProperties properties = definition.Properties;
             definitions[index] = definition with
             {
-                RuntimeIndex = checked((ushort)index),
-                Properties = properties
+                RuntimeIndex = checked((ushort)index)
             };
         }
 
@@ -95,44 +102,35 @@ public sealed class MaterialRegistry
             : Path.GetFullPath(configured.Trim());
     }
 
-    public static string NormalizeId(string id) => id.Trim().ToLowerInvariant();
-
-    private static List<MaterialDefinition> CreateBuiltIns()
+    public static string ResolveCoreDirectory()
     {
-        return
-        [
-            Create(CoreMaterialIds.Empty, MaterialId.Empty, "Пустота", new Color(0, 0, 0, 0), MaterialSimulationKind.None, 0f, 0f, 0f, -1000, true),
-            Create(CoreMaterialIds.Sand, MaterialId.Sand, "Песок", new Color(218, 184, 92), MaterialSimulationKind.Granular, 1.5f, 0.75f, 0.18f, 10),
-            Create(CoreMaterialIds.Water, MaterialId.Water, "Вода", new Color(43, 132, 207), MaterialSimulationKind.Liquid, 1f, 0.025f, 0.92f, 20),
-            Create(CoreMaterialIds.Metal, MaterialId.Metal, "Металл", new Color(142, 156, 166), MaterialSimulationKind.Solid, 7.8f, 0.35f, 0f, 30, flags: MaterialFlags.MovableSolid),
-            Create(CoreMaterialIds.Concrete, MaterialId.Concrete, "Бетон", new Color(92, 96, 101), MaterialSimulationKind.Solid, 9.2f, 0.75f, 0f, 40, flags: MaterialFlags.MovableSolid),
-            Create(CoreMaterialIds.Eraser, MaterialId.Eraser, "Ластик", new Color(222, 88, 88), MaterialSimulationKind.Tool, 0f, 0f, 0f, 50),
-            Create(CoreMaterialIds.Gas, MaterialId.Gas, "Газ", new Color(155, 196, 210, 155), MaterialSimulationKind.Gas, 0.08f, 0.005f, 1.2f, 60),
-            Create(CoreMaterialIds.Fixture, MaterialId.Fixture, "Опора", new Color(82, 91, 99), MaterialSimulationKind.Solid, 100f, 0.9f, 0f, 70)
-        ];
+        string? configured = Environment.GetEnvironmentVariable("PHYXEL_CORE_MATERIALS_PATH");
+        return string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(AppContext.BaseDirectory, "Materials", "core")
+            : Path.GetFullPath(configured.Trim());
     }
 
-    private static MaterialDefinition Create(
-        string id,
-        MaterialId legacyId,
-        string name,
-        Color color,
-        MaterialSimulationKind kind,
-        float density,
-        float friction,
-        float flowRate,
-        int uiOrder,
-        bool hidden = false,
-        MaterialFlags flags = MaterialFlags.None)
+    public static string NormalizeId(string id) => id.Trim().ToLowerInvariant();
+
+    private static void ValidateRequiredCoreMaterials(IReadOnlyCollection<MaterialDefinition> definitions)
     {
-        return new MaterialDefinition(
-            id,
-            checked((ushort)legacyId),
-            name,
-            color,
-            CreateProperties(kind, flags, density, friction, flowRate, color),
-            uiOrder,
-            hidden);
+        HashSet<string> ids = definitions
+            .Select(material => material.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        string[] missing = CoreMaterialIds.Required
+            .Where(id => !ids.Contains(id))
+            .ToArray();
+        if (missing.Length > 0)
+        {
+            throw new InvalidDataException(
+                $"Core material set is incomplete. Missing: {string.Join(", ", missing)}.");
+        }
+
+        MaterialDefinition empty = definitions.Single(material => material.Id == CoreMaterialIds.Empty);
+        if ((MaterialSimulationKind)empty.Properties.SimulationKind != MaterialSimulationKind.None || !empty.Hidden)
+        {
+            throw new InvalidDataException("core:empty must have kind 'none' and ui.hidden=true.");
+        }
     }
 
     internal static MaterialProperties CreateProperties(

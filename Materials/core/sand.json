@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "core:sand",
+  "name": { "ru": "Песок", "en": "Sand" },
+  "kind": "granular",
+  "color": "#DAB85C",
+  "physics": { "density": 1.5, "friction": 0.75, "flowRate": 0.18 },
+  "ui": { "order": 10, "hidden": false }
+}

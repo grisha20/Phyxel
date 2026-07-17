@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "core:concrete",
+  "name": { "ru": "Бетон", "en": "Concrete" },
+  "kind": "solid",
+  "flags": ["movable-solid"],
+  "color": "#5C6065",
+  "physics": { "density": 9.2, "friction": 0.75, "flowRate": 0.0 },
+  "ui": { "order": 40, "hidden": false }
+}

@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "core:metal",
+  "name": { "ru": "Металл", "en": "Metal" },
+  "kind": "solid",
+  "flags": ["movable-solid"],
+  "color": "#8E9CA6",
+  "physics": { "density": 7.8, "friction": 0.35, "flowRate": 0.0 },
+  "ui": { "order": 30, "hidden": false }
+}

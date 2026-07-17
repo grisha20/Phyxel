@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "core:fixture",
+  "name": { "ru": "Опора", "en": "Fixture" },
+  "kind": "solid",
+  "color": "#525B63",
+  "physics": { "density": 100.0, "friction": 0.9, "flowRate": 0.0 },
+  "ui": { "order": 70, "hidden": false }
+}

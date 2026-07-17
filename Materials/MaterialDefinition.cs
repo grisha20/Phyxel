@@ -1,20 +1,9 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Phyxel.Physics;
 
 namespace Phyxel.Materials;
-
-public enum MaterialId : uint
-{
-    Empty = 0,
-    Sand = 1,
-    Water = 2,
-    Metal = 3,
-    Concrete = 4,
-    Eraser = 5,
-    Gas = 6,
-    Fixture = 7
-}
 
 public enum MaterialSimulationKind : uint
 {
@@ -45,6 +34,18 @@ public static class CoreMaterialIds
     public const string Fixture = "core:fixture";
     public const string GoldSand = "core:gold_sand";
 
+    public static IReadOnlyList<string> Required { get; } =
+    [
+        Empty,
+        Sand,
+        Water,
+        Metal,
+        Concrete,
+        Eraser,
+        Gas,
+        Fixture,
+        GoldSand
+    ];
 }
 
 public sealed record MaterialDefinition(
