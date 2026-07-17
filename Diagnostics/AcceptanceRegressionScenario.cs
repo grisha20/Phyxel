@@ -24,11 +24,14 @@ public enum AcceptanceScenarioMode
     SavedGravity,
     Buoyancy,
     SavedSandWater,
-    GoldSand,
     ExternalGranular,
     ExternalLiquid,
     ExternalGas,
-    ExternalSolids
+    ExternalSolids,
+    UnderwaterGranularPile,
+    GranularWaterDisplacement,
+    GranularBarrier,
+    GranularBarrierHydraulic
 }
 
 public static class AcceptanceRegressionScenario
@@ -63,11 +66,14 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.SavedGravity => [],
             AcceptanceScenarioMode.Buoyancy => CreateBuoyancy(frame),
             AcceptanceScenarioMode.SavedSandWater => [],
-            AcceptanceScenarioMode.GoldSand => CreateGoldSand(frame),
             AcceptanceScenarioMode.ExternalGranular => CreateExternalGranular(frame),
             AcceptanceScenarioMode.ExternalLiquid => CreateExternalLiquid(frame),
             AcceptanceScenarioMode.ExternalGas => CreateExternalGas(frame),
             AcceptanceScenarioMode.ExternalSolids => CreateExternalSolids(frame),
+            AcceptanceScenarioMode.UnderwaterGranularPile => CreateUnderwaterGranular(frame),
+            AcceptanceScenarioMode.GranularWaterDisplacement => CreateUnderwaterGranular(frame),
+            AcceptanceScenarioMode.GranularBarrier => CreateGranularBarrier(frame),
+            AcceptanceScenarioMode.GranularBarrierHydraulic => CreateGranularBarrier(frame),
             _ => []
         };
     }
@@ -278,7 +284,7 @@ public static class AcceptanceRegressionScenario
             return [];
         }
         BrushDrawCommand granular = Create(
-            240, 75, 25, materials.Resolve("acceptance:granular"), 0, 0);
+            240, 75, 25, materials.Resolve("test:granular"), 0, 0);
         granular.Density = 0.51f;
         granular.Seed = 12001;
         return [granular];
@@ -343,22 +349,44 @@ public static class AcceptanceRegressionScenario
             : [];
     }
 
-    private static IReadOnlyList<BrushDrawCommand> CreateGoldSand(uint frame)
+    private static IReadOnlyList<BrushDrawCommand> CreateUnderwaterGranular(uint frame)
     {
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 80, 245, 400, 245, 7, 4, materials.Fixture, 11001);
+            AddLine(commands, 30, 70, 30, 250, 7, 4, materials.Fixture, 14001);
+            AddLine(commands, 450, 70, 450, 250, 7, 4, materials.Fixture, 14001);
+            AddLine(commands, 30, 250, 450, 250, 7, 4, materials.Fixture, 14001);
             return commands;
         }
-        if (frame != 1)
+        if (frame == 1)
+        {
+            return AddFill(50, 125, 430, 230, 15, 11, materials.Water, 0);
+        }
+        if (frame != 2)
         {
             return [];
         }
-        BrushDrawCommand goldSand = Create(240, 75, 25, materials.GoldSand, 0, 0);
-        goldSand.Density = 0.51f;
-        goldSand.Seed = 11002;
-        return [goldSand];
+        return [Create(240, 80, 20, materials.Resolve("test:granular"), 0, 0)];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateGranularBarrier(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 30, 70, 30, 250, 7, 4, materials.Fixture, 14101);
+            AddLine(commands, 450, 70, 450, 250, 7, 4, materials.Fixture, 14101);
+            AddLine(commands, 30, 250, 450, 250, 7, 4, materials.Fixture, 14101);
+            return commands;
+        }
+        if (frame == 1)
+        {
+            return AddFill(210, 90, 270, 240, 7, 5, materials.Resolve("test:granular"), 0);
+        }
+        return frame == 2
+            ? AddFill(50, 175, 175, 238, 7, 5, materials.Water, 0)
+            : [];
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateFlatSurface(uint frame)

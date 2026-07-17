@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "acceptance:granular",
+  "id": "test:granular",
   "name": "Acceptance Granular",
   "kind": "granular",
   "color": "#C98B3C",

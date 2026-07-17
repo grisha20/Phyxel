@@ -32,8 +32,6 @@ public static class CoreMaterialIds
     public const string Eraser = "core:eraser";
     public const string Gas = "core:gas";
     public const string Fixture = "core:fixture";
-    public const string GoldSand = "core:gold_sand";
-
     public static IReadOnlyList<string> Required { get; } =
     [
         Empty,
@@ -43,8 +41,7 @@ public static class CoreMaterialIds
         Concrete,
         Eraser,
         Gas,
-        Fixture,
-        GoldSand
+        Fixture
     ];
 }
 

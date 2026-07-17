@@ -48,7 +48,7 @@ public static class MaterialRegressionVerifier
         bool image = File.Exists(Path.Combine(artifactDirectory, imageName));
         bool passed = granular >= 700 && settled >= granular * 0.85 &&
             resting == granular && moving == 0 && maximumX - minimumX >= 35 && image;
-        report = $"PHYXEL_GOLD_SAND cells={granular} settled={settled} resting={resting} moving={moving} bounds={minimumX},{minimumY}-{maximumX},{maximumY}";
+        report = $"PHYXEL_GRANULAR_PILE cells={granular} settled={settled} resting={resting} moving={moving} bounds={minimumX},{minimumY}-{maximumX},{maximumY}";
         return passed;
     }
 

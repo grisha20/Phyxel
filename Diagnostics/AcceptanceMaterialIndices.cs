@@ -25,7 +25,5 @@ internal sealed class AcceptanceMaterialIndices
     public uint Eraser { get; }
     public uint Gas { get; }
     public uint Fixture { get; }
-    public uint GoldSand => Resolve(CoreMaterialIds.GoldSand);
-
     public uint Resolve(string id) => registry.GetRequiredRuntimeIndex(id);
 }

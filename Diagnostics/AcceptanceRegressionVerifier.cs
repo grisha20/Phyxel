@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using Phyxel.Materials;
 using Phyxel.Physics;
@@ -90,17 +91,10 @@ public static class AcceptanceRegressionVerifier
                 out report),
             AcceptanceScenarioMode.Buoyancy => ValidateBuoyancy(snapshot, framesPerSecond, out report),
             AcceptanceScenarioMode.SavedSandWater => ValidateSavedSandWater(snapshot, out report),
-            AcceptanceScenarioMode.GoldSand =>
-                MaterialRegressionVerifier.ValidateGranularPile(
-                    snapshot,
-                    materials.GoldSand,
-                    artifactDirectory,
-                    "P_gold_sand.png",
-                    out report),
             AcceptanceScenarioMode.ExternalGranular =>
                 MaterialRegressionVerifier.ValidateGranularPile(
                     snapshot,
-                    materials.Resolve("acceptance:granular"),
+                    materials.Resolve("test:granular"),
                     artifactDirectory,
                     "Q_external_granular.png",
                     out report),
@@ -123,8 +117,278 @@ public static class AcceptanceRegressionVerifier
                 materials.Resolve("acceptance:fixture"),
                 artifactDirectory,
                 out report),
+            AcceptanceScenarioMode.UnderwaterGranularPile => ValidateUnderwaterGranularPile(
+                snapshot,
+                materials.Resolve("test:granular"),
+                artifactDirectory,
+                out report),
+            AcceptanceScenarioMode.GranularWaterDisplacement => ValidateGranularWaterDisplacement(
+                snapshot,
+                materials.Resolve("test:granular"),
+                artifactDirectory,
+                out report),
+            AcceptanceScenarioMode.GranularBarrier => ValidateGranularBarrier(
+                snapshot,
+                materials.Resolve("test:granular"),
+                statistics,
+                false,
+                artifactDirectory,
+                out report),
+            AcceptanceScenarioMode.GranularBarrierHydraulic => ValidateGranularBarrier(
+                snapshot,
+                materials.Resolve("test:granular"),
+                statistics,
+                true,
+                artifactDirectory,
+                out report),
             _ => Fail(out report)
         };
+    }
+
+    private static bool ValidateUnderwaterGranularPile(
+        SimulationWorldSnapshot snapshot,
+        uint granularIndex,
+        string artifactDirectory,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int granular = 0;
+        int liquid = 0;
+        int settled = 0;
+        int minimumX = snapshot.Width;
+        int maximumX = -1;
+        int minimumY = snapshot.Height;
+        int maximumY = -1;
+        double granularMass = 0;
+        double liquidMass = 0;
+        for (int y = 0; y < snapshot.Height; y++)
+        {
+            for (int x = 0; x < snapshot.Width; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive == 0)
+                {
+                    continue;
+                }
+                if (cell.MaterialIndex == granularIndex)
+                {
+                    granular++;
+                    granularMass += cell.Mass;
+                    settled += cell.RestFrames >= 30 ? 1 : 0;
+                    minimumX = Math.Min(minimumX, x);
+                    maximumX = Math.Max(maximumX, x);
+                    minimumY = Math.Min(minimumY, y);
+                    maximumY = Math.Max(maximumY, y);
+                }
+                else if (cell.MaterialIndex == materials.Water)
+                {
+                    liquid++;
+                    liquidMass += cell.Mass;
+                }
+            }
+        }
+
+        int expectedGranular = ExpectedCircleCells(snapshot.Width, snapshot.Height, 240, 80, 20);
+        int expectedLiquid = ExpectedFillCells(snapshot.Width, snapshot.Height, 50, 125, 430, 230, 15, 11);
+        int width = maximumX >= minimumX ? maximumX - minimumX + 1 : 0;
+        int height = maximumY >= minimumY ? maximumY - minimumY + 1 : 0;
+        bool conserved = granular == expectedGranular && liquid == expectedLiquid &&
+            Math.Abs(granularMass - expectedGranular) < 0.1 &&
+            Math.Abs(liquidMass - expectedLiquid) < 0.1;
+        bool image = File.Exists(Path.Combine(artifactDirectory, "U_underwater_granular.png"));
+        bool passed = conserved && width >= 55 && height <= 45 && maximumY >= 240 &&
+            settled >= granular * 0.98 && image;
+        report =
+            $"PHYXEL_UNDERWATER_GRANULAR granular={granular}/{expectedGranular} granularMass={granularMass:0.0} " +
+            $"liquid={liquid}/{expectedLiquid} liquidMass={liquidMass:0.0} bounds={minimumX},{minimumY}-{maximumX},{maximumY} " +
+            $"width={width} height={height} settled={settled}";
+        return passed;
+    }
+
+    private static bool ValidateGranularWaterDisplacement(
+        SimulationWorldSnapshot snapshot,
+        uint granularIndex,
+        string artifactDirectory,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int granular = 0;
+        int liquid = 0;
+        int minimumLiquidY = snapshot.Height;
+        int shoulderLiquidTop = snapshot.Height;
+        int outsideLiquidTop = snapshot.Height;
+        int highTrail = 0;
+        int upwardFast = 0;
+        double granularMass = 0;
+        double liquidMass = 0;
+        for (int y = 0; y < snapshot.Height; y++)
+        {
+            for (int x = 0; x < snapshot.Width; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive == 0)
+                {
+                    continue;
+                }
+                if (cell.MaterialIndex == granularIndex)
+                {
+                    granular++;
+                    granularMass += cell.Mass;
+                }
+                else if (cell.MaterialIndex == materials.Water)
+                {
+                    liquid++;
+                    liquidMass += cell.Mass;
+                    minimumLiquidY = Math.Min(minimumLiquidY, y);
+                    if (x is >= 190 and <= 290)
+                    {
+                        shoulderLiquidTop = Math.Min(shoulderLiquidTop, y);
+                    }
+                    else if (x < 170 || x > 310)
+                    {
+                        outsideLiquidTop = Math.Min(outsideLiquidTop, y);
+                    }
+                    highTrail += x is >= 225 and <= 255 && y < 90 ? 1 : 0;
+                    upwardFast += cell.VelocityY < -8 ? 1 : 0;
+                }
+            }
+        }
+
+        int expectedGranular = ExpectedCircleCells(snapshot.Width, snapshot.Height, 240, 80, 20);
+        int expectedLiquid = ExpectedFillCells(snapshot.Width, snapshot.Height, 50, 125, 430, 230, 15, 11);
+        bool conserved = granular == expectedGranular && liquid == expectedLiquid &&
+            Math.Abs(granularMass - expectedGranular) < 0.1 &&
+            Math.Abs(liquidMass - expectedLiquid) < 0.1;
+        bool image = File.Exists(Path.Combine(artifactDirectory, "V_granular_displacement.png"));
+        int surfaceRise = outsideLiquidTop - shoulderLiquidTop;
+        bool passed = conserved && minimumLiquidY >= 90 && surfaceRise is >= 5 and <= 35 &&
+            highTrail == 0 && upwardFast == 0 && image;
+        report =
+            $"PHYXEL_GRANULAR_DISPLACEMENT granular={granular}/{expectedGranular} granularMass={granularMass:0.0} " +
+            $"liquid={liquid}/{expectedLiquid} liquidMass={liquidMass:0.0} liquidTop={minimumLiquidY} " +
+            $"shoulderTop={shoulderLiquidTop} outsideTop={outsideLiquidTop} rise={surfaceRise} " +
+            $"highTrail={highTrail} upwardFast={upwardFast}";
+        return passed;
+    }
+
+    private static bool ValidateGranularBarrier(
+        SimulationWorldSnapshot snapshot,
+        uint granularIndex,
+        SimulationStatistics statistics,
+        bool hydraulics,
+        string artifactDirectory,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int granular = 0;
+        int liquid = 0;
+        int settledGranular = 0;
+        int rightLiquid = 0;
+        int minimumGranularY = snapshot.Height;
+        int minimumLiquidY = snapshot.Height;
+        double granularMass = 0;
+        double liquidMass = 0;
+        for (int y = 0; y < snapshot.Height; y++)
+        {
+            for (int x = 0; x < snapshot.Width; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive == 0)
+                {
+                    continue;
+                }
+                if (cell.MaterialIndex == granularIndex)
+                {
+                    granular++;
+                    granularMass += cell.Mass;
+                    settledGranular += cell.RestFrames >= 30 ? 1 : 0;
+                    minimumGranularY = Math.Min(minimumGranularY, y);
+                }
+                else if (cell.MaterialIndex == materials.Water)
+                {
+                    liquid++;
+                    liquidMass += cell.Mass;
+                    minimumLiquidY = Math.Min(minimumLiquidY, y);
+                    rightLiquid += x >= 280 ? 1 : 0;
+                }
+            }
+        }
+
+        int expectedGranular = ExpectedFillCells(snapshot.Width, snapshot.Height, 210, 90, 270, 240, 7, 5);
+        int expectedLiquid = ExpectedFillCells(snapshot.Width, snapshot.Height, 50, 175, 175, 238, 7, 5);
+        bool conserved = granular == expectedGranular && liquid == expectedLiquid &&
+            Math.Abs(granularMass - expectedGranular) < 0.1 &&
+            Math.Abs(liquidMass - expectedLiquid) < 0.1;
+        string imageName = hydraulics ? "X_granular_barrier_on.png" : "W_granular_barrier_off.png";
+        bool image = File.Exists(Path.Combine(artifactDirectory, imageName));
+        bool passed = conserved && rightLiquid == 0 && minimumLiquidY >= 155 &&
+            minimumGranularY < minimumLiquidY && settledGranular >= granular * 0.98 &&
+            (!hydraulics || statistics.FarColumnMoves == 0) && image;
+        report =
+            $"PHYXEL_GRANULAR_BARRIER hydraulics={(hydraulics ? 1 : 0)} granular={granular}/{expectedGranular} " +
+            $"granularMass={granularMass:0.0} liquid={liquid}/{expectedLiquid} liquidMass={liquidMass:0.0} " +
+            $"granularTop={minimumGranularY} liquidTop={minimumLiquidY} rightLiquid={rightLiquid} " +
+            $"settled={settledGranular} pressureMoves={statistics.PressureMoves} farColumnMoves={statistics.FarColumnMoves}";
+        return passed;
+    }
+
+    private static int ExpectedCircleCells(
+        int width,
+        int height,
+        int centerX,
+        int centerY,
+        int radius)
+    {
+        bool[] cells = new bool[width * height];
+        MarkExpectedBrush(cells, width, height, centerX, centerY, radius);
+        return cells.Count(value => value);
+    }
+
+    private static int ExpectedFillCells(
+        int width,
+        int height,
+        int left,
+        int top,
+        int right,
+        int bottom,
+        int spacing,
+        int radius)
+    {
+        bool[] cells = new bool[width * height];
+        for (int y = top; y <= bottom; y += spacing)
+        {
+            for (int x = left; x <= right; x += spacing)
+            {
+                MarkExpectedBrush(cells, width, height, x, y, radius);
+            }
+        }
+        return cells.Count(value => value);
+    }
+
+    private static void MarkExpectedBrush(
+        bool[] cells,
+        int width,
+        int height,
+        int centerX,
+        int centerY,
+        int radius)
+    {
+        for (int offsetY = -radius; offsetY <= radius; offsetY++)
+        {
+            for (int offsetX = -radius; offsetX <= radius; offsetX++)
+            {
+                if (offsetX * offsetX + offsetY * offsetY > radius * radius)
+                {
+                    continue;
+                }
+                int x = centerX + offsetX;
+                int y = centerY + offsetY;
+                if (x >= 0 && y >= 0 && x < width && y < height)
+                {
+                    cells[y * width + x] = true;
+                }
+            }
+        }
     }
 
     private static bool ValidateExternalLiquid(

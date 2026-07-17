@@ -54,6 +54,7 @@ public sealed class SimulationStateSerializer
 
     private const uint WorldFileMagic = 0x5058594C;
     private const int CurrentVersion = 4;
+    private const string RemovedGoldSandId = "core:gold_sand";
     private readonly JsonSerializerOptions options = new() { WriteIndented = true };
     private bool capturePending;
     private SimulationWorldSnapshot? emptySnapshot;
@@ -242,8 +243,11 @@ public sealed class SimulationStateSerializer
             throw new InvalidDataException("Индекс 0 палитры сцены v4 должен быть core:empty.");
         }
 
+        string selectedMaterialId = MigrateV4MaterialId(
+            MaterialRegistry.NormalizeId(state.SelectedMaterialId),
+            warnings);
         ushort selectedMaterial;
-        if (!materialRegistry.TryGet(state.SelectedMaterialId, out MaterialDefinition selectedDefinition) ||
+        if (!materialRegistry.TryGet(selectedMaterialId, out MaterialDefinition selectedDefinition) ||
             selectedDefinition.Hidden)
         {
             selectedMaterial = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
@@ -341,11 +345,12 @@ public sealed class SimulationStateSerializer
         HashSet<string> ids = new(StringComparer.Ordinal);
         for (int sceneIndex = 0; sceneIndex < scenePalette.Count; sceneIndex++)
         {
-            string id = MaterialRegistry.NormalizeId(scenePalette[sceneIndex]);
-            if (!ids.Add(id))
+            string storedId = MaterialRegistry.NormalizeId(scenePalette[sceneIndex]);
+            if (!ids.Add(storedId))
             {
-                throw new InvalidDataException($"Палитра сцены содержит дублирующий ID '{id}'.");
+                throw new InvalidDataException($"Палитра сцены содержит дублирующий ID '{storedId}'.");
             }
+            string id = MigrateV4MaterialId(storedId, warnings);
             if (materialRegistry.TryGet(id, out MaterialDefinition definition))
             {
                 sceneToRuntime[sceneIndex] = definition.RuntimeIndex;
@@ -374,6 +379,22 @@ public sealed class SimulationStateSerializer
             }
             cells[index].MaterialIndex = sceneToRuntime[sceneIndex];
         }
+    }
+
+    private static string MigrateV4MaterialId(string id, List<string> warnings)
+    {
+        if (id != RemovedGoldSandId)
+        {
+            return id;
+        }
+
+        const string warning =
+            "Материал 'core:gold_sand' удалён и мигрирован в 'core:sand'.";
+        if (!warnings.Contains(warning))
+        {
+            AddWarning(warnings, warning);
+        }
+        return CoreMaterialIds.Sand;
     }
 
     private static void AddWarning(List<string> warnings, string message)

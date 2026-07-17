@@ -35,11 +35,14 @@ public sealed class AcceptanceRegressionHarness
             "saved_gravity" => AcceptanceScenarioMode.SavedGravity,
             "buoyancy" or "float" => AcceptanceScenarioMode.Buoyancy,
             "saved_sand_water" or "sand_basin" => AcceptanceScenarioMode.SavedSandWater,
-            "gold_sand" or "core:gold_sand" => AcceptanceScenarioMode.GoldSand,
             "external_granular" => AcceptanceScenarioMode.ExternalGranular,
             "external_liquid" => AcceptanceScenarioMode.ExternalLiquid,
             "external_gas" => AcceptanceScenarioMode.ExternalGas,
             "external_solids" => AcceptanceScenarioMode.ExternalSolids,
+            "underwater_granular" or "underwater_pile" => AcceptanceScenarioMode.UnderwaterGranularPile,
+            "granular_displacement" or "soft_displacement" => AcceptanceScenarioMode.GranularWaterDisplacement,
+            "granular_barrier" or "granular_barrier_off" => AcceptanceScenarioMode.GranularBarrier,
+            "granular_barrier_hydraulic" or "granular_barrier_on" => AcceptanceScenarioMode.GranularBarrierHydraulic,
             _ => AcceptanceScenarioMode.None
         };
     }
@@ -83,11 +86,14 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.SavedGravity => 400,
                 AcceptanceScenarioMode.Buoyancy => 500,
                 AcceptanceScenarioMode.SavedSandWater => 900,
-                AcceptanceScenarioMode.GoldSand => 190,
                 AcceptanceScenarioMode.ExternalGranular => 190,
                 AcceptanceScenarioMode.ExternalLiquid => 600,
                 AcceptanceScenarioMode.ExternalGas => 900,
                 AcceptanceScenarioMode.ExternalSolids => 300,
+                AcceptanceScenarioMode.UnderwaterGranularPile => 720,
+                AcceptanceScenarioMode.GranularWaterDisplacement => 13,
+                AcceptanceScenarioMode.GranularBarrier => 900,
+                AcceptanceScenarioMode.GranularBarrierHydraulic => 900,
                 _ => uint.MaxValue
             };
         }
@@ -111,7 +117,8 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.CommunicatingVessels or
             AcceptanceScenarioMode.PressureTube or
             AcceptanceScenarioMode.SavedPressure or
-            AcceptanceScenarioMode.SavedIsolation;
+            AcceptanceScenarioMode.SavedIsolation or
+            AcceptanceScenarioMode.GranularBarrierHydraulic;
         settings.HydraulicPressure = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_HYDRAULICS") switch
         {
             "0" => false,
@@ -173,12 +180,15 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.SavedGravity when frame == 399 => "L_saved_gravity",
             AcceptanceScenarioMode.Buoyancy when frame == 499 => "M_buoyancy",
             AcceptanceScenarioMode.SavedSandWater when frame == 899 => "N_saved_sand_water",
-            AcceptanceScenarioMode.GoldSand when frame == 189 => "P_gold_sand",
             AcceptanceScenarioMode.ExternalGranular when frame == 189 => "Q_external_granular",
             AcceptanceScenarioMode.ExternalLiquid when frame == 599 => "R_external_liquid",
             AcceptanceScenarioMode.ExternalGas when frame == 30 => "S_external_gas_rise",
             AcceptanceScenarioMode.ExternalGas when frame == 899 => "S_external_gas_spread",
             AcceptanceScenarioMode.ExternalSolids when frame == 299 => "T_external_solids",
+            AcceptanceScenarioMode.UnderwaterGranularPile when frame == 719 => "U_underwater_granular",
+            AcceptanceScenarioMode.GranularWaterDisplacement when frame == 12 => "V_granular_displacement",
+            AcceptanceScenarioMode.GranularBarrier when frame == 899 => "W_granular_barrier_off",
+            AcceptanceScenarioMode.GranularBarrierHydraulic when frame == 899 => "X_granular_barrier_on",
             _ => null
         };
         if (label is null)

@@ -163,23 +163,32 @@ void SwapCells(uint firstIndex, uint secondIndex, float horizontal, float vertic
     CellMaterials[secondIndex] = firstMaterial;
 }
 
-bool SandCanDisplaceWater(uint2 sandCoordinate, uint sandIndex)
+void ExchangeGranularWithLiquid(
+    uint granularIndex,
+    uint liquidIndex,
+    float horizontal,
+    float vertical)
 {
-    // Settled banks must not pump water upward through the granular mass.
-    // Falling or unsupported sand sinks through water; the displaced water
-    // swaps into the sand's previous cell above it, conserving both materials.
-    GridCell sand = Grid[sandIndex];
-    if (sand.RestFrames >= SandRestThreshold)
+    GridCell granular = Grid[granularIndex];
+    GridCell liquid = Grid[liquidIndex];
+
+    granular.RestFrames = 0;
+    granular.VelocityX = horizontal;
+    granular.VelocityY = vertical;
+
+    liquid.RestFrames = 0;
+    liquid.VelocityX = 0;
+    liquid.VelocityY = 0;
+    liquid.BodyId = 0;
+    if (HydraulicPressure == 0)
     {
-        return false;
+        liquid.Pressure = 0;
     }
-    bool supported = sandCoordinate.y + 1 >= Height;
-    if (!supported)
-    {
-        uint belowKind = CellKindAt(sandCoordinate + uint2(0, 1));
-        supported = belowKind == 1 || belowKind == 2;
-    }
-    return sand.VelocityY > 8 || !supported;
+
+    Grid[granularIndex] = liquid;
+    Grid[liquidIndex] = granular;
+    CellMaterials[granularIndex] = liquid.MaterialIndex;
+    CellMaterials[liquidIndex] = granular.MaterialIndex;
 }
 
 void RelaxGasPair(
@@ -233,6 +242,57 @@ bool SandSupported(uint2 coordinate)
     uint kind = CellKindAt(coordinate + uint2(0, 1));
     return kind == 1 || kind == 2;
 }
+
+bool GranularCanDisplaceLiquid(uint2 coordinate, uint granularIndex, uint liquidMaterial)
+{
+    GridCell granular = Grid[granularIndex];
+    if (CellKindFromMaterial(liquidMaterial) != SimulationKindLiquid ||
+        CellRankFromMaterial(granular.MaterialIndex) <= CellRankFromMaterial(liquidMaterial) ||
+        granular.RestFrames >= SandRestThreshold)
+    {
+        return false;
+    }
+
+    // An unsupported grain has just entered a liquid column even if the brush
+    // created it with zero velocity. Once it reaches granular/solid support it
+    // may keep forming a slope only while it still carries a falling impulse.
+    bool supported = SandSupported(coordinate);
+    bool hasFallingImpulse = granular.VelocityY > 8;
+    return !supported || hasFallingImpulse;
+}
+
+bool GranularCanMoveTo(
+    uint2 source,
+    uint sourceIndex,
+    uint2 destination,
+    uint targetMaterial)
+{
+    uint targetKind = CellKindFromMaterial(targetMaterial);
+    if (targetKind == SimulationKindSolid ||
+        CellRankFromMaterial(Grid[sourceIndex].MaterialIndex) <= CellRankFromMaterial(targetMaterial))
+    {
+        return false;
+    }
+
+    bool diagonal = source.x != destination.x;
+    if (diagonal)
+    {
+        uint2 firstCorner = uint2(source.x, destination.y);
+        uint2 secondCorner = uint2(destination.x, source.y);
+        if (CellKindAt(firstCorner) == SimulationKindSolid &&
+            CellKindAt(secondCorner) == SimulationKindSolid)
+        {
+            return false;
+        }
+    }
+
+    if (targetKind == SimulationKindLiquid)
+    {
+        return GranularCanDisplaceLiquid(source, sourceIndex, targetMaterial);
+    }
+
+    return !diagonal || SandSupported(source);
+}
 #define MaxSolidDistance 8
 
 uint SolidDistanceBelow(uint2 coordinate)
@@ -251,7 +311,8 @@ uint SolidDistanceBelow(uint2 coordinate)
 
 bool SandCanRoll(uint2 source, uint2 destination, uint sandMaterial, uint targetMaterial)
 {
-    if (CellRankFromMaterial(sandMaterial) <= CellRankFromMaterial(targetMaterial))
+    if (CellKindFromMaterial(targetMaterial) == SimulationKindLiquid ||
+        CellRankFromMaterial(sandMaterial) <= CellRankFromMaterial(targetMaterial))
     {
         return false;
     }
@@ -771,11 +832,19 @@ void ResolveVerticalPair(uint2 upperCoordinate)
         RelaxGasPair(upperIndex, lowerIndex, 0.72, 0, -36);
         return;
     }
-    if (upperKind != 0 && CellRankFromMaterial(upperMaterial) > CellRankFromMaterial(lowerMaterial))
+    bool canMove = upperKind == SimulationKindGranular
+        ? GranularCanMoveTo(
+            upperCoordinate,
+            upperIndex,
+            upperCoordinate + uint2(0, 1),
+            lowerMaterial)
+        : upperKind != SimulationKindNone &&
+            CellRankFromMaterial(upperMaterial) > CellRankFromMaterial(lowerMaterial);
+    if (canMove)
     {
-        if (upperKind == 1 && lowerKind == 4 &&
-            !SandCanDisplaceWater(upperCoordinate, upperIndex))
+        if (upperKind == SimulationKindGranular && lowerKind == SimulationKindLiquid)
         {
+            ExchangeGranularWithLiquid(upperIndex, lowerIndex, 0, 60);
             return;
         }
         SwapCells(upperIndex, lowerIndex, 0, 60);
@@ -808,18 +877,18 @@ void ResolveDiagonalPair(uint2 upperCoordinate, uint2 lowerCoordinate)
         RelaxGasPair(upperIndex, lowerIndex, 0.62, direction, -28);
         return;
     }
-    bool supported = upperKind == 1
-        ? SandSupported(upperCoordinate)
-        : upperKind == 4 && WaterSupported(upperCoordinate);
-    if (supported && upperKind != 0 &&
-        CellRankFromMaterial(upperMaterial) > CellRankFromMaterial(lowerMaterial))
+    bool canMove = upperKind == SimulationKindGranular
+        ? GranularCanMoveTo(upperCoordinate, upperIndex, lowerCoordinate, lowerMaterial)
+        : upperKind == SimulationKindLiquid && WaterSupported(upperCoordinate) &&
+            CellRankFromMaterial(upperMaterial) > CellRankFromMaterial(lowerMaterial);
+    if (canMove)
     {
-        if (upperKind == 1 && lowerKind == 4 &&
-            !SandCanDisplaceWater(upperCoordinate, upperIndex))
+        float direction = lowerCoordinate.x > upperCoordinate.x ? 32 : -32;
+        if (upperKind == SimulationKindGranular && lowerKind == SimulationKindLiquid)
         {
+            ExchangeGranularWithLiquid(upperIndex, lowerIndex, direction, 48);
             return;
         }
-        float direction = lowerCoordinate.x > upperCoordinate.x ? 32 : -32;
         SwapCells(upperIndex, lowerIndex, direction, 48);
     }
 }
@@ -1927,9 +1996,11 @@ bool CanMoveSand(uint2 coordinate, GridCell cell)
     {
         return false;
     }
-    uint belowMaterial = CellMaterials[FlattenCoordinate(coordinate + uint2(0, 1))];
+    uint sourceIndex = FlattenCoordinate(coordinate);
+    uint2 belowCoordinate = coordinate + uint2(0, 1);
+    uint belowMaterial = CellMaterials[FlattenCoordinate(belowCoordinate)];
     uint belowKind = CellKindFromMaterial(belowMaterial);
-    if (belowKind != 2 && CellRankFromMaterial(cell.MaterialIndex) > CellRankFromMaterial(belowMaterial))
+    if (GranularCanMoveTo(coordinate, sourceIndex, belowCoordinate, belowMaterial))
     {
         return true;
     }
@@ -1944,9 +2015,13 @@ bool CanMoveSand(uint2 coordinate, GridCell cell)
         {
             continue;
         }
-        uint diagonalMaterial = CellMaterials[FlattenCoordinate(uint2(x, coordinate.y + 1))];
-        if (CellKindFromMaterial(diagonalMaterial) != 2 &&
-            CellRankFromMaterial(cell.MaterialIndex) > CellRankFromMaterial(diagonalMaterial))
+        uint2 diagonalCoordinate = uint2(x, coordinate.y + 1);
+        uint diagonalMaterial = CellMaterials[FlattenCoordinate(diagonalCoordinate)];
+        if (GranularCanMoveTo(
+            coordinate,
+            sourceIndex,
+            diagonalCoordinate,
+            diagonalMaterial))
         {
             return true;
         }
@@ -1967,13 +2042,9 @@ bool CanMoveSand(uint2 coordinate, GridCell cell)
                 }
                 uint2 side = uint2(x, coordinate.y);
                 uint targetMaterial = CellMaterials[FlattenCoordinate(side)];
-                if (CellRankFromMaterial(cell.MaterialIndex) > CellRankFromMaterial(targetMaterial))
+                if (SandCanRoll(coordinate, side, cell.MaterialIndex, targetMaterial))
                 {
-                    uint destinationDistance = SolidDistanceBelow(side);
-                    if (destinationDistance > sourceDistance)
-                    {
-                        return true;
-                    }
+                    return true;
                 }
             }
         }
