@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -50,15 +51,19 @@ public sealed class SimulationStateSerializer
         public string[] MaterialPalette { get; set; } = [];
     }
 
-    private sealed record WorldFileData(int Version, SimulationWorldSnapshot Snapshot);
-
     private const uint WorldFileMagic = 0x5058594C;
+    private const int LegacyWorldHeaderSize = 20;
     private const int CurrentVersion = 4;
     private const string RemovedGoldSandId = "core:gold_sand";
     private const string RenamedConcreteId = "core:concrete";
     private readonly JsonSerializerOptions options = new() { WriteIndented = true };
     private bool capturePending;
     private SimulationWorldSnapshot? emptySnapshot;
+
+    public SimulationStateSerializer()
+    {
+        WorldCellCodec.ValidateLayoutContracts();
+    }
 
     public void BeginWorldCapture(GpuSimulationResources resources)
     {
@@ -168,25 +173,26 @@ public sealed class SimulationStateSerializer
             return null;
         }
 
-        WorldFileData? worldFile = await ReadWorldAsync(
+        RawWorldFile? rawWorld = await ReadWorldAsync(
             Path.ChangeExtension(path, ".world"),
             cancellationToken);
-        if (worldFile is not null && worldFile.Version != version)
+        if (rawWorld is not null && rawWorld.Version != version)
         {
             throw new InvalidDataException(
-                $"Версии scene.json ({version}) и .world ({worldFile.Version}) не совпадают.");
+                $"Версии scene.json ({version}) и .world ({rawWorld.Version}) не совпадают.");
         }
+        SimulationWorldSnapshot? world = rawWorld is null ? null : WorldCellCodec.Decode(rawWorld);
 
         List<string> warnings = [];
         return version switch
         {
             3 => LegacySceneV3Loader.Load(
                 sceneJson,
-                worldFile?.Snapshot,
+                world,
                 materialRegistry,
                 warnings,
                 options),
-            CurrentVersion => LoadV4(sceneJson, worldFile?.Snapshot, materialRegistry, warnings),
+            CurrentVersion => LoadV4(sceneJson, world, materialRegistry, warnings),
             _ => null
         };
     }
@@ -463,7 +469,7 @@ public sealed class SimulationStateSerializer
         await stream.WriteAsync(world.Grid, cancellationToken);
     }
 
-    private static async Task<WorldFileData?> ReadWorldAsync(
+    internal static async Task<RawWorldFile?> ReadWorldAsync(
         string path,
         CancellationToken cancellationToken)
     {
@@ -472,36 +478,48 @@ public sealed class SimulationStateSerializer
             return null;
         }
         await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, true);
-        uint magic = await ReadUInt32Async(stream, cancellationToken);
-        int version = await ReadInt32Async(stream, cancellationToken);
+        byte[] header = new byte[LegacyWorldHeaderSize];
+        try
+        {
+            await stream.ReadExactlyAsync(header, cancellationToken);
+        }
+        catch (EndOfStreamException exception)
+        {
+            throw new InvalidDataException("Заголовок файла мира обрезан.", exception);
+        }
+
+        uint magic = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(0, 4));
+        int version = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(4, 4));
         if (magic != WorldFileMagic || version is not (3 or CurrentVersion))
         {
             throw new InvalidDataException("Формат снимка мира не поддерживается.");
         }
-        int width = await ReadInt32Async(stream, cancellationToken);
-        int height = await ReadInt32Async(stream, cancellationToken);
-        int length = await ReadInt32Async(stream, cancellationToken);
-        int expected = checked(width * height * Marshal.SizeOf<GridCell>());
-        if (length != 0 && length != expected)
+
+        int width = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(8, 4));
+        int height = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(12, 4));
+        int length = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(16, 4));
+        const int storedCellStride = WorldCellCodec.LegacyCellStride;
+        WorldCellCodec.ValidateStoredWorld(width, height, storedCellStride, length);
+
+        long expectedFileLength = checked((long)LegacyWorldHeaderSize + length);
+        if (stream.Length < expectedFileLength)
         {
-            throw new InvalidDataException("Размер секции снимка мира некорректен.");
+            throw new InvalidDataException("Секция клеток файла мира обрезана.");
         }
+        if (stream.Length > expectedFileLength)
+        {
+            throw new InvalidDataException("После секции клеток файла мира обнаружены лишние байты.");
+        }
+
         byte[] grid = new byte[length];
-        await stream.ReadExactlyAsync(grid, cancellationToken);
-        return new WorldFileData(version, new SimulationWorldSnapshot(width, height, grid));
-    }
-
-    private static async Task<int> ReadInt32Async(FileStream stream, CancellationToken cancellationToken)
-    {
-        byte[] bytes = new byte[4];
-        await stream.ReadExactlyAsync(bytes, cancellationToken);
-        return BitConverter.ToInt32(bytes);
-    }
-
-    private static async Task<uint> ReadUInt32Async(FileStream stream, CancellationToken cancellationToken)
-    {
-        byte[] bytes = new byte[4];
-        await stream.ReadExactlyAsync(bytes, cancellationToken);
-        return BitConverter.ToUInt32(bytes);
+        try
+        {
+            await stream.ReadExactlyAsync(grid, cancellationToken);
+        }
+        catch (EndOfStreamException exception)
+        {
+            throw new InvalidDataException("Секция клеток файла мира обрезана.", exception);
+        }
+        return new RawWorldFile(version, width, height, storedCellStride, grid);
     }
 }
