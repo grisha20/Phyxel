@@ -18,6 +18,7 @@ internal static partial class MaterialFileLoader
         public string? Id { get; set; }
         public JsonElement Name { get; set; }
         public string? Kind { get; set; }
+        public string[] Flags { get; set; } = [];
         public string? Color { get; set; }
         public MaterialPhysicsDocument? Physics { get; set; }
         public MaterialUiDocument? Ui { get; set; }
@@ -134,12 +135,15 @@ internal static partial class MaterialFileLoader
         Color color = ParseColor(document.Color ?? "#FFFFFF");
         MaterialPhysicsDocument physics = document.Physics ?? new MaterialPhysicsDocument();
         if (!float.IsFinite(physics.Density) || physics.Density < 0 ||
+            physics.Density > MaterialRegistry.MaximumDensity ||
             !float.IsFinite(physics.Friction) || physics.Friction < 0 ||
             !float.IsFinite(physics.FlowRate) || physics.FlowRate < 0)
         {
-            throw new InvalidDataException("Параметры physics должны быть конечными неотрицательными числами.");
+            throw new InvalidDataException(
+                $"Параметры physics должны быть конечными неотрицательными числами; density не должна превышать {MaterialRegistry.MaximumDensity}.");
         }
 
+        MaterialFlags flags = ParseFlags(document.Flags, kind);
         string name = ParseName(document.Name, id);
         MaterialUiDocument ui = document.Ui ?? new MaterialUiDocument();
         return new MaterialDefinition(
@@ -147,9 +151,32 @@ internal static partial class MaterialFileLoader
             0,
             name,
             color,
-            MaterialRegistry.CreateProperties(0, kind, physics.Density, physics.Friction, physics.FlowRate, color),
+            MaterialRegistry.CreateProperties(kind, flags, physics.Density, physics.Friction, physics.FlowRate, color),
             ui.Order,
             ui.Hidden);
+    }
+
+    private static MaterialFlags ParseFlags(IEnumerable<string>? values, MaterialSimulationKind kind)
+    {
+        MaterialFlags flags = MaterialFlags.None;
+        foreach (string value in values ?? [])
+        {
+            MaterialFlags flag = value.Trim().ToLowerInvariant() switch
+            {
+                "movable-solid" => MaterialFlags.MovableSolid,
+                _ => throw new InvalidDataException($"Неизвестный flag '{value}'.")
+            };
+            if ((flags & flag) != 0)
+            {
+                throw new InvalidDataException($"Дублирующий flag '{value}'.");
+            }
+            flags |= flag;
+        }
+        if ((flags & MaterialFlags.MovableSolid) != 0 && kind != MaterialSimulationKind.Solid)
+        {
+            throw new InvalidDataException("Flag 'movable-solid' разрешён только для kind 'solid'.");
+        }
+        return flags;
     }
 
     private static MaterialSimulationKind ParseKind(string? value)

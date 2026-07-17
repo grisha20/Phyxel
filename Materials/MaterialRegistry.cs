@@ -11,6 +11,7 @@ namespace Phyxel.Materials;
 public sealed class MaterialRegistry
 {
     public const int MaximumMaterials = 256;
+    public const float MaximumDensity = 100f;
 
     private readonly ReadOnlyCollection<MaterialDefinition> materials;
     private readonly ReadOnlyCollection<MaterialDefinition> selectableMaterials;
@@ -34,7 +35,6 @@ public sealed class MaterialRegistry
         {
             MaterialDefinition definition = definitions[index];
             MaterialProperties properties = definition.Properties;
-            properties.MaterialId = (uint)index;
             definitions[index] = definition with
             {
                 RuntimeIndex = checked((ushort)index),
@@ -123,8 +123,8 @@ public sealed class MaterialRegistry
             Create(CoreMaterialIds.Empty, MaterialId.Empty, "Пустота", new Color(0, 0, 0, 0), MaterialSimulationKind.None, 0f, 0f, 0f, -1000, true),
             Create(CoreMaterialIds.Sand, MaterialId.Sand, "Песок", new Color(218, 184, 92), MaterialSimulationKind.Granular, 1.5f, 0.75f, 0.18f, 10),
             Create(CoreMaterialIds.Water, MaterialId.Water, "Вода", new Color(43, 132, 207), MaterialSimulationKind.Liquid, 1f, 0.025f, 0.92f, 20),
-            Create(CoreMaterialIds.Metal, MaterialId.Metal, "Металл", new Color(142, 156, 166), MaterialSimulationKind.Solid, 7.8f, 0.35f, 0f, 30),
-            Create(CoreMaterialIds.Concrete, MaterialId.Concrete, "Бетон", new Color(92, 96, 101), MaterialSimulationKind.Solid, 9.2f, 0.75f, 0f, 40),
+            Create(CoreMaterialIds.Metal, MaterialId.Metal, "Металл", new Color(142, 156, 166), MaterialSimulationKind.Solid, 7.8f, 0.35f, 0f, 30, flags: MaterialFlags.MovableSolid),
+            Create(CoreMaterialIds.Concrete, MaterialId.Concrete, "Бетон", new Color(92, 96, 101), MaterialSimulationKind.Solid, 9.2f, 0.75f, 0f, 40, flags: MaterialFlags.MovableSolid),
             Create(CoreMaterialIds.Eraser, MaterialId.Eraser, "Ластик", new Color(222, 88, 88), MaterialSimulationKind.Tool, 0f, 0f, 0f, 50),
             Create(CoreMaterialIds.Gas, MaterialId.Gas, "Газ", new Color(155, 196, 210, 155), MaterialSimulationKind.Gas, 0.08f, 0.005f, 1.2f, 60),
             Create(CoreMaterialIds.Fixture, MaterialId.Fixture, "Опора", new Color(82, 91, 99), MaterialSimulationKind.Solid, 100f, 0.9f, 0f, 70)
@@ -141,21 +141,22 @@ public sealed class MaterialRegistry
         float friction,
         float flowRate,
         int uiOrder,
-        bool hidden = false)
+        bool hidden = false,
+        MaterialFlags flags = MaterialFlags.None)
     {
         return new MaterialDefinition(
             id,
             checked((ushort)legacyId),
             name,
             color,
-            CreateProperties((uint)legacyId, kind, density, friction, flowRate, color),
+            CreateProperties(kind, flags, density, friction, flowRate, color),
             uiOrder,
             hidden);
     }
 
     internal static MaterialProperties CreateProperties(
-        uint runtimeIndex,
         MaterialSimulationKind kind,
+        MaterialFlags flags,
         float density,
         float friction,
         float flowRate,
@@ -163,7 +164,7 @@ public sealed class MaterialRegistry
     {
         return new MaterialProperties
         {
-            MaterialId = runtimeIndex,
+            Flags = (uint)flags,
             SimulationKind = (uint)kind,
             Density = density,
             Friction = friction,

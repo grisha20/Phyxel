@@ -12,7 +12,7 @@ struct GridCell
 
 struct MaterialProperties
 {
-    uint MaterialId;
+    uint Flags;
     uint SimulationKind;
     float Density;
     float Friction;
@@ -22,6 +22,15 @@ struct MaterialProperties
     float ColorB;
     float ColorA;
 };
+
+static const uint SimulationKindNone = 0;
+static const uint SimulationKindGranular = 1;
+static const uint SimulationKindSolid = 2;
+static const uint SimulationKindTool = 3;
+static const uint SimulationKindLiquid = 4;
+static const uint SimulationKindGas = 5;
+static const uint MaterialFlagMovableSolid = 1u << 0;
+static const float MaximumMaterialDensity = 100.0;
 
 struct BrushDrawCommand
 {
@@ -93,12 +102,29 @@ float HashUnitFloat(uint value)
 
 bool IsCellularMaterial(uint simulationKind)
 {
-    return simulationKind == 1 || simulationKind == 4 || simulationKind == 5;
+    return simulationKind == SimulationKindGranular ||
+        simulationKind == SimulationKindLiquid ||
+        simulationKind == SimulationKindGas;
 }
 
 bool IsFluidMaterial(uint simulationKind)
 {
-    return simulationKind == 4 || simulationKind == 5;
+    return simulationKind == SimulationKindLiquid || simulationKind == SimulationKindGas;
+}
+
+bool IsSolidMaterial(MaterialProperties material)
+{
+    return material.SimulationKind == SimulationKindSolid;
+}
+
+bool IsMovableSolidMaterial(MaterialProperties material)
+{
+    return IsSolidMaterial(material) && (material.Flags & MaterialFlagMovableSolid) != 0;
+}
+
+float ValidatedMaterialDensity(MaterialProperties material)
+{
+    return clamp(material.Density, 0.0, MaximumMaterialDensity);
 }
 
 bool IsFallingSolid(uint materialId)

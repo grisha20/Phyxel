@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 using Phyxel.Physics;
 
@@ -23,6 +24,13 @@ public enum MaterialSimulationKind : uint
     Tool = 3,
     Liquid = 4,
     Gas = 5
+}
+
+[Flags]
+public enum MaterialFlags : uint
+{
+    None = 0,
+    MovableSolid = 1u << 0
 }
 
 public static class CoreMaterialIds

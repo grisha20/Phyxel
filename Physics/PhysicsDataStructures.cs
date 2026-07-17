@@ -18,7 +18,7 @@ public struct GridCell
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct MaterialProperties
 {
-    public uint MaterialId;
+    public uint Flags;
     public uint SimulationKind;
     public float Density;
     public float Friction;
