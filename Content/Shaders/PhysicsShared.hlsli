@@ -21,6 +21,9 @@ struct MaterialProperties
     float ColorG;
     float ColorB;
     float ColorA;
+    float InitialTemperature;
+    float ThermalConductivity;
+    float HeatCapacity;
 };
 
 static const uint SimulationKindNone = 0;

@@ -12,6 +12,15 @@ public sealed class MaterialRegistry
 {
     public const int MaximumMaterials = 256;
     public const float MaximumDensity = 100f;
+    public const float DefaultInitialTemperature = 20f;
+    public const float DefaultThermalConductivity = 0.15f;
+    public const float DefaultHeatCapacity = 1f;
+    public const float MinimumInitialTemperature = -273.15f;
+    public const float MaximumInitialTemperature = 5000f;
+    public const float MinimumThermalConductivity = 0f;
+    public const float MaximumThermalConductivity = 1f;
+    public const float MinimumHeatCapacity = 0.01f;
+    public const float MaximumHeatCapacity = 100f;
 
     private readonly ReadOnlyCollection<MaterialDefinition> materials;
     private readonly ReadOnlyCollection<MaterialDefinition> selectableMaterials;
@@ -139,6 +148,9 @@ public sealed class MaterialRegistry
         float density,
         float friction,
         float flowRate,
+        float initialTemperature,
+        float thermalConductivity,
+        float heatCapacity,
         Color color)
     {
         return new MaterialProperties
@@ -151,7 +163,10 @@ public sealed class MaterialRegistry
             ColorR = color.R / 255f,
             ColorG = color.G / 255f,
             ColorB = color.B / 255f,
-            ColorA = color.A / 255f
+            ColorA = color.A / 255f,
+            InitialTemperature = initialTemperature,
+            ThermalConductivity = thermalConductivity,
+            HeatCapacity = heatCapacity
         };
     }
 }

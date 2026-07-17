@@ -6,5 +6,6 @@
   "flags": ["movable-solid"],
   "color": "#5C6065",
   "physics": { "density": 9.2, "friction": 0.75, "flowRate": 0.0 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.25, "heatCapacity": 0.84 },
   "ui": { "order": 40, "hidden": false }
 }

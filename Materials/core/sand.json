@@ -5,5 +5,6 @@
   "kind": "granular",
   "color": "#DAB85C",
   "physics": { "density": 1.5, "friction": 0.75, "flowRate": 0.18 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.15, "heatCapacity": 0.83 },
   "ui": { "order": 10, "hidden": false }
 }

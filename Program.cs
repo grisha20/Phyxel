@@ -13,6 +13,11 @@ public static class Program
             Environment.ExitCode = WorldCellCodecRegressionVerifier.Run();
             return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_THERMAL_MATERIALS") == "1")
+        {
+            Environment.ExitCode = ThermalMaterialPropertiesRegressionVerifier.Run();
+            return;
+        }
 
         using PhyxelGame game = new();
         game.Run();

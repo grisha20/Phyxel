@@ -27,6 +27,9 @@ public struct MaterialProperties
     public float ColorG;
     public float ColorB;
     public float ColorA;
+    public float InitialTemperature;
+    public float ThermalConductivity;
+    public float HeatCapacity;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

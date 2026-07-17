@@ -5,5 +5,6 @@
   "kind": "tool",
   "color": "#DE5858",
   "physics": { "density": 0.0, "friction": 0.0, "flowRate": 0.0 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.0, "heatCapacity": 1.0 },
   "ui": { "order": 50, "hidden": false }
 }

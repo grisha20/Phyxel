@@ -21,6 +21,7 @@ internal static partial class MaterialFileLoader
         public string[] Flags { get; set; } = [];
         public string? Color { get; set; }
         public MaterialPhysicsDocument? Physics { get; set; }
+        public MaterialThermalDocument? Thermal { get; set; }
         public MaterialUiDocument? Ui { get; set; }
 
         [JsonExtensionData]
@@ -32,6 +33,16 @@ internal static partial class MaterialFileLoader
         public float Density { get; set; } = 1f;
         public float Friction { get; set; }
         public float FlowRate { get; set; }
+    }
+
+    private sealed class MaterialThermalDocument
+    {
+        public float InitialTemperature { get; set; } = MaterialRegistry.DefaultInitialTemperature;
+        public float Conductivity { get; set; } = MaterialRegistry.DefaultThermalConductivity;
+        public float HeatCapacity { get; set; } = MaterialRegistry.DefaultHeatCapacity;
+
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? UnknownFields { get; set; }
     }
 
     private sealed class MaterialUiDocument
@@ -211,6 +222,7 @@ internal static partial class MaterialFileLoader
         MaterialSimulationKind kind = ParseKind(document.Kind);
         Color color = ParseColor(document.Color ?? "#FFFFFF");
         MaterialPhysicsDocument physics = document.Physics ?? new MaterialPhysicsDocument();
+        MaterialThermalDocument thermal = document.Thermal ?? new MaterialThermalDocument();
         if (!float.IsFinite(physics.Density) || physics.Density < 0 ||
             physics.Density > MaterialRegistry.MaximumDensity ||
             !float.IsFinite(physics.Friction) || physics.Friction < 0 ||
@@ -218,6 +230,32 @@ internal static partial class MaterialFileLoader
         {
             throw new InvalidDataException(
                 $"Параметры physics должны быть конечными неотрицательными числами; density не должна превышать {MaterialRegistry.MaximumDensity}.");
+        }
+        if (thermal.UnknownFields is { Count: > 0 })
+        {
+            throw new InvalidDataException(
+                $"Неизвестное поле thermal '{thermal.UnknownFields.Keys.OrderBy(key => key, StringComparer.Ordinal).First()}'.");
+        }
+        if (!float.IsFinite(thermal.InitialTemperature) ||
+            thermal.InitialTemperature < MaterialRegistry.MinimumInitialTemperature ||
+            thermal.InitialTemperature > MaterialRegistry.MaximumInitialTemperature)
+        {
+            throw new InvalidDataException(
+                $"thermal.initialTemperature должна быть конечным числом от {MaterialRegistry.MinimumInitialTemperature} до {MaterialRegistry.MaximumInitialTemperature}.");
+        }
+        if (!float.IsFinite(thermal.Conductivity) ||
+            thermal.Conductivity < MaterialRegistry.MinimumThermalConductivity ||
+            thermal.Conductivity > MaterialRegistry.MaximumThermalConductivity)
+        {
+            throw new InvalidDataException(
+                $"thermal.conductivity должна быть конечным числом от {MaterialRegistry.MinimumThermalConductivity} до {MaterialRegistry.MaximumThermalConductivity}.");
+        }
+        if (!float.IsFinite(thermal.HeatCapacity) ||
+            thermal.HeatCapacity < MaterialRegistry.MinimumHeatCapacity ||
+            thermal.HeatCapacity > MaterialRegistry.MaximumHeatCapacity)
+        {
+            throw new InvalidDataException(
+                $"thermal.heatCapacity должна быть конечным числом от {MaterialRegistry.MinimumHeatCapacity} до {MaterialRegistry.MaximumHeatCapacity}.");
         }
 
         MaterialFlags flags = ParseFlags(document.Flags, kind);
@@ -232,7 +270,16 @@ internal static partial class MaterialFileLoader
             0,
             name,
             color,
-            MaterialRegistry.CreateProperties(kind, flags, physics.Density, physics.Friction, physics.FlowRate, color),
+            MaterialRegistry.CreateProperties(
+                kind,
+                flags,
+                physics.Density,
+                physics.Friction,
+                physics.FlowRate,
+                thermal.InitialTemperature,
+                thermal.Conductivity,
+                thermal.HeatCapacity,
+                color),
             ui.Order,
             ui.Hidden);
     }

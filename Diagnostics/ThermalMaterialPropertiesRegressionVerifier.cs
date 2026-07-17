@@ -1,0 +1,318 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using Microsoft.Xna.Framework;
+using Phyxel.Materials;
+using Phyxel.Physics;
+
+namespace Phyxel.Diagnostics;
+
+internal static class ThermalMaterialPropertiesRegressionVerifier
+{
+    private sealed record ExpectedMaterial(
+        string Id,
+        MaterialSimulationKind Kind,
+        MaterialFlags Flags,
+        float Density,
+        float Friction,
+        float FlowRate,
+        string Color,
+        float InitialTemperature,
+        float Conductivity,
+        float HeatCapacity);
+
+    private static readonly ExpectedMaterial[] ExpectedCoreMaterials =
+    [
+        new(CoreMaterialIds.Empty, MaterialSimulationKind.None, MaterialFlags.None,
+            0f, 0f, 0f, "#00000000", 0f, 0f, 1f),
+        new(CoreMaterialIds.Sand, MaterialSimulationKind.Granular, MaterialFlags.None,
+            1.5f, 0.75f, 0.18f, "#DAB85C", 20f, 0.15f, 0.83f),
+        new(CoreMaterialIds.Water, MaterialSimulationKind.Liquid, MaterialFlags.None,
+            1f, 0.025f, 0.92f, "#2B84CF", 20f, 0.60f, 4.18f),
+        new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
+            7.8f, 0.35f, 0f, "#8E9CA6", 20f, 1f, 0.50f),
+        new(CoreMaterialIds.Stone, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
+            9.2f, 0.75f, 0f, "#5C6065", 20f, 0.25f, 0.84f),
+        new(CoreMaterialIds.Gas, MaterialSimulationKind.Gas, MaterialFlags.None,
+            0.08f, 0.005f, 1.2f, "#9BC4D29B", 20f, 0.03f, 1f),
+        new(CoreMaterialIds.Fixture, MaterialSimulationKind.Solid, MaterialFlags.None,
+            100f, 0.9f, 0f, "#525B63", 20f, 0.25f, 0.84f),
+        new(CoreMaterialIds.Eraser, MaterialSimulationKind.Tool, MaterialFlags.None,
+            0f, 0f, 0f, "#DE5858", 20f, 0f, 1f)
+    ];
+
+    public static int Run()
+    {
+        try
+        {
+            RunAsync().GetAwaiter().GetResult();
+            Console.WriteLine("PHYXEL_THERMAL_MATERIALS_SUCCESS");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"PHYXEL_THERMAL_MATERIALS_FAILED {exception}");
+            return 1;
+        }
+    }
+
+    private static async Task RunAsync()
+    {
+        Require(Marshal.SizeOf<MaterialProperties>() == 48, "MaterialProperties must be 48 bytes.");
+        string directory = Path.Combine(
+            Path.GetTempPath(),
+            $"phyxel-thermal-materials-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            await WriteExternalMaterialsAsync(directory);
+            MaterialRegistry registry;
+            string materialErrors;
+            TextWriter originalError = Console.Error;
+            using StringWriter capturedError = new();
+            try
+            {
+                Console.SetError(capturedError);
+                registry = new MaterialRegistry(directory);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+            materialErrors = capturedError.ToString();
+
+            VerifyCoreMaterials(registry);
+            VerifyExternalMaterials(registry, materialErrors);
+            VerifyGpuTable(registry);
+            await VerifyInvalidCoreStopsLoadingAsync(directory);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    private static void VerifyCoreMaterials(MaterialRegistry registry)
+    {
+        foreach (ExpectedMaterial expected in ExpectedCoreMaterials)
+        {
+            MaterialDefinition actual = registry[expected.Id];
+            MaterialProperties properties = actual.Properties;
+            Require((MaterialSimulationKind)properties.SimulationKind == expected.Kind,
+                $"{expected.Id} SimulationKind changed.");
+            Require((MaterialFlags)properties.Flags == expected.Flags,
+                $"{expected.Id} flags changed.");
+            Require(Same(properties.Density, expected.Density), $"{expected.Id} density changed.");
+            Require(Same(properties.Friction, expected.Friction), $"{expected.Id} friction changed.");
+            Require(Same(properties.FlowRate, expected.FlowRate), $"{expected.Id} flowRate changed.");
+            Color expectedColor = ParseColor(expected.Color);
+            Require(actual.Color == expectedColor, $"{expected.Id} color changed.");
+            Require(Same(properties.ColorR, expectedColor.R / 255f), $"{expected.Id} GPU red changed.");
+            Require(Same(properties.ColorG, expectedColor.G / 255f), $"{expected.Id} GPU green changed.");
+            Require(Same(properties.ColorB, expectedColor.B / 255f), $"{expected.Id} GPU blue changed.");
+            Require(Same(properties.ColorA, expectedColor.A / 255f), $"{expected.Id} GPU alpha changed.");
+            Require(Same(properties.InitialTemperature, expected.InitialTemperature),
+                $"{expected.Id} initialTemperature is incorrect.");
+            Require(Same(properties.ThermalConductivity, expected.Conductivity),
+                $"{expected.Id} conductivity is incorrect.");
+            Require(Same(properties.HeatCapacity, expected.HeatCapacity),
+                $"{expected.Id} heatCapacity is incorrect.");
+        }
+    }
+
+    private static void VerifyExternalMaterials(MaterialRegistry registry, string errors)
+    {
+        MaterialProperties legacy = registry["test:granular"].Properties;
+        Require(Same(legacy.InitialTemperature, MaterialRegistry.DefaultInitialTemperature),
+            "External material without thermal did not receive default initialTemperature.");
+        Require(Same(legacy.ThermalConductivity, MaterialRegistry.DefaultThermalConductivity),
+            "External material without thermal did not receive default conductivity.");
+        Require(Same(legacy.HeatCapacity, MaterialRegistry.DefaultHeatCapacity),
+            "External material without thermal did not receive default heatCapacity.");
+
+        MaterialProperties custom = registry["test:custom_thermal"].Properties;
+        Require(Same(custom.InitialTemperature, -125.5f), "Custom initialTemperature was not loaded.");
+        Require(Same(custom.ThermalConductivity, 0.72f), "Custom conductivity was not loaded.");
+        Require(Same(custom.HeatCapacity, 8.25f), "Custom heatCapacity was not loaded.");
+
+        MaterialProperties minimums = registry["test:thermal_minimums"].Properties;
+        Require(Same(minimums.InitialTemperature, MaterialRegistry.MinimumInitialTemperature),
+            "Minimum initialTemperature boundary was rejected.");
+        Require(Same(minimums.ThermalConductivity, MaterialRegistry.MinimumThermalConductivity),
+            "Minimum conductivity boundary was rejected.");
+        Require(Same(minimums.HeatCapacity, MaterialRegistry.MinimumHeatCapacity),
+            "Minimum heatCapacity boundary was rejected.");
+        MaterialProperties maximums = registry["test:thermal_maximums"].Properties;
+        Require(Same(maximums.InitialTemperature, MaterialRegistry.MaximumInitialTemperature),
+            "Maximum initialTemperature boundary was rejected.");
+        Require(Same(maximums.ThermalConductivity, MaterialRegistry.MaximumThermalConductivity),
+            "Maximum conductivity boundary was rejected.");
+        Require(Same(maximums.HeatCapacity, MaterialRegistry.MaximumHeatCapacity),
+            "Maximum heatCapacity boundary was rejected.");
+
+        string[] invalidIds =
+        [
+            "test:nan", "test:infinity", "test:temperature_low", "test:temperature_high",
+            "test:conductivity_low", "test:conductivity_high", "test:heat_capacity_zero",
+            "test:heat_capacity_low", "test:heat_capacity_high", "test:unknown_thermal"
+        ];
+        foreach (string id in invalidIds)
+        {
+            Require(!registry.TryGet(id, out _), $"Invalid external material '{id}' was loaded.");
+        }
+        Require(CountOccurrences(errors, "PHYXEL_MATERIAL_ERROR") == invalidIds.Length,
+            "Invalid external materials did not produce one PHYXEL_MATERIAL_ERROR each.");
+    }
+
+    private static void VerifyGpuTable(MaterialRegistry registry)
+    {
+        MaterialProperties[] table = registry.CreateGpuTable();
+        Require(table.Length == registry.Count, "GPU material table length is incorrect.");
+        foreach (MaterialDefinition material in registry.Materials)
+        {
+            MaterialProperties expected = material.Properties;
+            MaterialProperties actual = table[material.RuntimeIndex];
+            Require(SameProperties(actual, expected),
+                $"GPU material table entry {material.RuntimeIndex} does not match {material.Id}.");
+        }
+    }
+
+    private static async Task VerifyInvalidCoreStopsLoadingAsync(string parentDirectory)
+    {
+        string coreDirectory = Path.Combine(parentDirectory, "invalid-core");
+        Directory.CreateDirectory(coreDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(coreDirectory, "invalid.json"),
+            CreateMaterialJson(
+                "core:invalid",
+                "{ \"initialTemperature\": 20.0, \"conductivity\": 0.15, \"heatCapacity\": 1.0, \"typo\": 2.0 }"));
+        try
+        {
+            MaterialFileLoader.LoadCore(coreDirectory, MaterialRegistry.MaximumMaterials);
+        }
+        catch (InvalidDataException)
+        {
+            return;
+        }
+        throw new InvalidOperationException("Invalid core thermal data did not stop loading.");
+    }
+
+    private static async Task WriteExternalMaterialsAsync(string directory)
+    {
+        Dictionary<string, string?> materials = new()
+        {
+            ["granular.json"] = CreateMaterialJson("test:granular", null),
+            ["custom.json"] = CreateMaterialJson(
+                "test:custom_thermal",
+                "{ \"initialTemperature\": -125.5, \"conductivity\": 0.72, \"heatCapacity\": 8.25 }"),
+            ["minimums.json"] = CreateMaterialJson(
+                "test:thermal_minimums",
+                "{ \"initialTemperature\": -273.15, \"conductivity\": 0.0, \"heatCapacity\": 0.01 }"),
+            ["maximums.json"] = CreateMaterialJson(
+                "test:thermal_maximums",
+                "{ \"initialTemperature\": 5000.0, \"conductivity\": 1.0, \"heatCapacity\": 100.0 }"),
+            ["nan.json"] = CreateMaterialJson(
+                "test:nan",
+                "{ \"initialTemperature\": NaN, \"conductivity\": 0.15, \"heatCapacity\": 1.0 }"),
+            ["infinity.json"] = CreateMaterialJson(
+                "test:infinity",
+                "{ \"initialTemperature\": Infinity, \"conductivity\": 0.15, \"heatCapacity\": 1.0 }"),
+            ["temperature-low.json"] = CreateMaterialJson(
+                "test:temperature_low",
+                "{ \"initialTemperature\": -273.16, \"conductivity\": 0.15, \"heatCapacity\": 1.0 }"),
+            ["temperature-high.json"] = CreateMaterialJson(
+                "test:temperature_high",
+                "{ \"initialTemperature\": 5000.01, \"conductivity\": 0.15, \"heatCapacity\": 1.0 }"),
+            ["conductivity-low.json"] = CreateMaterialJson(
+                "test:conductivity_low",
+                "{ \"initialTemperature\": 20.0, \"conductivity\": -0.01, \"heatCapacity\": 1.0 }"),
+            ["conductivity-high.json"] = CreateMaterialJson(
+                "test:conductivity_high",
+                "{ \"initialTemperature\": 20.0, \"conductivity\": 1.01, \"heatCapacity\": 1.0 }"),
+            ["heat-capacity-zero.json"] = CreateMaterialJson(
+                "test:heat_capacity_zero",
+                "{ \"initialTemperature\": 20.0, \"conductivity\": 0.15, \"heatCapacity\": 0.0 }"),
+            ["heat-capacity-low.json"] = CreateMaterialJson(
+                "test:heat_capacity_low",
+                "{ \"initialTemperature\": 20.0, \"conductivity\": 0.15, \"heatCapacity\": 0.009 }"),
+            ["heat-capacity-high.json"] = CreateMaterialJson(
+                "test:heat_capacity_high",
+                "{ \"initialTemperature\": 20.0, \"conductivity\": 0.15, \"heatCapacity\": 100.01 }"),
+            ["unknown.json"] = CreateMaterialJson(
+                "test:unknown_thermal",
+                "{ \"initialTemperature\": 20.0, \"conductivity\": 0.15, \"heatCapacity\": 1.0, \"conductivty\": 0.2 }")
+        };
+        foreach ((string fileName, string? contents) in materials)
+        {
+            await File.WriteAllTextAsync(Path.Combine(directory, fileName), contents);
+        }
+    }
+
+    private static string CreateMaterialJson(string id, string? thermal)
+    {
+        const string template = """
+            {
+              "schema": 1,
+              "id": "__ID__",
+              "name": "Test",
+              "kind": "granular",
+              "color": "#12345678",
+              "physics": { "density": 2.5, "friction": 0.4, "flowRate": 0.2 }
+              __THERMAL__
+            }
+            """;
+        string thermalProperty = thermal is null ? string.Empty : $",\n  \"thermal\": {thermal}";
+        return template
+            .Replace("__ID__", id, StringComparison.Ordinal)
+            .Replace("__THERMAL__", thermalProperty, StringComparison.Ordinal);
+    }
+
+    private static bool SameProperties(MaterialProperties left, MaterialProperties right) =>
+        left.Flags == right.Flags &&
+        left.SimulationKind == right.SimulationKind &&
+        Same(left.Density, right.Density) &&
+        Same(left.Friction, right.Friction) &&
+        Same(left.FlowRate, right.FlowRate) &&
+        Same(left.ColorR, right.ColorR) &&
+        Same(left.ColorG, right.ColorG) &&
+        Same(left.ColorB, right.ColorB) &&
+        Same(left.ColorA, right.ColorA) &&
+        Same(left.InitialTemperature, right.InitialTemperature) &&
+        Same(left.ThermalConductivity, right.ThermalConductivity) &&
+        Same(left.HeatCapacity, right.HeatCapacity);
+
+    private static Color ParseColor(string value)
+    {
+        string hex = value[1..];
+        byte red = Convert.ToByte(hex[0..2], 16);
+        byte green = Convert.ToByte(hex[2..4], 16);
+        byte blue = Convert.ToByte(hex[4..6], 16);
+        byte alpha = hex.Length == 8 ? Convert.ToByte(hex[6..8], 16) : byte.MaxValue;
+        return new Color(red, green, blue, alpha);
+    }
+
+    private static int CountOccurrences(string value, string pattern)
+    {
+        int count = 0;
+        int offset = 0;
+        while ((offset = value.IndexOf(pattern, offset, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            offset += pattern.Length;
+        }
+        return count;
+    }
+
+    private static bool Same(float left, float right) =>
+        BitConverter.SingleToInt32Bits(left) == BitConverter.SingleToInt32Bits(right);
+
+    private static void Require(bool condition, string message)
+    {
+        if (!condition)
+        {
+            throw new InvalidOperationException(message);
+        }
+    }
+}
