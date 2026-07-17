@@ -16,7 +16,7 @@ internal static class LegacySceneV3Loader
         CoreMaterialIds.Sand,
         CoreMaterialIds.Water,
         CoreMaterialIds.Metal,
-        CoreMaterialIds.Concrete,
+        CoreMaterialIds.Stone,
         CoreMaterialIds.Eraser,
         CoreMaterialIds.Gas,
         CoreMaterialIds.Fixture

@@ -117,7 +117,7 @@ public static class AcceptanceRegressionScenario
         if (frame == 2)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 220, 60, 410, 60, 7, 5, materials.Concrete, 2201);
+            AddLine(commands, 220, 60, 410, 60, 7, 5, materials.Stone, 2201);
             return commands;
         }
         if (frame == 3)
@@ -453,11 +453,11 @@ public static class AcceptanceRegressionScenario
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 25, 35, 25, 252, 7, 5, materials.Concrete, 9001);
-            AddLine(commands, 455, 25, 455, 252, 7, 5, materials.Concrete, 9001);
-            AddLine(commands, 25, 252, 455, 252, 7, 5, materials.Concrete, 9001);
-            AddLine(commands, 105, 35, 105, 218, 7, 5, materials.Concrete, 9001);
-            AddLine(commands, 275, 85, 275, 232, 7, 5, materials.Concrete, 9001);
+            AddLine(commands, 25, 35, 25, 252, 7, 5, materials.Stone, 9001);
+            AddLine(commands, 455, 25, 455, 252, 7, 5, materials.Stone, 9001);
+            AddLine(commands, 25, 252, 455, 252, 7, 5, materials.Stone, 9001);
+            AddLine(commands, 105, 35, 105, 218, 7, 5, materials.Stone, 9001);
+            AddLine(commands, 275, 85, 275, 232, 7, 5, materials.Stone, 9001);
             return commands;
         }
         if (frame == 1)
@@ -472,14 +472,14 @@ public static class AcceptanceRegressionScenario
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 300, 40, 300, 192, 6, 4, materials.Concrete, 9101);
-            AddLine(commands, 300, 238, 300, 255, 6, 4, materials.Concrete, 9101);
-            AddLine(commands, 470, 40, 470, 255, 6, 4, materials.Concrete, 9101);
-            AddLine(commands, 300, 255, 470, 255, 6, 4, materials.Concrete, 9101);
-            AddLine(commands, 230, 70, 230, 210, 6, 4, materials.Concrete, 9102);
-            AddLine(commands, 260, 70, 260, 180, 6, 4, materials.Concrete, 9102);
-            AddLine(commands, 260, 180, 300, 200, 6, 4, materials.Concrete, 9102);
-            AddLine(commands, 230, 210, 300, 230, 6, 4, materials.Concrete, 9102);
+            AddLine(commands, 300, 40, 300, 192, 6, 4, materials.Stone, 9101);
+            AddLine(commands, 300, 238, 300, 255, 6, 4, materials.Stone, 9101);
+            AddLine(commands, 470, 40, 470, 255, 6, 4, materials.Stone, 9101);
+            AddLine(commands, 300, 255, 470, 255, 6, 4, materials.Stone, 9101);
+            AddLine(commands, 230, 70, 230, 210, 6, 4, materials.Stone, 9102);
+            AddLine(commands, 260, 70, 260, 180, 6, 4, materials.Stone, 9102);
+            AddLine(commands, 260, 180, 300, 200, 6, 4, materials.Stone, 9102);
+            AddLine(commands, 230, 210, 300, 230, 6, 4, materials.Stone, 9102);
             return commands;
         }
         if (frame == 1)

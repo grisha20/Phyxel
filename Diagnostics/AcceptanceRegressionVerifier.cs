@@ -839,9 +839,9 @@ public static class AcceptanceRegressionVerifier
         ReadOnlySpan<GridCell> grid = Cells(snapshot);
         int lowerMetal = CountMaterial(
             grid, snapshot.Width, 0, snapshot.Width - 1, 850, snapshot.Height - 1, materials.Metal);
-        int lowerConcrete = CountMaterial(
-            grid, snapshot.Width, 0, snapshot.Width - 1, 850, snapshot.Height - 1, materials.Concrete);
-        int lowerSolids = lowerMetal + lowerConcrete;
+        int lowerStone = CountMaterial(
+            grid, snapshot.Width, 0, snapshot.Width - 1, 850, snapshot.Height - 1, materials.Stone);
+        int lowerSolids = lowerMetal + lowerStone;
         Dictionary<uint, (int Count, int Top, int Bottom)> bodies = [];
         int water = 0;
         int waterTop = snapshot.Height;
@@ -856,7 +856,7 @@ public static class AcceptanceRegressionVerifier
                 waterTop = Math.Min(waterTop, y);
             }
             bool solidMaterial = cell.MaterialIndex == materials.Metal ||
-                cell.MaterialIndex == materials.Concrete;
+                cell.MaterialIndex == materials.Stone;
             if (cell.IsActive != 0 && solidMaterial &&
                 cell.RestFrames < 2)
             {
@@ -1047,31 +1047,31 @@ public static class AcceptanceRegressionVerifier
         ReadOnlySpan<GridCell> grid = Cells(snapshot);
         GridCell[] componentCells = grid.ToArray();
         ComponentMetrics metal = Components(componentCells, snapshot.Width, snapshot.Height, materials.Metal);
-        ComponentMetrics concrete = Components(componentCells, snapshot.Width, snapshot.Height, materials.Concrete);
+        ComponentMetrics stone = Components(componentCells, snapshot.Width, snapshot.Height, materials.Stone);
         string offImage = Path.Combine(artifactDirectory, "B_gravity_off.png");
         string fallingImage = Path.Combine(artifactDirectory, "B_falling.png");
         string landedImage = Path.Combine(artifactDirectory, "B_landed.png");
-        string splitImage = Path.Combine(artifactDirectory, "B_split_concrete.png");
+        string splitImage = Path.Combine(artifactDirectory, "B_split_stone.png");
         int suspendedMetal = CountColor(offImage, 50, 15, 120, 85, IsMetal);
-        int suspendedConcrete = CountColor(offImage, 205, 45, 425, 75, IsConcrete);
+        int suspendedStone = CountColor(offImage, 205, 45, 425, 75, IsStone);
         ColorMetrics colors = AnalyzeColors(splitImage);
         int squareCells = CountMaterial(grid, snapshot.Width, 50, 120, 180, 245, materials.Metal);
         int supportedFragment = CountMaterial(grid, snapshot.Width, 125, 165, 90, 115, materials.Metal);
         int floorFragment = CountMaterial(grid, snapshot.Width, 170, 210, 225, 245, materials.Metal);
-        int supportedConcrete = CountMaterial(grid, snapshot.Width, 210, 310, 155, 185, materials.Concrete);
-        int floorConcrete = CountMaterial(grid, snapshot.Width, 320, 410, 225, 245, materials.Concrete);
-        int landedWholeConcrete = CountColor(landedImage, 205, 155, 425, 185, IsConcrete);
+        int supportedStone = CountMaterial(grid, snapshot.Width, 210, 310, 155, 185, materials.Stone);
+        int floorStone = CountMaterial(grid, snapshot.Width, 320, 410, 225, 245, materials.Stone);
+        int landedWholeStone = CountColor(landedImage, 205, 155, 425, 185, IsStone);
         int water = CountMaterial(grid, snapshot.Width, 0, snapshot.Width - 1, 0, snapshot.Height - 1, materials.Water);
         int sand = CountMaterial(grid, snapshot.Width, 0, snapshot.Width - 1, 0, snapshot.Height - 1, materials.Sand);
         bool metalWhole = metal.Count == 3 && metal.Largest > 1800 && squareCells > 1800 &&
             supportedFragment > 150 && floorFragment > 150;
-        bool concreteSplit = concrete.Count == 2 && concrete.Largest > 700 &&
-            supportedConcrete > 650 && floorConcrete > 500 && landedWholeConcrete > 1400 &&
-            concrete.MinimumY <= 170 && concrete.MaximumY >= 240;
-        bool passed = metalWhole && concreteSplit && water > 500 && sand > 300 &&
-            suspendedMetal > 1500 && suspendedConcrete > 1000 &&
+        bool stoneSplit = stone.Count == 2 && stone.Largest > 700 &&
+            supportedStone > 650 && floorStone > 500 && landedWholeStone > 1400 &&
+            stone.MinimumY <= 170 && stone.MaximumY >= 240;
+        bool passed = metalWhole && stoneSplit && water > 500 && sand > 300 &&
+            suspendedMetal > 1500 && suspendedStone > 1000 &&
             File.Exists(fallingImage) && File.Exists(splitImage) && colors.Red == 0;
-        report = $"PHYXEL_B metalComponents={metal.Count} largestMetal={metal.Largest} square={squareCells} splitLevels={supportedFragment}/{floorFragment} concreteComponents={concrete.Count} concreteCells={concrete.Largest} concreteLevels={supportedConcrete}/{floorConcrete} landedWhole={landedWholeConcrete} water={water} sand={sand} suspendedMetal={suspendedMetal} suspendedConcrete={suspendedConcrete} red={colors.Red}";
+        report = $"PHYXEL_B metalComponents={metal.Count} largestMetal={metal.Largest} square={squareCells} splitLevels={supportedFragment}/{floorFragment} stoneComponents={stone.Count} stoneCells={stone.Largest} stoneLevels={supportedStone}/{floorStone} landedWhole={landedWholeStone} water={water} sand={sand} suspendedMetal={suspendedMetal} suspendedStone={suspendedStone} red={colors.Red}";
         return passed;
     }
 
@@ -1634,7 +1634,7 @@ public static class AcceptanceRegressionVerifier
     private static bool IsBlue(Color color) => color.B > color.G + 35 && color.G > color.R + 35;
     private static bool IsYellow(Color color) => color.R > 160 && color.G > 130 && color.B < 130;
     private static bool IsMetal(Color color) => color.R is >= 125 and <= 160 && color.G is >= 140 and <= 175 && color.B is >= 145 and <= 185;
-    private static bool IsConcrete(Color color) => color.R is >= 75 and <= 110 && color.G is >= 80 and <= 115 && color.B is >= 85 and <= 125;
+    private static bool IsStone(Color color) => color.R is >= 75 and <= 110 && color.G is >= 80 and <= 115 && color.B is >= 85 and <= 125;
     private static bool Fail(out string report)
     {
         report = "PHYXEL_ACCEPTANCE_MODE_MISSING";

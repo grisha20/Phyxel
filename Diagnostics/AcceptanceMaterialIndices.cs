@@ -12,7 +12,7 @@ internal sealed class AcceptanceMaterialIndices
         Sand = Resolve(CoreMaterialIds.Sand);
         Water = Resolve(CoreMaterialIds.Water);
         Metal = Resolve(CoreMaterialIds.Metal);
-        Concrete = Resolve(CoreMaterialIds.Concrete);
+        Stone = Resolve(CoreMaterialIds.Stone);
         Eraser = Resolve(CoreMaterialIds.Eraser);
         Gas = Resolve(CoreMaterialIds.Gas);
         Fixture = Resolve(CoreMaterialIds.Fixture);
@@ -21,7 +21,7 @@ internal sealed class AcceptanceMaterialIndices
     public uint Sand { get; }
     public uint Water { get; }
     public uint Metal { get; }
-    public uint Concrete { get; }
+    public uint Stone { get; }
     public uint Eraser { get; }
     public uint Gas { get; }
     public uint Fixture { get; }

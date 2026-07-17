@@ -55,6 +55,7 @@ public sealed class SimulationStateSerializer
     private const uint WorldFileMagic = 0x5058594C;
     private const int CurrentVersion = 4;
     private const string RemovedGoldSandId = "core:gold_sand";
+    private const string RenamedConcreteId = "core:concrete";
     private readonly JsonSerializerOptions options = new() { WriteIndented = true };
     private bool capturePending;
     private SimulationWorldSnapshot? emptySnapshot;
@@ -383,18 +384,28 @@ public sealed class SimulationStateSerializer
 
     private static string MigrateV4MaterialId(string id, List<string> warnings)
     {
-        if (id != RemovedGoldSandId)
+        string replacementId;
+        string warning;
+        if (id == RemovedGoldSandId)
+        {
+            replacementId = CoreMaterialIds.Sand;
+            warning = "Материал 'core:gold_sand' удалён и мигрирован в 'core:sand'.";
+        }
+        else if (id == RenamedConcreteId)
+        {
+            replacementId = CoreMaterialIds.Stone;
+            warning = "Материал 'core:concrete' переименован и мигрирован в 'core:stone'.";
+        }
+        else
         {
             return id;
         }
 
-        const string warning =
-            "Материал 'core:gold_sand' удалён и мигрирован в 'core:sand'.";
         if (!warnings.Contains(warning))
         {
             AddWarning(warnings, warning);
         }
-        return CoreMaterialIds.Sand;
+        return replacementId;
     }
 
     private static void AddWarning(List<string> warnings, string message)

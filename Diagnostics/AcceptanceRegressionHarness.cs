@@ -156,7 +156,7 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.SolidGravity when frame == 59 => "B_gravity_off",
             AcceptanceScenarioMode.SolidGravity when frame == 120 => "B_falling",
             AcceptanceScenarioMode.SolidGravity when frame == 190 => "B_landed",
-            AcceptanceScenarioMode.SolidGravity when frame == 359 => "B_split_concrete",
+            AcceptanceScenarioMode.SolidGravity when frame == 359 => "B_split_stone",
             AcceptanceScenarioMode.Sand when frame == 189 => "C_pile_3s",
             AcceptanceScenarioMode.Hydro when frame == 125 => "D_equal_2s",
             AcceptanceScenarioMode.Hydro when frame == 15 => "D_waterfall",

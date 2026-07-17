@@ -28,7 +28,7 @@ public static class CoreMaterialIds
     public const string Sand = "core:sand";
     public const string Water = "core:water";
     public const string Metal = "core:metal";
-    public const string Concrete = "core:concrete";
+    public const string Stone = "core:stone";
     public const string Eraser = "core:eraser";
     public const string Gas = "core:gas";
     public const string Fixture = "core:fixture";
@@ -38,7 +38,7 @@ public static class CoreMaterialIds
         Sand,
         Water,
         Metal,
-        Concrete,
+        Stone,
         Eraser,
         Gas,
         Fixture
