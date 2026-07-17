@@ -39,6 +39,7 @@ public sealed class PhyxelGame : Game
     private Task<LoadedSimulationScene?>? pendingLoad;
     private bool pendingWorldCapture;
     private bool pendingAcceptanceCheckpoint;
+    private uint pendingAcceptanceCheckpointFrame;
     private ulong pendingAcceptanceCheckpointTick;
     private bool acceptanceSuccess;
     private ushort capturedMaterial;
@@ -158,6 +159,8 @@ public sealed class PhyxelGame : Game
                 userInterface.SelectedMaterial,
                 (MaterialSimulationKind)materialRegistry[userInterface.SelectedMaterial]
                     .Properties.SimulationKind == MaterialSimulationKind.Tool,
+                userInterface.TemperatureToolActive,
+                userInterface.TargetTemperature,
                 userInterface.PointerConsumed);
         try
         {
@@ -299,6 +302,7 @@ public sealed class PhyxelGame : Game
         {
             pendingAcceptanceCheckpoint = false;
             acceptance.RecordThermalCheckpoint(
+                pendingAcceptanceCheckpointFrame,
                 pendingAcceptanceCheckpointTick,
                 checkpointSnapshot);
         }
@@ -384,7 +388,8 @@ public sealed class PhyxelGame : Game
     {
         if (!acceptance.Active || pendingWorldCapture || pendingAcceptanceCheckpoint ||
             currentResources is null || dispatchCoordinator is null ||
-            !acceptance.TryBeginThermalCheckpoint(
+            !acceptance.TryBeginAcceptanceCheckpoint(
+                frameIndex,
                 dispatchCoordinator.ThermalTicks,
                 out ulong checkpointTick))
         {
@@ -392,6 +397,7 @@ public sealed class PhyxelGame : Game
         }
         stateSerializer.BeginWorldCapture(currentResources);
         pendingAcceptanceCheckpoint = true;
+        pendingAcceptanceCheckpointFrame = frameIndex;
         pendingAcceptanceCheckpointTick = checkpointTick;
         Console.WriteLine($"PHYXEL_THERMAL_CHECKPOINT_CAPTURE ticks={checkpointTick}");
     }

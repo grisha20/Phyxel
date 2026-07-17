@@ -2,7 +2,9 @@ using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Xna.Framework;
+using Phyxel.Core;
 using Phyxel.Graphics;
+using Phyxel.Input;
 using Phyxel.Materials;
 using Phyxel.Physics;
 using Phyxel.UI;
@@ -19,6 +21,7 @@ internal static class ThermalDiffusionRegressionVerifier
         try
         {
             VerifyLayoutsAndShader();
+            VerifyBrushCommands();
             VerifyFixedStepScheduler();
             VerifyNumerics();
             VerifyProbeMappingAndFormatting();
@@ -40,7 +43,41 @@ internal static class ThermalDiffusionRegressionVerifier
             "TemperatureProbeConstants must be 16 bytes.");
         Require(Marshal.SizeOf<TemperatureProbeResult>() == 16,
             "TemperatureProbeResult must be 16 bytes.");
+        Require(Marshal.SizeOf<BrushDrawCommand>() == 36,
+            "BrushDrawCommand must be 36 bytes.");
+        Require(Enum.GetUnderlyingType(typeof(BrushCommandMode)) == typeof(uint) &&
+            (uint)BrushCommandMode.Material == 0 && (uint)BrushCommandMode.Erase == 1 &&
+            (uint)BrushCommandMode.SetTemperature == 2,
+            "BrushCommandMode C# values/layout are incorrect.");
         string shaderDirectory = Path.Combine(AppContext.BaseDirectory, "Content", "Shaders");
+        string shared = File.ReadAllText(Path.Combine(shaderDirectory, "PhysicsShared.hlsli"));
+        RequireOrdered(
+            shared,
+            "struct BrushDrawCommand",
+            "int X;",
+            "int Y;",
+            "uint MaterialIndex;",
+            "float Radius;",
+            "float Density;",
+            "uint Mode;",
+            "uint Seed;",
+            "uint Reserved;",
+            "float TargetTemperature;");
+        Require(shared.Contains("BrushCommandModeMaterial = 0", StringComparison.Ordinal) &&
+            shared.Contains("BrushCommandModeErase = 1", StringComparison.Ordinal) &&
+            shared.Contains("BrushCommandModeSetTemperature = 2", StringComparison.Ordinal),
+            "Brush command HLSL mode constants do not match C#.");
+        string brush = File.ReadAllText(Path.Combine(shaderDirectory, "BrushApplication.hlsl"));
+        int temperatureBranch = brush.IndexOf(
+            "command.Mode == BrushCommandModeSetTemperature",
+            StringComparison.Ordinal);
+        int materialLookup = brush.IndexOf(
+            "MaterialProperties material = Materials[command.MaterialIndex]",
+            StringComparison.Ordinal);
+        Require(temperatureBranch >= 0 && materialLookup > temperatureBranch &&
+            brush.Contains("existing.Temperature = clamp(command.TargetTemperature, -273.15, 5000.0)",
+                StringComparison.Ordinal),
+            "Temperature brush is missing, unclamped, or reads its unused material first.");
         string thermal = File.ReadAllText(Path.Combine(shaderDirectory, "ThermalDiffusion.hlsl"));
         RequireOrdered(
             thermal,
@@ -73,6 +110,56 @@ internal static class ThermalDiffusionRegressionVerifier
             "uint MaterialIndex;",
             "float Temperature;",
             "uint Reserved;");
+    }
+
+    private static void VerifyBrushCommands()
+    {
+        SimulationSettings settings = new();
+        Rectangle canvas = new(0, 0, settings.Width, settings.Height);
+        RawInputSnapshot left = new(
+            new Point(100, 100), 0, true, false, true, false, false, false,
+            false, false, false, false, 1f / 60);
+        BrushDrawCommand temperature = new CanvasBrushController().CreateCommands(
+            left, canvas, settings, 1, true, true, 500, false)[0];
+        Require(temperature.Mode == BrushCommandMode.SetTemperature &&
+            temperature.TargetTemperature == 500,
+            "Left temperature-tool command is incorrect.");
+
+        RawInputSnapshot right = left with
+        {
+            LeftDown = false,
+            RightDown = true,
+            LeftPressed = false,
+            RightPressed = true
+        };
+        BrushDrawCommand erase = new CanvasBrushController().CreateCommands(
+            right, canvas, settings, 1, false, true, 500, false)[0];
+        Require(erase.Mode == BrushCommandMode.Erase,
+            "Right button did not override the temperature tool with erase.");
+
+        BrushDrawCommand material = new CanvasBrushController().CreateCommands(
+            left, canvas, settings, 1, false, false, 500, false)[0];
+        Require(material.Mode == BrushCommandMode.Material && material.TargetTemperature == 0,
+            "Ordinary material brush command changed semantics.");
+
+        GpuCommandEncoder encoder = new();
+        BrushDrawCommand tooHot = temperature;
+        tooHot.TargetTemperature = 6000;
+        ReadOnlySpan<BrushDrawCommand> encoded = encoder.Encode([tooHot]);
+        Require(encoded[0].TargetTemperature == MaterialRegistry.MaximumInitialTemperature,
+            "CPU command encoder did not clamp target temperature.");
+        BrushDrawCommand invalid = temperature;
+        invalid.TargetTemperature = float.NaN;
+        bool rejected = false;
+        try
+        {
+            encoder.Encode([invalid]);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            rejected = true;
+        }
+        Require(rejected, "CPU command encoder accepted NaN target temperature.");
     }
 
     private static void VerifyFixedStepScheduler()

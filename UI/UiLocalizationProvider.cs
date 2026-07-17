@@ -13,4 +13,6 @@ public static class UiLocalizationProvider
     public static string SolidGravity => "Гравитация";
     public static string HydraulicPressure => "Гидравлика сосудов";
     public static string Materials => "МАТЕРИАЛЫ";
+    public static string TemperatureTool => "Температура";
+    public static string TargetTemperature => "Целевая температура";
 }

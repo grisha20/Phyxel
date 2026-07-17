@@ -33,6 +33,13 @@ public struct MaterialProperties
     public float HeatCapacity;
 }
 
+public enum BrushCommandMode : uint
+{
+    Material = 0,
+    Erase = 1,
+    SetTemperature = 2
+}
+
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct BrushDrawCommand
 {
@@ -41,9 +48,10 @@ public struct BrushDrawCommand
     public uint MaterialIndex;
     public float Radius;
     public float Density;
-    public uint Mode;
+    public BrushCommandMode Mode;
     public uint Seed;
     public uint Reserved;
+    public float TargetTemperature;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

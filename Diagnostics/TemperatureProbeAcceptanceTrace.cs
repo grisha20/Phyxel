@@ -9,6 +9,7 @@ internal sealed class TemperatureProbeAcceptanceTrace
     public TemperatureProbeResult? Hot { get; private set; }
     public TemperatureProbeResult? Cold { get; private set; }
     public TemperatureProbeResult? Empty { get; private set; }
+    public TemperatureProbeResult? TemperatureTool { get; private set; }
     public bool ResetAfterClear { get; private set; }
     public bool ResetAfterScale { get; private set; }
 
@@ -37,6 +38,14 @@ internal sealed class TemperatureProbeAcceptanceTrace
             case 220:
                 ResetAfterScale = result is null;
                 break;
+        }
+    }
+
+    public void ObserveTemperatureTool(uint frame, TemperatureProbeResult? result)
+    {
+        if (frame == 15)
+        {
+            TemperatureTool = result;
         }
     }
 }

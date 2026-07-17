@@ -232,9 +232,10 @@ public sealed class SimulationDispatchCoordinator
         ReadOnlySpan<BrushDrawCommand> commands,
         float elapsedSeconds)
     {
+        bool containsMaterialCommand = ContainsMaterialCommand(commands);
         GpuSimulationResources resources = lifecycleManager.CreateOrResize(
             settings,
-            worldHasMatter || thermalActive || commands.Length > 0);
+            worldHasMatter || thermalActive || containsMaterialCommand);
         if (!ReferenceEquals(resources, boundResources))
         {
             Clear(resources);
@@ -249,17 +250,17 @@ public sealed class SimulationDispatchCoordinator
         }
 
         SimulationFrameConstants constants = CreateConstants(settings, commands);
-        if (commands.Length > 0)
+        if (commands.Length > 0 && resources.IsSimulationAllocated)
         {
             resources.Commands.Upload(resources.Context, commands);
             DispatchBrush(resources, ref constants);
-            cellMaterialsDirty = true;
+            cellMaterialsDirty |= ContainsGridTopologyCommand(commands);
             RegisterActivity(
                 commands,
                 settings.Width,
                 settings.Height,
                 settings.HydraulicPressure);
-            worldHasMatter |= ContainsMatterCommand(commands);
+            worldHasMatter |= containsMaterialCommand;
             presentationDirty = true;
         }
 
@@ -960,7 +961,7 @@ public sealed class SimulationDispatchCoordinator
         int height,
         bool hydraulicPressure)
     {
-        if (commands.Length > 0)
+        if (ContainsGridTopologyCommand(commands))
         {
             waterPressureRoutesDirty = true;
             hydraulicWarmupFrames = hydraulicPressure ? 128 : 0;
@@ -969,9 +970,19 @@ public sealed class SimulationDispatchCoordinator
         }
         foreach (BrushDrawCommand command in commands)
         {
+            if (command.Mode == BrushCommandMode.SetTemperature)
+            {
+                thermalActive |= worldHasMatter;
+                continue;
+            }
+            if (command.Mode != BrushCommandMode.Material &&
+                command.Mode != BrushCommandMode.Erase)
+            {
+                continue;
+            }
             ExpandActiveRegion(command.X, command.Y, (int)MathF.Ceiling(command.Radius), width, height);
 
-            if (command.Mode != 0)
+            if (command.Mode == BrushCommandMode.Erase)
             {
                 topologyDirty = true;
                 cellularSleeping = false;
@@ -1113,11 +1124,23 @@ public sealed class SimulationDispatchCoordinator
         thermalTimingMaximumMilliseconds = 0;
     }
 
-    private static bool ContainsMatterCommand(ReadOnlySpan<BrushDrawCommand> commands)
+    private static bool ContainsMaterialCommand(ReadOnlySpan<BrushDrawCommand> commands)
     {
         foreach (BrushDrawCommand command in commands)
         {
-            if (command.Mode == 0)
+            if (command.Mode == BrushCommandMode.Material)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool ContainsGridTopologyCommand(ReadOnlySpan<BrushDrawCommand> commands)
+    {
+        foreach (BrushDrawCommand command in commands)
+        {
+            if (command.Mode is BrushCommandMode.Material or BrushCommandMode.Erase)
             {
                 return true;
             }

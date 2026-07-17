@@ -23,6 +23,8 @@ public sealed class CanvasBrushController
         SimulationSettings settings,
         ushort selectedMaterial,
         bool selectedMaterialIsTool,
+        bool temperatureToolActive,
+        float targetTemperature,
         bool pointerConsumedByUi)
     {
         frameCommands.Clear();
@@ -52,8 +54,19 @@ public sealed class CanvasBrushController
             gridPosition = SnapOrthogonally(strokeOrigin, gridPosition);
         }
 
-        bool erasing = input.RightDown || selectedMaterialIsTool;
-        AppendInterpolatedCommands(previousGridPosition, gridPosition, selectedMaterial, erasing, settings);
+        bool erasing = input.RightDown || !temperatureToolActive && selectedMaterialIsTool;
+        BrushCommandMode mode = erasing
+            ? BrushCommandMode.Erase
+            : temperatureToolActive
+                ? BrushCommandMode.SetTemperature
+                : BrushCommandMode.Material;
+        AppendInterpolatedCommands(
+            previousGridPosition,
+            gridPosition,
+            selectedMaterial,
+            mode,
+            targetTemperature,
+            settings);
         previousGridPosition = gridPosition;
         return frameCommands;
     }
@@ -62,7 +75,8 @@ public sealed class CanvasBrushController
         Point start,
         Point end,
         ushort material,
-        bool erasing,
+        BrushCommandMode mode,
+        float targetTemperature,
         SimulationSettings settings)
     {
         int deltaX = end.X - start.X;
@@ -80,9 +94,15 @@ public sealed class CanvasBrushController
                 MaterialIndex = material,
                 Radius = settings.BrushRadius,
                 Density = settings.SpawnDensity,
-                Mode = erasing ? 1u : 0u,
+                Mode = mode,
                 Seed = ++commandSeed,
-                Reserved = activeBodyId
+                Reserved = activeBodyId,
+                TargetTemperature = mode == BrushCommandMode.SetTemperature
+                    ? Math.Clamp(
+                        float.IsFinite(targetTemperature) ? targetTemperature : 20f,
+                        MaterialRegistry.MinimumInitialTemperature,
+                        MaterialRegistry.MaximumInitialTemperature)
+                    : 0
             });
         }
     }

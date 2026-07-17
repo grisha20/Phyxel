@@ -33,6 +33,7 @@ public enum AcceptanceScenarioMode
     GranularBarrier,
     GranularBarrierHydraulic,
     TemperatureBrush,
+    TemperatureTool,
     ThermalUniform,
     ThermalContact,
     ThermalCapacity,
@@ -86,6 +87,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.GranularBarrier => CreateGranularBarrier(frame),
             AcceptanceScenarioMode.GranularBarrierHydraulic => CreateGranularBarrier(frame),
             AcceptanceScenarioMode.TemperatureBrush => CreateTemperatureBrush(frame),
+            AcceptanceScenarioMode.TemperatureTool => CreateTemperatureTool(frame),
             AcceptanceScenarioMode.ThermalUniform or
             AcceptanceScenarioMode.ThermalContact or
             AcceptanceScenarioMode.ThermalCapacity or
@@ -114,6 +116,43 @@ public static class AcceptanceRegressionScenario
         return frame == 1
             ? [Create(300, 60, 14, materials.Eraser, 1, 0)]
             : [];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateTemperatureTool(uint frame)
+    {
+        if (frame == 1)
+        {
+            return
+            [
+                CreateTemperature(240, 135, 15, materials.Sand, 500),
+                CreateTemperature(80, 60, 10, materials.Sand, 500)
+            ];
+        }
+        if (frame == 2)
+        {
+            return [Create(240, 135, 4, materials.Eraser, (uint)BrushCommandMode.Erase, 0)];
+        }
+        return frame == 131
+            ? [CreateTemperature(80, 60, 10, materials.Sand, 500)]
+            : [];
+    }
+
+    private static BrushDrawCommand CreateTemperature(
+        int x,
+        int y,
+        float radius,
+        uint material,
+        float temperature)
+    {
+        BrushDrawCommand command = Create(
+            x,
+            y,
+            radius,
+            material,
+            (uint)BrushCommandMode.SetTemperature,
+            0);
+        command.TargetTemperature = temperature;
+        return command;
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateBowl(uint frame)
@@ -631,7 +670,7 @@ public static class AcceptanceRegressionScenario
             MaterialIndex = material,
             Radius = radius,
             Density = 1,
-            Mode = mode,
+            Mode = (BrushCommandMode)mode,
             Seed = (uint)(x + y * 2048),
             Reserved = bodyId
         };

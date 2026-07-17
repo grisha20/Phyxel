@@ -11,6 +11,7 @@ using Phyxel.Serialization;
 namespace Phyxel.Diagnostics;
 
 internal readonly record struct ThermalAcceptanceCheckpoint(
+    uint Frame,
     ulong ThermalTicks,
     SimulationWorldSnapshot Snapshot);
 
@@ -41,6 +42,15 @@ internal static class ThermalAcceptanceVerifier
         TemperatureProbeAcceptanceTrace probeTrace,
         out string report)
     {
+        if (mode == AcceptanceScenarioMode.TemperatureTool)
+        {
+            return ValidateTemperatureTool(
+                materials,
+                snapshot,
+                checkpoints,
+                probeTrace,
+                out report);
+        }
         if (mode == AcceptanceScenarioMode.TemperatureProbeGpu)
         {
             return ValidateTemperatureProbe(materials, probeTrace, out report);
@@ -155,6 +165,113 @@ internal static class ThermalAcceptanceVerifier
             $"energyError={energyError:P5} {detail}";
         return passed;
     }
+
+    private static bool ValidateTemperatureTool(
+        MaterialRegistry materials,
+        SimulationWorldSnapshot final,
+        IReadOnlyList<ThermalAcceptanceCheckpoint> checkpoints,
+        TemperatureProbeAcceptanceTrace probeTrace,
+        out string report)
+    {
+        if (checkpoints.Count != 2)
+        {
+            report = $"PHYXEL_TEMPERATURE_TOOL checkpoints={checkpoints.Count}";
+            return false;
+        }
+
+        SimulationWorldSnapshot initial = ThermalAcceptanceScenario.Create(
+            AcceptanceScenarioMode.TemperatureTool,
+            final.Width,
+            final.Height,
+            materials) ?? throw new InvalidOperationException("Temperature tool fixture is missing.");
+        ThermalAcceptanceCheckpoint checkpoint = checkpoints[0];
+        ThermalAcceptanceCheckpoint diffusedCheckpoint = checkpoints[1];
+        ReadOnlySpan<GridCell> initialCells = MemoryMarshal.Cast<byte, GridCell>(initial.Grid);
+        ReadOnlySpan<GridCell> pausedCells = MemoryMarshal.Cast<byte, GridCell>(checkpoint.Snapshot.Grid);
+        bool exactMutation = initialCells.Length == pausedCells.Length;
+        int heated = 0;
+        int unchanged = 0;
+        int erased = 0;
+        for (int y = 0; exactMutation && y < checkpoint.Snapshot.Height; y++)
+        {
+            for (int x = 0; x < checkpoint.Snapshot.Width; x++)
+            {
+                int index = y * checkpoint.Snapshot.Width + x;
+                GridCell before = initialCells[index];
+                GridCell after = pausedCells[index];
+                int dx = x - 240;
+                int dy = y - 135;
+                int distanceSquared = dx * dx + dy * dy;
+                if (distanceSquared <= 4 * 4)
+                {
+                    exactMutation &= IsDefault(after);
+                    erased++;
+                }
+                else if (distanceSquared <= 15 * 15 && before.IsActive != 0)
+                {
+                    exactMutation &= SameExceptTemperature(before, after) && after.Temperature == 500;
+                    heated++;
+                }
+                else
+                {
+                    exactMutation &= SameCell(before, after);
+                    unchanged++;
+                }
+            }
+        }
+
+        GridCell emptyTarget = CellAt(checkpoint.Snapshot, 80, 60);
+        GridCell preserved = CellAt(checkpoint.Snapshot, 245, 135);
+        GridCell pausedHot = CellAt(checkpoint.Snapshot, 252, 135);
+        GridCell pausedCold = CellAt(checkpoint.Snapshot, 256, 135);
+        GridCell finalHot = CellAt(diffusedCheckpoint.Snapshot, 252, 135);
+        GridCell finalCold = CellAt(diffusedCheckpoint.Snapshot, 256, 135);
+        Metrics pausedMetrics = Measure(checkpoint.Snapshot, materials);
+        Metrics finalMetrics = Measure(diffusedCheckpoint.Snapshot, materials);
+        double energyError = RelativeError(pausedMetrics.Energy, finalMetrics.Energy);
+        uint sand = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
+        bool probeValid = probeTrace.TemperatureTool is
+            { IsActive: 1, MaterialIndex: var probeMaterial, Temperature: 500 } &&
+            probeMaterial == sand;
+        bool preservedFields = preserved.MaterialIndex == sand && preserved.Mass == 0.75f &&
+            preserved.VelocityX == 3.25f && preserved.VelocityY == -1.5f &&
+            preserved.Pressure == 2.5f && preserved.IsActive == 1 &&
+            preserved.BodyId == 4242 && preserved.RestFrames == 17 &&
+            preserved.Temperature == 500;
+        bool diffusion = diffusedCheckpoint.ThermalTicks > 0 &&
+            finalHot.IsActive != 0 && finalCold.IsActive != 0 &&
+            finalHot.Temperature < pausedHot.Temperature &&
+            finalCold.Temperature > pausedCold.Temperature &&
+            energyError <= 0.0005;
+        bool roundTrip = VerifyV5RoundTrip(diffusedCheckpoint.Snapshot, materials);
+        bool passed = checkpoint.Frame >= 3 && checkpoint.ThermalTicks == 0 &&
+            diffusedCheckpoint.Frame >= 120 && diffusedCheckpoint.ThermalTicks > 0 &&
+            exactMutation && heated > 0 && erased > 0 && IsDefault(emptyTarget) &&
+            preservedFields && probeValid && diffusion && roundTrip && final.Grid.Length == 0;
+        report = $"PHYXEL_TEMPERATURE_TOOL checkpoints={checkpoint.Frame}/{checkpoint.ThermalTicks}," +
+            $"{diffusedCheckpoint.Frame}/{diffusedCheckpoint.ThermalTicks} " +
+            $"heated={heated} unchanged={unchanged} erased={erased} exact={exactMutation} " +
+            $"paused={pausedHot.Temperature:0.000}/{pausedCold.Temperature:0.000} " +
+            $"final={finalHot.Temperature:0.000}/{finalCold.Temperature:0.000} " +
+            $"probe={FormatProbe(probeTrace.TemperatureTool)} emptyDefault={IsDefault(emptyTarget)} " +
+            $"preservedFields={preservedFields} energyError={energyError:P5} " +
+            $"roundTrip={roundTrip} clearedEmpty={final.Grid.Length == 0}";
+        return passed;
+    }
+
+    private static bool SameExceptTemperature(GridCell first, GridCell second) =>
+        first.MaterialIndex == second.MaterialIndex &&
+        BitConverter.SingleToInt32Bits(first.Mass) == BitConverter.SingleToInt32Bits(second.Mass) &&
+        BitConverter.SingleToInt32Bits(first.VelocityX) == BitConverter.SingleToInt32Bits(second.VelocityX) &&
+        BitConverter.SingleToInt32Bits(first.VelocityY) == BitConverter.SingleToInt32Bits(second.VelocityY) &&
+        BitConverter.SingleToInt32Bits(first.Pressure) == BitConverter.SingleToInt32Bits(second.Pressure) &&
+        first.IsActive == second.IsActive && first.BodyId == second.BodyId &&
+        first.RestFrames == second.RestFrames;
+
+    private static bool SameCell(GridCell first, GridCell second) =>
+        SameExceptTemperature(first, second) &&
+        BitConverter.SingleToInt32Bits(first.Temperature) ==
+        BitConverter.SingleToInt32Bits(second.Temperature);
 
     private static bool ValidateContactCheckpoints(
         SimulationWorldSnapshot initial,

@@ -35,6 +35,9 @@ static const uint SimulationKindLiquid = 4;
 static const uint SimulationKindGas = 5;
 static const uint MaterialFlagMovableSolid = 1u << 0;
 static const float MaximumMaterialDensity = 100.0;
+static const uint BrushCommandModeMaterial = 0;
+static const uint BrushCommandModeErase = 1;
+static const uint BrushCommandModeSetTemperature = 2;
 
 struct BrushDrawCommand
 {
@@ -46,6 +49,7 @@ struct BrushDrawCommand
     uint Mode;
     uint Seed;
     uint Reserved;
+    float TargetTemperature;
 };
 
 struct SimulationStatistics

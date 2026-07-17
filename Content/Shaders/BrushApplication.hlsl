@@ -29,24 +29,30 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     uint index = FlattenCoordinate(uint2(position));
-    if (command.Mode == 0 && HashUnitFloat(index ^ command.Seed ^ FrameIndex) > command.Density)
+    if (command.Mode == BrushCommandModeMaterial &&
+        HashUnitFloat(index ^ command.Seed ^ FrameIndex) > command.Density)
     {
         return;
     }
 
     GridCell existing = Grid[index];
-    if (command.Mode == 2)
+    if (command.Mode == BrushCommandModeSetTemperature)
     {
-        if (existing.IsActive != 0 && IsCellularMaterial(Materials[existing.MaterialIndex].SimulationKind))
+        if (existing.IsActive != 0)
         {
-            Grid[index] = CreateEmptyCell();
+            existing.Temperature = clamp(command.TargetTemperature, -273.15, 5000.0);
+            Grid[index] = existing;
         }
         return;
     }
 
-    if (command.Mode != 0)
+    if (command.Mode == BrushCommandModeErase)
     {
         Grid[index] = CreateEmptyCell();
+        return;
+    }
+    if (command.Mode != BrushCommandModeMaterial)
+    {
         return;
     }
 

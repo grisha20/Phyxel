@@ -48,6 +48,7 @@ public sealed class AcceptanceRegressionHarness
             "granular_barrier" or "granular_barrier_off" => AcceptanceScenarioMode.GranularBarrier,
             "granular_barrier_hydraulic" or "granular_barrier_on" => AcceptanceScenarioMode.GranularBarrierHydraulic,
             "temperature_brush" => AcceptanceScenarioMode.TemperatureBrush,
+            "temperature_tool" => AcceptanceScenarioMode.TemperatureTool,
             "thermal_uniform" => AcceptanceScenarioMode.ThermalUniform,
             "thermal_contact" => AcceptanceScenarioMode.ThermalContact,
             "thermal_capacity" => AcceptanceScenarioMode.ThermalCapacity,
@@ -111,6 +112,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.GranularBarrier => 900,
                 AcceptanceScenarioMode.GranularBarrierHydraulic => 900,
                 AcceptanceScenarioMode.TemperatureBrush => 3,
+                AcceptanceScenarioMode.TemperatureTool => 140,
                 AcceptanceScenarioMode.ThermalGas => 120,
                 AcceptanceScenarioMode.ThermalContact => 500,
                 AcceptanceScenarioMode.ThermalCapacity => 1300,
@@ -139,6 +141,7 @@ public sealed class AcceptanceRegressionHarness
     public Point? GetProbeCoordinate(uint frame) => Mode switch
     {
         AcceptanceScenarioMode.ThermalUniform => new Point(200, 120),
+        AcceptanceScenarioMode.TemperatureTool => new Point(252, 135),
         AcceptanceScenarioMode.TemperatureProbeGpu when frame < 30 => new Point(60, 235),
         AcceptanceScenarioMode.TemperatureProbeGpu when frame < 60 => new Point(120, 235),
         AcceptanceScenarioMode.TemperatureProbeGpu when frame < 120 => new Point(239, 130),
@@ -147,7 +150,8 @@ public sealed class AcceptanceRegressionHarness
         _ => null
     };
     public bool OwnsTemperatureProbe => Mode is
-        AcceptanceScenarioMode.ThermalUniform or AcceptanceScenarioMode.TemperatureProbeGpu;
+        AcceptanceScenarioMode.ThermalUniform or AcceptanceScenarioMode.TemperatureTool or
+        AcceptanceScenarioMode.TemperatureProbeGpu;
 
     public void ApplyRuntimeControls(
         uint frame,
@@ -155,6 +159,15 @@ public sealed class AcceptanceRegressionHarness
         SimulationDispatchCoordinator dispatchCoordinator,
         GpuTemperatureProbe temperatureProbe)
     {
+        if (Mode == AcceptanceScenarioMode.TemperatureTool)
+        {
+            if (frame == 130)
+            {
+                dispatchCoordinator.ClearCurrentWorld(settings);
+                temperatureProbe.Reset();
+            }
+            return;
+        }
         if (Mode != AcceptanceScenarioMode.TemperatureProbeGpu)
         {
             return;
@@ -177,16 +190,34 @@ public sealed class AcceptanceRegressionHarness
         {
             temperatureProbeTrace.Observe(frame, result);
         }
+        else if (Mode == AcceptanceScenarioMode.TemperatureTool)
+        {
+            temperatureProbeTrace.ObserveTemperatureTool(frame, result);
+        }
     }
 
-    public bool TryBeginThermalCheckpoint(ulong thermalTicks, out ulong checkpointTick)
+    public bool TryBeginAcceptanceCheckpoint(
+        uint frame,
+        ulong thermalTicks,
+        out ulong checkpointTick)
     {
         checkpointTick = 0;
-        if (Mode != AcceptanceScenarioMode.ThermalContact ||
-            thermalCheckpoints.Count >= ThermalContactCheckpointTicks.Length)
+        if (Mode == AcceptanceScenarioMode.TemperatureTool)
         {
-            return false;
+            bool ready = thermalCheckpoints.Count switch
+            {
+                0 => frame >= 3,
+                1 => frame >= 120,
+                _ => false
+            };
+            if (ready)
+            {
+                checkpointTick = thermalTicks;
+            }
+            return ready;
         }
+        if (Mode != AcceptanceScenarioMode.ThermalContact ||
+            thermalCheckpoints.Count >= ThermalContactCheckpointTicks.Length) return false;
         ulong target = ThermalContactCheckpointTicks[thermalCheckpoints.Count];
         if (thermalTicks < target)
         {
@@ -196,9 +227,12 @@ public sealed class AcceptanceRegressionHarness
         return true;
     }
 
-    public void RecordThermalCheckpoint(ulong thermalTicks, SimulationWorldSnapshot snapshot)
+    public void RecordThermalCheckpoint(
+        uint frame,
+        ulong thermalTicks,
+        SimulationWorldSnapshot snapshot)
     {
-        thermalCheckpoints.Add(new ThermalAcceptanceCheckpoint(thermalTicks, snapshot));
+        thermalCheckpoints.Add(new ThermalAcceptanceCheckpoint(frame, thermalTicks, snapshot));
     }
 
     public void ConfigureSettings(uint frame, SimulationSettings settings)
@@ -230,6 +264,10 @@ public sealed class AcceptanceRegressionHarness
         else if (Mode == AcceptanceScenarioMode.SavedGravity)
         {
             settings.SolidGravity = frame >= 30;
+        }
+        if (Mode == AcceptanceScenarioMode.TemperatureTool)
+        {
+            settings.Paused = frame < 20;
         }
     }
 

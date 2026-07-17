@@ -146,6 +146,7 @@ public static class AcceptanceRegressionVerifier
                 artifactDirectory,
                 out report),
             AcceptanceScenarioMode.TemperatureBrush => ValidateTemperatureBrush(snapshot, out report),
+            AcceptanceScenarioMode.TemperatureTool or
             AcceptanceScenarioMode.ThermalUniform or
             AcceptanceScenarioMode.ThermalContact or
             AcceptanceScenarioMode.ThermalCapacity or

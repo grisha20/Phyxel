@@ -26,6 +26,7 @@ internal static class ThermalAcceptanceScenario
             AcceptanceScenarioMode.ThermalInsulator or
             AcceptanceScenarioMode.ThermalVacuum or
             AcceptanceScenarioMode.ThermalGas or
+            AcceptanceScenarioMode.TemperatureTool or
             AcceptanceScenarioMode.TemperatureProbeGpu))
         {
             return null;
@@ -79,6 +80,9 @@ internal static class ThermalAcceptanceScenario
                 break;
             case AcceptanceScenarioMode.ThermalGas:
                 CreateGas(cells, width, materials);
+                break;
+            case AcceptanceScenarioMode.TemperatureTool:
+                CreateTemperatureToolFixture(cells, width, height, materials);
                 break;
             case AcceptanceScenarioMode.TemperatureProbeGpu:
                 CreateTemperatureProbeFixture(cells, width, height, materials);
@@ -155,6 +159,29 @@ internal static class ThermalAcceptanceScenario
         Fill(cells, width, 35, 250, 144, 253, fixture, 20, 2);
         Fill(cells, width, 200, 100, 239, 159, fast, 400, 2);
         Fill(cells, width, 240, 100, 279, 159, fast, 0, 2);
+    }
+
+    private static void CreateTemperatureToolFixture(
+        Span<GridCell> cells,
+        int width,
+        int height,
+        MaterialRegistry materials)
+    {
+        if (width < 400 || height < 220)
+        {
+            throw new InvalidOperationException("Temperature tool acceptance requires at least 400x220 cells.");
+        }
+        uint sand = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
+        uint fixture = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Fixture);
+        Fill(cells, width, 160, 100, 319, 169, sand, 20, 1);
+        Fill(cells, width, 155, 170, 324, 174, fixture, 20, 1);
+        ref GridCell preservationProbe = ref cells[135 * width + 245];
+        preservationProbe.Mass = 0.75f;
+        preservationProbe.VelocityX = 3.25f;
+        preservationProbe.VelocityY = -1.5f;
+        preservationProbe.Pressure = 2.5f;
+        preservationProbe.BodyId = 4242;
+        preservationProbe.RestFrames = 17;
     }
 
     private static void Fill(

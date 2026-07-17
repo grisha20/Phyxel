@@ -33,9 +33,15 @@ public sealed class SandboxUiCoordinator
     private readonly UiIconButton loadButton = new(UiLocalizationProvider.Load);
     private readonly UiIconButton solidGravityButton = new(UiLocalizationProvider.SolidGravity);
     private readonly UiIconButton hydraulicsButton = new(UiLocalizationProvider.HydraulicPressure);
+    private readonly UiIconButton temperatureButton = new(UiLocalizationProvider.TemperatureTool)
+    {
+        AccentColor = new Color(232, 132, 72)
+    };
     private readonly UiValueSlider brushSlider;
     private readonly UiValueSlider densitySlider;
+    private readonly UiValueSlider temperatureSlider;
     private readonly UiValueSlider scaleSlider;
+    private ushort selectedMaterial;
     private float clearConfirmationRemaining;
     private bool compactLayout;
 
@@ -60,6 +66,14 @@ public sealed class SandboxUiCoordinator
 
         brushSlider = new UiValueSlider(UiLocalizationProvider.BrushSize, 1, 96, 1, 18, " px");
         densitySlider = new UiValueSlider(UiLocalizationProvider.SpawnDensity, 5, 100, 1, 82, "%");
+        temperatureSlider = new UiValueSlider(
+            UiLocalizationProvider.TargetTemperature,
+            -200,
+            2000,
+            10,
+            500,
+            " °C",
+            "0");
         scaleSlider = new UiValueSlider(
             "Масштаб симуляции",
             [25, 35, 50, 75, 85, 100],
@@ -69,7 +83,17 @@ public sealed class SandboxUiCoordinator
         SelectedMaterial = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
     }
 
-    public ushort SelectedMaterial { get; set; }
+    public ushort SelectedMaterial
+    {
+        get => selectedMaterial;
+        set
+        {
+            selectedMaterial = value;
+            TemperatureToolActive = false;
+        }
+    }
+    public bool TemperatureToolActive { get; private set; }
+    public float TargetTemperature => temperatureSlider.Value;
     public Rectangle CanvasBounds { get; private set; }
     public Rectangle SidePanelBounds { get; private set; }
     public Rectangle InfoPanelBounds { get; private set; }
@@ -88,11 +112,18 @@ public sealed class SandboxUiCoordinator
         for (int index = 0; index < materialButtons.Count; index++)
         {
             (ushort runtimeIndex, UiIconButton button) = materialButtons[index];
-            button.Active = runtimeIndex == SelectedMaterial;
+            button.Active = !TemperatureToolActive && runtimeIndex == SelectedMaterial;
             if (button.Update(input))
             {
                 SelectedMaterial = runtimeIndex;
+                TemperatureToolActive = false;
             }
+        }
+
+        temperatureButton.Active = TemperatureToolActive;
+        if (temperatureButton.Update(input))
+        {
+            TemperatureToolActive = true;
         }
 
         pauseButton.Active = settings.Paused;
@@ -150,7 +181,11 @@ public sealed class SandboxUiCoordinator
             settings.BrushRadius = (int)brushSlider.Value;
         }
 
-        if (densitySlider.Update(input))
+        if (TemperatureToolActive)
+        {
+            temperatureSlider.Update(input);
+        }
+        else if (densitySlider.Update(input))
         {
             settings.SpawnDensity = densitySlider.Value / 100f;
         }
@@ -192,9 +227,17 @@ public sealed class SandboxUiCoordinator
         {
             button.Draw(spriteBatch, font, panelRenderer, pixel, true);
         }
+        temperatureButton.Draw(spriteBatch, font, panelRenderer, pixel);
 
         brushSlider.Draw(spriteBatch, font, panelRenderer, pixel);
-        densitySlider.Draw(spriteBatch, font, panelRenderer, pixel);
+        if (TemperatureToolActive)
+        {
+            temperatureSlider.Draw(spriteBatch, font, panelRenderer, pixel);
+        }
+        else
+        {
+            densitySlider.Draw(spriteBatch, font, panelRenderer, pixel);
+        }
         scaleSlider.Draw(spriteBatch, font, panelRenderer, pixel);
         pauseButton.Draw(spriteBatch, font, panelRenderer, pixel);
         solidGravityButton.Draw(spriteBatch, font, panelRenderer, pixel);
@@ -202,7 +245,9 @@ public sealed class SandboxUiCoordinator
         clearButton.Draw(spriteBatch, font, panelRenderer, pixel);
         saveButton.Draw(spriteBatch, font, panelRenderer, pixel);
         loadButton.Draw(spriteBatch, font, panelRenderer, pixel);
-        string selectedName = materialRegistry[SelectedMaterial].Name;
+        string selectedName = TemperatureToolActive
+            ? UiLocalizationProvider.TemperatureTool
+            : materialRegistry[SelectedMaterial].Name;
         string gravityState = settings.SolidGravity ? "вкл" : "выкл";
         string hydraulicsState = settings.HydraulicPressure ? "вкл" : "выкл";
         string probeInfo = FormatTemperatureProbe(materialRegistry, temperatureProbe);
@@ -260,9 +305,14 @@ public sealed class SandboxUiCoordinator
         int diameter = Math.Max(3, (int)MathF.Round((settings.BrushRadius * 2 + 1) * pixelScale));
         Rectangle bounds = new(pointer.X - diameter / 2, pointer.Y - diameter / 2, diameter, diameter);
         bool erasing = eraseOverride ||
+            !TemperatureToolActive &&
             (MaterialSimulationKind)materialRegistry[SelectedMaterial].Properties.SimulationKind ==
-            MaterialSimulationKind.Tool;
-        Color color = erasing ? new Color(255, 96, 96, 190) : new Color(210, 235, 255, 175);
+                MaterialSimulationKind.Tool;
+        Color color = erasing
+            ? new Color(255, 96, 96, 190)
+            : TemperatureToolActive
+                ? new Color(255, 154, 86, 190)
+                : new Color(210, 235, 255, 175);
         spriteBatch.Draw(brushOutline, bounds, color);
     }
 
@@ -299,11 +349,14 @@ public sealed class SandboxUiCoordinator
             button.Bounds = new Rectangle(innerX, cursorY, innerWidth, buttonHeight);
             cursorY += buttonHeight + buttonSpacing;
         }
+        temperatureButton.Bounds = new Rectangle(innerX, cursorY, innerWidth, buttonHeight);
+        cursorY += buttonHeight + buttonSpacing;
 
         cursorY += compactLayout ? 24 : 28;
         brushSlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
         cursorY += compactLayout ? 49 : 64;
         densitySlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
+        temperatureSlider.Bounds = densitySlider.Bounds;
         cursorY += compactLayout ? 49 : 64;
         scaleSlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
         UiIconButton[] serviceButtons =
