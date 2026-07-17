@@ -26,7 +26,6 @@ public sealed class SandboxUiCoordinator
     private readonly Texture2D brushOutline;
     private readonly UiPanelBackdropRenderer panelRenderer;
     private readonly List<(ushort RuntimeIndex, UiIconButton Button)> materialButtons = [];
-    private readonly ushort eraserRuntimeIndex;
     private readonly UiIconButton pauseButton = new(UiLocalizationProvider.Pause);
     private readonly UiIconButton clearButton = new(UiLocalizationProvider.Clear);
     private readonly UiIconButton saveButton = new(UiLocalizationProvider.Save);
@@ -49,7 +48,6 @@ public sealed class SandboxUiCoordinator
         pixel = resources.PixelTexture;
         brushOutline = resources.BrushOutlineTexture;
         panelRenderer = new UiPanelBackdropRenderer(resources.PixelTexture, resources.CircleTexture);
-        eraserRuntimeIndex = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Eraser);
         foreach (MaterialDefinition material in materialRegistry.SelectableMaterials)
         {
             UiIconButton button = new(material.Name)
@@ -234,7 +232,9 @@ public sealed class SandboxUiCoordinator
         float pixelScale = worldBounds.Width / (float)Math.Max(1, settings.Width);
         int diameter = Math.Max(3, (int)MathF.Round((settings.BrushRadius * 2 + 1) * pixelScale));
         Rectangle bounds = new(pointer.X - diameter / 2, pointer.Y - diameter / 2, diameter, diameter);
-        bool erasing = eraseOverride || SelectedMaterial == eraserRuntimeIndex;
+        bool erasing = eraseOverride ||
+            (MaterialSimulationKind)materialRegistry[SelectedMaterial].Properties.SimulationKind ==
+            MaterialSimulationKind.Tool;
         Color color = erasing ? new Color(255, 96, 96, 190) : new Color(210, 235, 255, 175);
         spriteBatch.Draw(brushOutline, bounds, color);
     }

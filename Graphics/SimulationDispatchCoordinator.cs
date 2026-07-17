@@ -83,7 +83,7 @@ public sealed class SimulationDispatchCoordinator
     private bool worldHasMatter;
     private bool cellularMatter;
     private bool fluidMatter;
-    private bool waterMatter;
+    private bool liquidMatter;
     private bool gasMatter;
     private bool solidMatter;
     private bool cellularSleeping;
@@ -289,7 +289,7 @@ public sealed class SimulationDispatchCoordinator
             presentationDirty = true;
         }
 
-        if (settings.HydraulicPressure && waterMatter && waterPressureRoutesDirty &&
+        if (settings.HydraulicPressure && liquidMatter && waterPressureRoutesDirty &&
             resources.IsSimulationAllocated)
         {
             resources.Context.ClearUnorderedAccessView(
@@ -338,7 +338,7 @@ public sealed class SimulationDispatchCoordinator
                 ref constants,
                 cellMaterialsDirty,
                 primaryStep: true,
-                runPressureRoutes: waterMatter && settings.HydraulicPressure,
+                runPressureRoutes: liquidMatter && settings.HydraulicPressure,
                 runLongRangeFluid,
                 updateRestState: !runSecondaryStep,
                 useOptimizedSchedule);
@@ -397,7 +397,7 @@ public sealed class SimulationDispatchCoordinator
         worldHasMatter = containsMatter;
         cellularMatter = containsMatter;
         fluidMatter = containsMatter;
-        waterMatter = containsMatter;
+        liquidMatter = containsMatter;
         gasMatter = containsMatter;
         solidMatter = containsMatter;
         cellularSleeping = false;
@@ -434,9 +434,9 @@ public sealed class SimulationDispatchCoordinator
             return;
         }
         lastObservedStatisticsFrame = statistics.FrameIndex;
-        uint cellularCells = statistics.WaterCells + statistics.SandCells + statistics.GasCells;
-        fluidMatter = statistics.WaterCells > 0 || statistics.GasCells > 0;
-        waterMatter = statistics.WaterCells > 0;
+        uint cellularCells = statistics.LiquidCells + statistics.GranularCells + statistics.GasCells;
+        fluidMatter = statistics.LiquidCells > 0 || statistics.GasCells > 0;
+        liquidMatter = statistics.LiquidCells > 0;
         gasMatter = statistics.GasCells > 0;
         uint movingCellularCells = statistics.MovingCells > statistics.MovingSolidCells
             ? statistics.MovingCells - statistics.MovingSolidCells
@@ -447,7 +447,7 @@ public sealed class SimulationDispatchCoordinator
             ? Math.Max(64u, cellularCells / 10u)
             : minorSolidMotion
                 ? Math.Max(256u, statistics.MovingSolidCells * 64u)
-                : statistics.WaterCells >= 10000
+                : statistics.LiquidCells >= 10000
                     // Large, level pools can retain a handful of parity swaps
                     // after pressure and every visible surface have settled.
                     ? 8u
@@ -930,7 +930,7 @@ public sealed class SimulationDispatchCoordinator
             {
                 cellularMatter = true;
                 fluidMatter |= kind is MaterialSimulationKind.Liquid or MaterialSimulationKind.Gas;
-                waterMatter |= kind == MaterialSimulationKind.Liquid;
+                liquidMatter |= kind == MaterialSimulationKind.Liquid;
                 gasMatter |= kind == MaterialSimulationKind.Gas;
                 cellularSleeping = false;
                 finalizeCellularRest = false;
@@ -944,7 +944,7 @@ public sealed class SimulationDispatchCoordinator
         worldHasMatter = false;
         cellularMatter = false;
         fluidMatter = false;
-        waterMatter = false;
+        liquidMatter = false;
         gasMatter = false;
         solidMatter = false;
         cellularSleeping = false;

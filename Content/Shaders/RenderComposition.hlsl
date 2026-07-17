@@ -13,10 +13,11 @@ float4 MaterialColor(uint materialId)
     return float4(material.ColorR, material.ColorG, material.ColorB, material.ColorA);
 }
 
-float WaterCoverage(uint2 coordinate)
+float LiquidCoverage(uint2 coordinate, out float3 liquidColor)
 {
     float coverage = 0;
     float weight = 0;
+    float3 weightedColor = 0;
     for (int y = -1; y <= 1; y++)
     {
         for (int x = -1; x <= 1; x++)
@@ -28,10 +29,17 @@ float WaterCoverage(uint2 coordinate)
             }
             float sampleWeight = x == 0 && y == 0 ? 4 : x == 0 || y == 0 ? 2 : 1;
             GridCell cell = Grid[FlattenCoordinate(uint2(sample))];
-            coverage += cell.IsActive != 0 && cell.MaterialId == 2 ? saturate(cell.Mass) * sampleWeight : 0;
+            if (cell.IsActive != 0 &&
+                Materials[cell.MaterialId].SimulationKind == SimulationKindLiquid)
+            {
+                float amount = saturate(cell.Mass) * sampleWeight;
+                coverage += amount;
+                weightedColor += MaterialColor(cell.MaterialId).rgb * amount;
+            }
             weight += sampleWeight;
         }
     }
+    liquidColor = coverage > 0 ? weightedColor / coverage : 0;
     return coverage / max(weight, 1);
 }
 
@@ -44,13 +52,13 @@ void Collect(GridCell cell)
     uint ignored;
     uint kind = Materials[cell.MaterialId].SimulationKind;
     InterlockedAdd(Statistics[0].ActiveCells, 1, ignored);
-    if (kind == 2) InterlockedAdd(Statistics[0].SolidCells, 1, ignored);
-    if (kind == 4) InterlockedAdd(Statistics[0].WaterCells, 1, ignored);
-    if (kind == 1) InterlockedAdd(Statistics[0].SandCells, 1, ignored);
-    if (kind == 5) InterlockedAdd(Statistics[0].GasCells, 1, ignored);
-    bool restingSolid = kind == 2 && (SolidGravity == 0 || cell.RestFrames >= 2);
-    uint cellularRestThreshold = kind == 1 ? 30 : 60;
-    bool restingCellular = kind != 2 &&
+    if (kind == SimulationKindSolid) InterlockedAdd(Statistics[0].SolidCells, 1, ignored);
+    if (kind == SimulationKindLiquid) InterlockedAdd(Statistics[0].LiquidCells, 1, ignored);
+    if (kind == SimulationKindGranular) InterlockedAdd(Statistics[0].GranularCells, 1, ignored);
+    if (kind == SimulationKindGas) InterlockedAdd(Statistics[0].GasCells, 1, ignored);
+    bool restingSolid = kind == SimulationKindSolid && (SolidGravity == 0 || cell.RestFrames >= 2);
+    uint cellularRestThreshold = kind == SimulationKindGranular ? 30 : 60;
+    bool restingCellular = kind != SimulationKindSolid &&
         (!IsCellularMaterial(kind) || cell.RestFrames >= cellularRestThreshold);
     if (restingSolid || restingCellular)
     {
@@ -59,7 +67,7 @@ void Collect(GridCell cell)
     else
     {
         InterlockedAdd(Statistics[0].MovingCells, 1, ignored);
-        if (kind == 2)
+        if (kind == SimulationKindSolid)
         {
             InterlockedAdd(Statistics[0].MovingSolidCells, 1, ignored);
         }
@@ -80,18 +88,20 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (cell.IsActive != 0)
     {
         color = MaterialColor(cell.MaterialId);
-        if (IsFluidMaterial(Materials[cell.MaterialId].SimulationKind))
+        uint kind = Materials[cell.MaterialId].SimulationKind;
+        if (IsFluidMaterial(kind))
         {
-            float fill = cell.MaterialId == 2 ? 1 : sqrt(saturate(cell.Mass));
+            float fill = kind == SimulationKindLiquid ? 1 : sqrt(saturate(cell.Mass));
             color.rgb = lerp(float3(0.035, 0.041, 0.047), color.rgb, fill);
         }
     }
     else
     {
-        float coverage = WaterCoverage(coordinate);
+        float3 liquidColor;
+        float coverage = LiquidCoverage(coordinate, liquidColor);
         if (coverage > 0.02)
         {
-            color.rgb = lerp(color.rgb, MaterialColor(2).rgb, saturate(coverage * 2.5));
+            color.rgb = lerp(color.rgb, liquidColor, saturate(coverage * 2.5));
         }
     }
     OutputTexture[coordinate] = color;

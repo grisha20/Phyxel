@@ -44,13 +44,17 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    if (command.Mode != 0 || command.MaterialId == 5)
+    if (command.Mode != 0)
     {
         Grid[index] = CreateEmptyCell();
         return;
     }
 
     MaterialProperties material = Materials[command.MaterialId];
+    if (material.SimulationKind == SimulationKindTool)
+    {
+        return;
+    }
     if (IsCellularMaterial(material.SimulationKind) && existing.IsActive != 0 &&
         Materials[existing.MaterialId].SimulationKind == 2)
     {

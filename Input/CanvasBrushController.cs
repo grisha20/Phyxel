@@ -22,7 +22,7 @@ public sealed class CanvasBrushController
         Rectangle canvasBounds,
         SimulationSettings settings,
         ushort selectedMaterial,
-        ushort eraserMaterial,
+        bool selectedMaterialIsTool,
         bool pointerConsumedByUi)
     {
         frameCommands.Clear();
@@ -52,9 +52,8 @@ public sealed class CanvasBrushController
             gridPosition = SnapOrthogonally(strokeOrigin, gridPosition);
         }
 
-        bool erasing = input.RightDown || selectedMaterial == eraserMaterial;
-        ushort material = erasing ? eraserMaterial : selectedMaterial;
-        AppendInterpolatedCommands(previousGridPosition, gridPosition, material, erasing, settings);
+        bool erasing = input.RightDown || selectedMaterialIsTool;
+        AppendInterpolatedCommands(previousGridPosition, gridPosition, selectedMaterial, erasing, settings);
         previousGridPosition = gridPosition;
         return frameCommands;
     }

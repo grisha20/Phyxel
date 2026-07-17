@@ -126,7 +126,8 @@ public sealed class PhyxelGame : Game
                 worldBounds,
                 settings,
                 userInterface.SelectedMaterial,
-                materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Eraser),
+                (MaterialSimulationKind)materialRegistry[userInterface.SelectedMaterial]
+                    .Properties.SimulationKind == MaterialSimulationKind.Tool,
                 userInterface.PointerConsumed);
         try
         {

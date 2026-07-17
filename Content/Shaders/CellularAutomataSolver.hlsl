@@ -115,7 +115,6 @@ GridCell GasWithMass(GridCell templateCell, float mass)
     {
         return CreateEmptyCell();
     }
-    templateCell.MaterialId = 6;
     templateCell.Mass = min(mass, 1);
     templateCell.IsActive = 1;
     templateCell.BodyId = 0;
@@ -133,11 +132,7 @@ GridCell GasTemplate(GridCell first, GridCell second)
     {
         return second;
     }
-    GridCell cell = CreateEmptyCell();
-    cell.MaterialId = 6;
-    cell.Mass = 1;
-    cell.IsActive = 1;
-    return cell;
+    return CreateEmptyCell();
 }
 
 
@@ -196,8 +191,14 @@ void RelaxGasPair(
 {
     GridCell first = Grid[firstIndex];
     GridCell second = Grid[secondIndex];
-    float firstMass = CellKind(first) == 5 ? first.Mass : 0;
-    float secondMass = CellKind(second) == 5 ? second.Mass : 0;
+    bool firstIsGas = CellKind(first) == SimulationKindGas;
+    bool secondIsGas = CellKind(second) == SimulationKindGas;
+    if (firstIsGas && secondIsGas && first.MaterialId != second.MaterialId)
+    {
+        return;
+    }
+    float firstMass = firstIsGas ? first.Mass : 0;
+    float secondMass = secondIsGas ? second.Mass : 0;
     float totalMass = firstMass + secondMass;
     if (totalMass < GasMinimumMass)
     {

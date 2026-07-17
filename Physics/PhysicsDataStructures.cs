@@ -71,8 +71,8 @@ public struct SimulationStatistics
     public uint MovingCells;
     public uint SolidCells;
     public uint FrameIndex;
-    public uint WaterCells;
-    public uint SandCells;
+    public uint LiquidCells;
+    public uint GranularCells;
     public uint GasCells;
     public uint PressureMoves;
     public uint MovingSolidCells;
