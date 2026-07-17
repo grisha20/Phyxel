@@ -22,7 +22,7 @@ public static class AcceptanceRegressionVerifier
         int MinimumY,
         int MaximumY);
 
-    public static bool Validate(
+    internal static bool Validate(
         AcceptanceScenarioMode mode,
         MaterialRegistry? materialRegistry,
         SimulationWorldSnapshot snapshot,
@@ -30,6 +30,8 @@ public static class AcceptanceRegressionVerifier
         double framesPerSecond,
         ulong thermalTicks,
         TemperatureProbeResult? temperatureProbe,
+        IReadOnlyList<ThermalAcceptanceCheckpoint> thermalCheckpoints,
+        TemperatureProbeAcceptanceTrace temperatureProbeTrace,
         string artifactDirectory,
         out string report)
     {
@@ -147,16 +149,20 @@ public static class AcceptanceRegressionVerifier
             AcceptanceScenarioMode.ThermalUniform or
             AcceptanceScenarioMode.ThermalContact or
             AcceptanceScenarioMode.ThermalCapacity or
+            AcceptanceScenarioMode.ThermalConductivityCompare or
             AcceptanceScenarioMode.ThermalFast or
             AcceptanceScenarioMode.ThermalSlow or
             AcceptanceScenarioMode.ThermalInsulator or
             AcceptanceScenarioMode.ThermalVacuum or
-            AcceptanceScenarioMode.ThermalGas => ThermalAcceptanceVerifier.Validate(
+            AcceptanceScenarioMode.ThermalGas or
+            AcceptanceScenarioMode.TemperatureProbeGpu => ThermalAcceptanceVerifier.Validate(
                 mode,
                 materialRegistry,
                 snapshot,
                 thermalTicks,
                 temperatureProbe,
+                thermalCheckpoints,
+                temperatureProbeTrace,
                 out report),
             _ => Fail(out report)
         };

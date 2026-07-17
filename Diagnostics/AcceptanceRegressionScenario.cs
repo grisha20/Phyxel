@@ -36,11 +36,13 @@ public enum AcceptanceScenarioMode
     ThermalUniform,
     ThermalContact,
     ThermalCapacity,
+    ThermalConductivityCompare,
     ThermalFast,
     ThermalSlow,
     ThermalInsulator,
     ThermalVacuum,
-    ThermalGas
+    ThermalGas,
+    TemperatureProbeGpu
 }
 
 public static class AcceptanceRegressionScenario
@@ -87,11 +89,13 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.ThermalUniform or
             AcceptanceScenarioMode.ThermalContact or
             AcceptanceScenarioMode.ThermalCapacity or
+            AcceptanceScenarioMode.ThermalConductivityCompare or
             AcceptanceScenarioMode.ThermalFast or
             AcceptanceScenarioMode.ThermalSlow or
             AcceptanceScenarioMode.ThermalInsulator or
             AcceptanceScenarioMode.ThermalVacuum or
-            AcceptanceScenarioMode.ThermalGas => [],
+            AcceptanceScenarioMode.ThermalGas or
+            AcceptanceScenarioMode.TemperatureProbeGpu => [],
             _ => []
         };
     }

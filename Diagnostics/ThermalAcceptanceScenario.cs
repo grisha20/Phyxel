@@ -20,11 +20,13 @@ internal static class ThermalAcceptanceScenario
             AcceptanceScenarioMode.ThermalUniform or
             AcceptanceScenarioMode.ThermalContact or
             AcceptanceScenarioMode.ThermalCapacity or
+            AcceptanceScenarioMode.ThermalConductivityCompare or
             AcceptanceScenarioMode.ThermalFast or
             AcceptanceScenarioMode.ThermalSlow or
             AcceptanceScenarioMode.ThermalInsulator or
             AcceptanceScenarioMode.ThermalVacuum or
-            AcceptanceScenarioMode.ThermalGas))
+            AcceptanceScenarioMode.ThermalGas or
+            AcceptanceScenarioMode.TemperatureProbeGpu))
         {
             return null;
         }
@@ -43,9 +45,13 @@ internal static class ThermalAcceptanceScenario
                     materials.GetRequiredRuntimeIndex("acceptance:thermal_fast"));
                 break;
             case AcceptanceScenarioMode.ThermalCapacity:
-                FillContact(cells, width,
-                    materials.GetRequiredRuntimeIndex("acceptance:thermal_low_capacity"),
-                    materials.GetRequiredRuntimeIndex("acceptance:thermal_high_capacity"));
+                Set(cells, width, 239, 135,
+                    materials.GetRequiredRuntimeIndex("acceptance:thermal_low_capacity"), 400, 2);
+                Set(cells, width, 240, 135,
+                    materials.GetRequiredRuntimeIndex("acceptance:thermal_high_capacity"), 0, 2);
+                break;
+            case AcceptanceScenarioMode.ThermalConductivityCompare:
+                FillConductivityComparison(cells, width, materials);
                 break;
             case AcceptanceScenarioMode.ThermalFast:
                 FillContact(cells, width,
@@ -73,6 +79,9 @@ internal static class ThermalAcceptanceScenario
                 break;
             case AcceptanceScenarioMode.ThermalGas:
                 CreateGas(cells, width, materials);
+                break;
+            case AcceptanceScenarioMode.TemperatureProbeGpu:
+                CreateTemperatureProbeFixture(cells, width, height, materials);
                 break;
         }
         return new SimulationWorldSnapshot(width, height, bytes);
@@ -111,6 +120,41 @@ internal static class ThermalAcceptanceScenario
                 Set(cells, width, x, y, otherGas, x < 286 ? 300 : 100, mass);
             }
         }
+    }
+
+    private static void FillConductivityComparison(
+        Span<GridCell> cells,
+        int width,
+        MaterialRegistry materials)
+    {
+        uint fast = materials.GetRequiredRuntimeIndex("acceptance:thermal_fast");
+        uint slow = materials.GetRequiredRuntimeIndex("acceptance:thermal_slow");
+        Fill(cells, width, 140, 60, 171, 91, fast, 400, 2);
+        Fill(cells, width, 172, 60, 203, 91, fast, 0, 2);
+        Fill(cells, width, 140, 160, 171, 191, slow, 400, 2);
+        Fill(cells, width, 172, 160, 203, 191, slow, 0, 2);
+    }
+
+    private static void CreateTemperatureProbeFixture(
+        Span<GridCell> cells,
+        int width,
+        int height,
+        MaterialRegistry materials)
+    {
+        if (width < 400 || height < 260)
+        {
+            throw new InvalidOperationException("Temperature probe acceptance requires at least 400x260 cells.");
+        }
+
+        uint sand = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
+        uint probe = materials.GetRequiredRuntimeIndex("acceptance:temperature_probe");
+        uint fixture = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Fixture);
+        uint fast = materials.GetRequiredRuntimeIndex("acceptance:thermal_fast");
+        Fill(cells, width, 40, 220, 79, 249, sand, 20, 2);
+        Fill(cells, width, 100, 220, 139, 249, probe, 123.5f, 2);
+        Fill(cells, width, 35, 250, 144, 253, fixture, 20, 2);
+        Fill(cells, width, 200, 100, 239, 159, fast, 400, 2);
+        Fill(cells, width, 240, 100, 279, 159, fast, 0, 2);
     }
 
     private static void Fill(

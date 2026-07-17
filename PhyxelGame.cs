@@ -38,6 +38,8 @@ public sealed class PhyxelGame : Game
     private Task? pendingSave;
     private Task<LoadedSimulationScene?>? pendingLoad;
     private bool pendingWorldCapture;
+    private bool pendingAcceptanceCheckpoint;
+    private ulong pendingAcceptanceCheckpointTick;
     private bool acceptanceSuccess;
     private ushort capturedMaterial;
     private string transientStatus = string.Empty;
@@ -141,6 +143,11 @@ public sealed class PhyxelGame : Game
         UiFrameActions actions = userInterface.Update(input, GraphicsDevice.Viewport, settings);
         ProcessUiActions(actions);
         acceptance.ConfigureSettings(frameIndex, settings);
+        acceptance.ApplyRuntimeControls(
+            frameIndex,
+            settings,
+            dispatchCoordinator,
+            temperatureProbe);
         Rectangle worldBounds = FitWorldToCanvas(userInterface.CanvasBounds, settings.Width, settings.Height);
         IReadOnlyList<BrushDrawCommand> commands = acceptance.Active
             ? acceptance.CreateCommands(frameIndex)
@@ -154,19 +161,24 @@ public sealed class PhyxelGame : Game
                 userInterface.PointerConsumed);
         try
         {
+            uint acceptanceFrame = frameIndex;
             currentResources = dispatchCoordinator.DispatchFrame(
                 settings,
                 commandEncoder.Encode(commands),
                 input.DeltaSeconds);
             acceptance.CaptureScreenshot(currentResources, frameIndex);
             debugProbe.Update(currentResources, frameIndex++);
-            Point? probeCoordinate = acceptance.ProbeCoordinate ?? GpuTemperatureProbe.MapPointerToCell(
-                input.MousePosition,
-                worldBounds,
-                currentResources.Width,
-                currentResources.Height);
+            Point? probeCoordinate = acceptance.OwnsTemperatureProbe
+                ? acceptance.GetProbeCoordinate(acceptanceFrame)
+                : GpuTemperatureProbe.MapPointerToCell(
+                    input.MousePosition,
+                    worldBounds,
+                    currentResources.Width,
+                    currentResources.Height);
             temperatureProbe.Update(currentResources, probeCoordinate, input.DeltaSeconds);
+            acceptance.ObserveTemperatureProbe(acceptanceFrame, temperatureProbe.Latest);
             dispatchCoordinator.ObserveStatistics(debugProbe.Latest);
+            BeginAcceptanceCheckpoint();
             BeginAcceptanceCapture();
         }
         catch (SharpDXException exception) when (
@@ -279,6 +291,17 @@ public sealed class PhyxelGame : Game
 
     private void ProcessSerializationCompletion()
     {
+        if (pendingAcceptanceCheckpoint && currentResources is not null &&
+            stateSerializer.TryCompleteWorldCapture(
+                currentResources,
+                out SimulationWorldSnapshot? checkpointSnapshot) &&
+            checkpointSnapshot is not null)
+        {
+            pendingAcceptanceCheckpoint = false;
+            acceptance.RecordThermalCheckpoint(
+                pendingAcceptanceCheckpointTick,
+                checkpointSnapshot);
+        }
         if (pendingWorldCapture && currentResources is not null && materialRegistry is not null &&
             stateSerializer.TryCompleteWorldCapture(currentResources, out SimulationWorldSnapshot? snapshot) &&
             snapshot is not null)
@@ -340,7 +363,8 @@ public sealed class PhyxelGame : Game
 
     private void BeginAcceptanceCapture()
     {
-        if (acceptanceSuccess || !acceptance.Active || pendingWorldCapture || frameIndex < acceptance.CaptureFrame ||
+        if (acceptanceSuccess || !acceptance.Active || pendingWorldCapture ||
+            pendingAcceptanceCheckpoint || frameIndex < acceptance.CaptureFrame ||
             currentResources is null || userInterface is null || dispatchCoordinator is null)
         {
             return;
@@ -354,6 +378,22 @@ public sealed class PhyxelGame : Game
         stateSerializer.BeginWorldCapture(currentResources);
         pendingWorldCapture = true;
         Console.WriteLine("PHYXEL_ACCEPTANCE_CAPTURE_BEGIN");
+    }
+
+    private void BeginAcceptanceCheckpoint()
+    {
+        if (!acceptance.Active || pendingWorldCapture || pendingAcceptanceCheckpoint ||
+            currentResources is null || dispatchCoordinator is null ||
+            !acceptance.TryBeginThermalCheckpoint(
+                dispatchCoordinator.ThermalTicks,
+                out ulong checkpointTick))
+        {
+            return;
+        }
+        stateSerializer.BeginWorldCapture(currentResources);
+        pendingAcceptanceCheckpoint = true;
+        pendingAcceptanceCheckpointTick = checkpointTick;
+        Console.WriteLine($"PHYXEL_THERMAL_CHECKPOINT_CAPTURE ticks={checkpointTick}");
     }
 
     private void SetStatus(string message)
