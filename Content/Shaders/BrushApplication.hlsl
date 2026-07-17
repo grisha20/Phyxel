@@ -65,6 +65,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     cell.MaterialId = command.MaterialId;
     cell.Mass = material.SimulationKind == 2 ? material.Density : 1;
     cell.IsActive = 1;
-    cell.BodyId = material.SimulationKind == 2 ? command.Reserved : 0;
+    cell.BodyId = IsMovableSolidMaterial(material) ? command.Reserved : 0;
     Grid[index] = cell;
 }

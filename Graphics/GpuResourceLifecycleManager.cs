@@ -107,6 +107,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         int bodyFlagCount = allocateSimulation ? Math.Max(cellCount, checked(width * 18 + 1)) : 19;
         GpuStructuredBuffer<uint> bodyFlags = new(Device, bodyFlagCount);
         GpuStructuredBuffer<uint> solidBodyGeometry = new(Device, cellCount);
+        GpuStructuredBuffer<uint> solidBodyMass = new(Device, cellCount);
         // One extra element is a persistent diagnostic counter for forbidden
         // non-adjacent column transfers; blocker-mask rebuilds never touch it.
         int blockerMaskCount = allocateSimulation
@@ -181,6 +182,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ComponentParents = componentParents,
             BodyFlags = bodyFlags,
             SolidBodyGeometry = solidBodyGeometry,
+            SolidBodyMass = solidBodyMass,
             PathBlockerMasks = pathBlockerMasks,
             CellMaterials = cellMaterials,
             WaterPressureRoutes = waterPressureRoutes,

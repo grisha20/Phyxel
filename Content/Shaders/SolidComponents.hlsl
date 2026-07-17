@@ -2,12 +2,13 @@
 
 StructuredBuffer<GridCell> Grid : register(t0);
 StructuredBuffer<uint> SourceParents : register(t1);
+StructuredBuffer<MaterialProperties> Materials : register(t2);
 RWStructuredBuffer<uint> Parents : register(u0);
 RWStructuredBuffer<GridCell> WritableGrid : register(u1);
 
 bool IsComponentCell(GridCell cell)
 {
-    return cell.IsActive != 0 && IsFallingSolid(cell.MaterialId);
+    return cell.IsActive != 0 && IsMovableSolidMaterial(Materials[cell.MaterialId]);
 }
 
 uint FindRoot(uint index)

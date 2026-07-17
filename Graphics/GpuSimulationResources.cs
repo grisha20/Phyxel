@@ -18,6 +18,7 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuStructuredBuffer<uint> ComponentParents { get; init; }
     public required GpuStructuredBuffer<uint> BodyFlags { get; init; }
     public required GpuStructuredBuffer<uint> SolidBodyGeometry { get; init; }
+    public required GpuStructuredBuffer<uint> SolidBodyMass { get; init; }
     public required GpuStructuredBuffer<uint> PathBlockerMasks { get; init; }
     public required GpuStructuredBuffer<uint> CellMaterials { get; init; }
     public required GpuStructuredBuffer<WaterPressureRouteData> WaterPressureRoutes { get; init; }
@@ -53,7 +54,7 @@ public sealed class GpuSimulationResources : IDisposable
     public void Dispose()
     {
         Context.ComputeShader.Set(null);
-        Context.ComputeShader.SetShaderResources(0, null, null, null, null);
+        Context.ComputeShader.SetShaderResources(0, null, null, null, null, null, null, null);
         Context.ComputeShader.SetUnorderedAccessViews(0, null, null, null, null, null, null);
         CompositionShader?.Dispose();
         SolidDisplacementApplyShader?.Dispose();
@@ -85,6 +86,7 @@ public sealed class GpuSimulationResources : IDisposable
         CellMaterials.Dispose();
         PathBlockerMasks.Dispose();
         BodyFlags.Dispose();
+        SolidBodyMass.Dispose();
         SolidBodyGeometry.Dispose();
         ComponentParents.Dispose();
         Grid.Dispose();

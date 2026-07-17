@@ -506,19 +506,27 @@ public sealed class SimulationDispatchCoordinator
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.ComponentInitializeShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResource(0, resources.Grid.ReadView);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Grid.ReadView,
+            null,
+            resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.ComponentParents.UnorderedView);
         context.Dispatch(DivideRoundUp(cells, 256), 1, 1);
-        Unbind(context, 1, 1);
+        Unbind(context, 3, 1);
 
         for (int iteration = 0; iteration < 24; iteration++)
         {
             context.ComputeShader.Set(resources.ComponentUnionShader);
             context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-            context.ComputeShader.SetShaderResource(0, resources.Grid.ReadView);
+            context.ComputeShader.SetShaderResources(
+                0,
+                resources.Grid.ReadView,
+                null,
+                resources.Materials.View);
             context.ComputeShader.SetUnorderedAccessView(0, resources.ComponentParents.UnorderedView);
             context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-            Unbind(context, 1, 1);
+            Unbind(context, 3, 1);
 
             context.ComputeShader.Set(resources.ComponentCompressShader);
             context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
@@ -529,10 +537,14 @@ public sealed class SimulationDispatchCoordinator
 
         context.ComputeShader.Set(resources.ComponentFinalizeShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResources(0, null, resources.ComponentParents.View);
+        context.ComputeShader.SetShaderResources(
+            0,
+            null,
+            resources.ComponentParents.View,
+            resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessViews(0, null, resources.Grid.ReadUnorderedView);
         context.Dispatch(DivideRoundUp(cells, 256), 1, 1);
-        Unbind(context, 2, 2);
+        Unbind(context, 3, 2);
     }
 
     private static void DispatchSolidGeometry(
@@ -543,22 +555,34 @@ public sealed class SimulationDispatchCoordinator
         context.ClearUnorderedAccessView(
             resources.SolidBodyGeometry.UnorderedView,
             new RawInt4(0, 0, 0, 0));
+        context.ClearUnorderedAccessView(
+            resources.SolidBodyMass.UnorderedView,
+            new RawInt4(0, 0, 0, 0));
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.SolidGeometryAnalyzeShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResource(0, resources.Grid.ReadView);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Grid.ReadView,
+            null,
+            null,
+            null,
+            null,
+            resources.Materials.View,
+            null);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             null,
             null,
             null,
             null,
-            resources.SolidBodyGeometry.UnorderedView);
+            resources.SolidBodyGeometry.UnorderedView,
+            resources.SolidBodyMass.UnorderedView);
         context.Dispatch(
             DivideRoundUp(resources.Width, 16),
             DivideRoundUp(resources.Height, 16),
             1);
-        Unbind(context, 1, 5);
+        Unbind(context, 7, 6);
     }
 
     private void DispatchSolidPass(
@@ -581,14 +605,16 @@ public sealed class SimulationDispatchCoordinator
             null,
             null,
             null,
-            resources.SolidBodyGeometry.View);
+            resources.SolidBodyGeometry.View,
+            resources.Materials.View,
+            resources.SolidBodyMass.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.BodyFlags.UnorderedView,
             null,
             resources.CellMaterials.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 5, 3);
+        Unbind(context, 7, 3);
 
         // ComponentParents is only labeling scratch after body IDs have been
         // copied into the cells. Reuse it for one-frame displacement targets;
@@ -602,7 +628,9 @@ public sealed class SimulationDispatchCoordinator
             resources.BodyFlags.View,
             resources.CellMaterials.View,
             null,
-            resources.SolidBodyGeometry.View);
+            resources.SolidBodyGeometry.View,
+            resources.Materials.View,
+            resources.SolidBodyMass.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             null,
@@ -610,7 +638,7 @@ public sealed class SimulationDispatchCoordinator
             null,
             resources.ComponentParents.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 5, 4);
+        Unbind(context, 7, 4);
 
         context.ComputeShader.Set(resources.SolidMoveShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
@@ -620,10 +648,12 @@ public sealed class SimulationDispatchCoordinator
             resources.BodyFlags.View,
             resources.CellMaterials.View,
             resources.ComponentParents.View,
-            resources.SolidBodyGeometry.View);
+            resources.SolidBodyGeometry.View,
+            resources.Materials.View,
+            resources.SolidBodyMass.View);
         context.ComputeShader.SetUnorderedAccessViews(0, null, resources.Grid.WriteUnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 5, 2);
+        Unbind(context, 7, 2);
 
         context.ComputeShader.Set(resources.SolidDisplacementApplyShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
@@ -633,10 +663,12 @@ public sealed class SimulationDispatchCoordinator
             resources.BodyFlags.View,
             resources.CellMaterials.View,
             resources.ComponentParents.View,
-            resources.SolidBodyGeometry.View);
+            resources.SolidBodyGeometry.View,
+            resources.Materials.View,
+            resources.SolidBodyMass.View);
         context.ComputeShader.SetUnorderedAccessViews(0, null, resources.Grid.WriteUnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 5, 2);
+        Unbind(context, 7, 2);
         resources.Grid.Swap();
         waterPressureRoutesDirty = true;
     }

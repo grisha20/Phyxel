@@ -127,11 +127,6 @@ float ValidatedMaterialDensity(MaterialProperties material)
     return clamp(material.Density, 0.0, MaximumMaterialDensity);
 }
 
-bool IsFallingSolid(uint materialId)
-{
-    return materialId == 3 || materialId == 4;
-}
-
 GridCell CreateEmptyCell()
 {
     return (GridCell)0;

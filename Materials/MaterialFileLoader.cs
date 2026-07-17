@@ -144,6 +144,10 @@ internal static partial class MaterialFileLoader
         }
 
         MaterialFlags flags = ParseFlags(document.Flags, kind);
+        if ((flags & MaterialFlags.MovableSolid) != 0 && physics.Density <= 0)
+        {
+            throw new InvalidDataException("Материал с flag 'movable-solid' должен иметь density больше 0.");
+        }
         string name = ParseName(document.Name, id);
         MaterialUiDocument ui = document.Ui ?? new MaterialUiDocument();
         return new MaterialDefinition(

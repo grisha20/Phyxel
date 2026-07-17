@@ -5,21 +5,24 @@ StructuredBuffer<uint> SourceBodyFlags : register(t1);
 StructuredBuffer<uint> SourceBodyBuoyancy : register(t2);
 StructuredBuffer<uint> SourceDisplacementReservations : register(t3);
 StructuredBuffer<uint> SourceBodyGeometry : register(t4);
+StructuredBuffer<MaterialProperties> Materials : register(t5);
+StructuredBuffer<uint> SourceBodyMass : register(t6);
 RWStructuredBuffer<uint> BodyFlags : register(u0);
 RWStructuredBuffer<GridCell> DestinationGrid : register(u1);
 RWStructuredBuffer<uint> BodyBuoyancy : register(u2);
 RWStructuredBuffer<uint> DisplacementReservations : register(u3);
 RWStructuredBuffer<uint> BodyGeometry : register(u4);
+RWStructuredBuffer<uint> BodyMass : register(u5);
 
 static const uint BodyBlocked = 1;
 static const uint BodyActive = 4;
 static const uint BodyTouchesWater = 16;
-static const uint GeometryContainsMetal = 1;
 static const uint GeometryHasHull = 2;
 static const uint GeometrySpanShift = 2;
 static const uint GeometrySpanMask = 0x3ff;
 static const uint GeometryCellCountShift = 12;
 static const uint GeometryCellCountUnit = 1u << GeometryCellCountShift;
+static const float HullRasterThickness = 10.0;
 static const uint HullSearchDistance = 512;
 static const uint HullMinimumGap = 8;
 static const uint DisplacementStackHeight = 4;
@@ -30,12 +33,13 @@ static const uint DisplacementHullFloorProbe = 64;
 
 bool IsMovableSolid(GridCell cell)
 {
-    return cell.IsActive != 0 && IsFallingSolid(cell.MaterialId) && cell.BodyId != 0;
+    return cell.IsActive != 0 &&
+        IsMovableSolidMaterial(Materials[cell.MaterialId]) && cell.BodyId != 0;
 }
 
 bool IsSolidMaterial(uint materialId)
 {
-    return materialId == 3 || materialId == 4 || materialId == 7;
+    return IsSolidMaterial(Materials[materialId]);
 }
 
 bool BodyMoves(GridCell cell)
@@ -56,13 +60,12 @@ bool BodyMoves(GridCell cell)
         uint hullSpan = max((geometry >> GeometrySpanShift) & GeometrySpanMask, 1);
         uint waterDepth = buoyancy & 0xffff;
         uint cargoQuarterMass = buoyancy >> 16;
-        uint solidCells = geometry >> GeometryCellCountShift;
+        uint solidQuarterMass = SourceBodyMass[cell.BodyId - 1];
 
         // Rasterized walls are much thicker than real sheet metal. Treat each
-        // metal pixel as 0.75 water pixels (concrete as 1.0), then apply
+        // solid pixel as density / HullRasterThickness water pixels, then apply
         // Archimedes' principle in 2D: draft = effective mass / hull width.
-        uint weightNumerator = (geometry & GeometryContainsMetal) != 0 ? 3 : 4;
-        uint effectiveQuarterMass = solidCells * weightNumerator + cargoQuarterMass;
+        uint effectiveQuarterMass = solidQuarterMass + cargoQuarterMass;
         uint requiredDraft = (effectiveQuarterMass + hullSpan * 4 - 1) /
             (hullSpan * 4);
         requiredDraft = max(requiredDraft, 8);
@@ -134,7 +137,8 @@ uint WaterDepthAt(int2 coordinate)
     for (int y = coordinate.y; y >= 0 && depth < 0xffff; y--)
     {
         GridCell sample = SourceGrid[uint(y) * Width + uint(coordinate.x)];
-        if (sample.IsActive == 0 || sample.MaterialId != 2)
+        if (sample.IsActive == 0 ||
+            Materials[sample.MaterialId].SimulationKind != SimulationKindLiquid)
         {
             break;
         }
@@ -164,6 +168,12 @@ void AtomicMaxGeometrySpan(uint bodyIndex, uint hullSpan)
         }
         expected = observed;
     }
+}
+
+uint SolidQuarterMass(uint materialId)
+{
+    float density = ValidatedMaterialDensity(Materials[materialId]);
+    return max(1, (uint)round(density * 4.0 / HullRasterThickness));
 }
 
 void AtomicMaxWaterDepth(uint bodyIndex, uint waterDepth)
@@ -224,7 +234,7 @@ void AnalyzeSolidGeometry(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
     uint horizontalSpan = BodyHorizontalHullSpan(coordinate, cell.BodyId);
-    uint geometryFlags = cell.MaterialId == 3 ? GeometryContainsMetal : 0;
+    uint geometryFlags = 0;
     if (BodyHasHullSpace(coordinate, cell.BodyId, horizontalSpan))
     {
         geometryFlags |= GeometryHasHull;
@@ -233,6 +243,7 @@ void AnalyzeSolidGeometry(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint ignored;
     InterlockedAdd(BodyGeometry[bodyIndex], GeometryCellCountUnit, ignored);
     InterlockedOr(BodyGeometry[bodyIndex], geometryFlags, ignored);
+    InterlockedAdd(BodyMass[bodyIndex], SolidQuarterMass(cell.MaterialId), ignored);
     AtomicMaxGeometrySpan(bodyIndex, horizontalSpan);
 }
 
@@ -348,13 +359,13 @@ uint CargoColumnQuarterMass(uint2 floorCoordinate, uint bodyId)
         {
             break;
         }
-        if (sample.MaterialId == 1)
+        uint kind = Materials[sample.MaterialId].SimulationKind;
+        if (kind == SimulationKindGranular || kind == SimulationKindLiquid)
         {
-            cargoMass = min(0xffff, cargoMass + 6);
-        }
-        else if (sample.MaterialId == 2)
-        {
-            cargoMass = min(0xffff, cargoMass + 4);
+            uint quarterMass = max(
+                1,
+                (uint)round(ValidatedMaterialDensity(Materials[sample.MaterialId]) * 4.0));
+            cargoMass = min(0xffff, cargoMass + quarterMass);
         }
         else
         {
@@ -392,8 +403,8 @@ bool IsAboveAnyHullFloor(uint2 coordinate)
     {
         GridCell sample = SourceGrid[FlattenCoordinate(
             uint2(coordinate.x, coordinate.y + distance))];
-        if (sample.IsActive == 0 || sample.MaterialId == 1 ||
-            sample.MaterialId == 2 || sample.MaterialId == 6)
+        if (sample.IsActive == 0 ||
+            IsCellularMaterial(Materials[sample.MaterialId].SimulationKind))
         {
             continue;
         }
@@ -417,7 +428,8 @@ bool SurfaceTarget(int x, uint sourceY, uint stack, uint bodyId, out uint target
     while (surfaceY >= 0)
     {
         GridCell sample = SourceGrid[uint(surfaceY) * Width + uint(x)];
-        if (sample.IsActive == 0 || sample.MaterialId != 2)
+        if (sample.IsActive == 0 ||
+            Materials[sample.MaterialId].SimulationKind != SimulationKindLiquid)
         {
             break;
         }
@@ -583,7 +595,9 @@ void PlanHullWaterDisplacement(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint index = FlattenCoordinate(coordinate);
     GridCell water = SourceGrid[index];
     GridCell above = SourceGrid[index - Width];
-    if (water.IsActive == 0 || water.MaterialId != 2 || !BodyMoves(above))
+    if (water.IsActive == 0 ||
+        Materials[water.MaterialId].SimulationKind != SimulationKindLiquid ||
+        !BodyMoves(above))
     {
         return;
     }
@@ -656,7 +670,7 @@ void MoveSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
             replacement.VelocityY = 0;
             uint geometry = SourceBodyGeometry[current.BodyId - 1];
             if ((geometry & GeometryHasHull) != 0 && sample.IsActive != 0 &&
-                sample.MaterialId == 2)
+                Materials[sample.MaterialId].SimulationKind == SimulationKindLiquid)
             {
                 // Water below a descending hull is either transferred by the
                 // reservation pass or stays in its own interior cell. Pulling
@@ -691,7 +705,8 @@ void ApplyHullWaterDisplacement(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         bodyAbove = SourceGrid[sourceIndex - Width];
     }
-    if (displaced.IsActive == 0 || displaced.MaterialId != 2 ||
+    if (displaced.IsActive == 0 ||
+        Materials[displaced.MaterialId].SimulationKind != SimulationKindLiquid ||
         !BodyMovesWithDisplacement(bodyAbove))
     {
         return;
