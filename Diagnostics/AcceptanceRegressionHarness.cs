@@ -36,6 +36,10 @@ public sealed class AcceptanceRegressionHarness
             "buoyancy" or "float" => AcceptanceScenarioMode.Buoyancy,
             "saved_sand_water" or "sand_basin" => AcceptanceScenarioMode.SavedSandWater,
             "gold_sand" or "core:gold_sand" => AcceptanceScenarioMode.GoldSand,
+            "external_granular" => AcceptanceScenarioMode.ExternalGranular,
+            "external_liquid" => AcceptanceScenarioMode.ExternalLiquid,
+            "external_gas" => AcceptanceScenarioMode.ExternalGas,
+            "external_solids" => AcceptanceScenarioMode.ExternalSolids,
             _ => AcceptanceScenarioMode.None
         };
     }
@@ -80,6 +84,10 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.Buoyancy => 500,
                 AcceptanceScenarioMode.SavedSandWater => 900,
                 AcceptanceScenarioMode.GoldSand => 190,
+                AcceptanceScenarioMode.ExternalGranular => 190,
+                AcceptanceScenarioMode.ExternalLiquid => 600,
+                AcceptanceScenarioMode.ExternalGas => 900,
+                AcceptanceScenarioMode.ExternalSolids => 300,
                 _ => uint.MaxValue
             };
         }
@@ -110,7 +118,8 @@ public sealed class AcceptanceRegressionHarness
             "1" => true,
             _ => scenarioHydraulics
         };
-        if (Mode is AcceptanceScenarioMode.SolidGravity or AcceptanceScenarioMode.Buoyancy)
+        if (Mode is AcceptanceScenarioMode.SolidGravity or AcceptanceScenarioMode.Buoyancy or
+            AcceptanceScenarioMode.ExternalSolids)
         {
             settings.SolidGravity = frame >= 60;
         }
@@ -165,6 +174,11 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.Buoyancy when frame == 499 => "M_buoyancy",
             AcceptanceScenarioMode.SavedSandWater when frame == 899 => "N_saved_sand_water",
             AcceptanceScenarioMode.GoldSand when frame == 189 => "P_gold_sand",
+            AcceptanceScenarioMode.ExternalGranular when frame == 189 => "Q_external_granular",
+            AcceptanceScenarioMode.ExternalLiquid when frame == 599 => "R_external_liquid",
+            AcceptanceScenarioMode.ExternalGas when frame == 30 => "S_external_gas_rise",
+            AcceptanceScenarioMode.ExternalGas when frame == 899 => "S_external_gas_spread",
+            AcceptanceScenarioMode.ExternalSolids when frame == 299 => "T_external_solids",
             _ => null
         };
         if (label is null)

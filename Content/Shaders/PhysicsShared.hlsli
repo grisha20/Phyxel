@@ -1,6 +1,6 @@
 struct GridCell
 {
-    uint MaterialId;
+    uint MaterialIndex;
     float Mass;
     float VelocityX;
     float VelocityY;
@@ -36,7 +36,7 @@ struct BrushDrawCommand
 {
     int X;
     int Y;
-    uint MaterialId;
+    uint MaterialIndex;
     float Radius;
     float Density;
     uint Mode;

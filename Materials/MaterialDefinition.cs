@@ -45,17 +45,6 @@ public static class CoreMaterialIds
     public const string Fixture = "core:fixture";
     public const string GoldSand = "core:gold_sand";
 
-    public static readonly string[] LegacyV3Palette =
-    [
-        Empty,
-        Sand,
-        Water,
-        Metal,
-        Concrete,
-        Eraser,
-        Gas,
-        Fixture
-    ];
 }
 
 public sealed record MaterialDefinition(

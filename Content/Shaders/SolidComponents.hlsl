@@ -8,7 +8,7 @@ RWStructuredBuffer<GridCell> WritableGrid : register(u1);
 
 bool IsComponentCell(GridCell cell)
 {
-    return cell.IsActive != 0 && IsMovableSolidMaterial(Materials[cell.MaterialId]);
+    return cell.IsActive != 0 && IsMovableSolidMaterial(Materials[cell.MaterialIndex]);
 }
 
 uint FindRoot(uint index)

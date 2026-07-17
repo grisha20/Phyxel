@@ -37,7 +37,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     GridCell existing = Grid[index];
     if (command.Mode == 2)
     {
-        if (existing.IsActive != 0 && IsCellularMaterial(Materials[existing.MaterialId].SimulationKind))
+        if (existing.IsActive != 0 && IsCellularMaterial(Materials[existing.MaterialIndex].SimulationKind))
         {
             Grid[index] = CreateEmptyCell();
         }
@@ -50,19 +50,19 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    MaterialProperties material = Materials[command.MaterialId];
+    MaterialProperties material = Materials[command.MaterialIndex];
     if (material.SimulationKind == SimulationKindTool)
     {
         return;
     }
     if (IsCellularMaterial(material.SimulationKind) && existing.IsActive != 0 &&
-        Materials[existing.MaterialId].SimulationKind == 2)
+        Materials[existing.MaterialIndex].SimulationKind == 2)
     {
         return;
     }
 
     GridCell cell = CreateEmptyCell();
-    cell.MaterialId = command.MaterialId;
+    cell.MaterialIndex = command.MaterialIndex;
     cell.Mass = material.SimulationKind == 2 ? material.Density : 1;
     cell.IsActive = 1;
     cell.BodyId = IsMovableSolidMaterial(material) ? command.Reserved : 0;

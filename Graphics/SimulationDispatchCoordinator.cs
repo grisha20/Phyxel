@@ -949,7 +949,7 @@ public sealed class SimulationDispatchCoordinator
                 settledObservations = 0;
                 continue;
             }
-            MaterialSimulationKind kind = (MaterialSimulationKind)materialRegistry[command.MaterialId]
+            MaterialSimulationKind kind = (MaterialSimulationKind)materialRegistry[command.MaterialIndex]
                 .Properties.SimulationKind;
             if (kind == MaterialSimulationKind.Solid)
             {

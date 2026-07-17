@@ -36,19 +36,6 @@ public sealed record LoadedSimulationScene(
 
 public sealed class SimulationStateSerializer
 {
-    private sealed class SceneFileV3
-    {
-        public int Version { get; set; }
-        public float Scale { get; set; }
-        public float Gravity { get; set; }
-        public int BrushRadius { get; set; }
-        public float SpawnDensity { get; set; }
-        public bool SolidGravity { get; set; }
-        public MaterialId SelectedMaterial { get; set; }
-        public DateTimeOffset SavedAt { get; set; }
-        public bool HydraulicPressure { get; set; }
-    }
-
     private sealed class SceneFileV4
     {
         public int Version { get; set; }
@@ -191,7 +178,12 @@ public sealed class SimulationStateSerializer
         List<string> warnings = [];
         return version switch
         {
-            3 => LoadV3(sceneJson, worldFile?.Snapshot, materialRegistry, warnings),
+            3 => LegacySceneV3Loader.Load(
+                sceneJson,
+                worldFile?.Snapshot,
+                materialRegistry,
+                warnings,
+                options),
             CurrentVersion => LoadV4(sceneJson, worldFile?.Snapshot, materialRegistry, warnings),
             _ => null
         };
@@ -231,35 +223,6 @@ public sealed class SimulationStateSerializer
             }
         }
         return false;
-    }
-
-    private LoadedSimulationScene LoadV3(
-        byte[] sceneJson,
-        SimulationWorldSnapshot? world,
-        MaterialRegistry materialRegistry,
-        List<string> warnings)
-    {
-        SceneFileV3 state = JsonSerializer.Deserialize<SceneFileV3>(sceneJson, options) ??
-            throw new InvalidDataException("Сцена v3 не содержит состояния.");
-        ushort selectedMaterial = ResolveLegacyIndex((uint)state.SelectedMaterial, materialRegistry);
-        if (world is not null)
-        {
-            RemapSnapshotToRuntime(world, CoreMaterialIds.LegacyV3Palette, materialRegistry, warnings);
-        }
-
-        return new LoadedSimulationScene(
-            new SimulationSceneState(
-                state.Version,
-                state.Scale,
-                state.Gravity,
-                state.BrushRadius,
-                state.SpawnDensity,
-                state.SolidGravity,
-                selectedMaterial,
-                state.SavedAt,
-                state.HydraulicPressure),
-            world,
-            warnings);
     }
 
     private LoadedSimulationScene LoadV4(
@@ -321,12 +284,16 @@ public sealed class SimulationStateSerializer
         ReadOnlySpan<GridCell> sourceCells = MemoryMarshal.Cast<byte, GridCell>(world.Grid);
         foreach (GridCell cell in sourceCells)
         {
-            if (cell.MaterialId >= materialRegistry.Count)
+            if (cell.IsActive == 0)
+            {
+                continue;
+            }
+            if (cell.MaterialIndex >= materialRegistry.Count)
             {
                 throw new InvalidDataException(
-                    $"Снимок содержит неизвестный runtime-индекс материала {cell.MaterialId}.");
+                    $"Снимок содержит неизвестный runtime-индекс материала {cell.MaterialIndex}.");
             }
-            usedRuntimeIndices[cell.MaterialId] = true;
+            usedRuntimeIndices[cell.MaterialIndex] = true;
         }
 
         ushort[] runtimeToScene = new ushort[materialRegistry.Count];
@@ -346,8 +313,13 @@ public sealed class SimulationStateSerializer
         Span<GridCell> encodedCells = MemoryMarshal.Cast<byte, GridCell>(encodedGrid);
         for (int index = 0; index < encodedCells.Length; index++)
         {
-            uint runtimeIndex = encodedCells[index].MaterialId;
-            encodedCells[index].MaterialId = runtimeToScene[runtimeIndex];
+            if (encodedCells[index].IsActive == 0)
+            {
+                encodedCells[index] = default;
+                continue;
+            }
+            uint runtimeIndex = encodedCells[index].MaterialIndex;
+            encodedCells[index].MaterialIndex = runtimeToScene[runtimeIndex];
         }
         return (new SimulationWorldSnapshot(world.Width, world.Height, encodedGrid), palette.ToArray());
     }
@@ -389,21 +361,19 @@ public sealed class SimulationStateSerializer
         Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(world.Grid);
         for (int index = 0; index < cells.Length; index++)
         {
-            uint sceneIndex = cells[index].MaterialId;
+            if (cells[index].IsActive == 0)
+            {
+                cells[index] = default;
+                continue;
+            }
+            uint sceneIndex = cells[index].MaterialIndex;
             if (sceneIndex >= sceneToRuntime.Length || missing[sceneIndex])
             {
                 cells[index] = default;
                 continue;
             }
-            cells[index].MaterialId = sceneToRuntime[sceneIndex];
+            cells[index].MaterialIndex = sceneToRuntime[sceneIndex];
         }
-    }
-
-    private static ushort ResolveLegacyIndex(uint legacyIndex, MaterialRegistry materialRegistry)
-    {
-        return legacyIndex < CoreMaterialIds.LegacyV3Palette.Length
-            ? materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.LegacyV3Palette[legacyIndex])
-            : materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
     }
 
     private static void AddWarning(List<string> warnings, string message)
@@ -412,7 +382,7 @@ public sealed class SimulationStateSerializer
         Console.Error.WriteLine($"PHYXEL_SCENE_WARNING {message}");
     }
 
-    private static void ValidateSnapshotSize(SimulationWorldSnapshot world)
+    internal static void ValidateSnapshotSize(SimulationWorldSnapshot world)
     {
         int expected = checked(world.Width * world.Height * Marshal.SizeOf<GridCell>());
         if (world.Grid.Length != 0 && world.Grid.Length != expected)

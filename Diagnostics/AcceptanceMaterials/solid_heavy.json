@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "acceptance:solid_heavy",
+  "name": "Acceptance Heavy Solid",
+  "kind": "solid",
+  "flags": ["movable-solid"],
+  "color": "#A86442",
+  "physics": { "density": 12.0, "friction": 0.35, "flowRate": 0.0 },
+  "ui": { "order": 1040, "hidden": false }
+}

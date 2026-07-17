@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "acceptance:fixture",
+  "name": "Acceptance Fixture",
+  "kind": "solid",
+  "color": "#55616A",
+  "physics": { "density": 100.0, "friction": 0.9, "flowRate": 0.0 },
+  "ui": { "order": 1050, "hidden": false }
+}

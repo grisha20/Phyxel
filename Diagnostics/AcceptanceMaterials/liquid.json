@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "acceptance:liquid",
+  "name": "Acceptance Liquid",
+  "kind": "liquid",
+  "color": "#7B4FD6",
+  "physics": { "density": 1.0, "friction": 0.025, "flowRate": 0.92 },
+  "ui": { "order": 1010, "hidden": false }
+}

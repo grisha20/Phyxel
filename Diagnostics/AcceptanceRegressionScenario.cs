@@ -24,16 +24,27 @@ public enum AcceptanceScenarioMode
     SavedGravity,
     Buoyancy,
     SavedSandWater,
-    GoldSand
+    GoldSand,
+    ExternalGranular,
+    ExternalLiquid,
+    ExternalGas,
+    ExternalSolids
 }
 
 public static class AcceptanceRegressionScenario
 {
+    private static AcceptanceMaterialIndices materials = null!;
+
     public static IReadOnlyList<BrushDrawCommand> CreateCommands(
         AcceptanceScenarioMode mode,
         uint frame,
         MaterialRegistry? materialRegistry = null)
     {
+        if (materialRegistry is null)
+        {
+            throw new InvalidOperationException("Acceptance-сценарий требует реестр материалов.");
+        }
+        materials = new AcceptanceMaterialIndices(materialRegistry);
         return mode switch
         {
             AcceptanceScenarioMode.Bowl => CreateBowl(frame),
@@ -52,7 +63,11 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.SavedGravity => [],
             AcceptanceScenarioMode.Buoyancy => CreateBuoyancy(frame),
             AcceptanceScenarioMode.SavedSandWater => [],
-            AcceptanceScenarioMode.GoldSand => CreateGoldSand(frame, materialRegistry),
+            AcceptanceScenarioMode.GoldSand => CreateGoldSand(frame),
+            AcceptanceScenarioMode.ExternalGranular => CreateExternalGranular(frame),
+            AcceptanceScenarioMode.ExternalLiquid => CreateExternalLiquid(frame),
+            AcceptanceScenarioMode.ExternalGas => CreateExternalGas(frame),
+            AcceptanceScenarioMode.ExternalSolids => CreateExternalSolids(frame),
             _ => []
         };
     }
@@ -62,17 +77,17 @@ public static class AcceptanceRegressionScenario
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 114, 115, 114, 225, 8, 5, MaterialId.Metal, 1001);
-            AddLine(commands, 325, 115, 325, 225, 8, 5, MaterialId.Metal, 1001);
-            AddLine(commands, 114, 225, 325, 225, 8, 5, MaterialId.Metal, 1001);
+            AddLine(commands, 114, 115, 114, 225, 8, 5, materials.Metal, 1001);
+            AddLine(commands, 325, 115, 325, 225, 8, 5, materials.Metal, 1001);
+            AddLine(commands, 114, 225, 325, 225, 8, 5, materials.Metal, 1001);
             return commands;
         }
         if (frame == 2)
         {
-            return AddFill(121, 170, 318, 218, 8, 5, MaterialId.Water, 0);
+            return AddFill(121, 170, 318, 218, 8, 5, materials.Water, 0);
         }
         return frame == 130
-            ? AddFill(121, 130, 318, 158, 8, 5, MaterialId.Sand, 0)
+            ? AddFill(121, 130, 318, 158, 8, 5, materials.Sand, 0)
             : [];
     }
 
@@ -81,54 +96,54 @@ public static class AcceptanceRegressionScenario
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 20, 250, 460, 250, 7, 4, MaterialId.Fixture, 2001);
-            AddLine(commands, 215, 180, 215, 250, 7, 4, MaterialId.Fixture, 2002);
-            AddLine(commands, 415, 180, 415, 250, 7, 4, MaterialId.Fixture, 2003);
-            AddLine(commands, 140, 150, 140, 250, 7, 4, MaterialId.Fixture, 2004);
-            AddLine(commands, 35, 100, 35, 250, 7, 4, MaterialId.Fixture, 2005);
-            AddLine(commands, 130, 100, 130, 250, 7, 4, MaterialId.Fixture, 2005);
+            AddLine(commands, 20, 250, 460, 250, 7, 4, materials.Fixture, 2001);
+            AddLine(commands, 215, 180, 215, 250, 7, 4, materials.Fixture, 2002);
+            AddLine(commands, 415, 180, 415, 250, 7, 4, materials.Fixture, 2003);
+            AddLine(commands, 140, 150, 140, 250, 7, 4, materials.Fixture, 2004);
+            AddLine(commands, 35, 100, 35, 250, 7, 4, materials.Fixture, 2005);
+            AddLine(commands, 130, 100, 130, 250, 7, 4, materials.Fixture, 2005);
             return commands;
         }
         if (frame == 1)
         {
-            return AddFill(60, 25, 109, 74, 6, 4, MaterialId.Metal, 2101);
+            return AddFill(60, 25, 109, 74, 6, 4, materials.Metal, 2101);
         }
         if (frame == 2)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 220, 60, 410, 60, 7, 5, MaterialId.Concrete, 2201);
+            AddLine(commands, 220, 60, 410, 60, 7, 5, materials.Concrete, 2201);
             return commands;
         }
         if (frame == 3)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 130, 100, 200, 100, 7, 5, MaterialId.Metal, 2301);
+            AddLine(commands, 130, 100, 200, 100, 7, 5, materials.Metal, 2301);
             return commands;
         }
         if (frame == 4)
         {
-            return AddFill(43, 205, 122, 240, 7, 4, MaterialId.Water, 0);
+            return AddFill(43, 205, 122, 240, 7, 4, materials.Water, 0);
         }
         if (frame == 5)
         {
-            return AddFill(43, 229, 122, 240, 7, 4, MaterialId.Sand, 0);
+            return AddFill(43, 229, 122, 240, 7, 4, materials.Sand, 0);
         }
         if (frame == 30)
         {
-            return [Create(165, 100, 6, MaterialId.Eraser, 1, 0)];
+            return [Create(165, 100, 6, materials.Eraser, 1, 0)];
         }
         if (frame == 200)
         {
-            return [Create(315, 172, 8, MaterialId.Eraser, 1, 0)];
+            return [Create(315, 172, 8, materials.Eraser, 1, 0)];
         }
         if (frame == 205)
         {
             return
             [
-                Create(415, 183, 17, MaterialId.Eraser, 1, 0),
-                Create(415, 210, 11, MaterialId.Eraser, 1, 0),
-                Create(415, 232, 11, MaterialId.Eraser, 1, 0),
-                Create(415, 247, 8, MaterialId.Eraser, 1, 0)
+                Create(415, 183, 17, materials.Eraser, 1, 0),
+                Create(415, 210, 11, materials.Eraser, 1, 0),
+                Create(415, 232, 11, materials.Eraser, 1, 0),
+                Create(415, 247, 8, materials.Eraser, 1, 0)
             ];
         }
         return [];
@@ -139,14 +154,14 @@ public static class AcceptanceRegressionScenario
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 80, 245, 400, 245, 7, 4, MaterialId.Fixture, 3001);
+            AddLine(commands, 80, 245, 400, 245, 7, 4, materials.Fixture, 3001);
             return commands;
         }
         if (frame != 1)
         {
             return [];
         }
-        BrushDrawCommand sand = Create(240, 75, 25, MaterialId.Sand, 0, 0);
+        BrushDrawCommand sand = Create(240, 75, 25, materials.Sand, 0, 0);
         sand.Density = 0.51f;
         sand.Seed = 3002;
         return [sand];
@@ -157,28 +172,28 @@ public static class AcceptanceRegressionScenario
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 15, 95, 15, 250, 7, 4, MaterialId.Metal, 4001);
-            AddLine(commands, 260, 95, 260, 250, 7, 4, MaterialId.Metal, 4001);
-            AddLine(commands, 15, 250, 260, 250, 7, 4, MaterialId.Metal, 4001);
-            AddLine(commands, 138, 95, 138, 218, 7, 4, MaterialId.Metal, 4001);
+            AddLine(commands, 15, 95, 15, 250, 7, 4, materials.Metal, 4001);
+            AddLine(commands, 260, 95, 260, 250, 7, 4, materials.Metal, 4001);
+            AddLine(commands, 15, 250, 260, 250, 7, 4, materials.Metal, 4001);
+            AddLine(commands, 138, 95, 138, 218, 7, 4, materials.Metal, 4001);
             return commands;
         }
         if (frame == 1)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 290, 150, 290, 250, 7, 4, MaterialId.Metal, 4002);
-            AddLine(commands, 465, 150, 465, 250, 7, 4, MaterialId.Metal, 4002);
-            AddLine(commands, 290, 250, 465, 250, 7, 4, MaterialId.Metal, 4002);
+            AddLine(commands, 290, 150, 290, 250, 7, 4, materials.Metal, 4002);
+            AddLine(commands, 465, 150, 465, 250, 7, 4, materials.Metal, 4002);
+            AddLine(commands, 290, 250, 465, 250, 7, 4, materials.Metal, 4002);
             return commands;
         }
         if (frame == 2)
         {
-            return AddFill(25, 155, 128, 240, 7, 5, MaterialId.Water, 0);
+            return AddFill(25, 155, 128, 240, 7, 5, materials.Water, 0);
         }
         if (frame is >= 3 and <= 20)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 378, 20, 378, 50, 6, 4, MaterialId.Water, 0);
+            AddLine(commands, 378, 20, 378, 50, 6, 4, materials.Water, 0);
             return commands;
         }
         return [];
@@ -189,15 +204,15 @@ public static class AcceptanceRegressionScenario
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 5, 250, 475, 250, 7, 5, MaterialId.Metal, 5001);
-            AddLine(commands, 300, 225, 390, 70, 7, 5, MaterialId.Metal, 5001);
+            AddLine(commands, 5, 250, 475, 250, 7, 5, materials.Metal, 5001);
+            AddLine(commands, 300, 225, 390, 70, 7, 5, materials.Metal, 5001);
             return commands;
         }
         if (frame != 1)
         {
             return [];
         }
-        BrushDrawCommand sand = Create(382, 42, 24, MaterialId.Sand, 0, 0);
+        BrushDrawCommand sand = Create(382, 42, 24, materials.Sand, 0, 0);
         sand.Density = 0.62f;
         sand.Seed = 5002;
         return [sand];
@@ -208,17 +223,17 @@ public static class AcceptanceRegressionScenario
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 50, 30, 430, 30, 7, 5, MaterialId.Metal, 6001);
-            AddLine(commands, 50, 30, 50, 250, 7, 5, MaterialId.Metal, 6001);
-            AddLine(commands, 430, 30, 430, 250, 7, 5, MaterialId.Metal, 6001);
-            AddLine(commands, 50, 250, 430, 250, 7, 5, MaterialId.Metal, 6001);
+            AddLine(commands, 50, 30, 430, 30, 7, 5, materials.Metal, 6001);
+            AddLine(commands, 50, 30, 50, 250, 7, 5, materials.Metal, 6001);
+            AddLine(commands, 430, 30, 430, 250, 7, 5, materials.Metal, 6001);
+            AddLine(commands, 50, 250, 430, 250, 7, 5, materials.Metal, 6001);
             return commands;
         }
         if (frame != 1)
         {
             return [];
         }
-        BrushDrawCommand gas = Create(240, 215, 25, MaterialId.Gas, 0, 0);
+        BrushDrawCommand gas = Create(240, 215, 25, materials.Gas, 0, 0);
         gas.Density = 0.72f;
         gas.Seed = 6002;
         return [gas];
@@ -229,47 +244,118 @@ public static class AcceptanceRegressionScenario
         List<BrushDrawCommand> commands = [];
         if (frame == 0)
         {
-            AddLine(commands, 24, 1000, 1896, 1000, 16, 8, MaterialId.Metal, 7001);
-            AddLine(commands, 24, 96, 24, 1000, 16, 8, MaterialId.Metal, 7001);
-            AddLine(commands, 1896, 96, 1896, 1000, 16, 8, MaterialId.Metal, 7001);
+            AddLine(commands, 24, 1000, 1896, 1000, 16, 8, materials.Metal, 7001);
+            AddLine(commands, 24, 96, 24, 1000, 16, 8, materials.Metal, 7001);
+            AddLine(commands, 1896, 96, 1896, 1000, 16, 8, materials.Metal, 7001);
             return commands;
         }
         if (frame == 1)
         {
-            AddLine(commands, 320, 900, 820, 520, 16, 8, MaterialId.Metal, 7002);
-            AddLine(commands, 1100, 520, 1600, 900, 16, 8, MaterialId.Metal, 7002);
+            AddLine(commands, 320, 900, 820, 520, 16, 8, materials.Metal, 7002);
+            AddLine(commands, 1100, 520, 1600, 900, 16, 8, materials.Metal, 7002);
             return commands;
         }
         if (frame is >= 2 and <= 18)
         {
             int y = 160 + ((int)frame - 2) * 42;
-            AddLine(commands, 100, y, 1820, y, 52, 34, MaterialId.Water, 0);
+            AddLine(commands, 100, y, 1820, y, 52, 34, materials.Water, 0);
             return commands;
         }
         return commands;
     }
 
-    private static IReadOnlyList<BrushDrawCommand> CreateGoldSand(
-        uint frame,
-        MaterialRegistry? materialRegistry)
+    private static IReadOnlyList<BrushDrawCommand> CreateExternalGranular(uint frame)
     {
+        uint fixture = materials.Resolve("acceptance:fixture");
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 80, 245, 400, 245, 7, 4, MaterialId.Fixture, 11001);
+            AddLine(commands, 80, 245, 400, 245, 7, 4, fixture, 0);
             return commands;
         }
         if (frame != 1)
         {
             return [];
         }
-        if (materialRegistry is null)
-        {
-            throw new InvalidOperationException("Реестр материалов не настроен для gold_sand acceptance.");
-        }
+        BrushDrawCommand granular = Create(
+            240, 75, 25, materials.Resolve("acceptance:granular"), 0, 0);
+        granular.Density = 0.51f;
+        granular.Seed = 12001;
+        return [granular];
+    }
 
-        ushort runtimeIndex = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.GoldSand);
-        BrushDrawCommand goldSand = Create(240, 75, 25, runtimeIndex, 0, 0);
+    private static IReadOnlyList<BrushDrawCommand> CreateExternalLiquid(uint frame)
+    {
+        uint fixture = materials.Resolve("acceptance:fixture");
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 40, 120, 40, 245, 7, 5, fixture, 0);
+            AddLine(commands, 440, 120, 440, 245, 7, 5, fixture, 0);
+            AddLine(commands, 40, 245, 440, 245, 7, 5, fixture, 0);
+            return commands;
+        }
+        return frame == 1
+            ? AddFill(70, 155, 210, 230, 8, 5, materials.Resolve("acceptance:liquid"), 0)
+            : [];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateExternalGas(uint frame)
+    {
+        uint fixture = materials.Resolve("acceptance:fixture");
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 50, 30, 430, 30, 7, 5, fixture, 0);
+            AddLine(commands, 50, 30, 50, 250, 7, 5, fixture, 0);
+            AddLine(commands, 430, 30, 430, 250, 7, 5, fixture, 0);
+            AddLine(commands, 50, 250, 430, 250, 7, 5, fixture, 0);
+            return commands;
+        }
+        if (frame != 1)
+        {
+            return [];
+        }
+        BrushDrawCommand gas = Create(240, 215, 25, materials.Resolve("acceptance:gas"), 0, 0);
+        gas.Density = 0.72f;
+        gas.Seed = 12002;
+        return [gas];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateExternalSolids(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(
+                commands,
+                20, 245, 460, 245, 7, 5, materials.Resolve("acceptance:fixture"), 0);
+            return commands;
+        }
+        if (frame == 1)
+        {
+            return AddFill(
+                80, 55, 145, 105, 6, 4, materials.Resolve("acceptance:solid_light"), 13001);
+        }
+        return frame == 2
+            ? AddFill(
+                300, 55, 365, 105, 6, 4, materials.Resolve("acceptance:solid_heavy"), 13002)
+            : [];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateGoldSand(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 80, 245, 400, 245, 7, 4, materials.Fixture, 11001);
+            return commands;
+        }
+        if (frame != 1)
+        {
+            return [];
+        }
+        BrushDrawCommand goldSand = Create(240, 75, 25, materials.GoldSand, 0, 0);
         goldSand.Density = 0.51f;
         goldSand.Seed = 11002;
         return [goldSand];
@@ -280,26 +366,26 @@ public static class AcceptanceRegressionScenario
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 10, 255, 470, 255, 7, 5, MaterialId.Metal, 7101);
-            AddLine(commands, 10, 90, 10, 255, 7, 5, MaterialId.Metal, 7101);
-            AddLine(commands, 470, 90, 470, 255, 7, 5, MaterialId.Metal, 7101);
+            AddLine(commands, 10, 255, 470, 255, 7, 5, materials.Metal, 7101);
+            AddLine(commands, 10, 90, 10, 255, 7, 5, materials.Metal, 7101);
+            AddLine(commands, 470, 90, 470, 255, 7, 5, materials.Metal, 7101);
             return commands;
         }
         if (frame == 1)
         {
-            BrushDrawCommand sand = Create(355, 178, 30, MaterialId.Sand, 0, 0);
+            BrushDrawCommand sand = Create(355, 178, 30, materials.Sand, 0, 0);
             sand.Density = 0.72f;
             sand.Seed = 7102;
             return [sand];
         }
         if (frame == 2)
         {
-            return AddFill(275, 165, 455, 245, 8, 5, MaterialId.Water, 0);
+            return AddFill(275, 165, 455, 245, 8, 5, materials.Water, 0);
         }
         if (frame is >= 3 and <= 300)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 240, 25, 240, 55, 6, 4, MaterialId.Water, 0);
+            AddLine(commands, 240, 25, 240, 55, 6, 4, materials.Water, 0);
             return commands;
         }
         return [];
@@ -310,23 +396,23 @@ public static class AcceptanceRegressionScenario
         List<BrushDrawCommand> commands = [];
         if (frame == 0)
         {
-            AddLine(commands, 5, 255, 475, 255, 7, 5, MaterialId.Metal, 8001);
-            AddLine(commands, 5, 20, 5, 255, 7, 5, MaterialId.Metal, 8001);
-            AddLine(commands, 475, 20, 475, 255, 7, 5, MaterialId.Metal, 8001);
+            AddLine(commands, 5, 255, 475, 255, 7, 5, materials.Metal, 8001);
+            AddLine(commands, 5, 20, 5, 255, 7, 5, materials.Metal, 8001);
+            AddLine(commands, 475, 20, 475, 255, 7, 5, materials.Metal, 8001);
             return commands;
         }
         if (frame == 1)
         {
-            return AddFill(20, 205, 230, 245, 8, 5, MaterialId.Water, 0);
+            return AddFill(20, 205, 230, 245, 8, 5, materials.Water, 0);
         }
         if (frame == 2)
         {
-            return AddFill(238, 205, 460, 245, 8, 5, MaterialId.Water, 0);
+            return AddFill(238, 205, 460, 245, 8, 5, materials.Water, 0);
         }
         if (frame is >= 30 and <= 75)
         {
             int offset = ((int)frame % 5 - 2) * 4;
-            BrushDrawCommand sand = Create(240 + offset, 65, 18, MaterialId.Sand, 0, 0);
+            BrushDrawCommand sand = Create(240 + offset, 65, 18, materials.Sand, 0, 0);
             sand.Density = 0.62f;
             sand.Seed = 8002 + frame;
             return [sand];
@@ -339,16 +425,16 @@ public static class AcceptanceRegressionScenario
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 25, 35, 25, 252, 7, 5, MaterialId.Concrete, 9001);
-            AddLine(commands, 455, 25, 455, 252, 7, 5, MaterialId.Concrete, 9001);
-            AddLine(commands, 25, 252, 455, 252, 7, 5, MaterialId.Concrete, 9001);
-            AddLine(commands, 105, 35, 105, 218, 7, 5, MaterialId.Concrete, 9001);
-            AddLine(commands, 275, 85, 275, 232, 7, 5, MaterialId.Concrete, 9001);
+            AddLine(commands, 25, 35, 25, 252, 7, 5, materials.Concrete, 9001);
+            AddLine(commands, 455, 25, 455, 252, 7, 5, materials.Concrete, 9001);
+            AddLine(commands, 25, 252, 455, 252, 7, 5, materials.Concrete, 9001);
+            AddLine(commands, 105, 35, 105, 218, 7, 5, materials.Concrete, 9001);
+            AddLine(commands, 275, 85, 275, 232, 7, 5, materials.Concrete, 9001);
             return commands;
         }
         if (frame == 1)
         {
-            return AddFill(295, 40, 440, 190, 10, 6, MaterialId.Water, 0);
+            return AddFill(295, 40, 440, 190, 10, 6, materials.Water, 0);
         }
         return [];
     }
@@ -358,19 +444,19 @@ public static class AcceptanceRegressionScenario
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 300, 40, 300, 192, 6, 4, MaterialId.Concrete, 9101);
-            AddLine(commands, 300, 238, 300, 255, 6, 4, MaterialId.Concrete, 9101);
-            AddLine(commands, 470, 40, 470, 255, 6, 4, MaterialId.Concrete, 9101);
-            AddLine(commands, 300, 255, 470, 255, 6, 4, MaterialId.Concrete, 9101);
-            AddLine(commands, 230, 70, 230, 210, 6, 4, MaterialId.Concrete, 9102);
-            AddLine(commands, 260, 70, 260, 180, 6, 4, MaterialId.Concrete, 9102);
-            AddLine(commands, 260, 180, 300, 200, 6, 4, MaterialId.Concrete, 9102);
-            AddLine(commands, 230, 210, 300, 230, 6, 4, MaterialId.Concrete, 9102);
+            AddLine(commands, 300, 40, 300, 192, 6, 4, materials.Concrete, 9101);
+            AddLine(commands, 300, 238, 300, 255, 6, 4, materials.Concrete, 9101);
+            AddLine(commands, 470, 40, 470, 255, 6, 4, materials.Concrete, 9101);
+            AddLine(commands, 300, 255, 470, 255, 6, 4, materials.Concrete, 9101);
+            AddLine(commands, 230, 70, 230, 210, 6, 4, materials.Concrete, 9102);
+            AddLine(commands, 260, 70, 260, 180, 6, 4, materials.Concrete, 9102);
+            AddLine(commands, 260, 180, 300, 200, 6, 4, materials.Concrete, 9102);
+            AddLine(commands, 230, 210, 300, 230, 6, 4, materials.Concrete, 9102);
             return commands;
         }
         if (frame == 1)
         {
-            return AddFill(315, 145, 455, 245, 8, 5, MaterialId.Water, 0);
+            return AddFill(315, 145, 455, 245, 8, 5, materials.Water, 0);
         }
         return [];
     }
@@ -388,31 +474,31 @@ public static class AcceptanceRegressionScenario
         if (frame == 0)
         {
             List<BrushDrawCommand> commands = [];
-            AddLine(commands, 15, 255, 465, 255, 7, 5, MaterialId.Fixture, 10001);
-            AddLine(commands, 55, 75, 185, 75, 7, 5, MaterialId.Metal, 10101);
-            AddLine(commands, 55, 75, 55, 140, 7, 5, MaterialId.Metal, 10101);
-            AddLine(commands, 185, 75, 185, 140, 7, 5, MaterialId.Metal, 10101);
-            AddLine(commands, 55, 140, 185, 140, 7, 5, MaterialId.Metal, 10101);
-            AddLine(commands, 215, 75, 215, 140, 7, 5, MaterialId.Metal, 10201);
-            AddLine(commands, 330, 75, 330, 140, 7, 5, MaterialId.Metal, 10201);
-            AddLine(commands, 215, 140, 330, 140, 7, 5, MaterialId.Metal, 10201);
+            AddLine(commands, 15, 255, 465, 255, 7, 5, materials.Fixture, 10001);
+            AddLine(commands, 55, 75, 185, 75, 7, 5, materials.Metal, 10101);
+            AddLine(commands, 55, 75, 55, 140, 7, 5, materials.Metal, 10101);
+            AddLine(commands, 185, 75, 185, 140, 7, 5, materials.Metal, 10101);
+            AddLine(commands, 55, 140, 185, 140, 7, 5, materials.Metal, 10101);
+            AddLine(commands, 215, 75, 215, 140, 7, 5, materials.Metal, 10201);
+            AddLine(commands, 330, 75, 330, 140, 7, 5, materials.Metal, 10201);
+            AddLine(commands, 215, 140, 330, 140, 7, 5, materials.Metal, 10201);
             return commands;
         }
         if (frame == 1)
         {
-            return AddFill(375, 90, 425, 140, 6, 4, MaterialId.Metal, 10301);
+            return AddFill(375, 90, 425, 140, 6, 4, materials.Metal, 10301);
         }
         if (frame == 2)
         {
-            return AddFill(20, 175, 240, 247, 8, 5, MaterialId.Water, 0);
+            return AddFill(20, 175, 240, 247, 8, 5, materials.Water, 0);
         }
         if (frame == 3)
         {
-            return AddFill(240, 175, 460, 247, 8, 5, MaterialId.Water, 0);
+            return AddFill(240, 175, 460, 247, 8, 5, materials.Water, 0);
         }
         if (frame == 4)
         {
-            return AddFill(235, 92, 310, 128, 6, 4, MaterialId.Sand, 0);
+            return AddFill(235, 92, 310, 128, 6, 4, materials.Sand, 0);
         }
         return [];
     }
@@ -424,7 +510,7 @@ public static class AcceptanceRegressionScenario
         int bottom,
         int spacing,
         float radius,
-        MaterialId material,
+        uint material,
         uint bodyId)
     {
         List<BrushDrawCommand> commands = [];
@@ -446,7 +532,7 @@ public static class AcceptanceRegressionScenario
         int endY,
         int spacing,
         float radius,
-        MaterialId material,
+        uint material,
         uint bodyId)
     {
         int length = Math.Max(Math.Abs(endX - startX), Math.Abs(endY - startY));
@@ -468,17 +554,6 @@ public static class AcceptanceRegressionScenario
         int x,
         int y,
         float radius,
-        MaterialId material,
-        uint mode,
-        uint bodyId)
-    {
-        return Create(x, y, radius, (uint)material, mode, bodyId);
-    }
-
-    private static BrushDrawCommand Create(
-        int x,
-        int y,
-        float radius,
         uint material,
         uint mode,
         uint bodyId)
@@ -487,7 +562,7 @@ public static class AcceptanceRegressionScenario
         {
             X = x,
             Y = y,
-            MaterialId = material,
+            MaterialIndex = material,
             Radius = radius,
             Density = 1,
             Mode = mode,

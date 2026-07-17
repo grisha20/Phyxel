@@ -77,7 +77,7 @@ public sealed class CanvasBrushController
             {
                 X = (int)MathF.Round(start.X + deltaX * interpolation),
                 Y = (int)MathF.Round(start.Y + deltaY * interpolation),
-                MaterialId = material,
+                MaterialIndex = material,
                 Radius = settings.BrushRadius,
                 Density = settings.SpawnDensity,
                 Mode = erasing ? 1u : 0u,

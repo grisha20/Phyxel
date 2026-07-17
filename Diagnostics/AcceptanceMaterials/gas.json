@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "acceptance:gas",
+  "name": "Acceptance Gas",
+  "kind": "gas",
+  "color": "#D58BE6A0",
+  "physics": { "density": 0.08, "friction": 0.005, "flowRate": 1.2 },
+  "ui": { "order": 1020, "hidden": false }
+}

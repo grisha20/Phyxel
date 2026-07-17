@@ -30,11 +30,11 @@ float LiquidCoverage(uint2 coordinate, out float3 liquidColor)
             float sampleWeight = x == 0 && y == 0 ? 4 : x == 0 || y == 0 ? 2 : 1;
             GridCell cell = Grid[FlattenCoordinate(uint2(sample))];
             if (cell.IsActive != 0 &&
-                Materials[cell.MaterialId].SimulationKind == SimulationKindLiquid)
+                Materials[cell.MaterialIndex].SimulationKind == SimulationKindLiquid)
             {
                 float amount = saturate(cell.Mass) * sampleWeight;
                 coverage += amount;
-                weightedColor += MaterialColor(cell.MaterialId).rgb * amount;
+                weightedColor += MaterialColor(cell.MaterialIndex).rgb * amount;
             }
             weight += sampleWeight;
         }
@@ -50,7 +50,7 @@ void Collect(GridCell cell)
         return;
     }
     uint ignored;
-    uint kind = Materials[cell.MaterialId].SimulationKind;
+    uint kind = Materials[cell.MaterialIndex].SimulationKind;
     InterlockedAdd(Statistics[0].ActiveCells, 1, ignored);
     if (kind == SimulationKindSolid) InterlockedAdd(Statistics[0].SolidCells, 1, ignored);
     if (kind == SimulationKindLiquid) InterlockedAdd(Statistics[0].LiquidCells, 1, ignored);
@@ -87,8 +87,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float4 color = float4(0.035, 0.041, 0.047, 1);
     if (cell.IsActive != 0)
     {
-        color = MaterialColor(cell.MaterialId);
-        uint kind = Materials[cell.MaterialId].SimulationKind;
+        color = MaterialColor(cell.MaterialIndex);
+        uint kind = Materials[cell.MaterialIndex].SimulationKind;
         if (IsFluidMaterial(kind))
         {
             float fill = kind == SimulationKindLiquid ? 1 : sqrt(saturate(cell.Mass));

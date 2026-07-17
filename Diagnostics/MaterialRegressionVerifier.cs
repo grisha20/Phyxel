@@ -11,7 +11,7 @@ public static class MaterialRegressionVerifier
 {
     public static bool ValidateGranularPile(
         SimulationWorldSnapshot snapshot,
-        ushort runtimeIndex,
+        uint runtimeIndex,
         string artifactDirectory,
         string imageName,
         out string report)
@@ -30,7 +30,7 @@ public static class MaterialRegressionVerifier
             for (int x = 0; x < snapshot.Width; x++)
             {
                 GridCell cell = grid[y * snapshot.Width + x];
-                if (cell.IsActive == 0 || cell.MaterialId != runtimeIndex)
+                if (cell.IsActive == 0 || cell.MaterialIndex != runtimeIndex)
                 {
                     continue;
                 }
@@ -54,6 +54,7 @@ public static class MaterialRegressionVerifier
 
     public static bool ValidateSlope(
         SimulationWorldSnapshot snapshot,
+        uint runtimeIndex,
         string artifactDirectory,
         out string report)
     {
@@ -72,7 +73,7 @@ public static class MaterialRegressionVerifier
             for (int x = 0; x < snapshot.Width; x++)
             {
                 GridCell cell = grid[y * snapshot.Width + x];
-                if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Sand)
+                if (cell.IsActive == 0 || cell.MaterialIndex != runtimeIndex)
                 {
                     continue;
                 }
@@ -97,7 +98,10 @@ public static class MaterialRegressionVerifier
 
     public static bool ValidateGas(
         SimulationWorldSnapshot snapshot,
+        uint runtimeIndex,
         string artifactDirectory,
+        string riseImageName,
+        string spreadImageName,
         out string report)
     {
         ReadOnlySpan<GridCell> grid = MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid);
@@ -116,7 +120,7 @@ public static class MaterialRegressionVerifier
             for (int x = 0; x < snapshot.Width; x++)
             {
                 GridCell cell = grid[y * snapshot.Width + x];
-                if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Gas)
+                if (cell.IsActive == 0 || cell.MaterialIndex != runtimeIndex)
                 {
                     continue;
                 }
@@ -133,8 +137,8 @@ public static class MaterialRegressionVerifier
             }
         }
         double averageY = weightedY / Math.Max(0.001, mass);
-        bool images = File.Exists(Path.Combine(artifactDirectory, "F_gas_rise.png")) &&
-            File.Exists(Path.Combine(artifactDirectory, "F_gas_spread.png"));
+        bool images = File.Exists(Path.Combine(artifactDirectory, riseImageName)) &&
+            File.Exists(Path.Combine(artifactDirectory, spreadImageName));
         bool passed = gas >= 1000 && mass >= 800 && averageY <= 105 &&
             maximumX - minimumX >= 240 && maximumY - minimumY >= 20 &&
             dense <= gas / 3 && resting == gas && moving == 0 && images;

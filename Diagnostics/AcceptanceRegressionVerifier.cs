@@ -11,6 +11,8 @@ namespace Phyxel.Diagnostics;
 
 public static class AcceptanceRegressionVerifier
 {
+    private static AcceptanceMaterialIndices materials = null!;
+
     private readonly record struct ComponentMetrics(
         int Count,
         int Largest,
@@ -28,6 +30,11 @@ public static class AcceptanceRegressionVerifier
         string artifactDirectory,
         out string report)
     {
+        if (materialRegistry is null)
+        {
+            return Fail(out report);
+        }
+        materials = new AcceptanceMaterialIndices(materialRegistry);
         return mode switch
         {
             AcceptanceScenarioMode.Bowl => ValidateBowl(snapshot, artifactDirectory, out report),
@@ -41,11 +48,15 @@ public static class AcceptanceRegressionVerifier
                 out report),
             AcceptanceScenarioMode.Slope => MaterialRegressionVerifier.ValidateSlope(
                 snapshot,
+                materials.Sand,
                 artifactDirectory,
                 out report),
             AcceptanceScenarioMode.Gas => MaterialRegressionVerifier.ValidateGas(
                 snapshot,
+                materials.Gas,
                 artifactDirectory,
+                "F_gas_rise.png",
+                "F_gas_spread.png",
                 out report),
             AcceptanceScenarioMode.WaterStress => ValidateWaterStress(
                 snapshot,
@@ -79,15 +90,136 @@ public static class AcceptanceRegressionVerifier
                 out report),
             AcceptanceScenarioMode.Buoyancy => ValidateBuoyancy(snapshot, framesPerSecond, out report),
             AcceptanceScenarioMode.SavedSandWater => ValidateSavedSandWater(snapshot, out report),
-            AcceptanceScenarioMode.GoldSand when materialRegistry is not null =>
+            AcceptanceScenarioMode.GoldSand =>
                 MaterialRegressionVerifier.ValidateGranularPile(
                     snapshot,
-                    materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.GoldSand),
+                    materials.GoldSand,
                     artifactDirectory,
                     "P_gold_sand.png",
                     out report),
+            AcceptanceScenarioMode.ExternalGranular =>
+                MaterialRegressionVerifier.ValidateGranularPile(
+                    snapshot,
+                    materials.Resolve("acceptance:granular"),
+                    artifactDirectory,
+                    "Q_external_granular.png",
+                    out report),
+            AcceptanceScenarioMode.ExternalLiquid => ValidateExternalLiquid(
+                snapshot,
+                materials.Resolve("acceptance:liquid"),
+                artifactDirectory,
+                out report),
+            AcceptanceScenarioMode.ExternalGas => MaterialRegressionVerifier.ValidateGas(
+                snapshot,
+                materials.Resolve("acceptance:gas"),
+                artifactDirectory,
+                "S_external_gas_rise.png",
+                "S_external_gas_spread.png",
+                out report),
+            AcceptanceScenarioMode.ExternalSolids => ValidateExternalSolids(
+                snapshot,
+                materials.Resolve("acceptance:solid_light"),
+                materials.Resolve("acceptance:solid_heavy"),
+                materials.Resolve("acceptance:fixture"),
+                artifactDirectory,
+                out report),
             _ => Fail(out report)
         };
+    }
+
+    private static bool ValidateExternalLiquid(
+        SimulationWorldSnapshot snapshot,
+        uint liquidIndex,
+        string artifactDirectory,
+        out string report)
+    {
+        int cells = 0;
+        int resting = 0;
+        int moving = 0;
+        int minimumX = snapshot.Width;
+        int maximumX = 0;
+        double mass = 0;
+        foreach (GridCell cell in Cells(snapshot))
+        {
+            if (cell.IsActive == 0 || cell.MaterialIndex != liquidIndex)
+            {
+                continue;
+            }
+            cells++;
+            mass += cell.Mass;
+            resting += cell.RestFrames >= 60 ? 1 : 0;
+            moving += Speed(cell) > 0.02f ? 1 : 0;
+        }
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        for (int y = 0; y < snapshot.Height; y++)
+        {
+            for (int x = 0; x < snapshot.Width; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive != 0 && cell.MaterialIndex == liquidIndex)
+                {
+                    minimumX = Math.Min(minimumX, x);
+                    maximumX = Math.Max(maximumX, x);
+                }
+            }
+        }
+        bool image = File.Exists(Path.Combine(artifactDirectory, "R_external_liquid.png"));
+        bool passed = cells >= 1000 && mass >= 1000 && maximumX - minimumX >= 180 &&
+            resting >= cells * 0.98 && moving == 0 && image;
+        report = $"PHYXEL_EXTERNAL_LIQUID cells={cells} mass={mass:0.0} resting={resting} moving={moving} width={maximumX - minimumX}";
+        return passed;
+    }
+
+    private static bool ValidateExternalSolids(
+        SimulationWorldSnapshot snapshot,
+        uint lightIndex,
+        uint heavyIndex,
+        uint fixtureIndex,
+        string artifactDirectory,
+        out string report)
+    {
+        int light = 0;
+        int heavy = 0;
+        int fixture = 0;
+        int moving = 0;
+        int lightBottom = 0;
+        int heavyBottom = 0;
+        int fixtureBodyCells = 0;
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        for (int index = 0; index < grid.Length; index++)
+        {
+            GridCell cell = grid[index];
+            if (cell.IsActive == 0)
+            {
+                continue;
+            }
+            int y = index / snapshot.Width;
+            if (cell.MaterialIndex == lightIndex)
+            {
+                light++;
+                lightBottom = Math.Max(lightBottom, y);
+                moving += cell.RestFrames < 2 ? 1 : 0;
+                if (Math.Abs(cell.Mass - 4f) > 0.01f) return Fail(out report);
+            }
+            else if (cell.MaterialIndex == heavyIndex)
+            {
+                heavy++;
+                heavyBottom = Math.Max(heavyBottom, y);
+                moving += cell.RestFrames < 2 ? 1 : 0;
+                if (Math.Abs(cell.Mass - 12f) > 0.01f) return Fail(out report);
+            }
+            else if (cell.MaterialIndex == fixtureIndex)
+            {
+                fixture++;
+                fixtureBodyCells += cell.BodyId != 0 ? 1 : 0;
+            }
+        }
+        bool image = File.Exists(Path.Combine(artifactDirectory, "T_external_solids.png"));
+        bool passed = light >= 500 && heavy >= 500 && fixture >= 400 &&
+            lightBottom >= 235 && heavyBottom >= 235 && moving == 0 &&
+            fixtureBodyCells == 0 && image;
+        report = $"PHYXEL_EXTERNAL_SOLIDS light={light}@{lightBottom} heavy={heavy}@{heavyBottom} fixture={fixture} fixtureBodies={fixtureBodyCells} moving={moving}";
+        return passed;
     }
 
     private static bool ValidateWaterStress(
@@ -100,7 +232,7 @@ public static class AcceptanceRegressionVerifier
         int moving = 0;
         foreach (GridCell cell in Cells(snapshot))
         {
-            if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+            if (cell.IsActive == 0 || cell.MaterialIndex != materials.Water)
             {
                 continue;
             }
@@ -134,7 +266,7 @@ public static class AcceptanceRegressionVerifier
             for (int x = 0; x < snapshot.Width; x++)
             {
                 GridCell cell = grid[y * snapshot.Width + x];
-                if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+                if (cell.IsActive == 0 || cell.MaterialIndex != materials.Water)
                 {
                     continue;
                 }
@@ -208,12 +340,12 @@ public static class AcceptanceRegressionVerifier
                 {
                     continue;
                 }
-                if (cell.MaterialId == (uint)MaterialId.Sand)
+                if (cell.MaterialIndex == materials.Sand)
                 {
                     sand++;
                     continue;
                 }
-                if (cell.MaterialId != (uint)MaterialId.Water)
+                if (cell.MaterialIndex != materials.Water)
                 {
                     continue;
                 }
@@ -255,7 +387,7 @@ public static class AcceptanceRegressionVerifier
         int leaks = 0;
         foreach (GridCell cell in grid)
         {
-            if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+            if (cell.IsActive == 0 || cell.MaterialIndex != materials.Water)
             {
                 continue;
             }
@@ -268,7 +400,7 @@ public static class AcceptanceRegressionVerifier
             for (int x = 0; x < snapshot.Width; x++)
             {
                 GridCell cell = grid[y * snapshot.Width + x];
-                if (cell.IsActive != 0 && cell.MaterialId == (uint)MaterialId.Water &&
+                if (cell.IsActive != 0 && cell.MaterialIndex == materials.Water &&
                     (x < 20 || x > 460 || y > 251))
                 {
                     leaks++;
@@ -302,7 +434,7 @@ public static class AcceptanceRegressionVerifier
             for (int x = 0; x < snapshot.Width; x++)
             {
                 GridCell cell = grid[y * snapshot.Width + x];
-                if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+                if (cell.IsActive == 0 || cell.MaterialIndex != materials.Water)
                 {
                     continue;
                 }
@@ -346,7 +478,7 @@ public static class AcceptanceRegressionVerifier
         float minimumHead = float.MaxValue;
         foreach (GridCell cell in grid)
         {
-            if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+            if (cell.IsActive == 0 || cell.MaterialIndex != materials.Water)
             {
                 continue;
             }
@@ -377,25 +509,25 @@ public static class AcceptanceRegressionVerifier
             snapshot.Width - 1,
             0,
             snapshot.Height - 1,
-            MaterialId.Water);
+            materials.Water);
         int tankTop = SurfaceTop(grid, snapshot.Width, 1100, 1450, 100, 350);
         int leftSpiralTop = SurfaceTop(grid, snapshot.Width, 580, 730, 300, 760);
         int outerRise = CountMaterial(
-            grid, snapshot.Width, 620, 700, 390, 508, MaterialId.Water);
+            grid, snapshot.Width, 620, 700, 390, 508, materials.Water);
         int firstBend = CountMaterial(
-            grid, snapshot.Width, 730, 780, 480, 510, MaterialId.Water);
+            grid, snapshot.Width, 730, 780, 480, 510, materials.Water);
         int innerRise = CountMaterial(
-            grid, snapshot.Width, 1040, 1100, 500, 612, MaterialId.Water);
+            grid, snapshot.Width, 1040, 1100, 500, 612, materials.Water);
         int bottomWater = CountMaterial(
-            grid, snapshot.Width, 0, snapshot.Width - 1, 1000, snapshot.Height - 1, MaterialId.Water);
+            grid, snapshot.Width, 0, snapshot.Width - 1, 1000, snapshot.Height - 1, materials.Water);
         int upperWater = water - bottomWater;
         GridCell[] componentCells = grid.ToArray();
         int outerComponent = ConnectedMaterialSize(
-            componentCells, snapshot.Width, snapshot.Height, 1200, 300, MaterialId.Water);
+            componentCells, snapshot.Width, snapshot.Height, 1200, 300, materials.Water);
         int innerComponent = ConnectedMaterialSize(
-            componentCells, snapshot.Width, snapshot.Height, 1050, 600, MaterialId.Water);
+            componentCells, snapshot.Width, snapshot.Height, 1050, 600, materials.Water);
         int bottomComponent = ConnectedMaterialSize(
-            componentCells, snapshot.Width, snapshot.Height, 100, 1070, MaterialId.Water);
+            componentCells, snapshot.Width, snapshot.Height, 100, 1070, materials.Water);
         int moving = 0;
         int leftRouted = 0;
         float leftMinimumHead = float.MaxValue;
@@ -404,7 +536,7 @@ public static class AcceptanceRegressionVerifier
             for (int x = 580; x <= 730; x++)
             {
                 GridCell cell = grid[y * snapshot.Width + x];
-                if (IsMaterial(cell, MaterialId.Water) && cell.Pressure > 0)
+                if (IsMaterial(cell, materials.Water) && cell.Pressure > 0)
                 {
                     leftRouted++;
                     leftMinimumHead = Math.Min(leftMinimumHead, cell.Pressure - 1);
@@ -413,7 +545,7 @@ public static class AcceptanceRegressionVerifier
         }
         foreach (GridCell cell in grid)
         {
-            moving += IsMaterial(cell, MaterialId.Water) && Speed(cell) > 0.02f ? 1 : 0;
+            moving += IsMaterial(cell, materials.Water) && Speed(cell) > 0.02f ? 1 : 0;
         }
 
         // This capture contains three deliberately disconnected pools: the
@@ -442,9 +574,9 @@ public static class AcceptanceRegressionVerifier
     {
         ReadOnlySpan<GridCell> grid = Cells(snapshot);
         int lowerMetal = CountMaterial(
-            grid, snapshot.Width, 0, snapshot.Width - 1, 850, snapshot.Height - 1, MaterialId.Metal);
+            grid, snapshot.Width, 0, snapshot.Width - 1, 850, snapshot.Height - 1, materials.Metal);
         int lowerConcrete = CountMaterial(
-            grid, snapshot.Width, 0, snapshot.Width - 1, 850, snapshot.Height - 1, MaterialId.Concrete);
+            grid, snapshot.Width, 0, snapshot.Width - 1, 850, snapshot.Height - 1, materials.Concrete);
         int lowerSolids = lowerMetal + lowerConcrete;
         Dictionary<uint, (int Count, int Top, int Bottom)> bodies = [];
         int water = 0;
@@ -454,19 +586,19 @@ public static class AcceptanceRegressionVerifier
         {
             GridCell cell = grid[index];
             int y = index / snapshot.Width;
-            if (IsMaterial(cell, MaterialId.Water))
+            if (IsMaterial(cell, materials.Water))
             {
                 water++;
                 waterTop = Math.Min(waterTop, y);
             }
-            if (cell.IsActive != 0 &&
-                cell.MaterialId is (uint)MaterialId.Metal or (uint)MaterialId.Concrete &&
+            bool solidMaterial = cell.MaterialIndex == materials.Metal ||
+                cell.MaterialIndex == materials.Concrete;
+            if (cell.IsActive != 0 && solidMaterial &&
                 cell.RestFrames < 2)
             {
                 movingSolids++;
             }
-            if (cell.IsActive != 0 && cell.BodyId != 0 &&
-                cell.MaterialId is (uint)MaterialId.Metal or (uint)MaterialId.Concrete)
+            if (cell.IsActive != 0 && cell.BodyId != 0 && solidMaterial)
             {
                 bodies.TryGetValue(cell.BodyId, out (int Count, int Top, int Bottom) body);
                 body.Count++;
@@ -497,32 +629,32 @@ public static class AcceptanceRegressionVerifier
     {
         ReadOnlySpan<GridCell> grid = Cells(snapshot);
         int waterTop = SurfaceTop(grid, snapshot.Width, 20, 45, 130, 250);
-        int closedBottom = MaterialBottom(grid, snapshot.Width, 45, 195, 60, 250, MaterialId.Metal);
-        int openBottom = MaterialBottom(grid, snapshot.Width, 205, 340, 60, 250, MaterialId.Metal);
-        int blockBottom = MaterialBottom(grid, snapshot.Width, 365, 435, 60, 250, MaterialId.Metal);
+        int closedBottom = MaterialBottom(grid, snapshot.Width, 45, 195, 60, 250, materials.Metal);
+        int openBottom = MaterialBottom(grid, snapshot.Width, 205, 340, 60, 250, materials.Metal);
+        int blockBottom = MaterialBottom(grid, snapshot.Width, 365, 435, 60, 250, materials.Metal);
         int closedMetal = CountMaterial(
-            grid, snapshot.Width, 45, 195, 60, 250, MaterialId.Metal);
+            grid, snapshot.Width, 45, 195, 60, 250, materials.Metal);
         int openMetal = CountMaterial(
-            grid, snapshot.Width, 205, 340, 60, 250, MaterialId.Metal);
+            grid, snapshot.Width, 205, 340, 60, 250, materials.Metal);
         int loadedSand = CountMaterial(
-            grid, snapshot.Width, 205, 340, 60, 250, MaterialId.Sand);
+            grid, snapshot.Width, 205, 340, 60, 250, materials.Sand);
         int sunkBlock = CountMaterial(
-            grid, snapshot.Width, 365, 435, waterTop + 3, 250, MaterialId.Metal);
+            grid, snapshot.Width, 365, 435, waterTop + 3, 250, materials.Metal);
         int closedWater = CountMaterial(
-            grid, snapshot.Width, 70, 170, Math.Max(0, waterTop - 80), closedBottom - 10, MaterialId.Water);
+            grid, snapshot.Width, 70, 170, Math.Max(0, waterTop - 80), closedBottom - 10, materials.Water);
         int openWater = CountMaterial(
-            grid, snapshot.Width, 230, 315, Math.Max(0, waterTop - 80), openBottom - 10, MaterialId.Water);
+            grid, snapshot.Width, 230, 315, Math.Max(0, waterTop - 80), openBottom - 10, materials.Water);
         int deepHull = CountMaterial(
-            grid, snapshot.Width, 45, 340, waterTop + 64, 250, MaterialId.Metal);
+            grid, snapshot.Width, 45, 340, waterTop + 64, 250, materials.Metal);
         int totalWater = 0;
         int movingSolids = 0;
         foreach (GridCell cell in grid)
         {
-            if (cell.IsActive != 0 && cell.MaterialId == (uint)MaterialId.Water)
+            if (cell.IsActive != 0 && cell.MaterialIndex == materials.Water)
             {
                 totalWater++;
             }
-            if (cell.IsActive != 0 && cell.MaterialId == (uint)MaterialId.Metal &&
+            if (cell.IsActive != 0 && cell.MaterialIndex == materials.Metal &&
                 cell.RestFrames < 2)
             {
                 movingSolids++;
@@ -556,7 +688,7 @@ public static class AcceptanceRegressionVerifier
             {
                 int index = y * snapshot.Width + x;
                 GridCell cell = grid[index];
-                if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+                if (cell.IsActive == 0 || cell.MaterialIndex != materials.Water)
                 {
                     continue;
                 }
@@ -568,10 +700,10 @@ public static class AcceptanceRegressionVerifier
                 fringeWater++;
                 movingFringe += cell.RestFrames < 60 ? 1 : 0;
                 bool adjacentSand =
-                    (x > 0 && IsMaterial(grid[index - 1], MaterialId.Sand)) ||
-                    (x + 1 < snapshot.Width && IsMaterial(grid[index + 1], MaterialId.Sand)) ||
-                    (y > 0 && IsMaterial(grid[index - snapshot.Width], MaterialId.Sand)) ||
-                    (y + 1 < snapshot.Height && IsMaterial(grid[index + snapshot.Width], MaterialId.Sand));
+                    (x > 0 && IsMaterial(grid[index - 1], materials.Sand)) ||
+                    (x + 1 < snapshot.Width && IsMaterial(grid[index + 1], materials.Sand)) ||
+                    (y > 0 && IsMaterial(grid[index - snapshot.Width], materials.Sand)) ||
+                    (y + 1 < snapshot.Height && IsMaterial(grid[index + snapshot.Width], materials.Sand));
                 fringeAdjacentSand += adjacentSand ? 1 : 0;
             }
         }
@@ -604,16 +736,16 @@ public static class AcceptanceRegressionVerifier
                 {
                     continue;
                 }
-                MaterialId material = (MaterialId)cell.MaterialId;
-                if (material == MaterialId.Metal) metal++;
-                if (material == MaterialId.Water)
+                uint material = cell.MaterialIndex;
+                if (material == materials.Metal) metal++;
+                if (material == materials.Water)
                 {
                     water++;
                     waterY += y;
                     leakedWater += x < 108 || x > 331 || y > 231 ? 1 : 0;
                     movingWater += Speed(cell) > 0.02f ? 1 : 0;
                 }
-                if (material == MaterialId.Sand)
+                if (material == materials.Sand)
                 {
                     sand++;
                     sandY += y;
@@ -624,12 +756,12 @@ public static class AcceptanceRegressionVerifier
         int wallGaps = 0;
         for (int y = 115; y <= 229; y++)
         {
-            wallGaps += HasMaterial(grid, snapshot.Width, 108, 120, y, MaterialId.Metal) ? 0 : 1;
-            wallGaps += HasMaterial(grid, snapshot.Width, 319, 331, y, MaterialId.Metal) ? 0 : 1;
+            wallGaps += HasMaterial(grid, snapshot.Width, 108, 120, y, materials.Metal) ? 0 : 1;
+            wallGaps += HasMaterial(grid, snapshot.Width, 319, 331, y, materials.Metal) ? 0 : 1;
         }
         for (int x = 110; x <= 329; x++)
         {
-            wallGaps += HasMaterial(grid, snapshot.Width, x, x, 220, 230, MaterialId.Metal) ? 0 : 1;
+            wallGaps += HasMaterial(grid, snapshot.Width, x, x, 220, 230, materials.Metal) ? 0 : 1;
         }
         string waterImage = Path.Combine(artifactDirectory, "A_water_2s.png");
         string finalImage = Path.Combine(artifactDirectory, "A_water_sand.png");
@@ -650,8 +782,8 @@ public static class AcceptanceRegressionVerifier
     {
         ReadOnlySpan<GridCell> grid = Cells(snapshot);
         GridCell[] componentCells = grid.ToArray();
-        ComponentMetrics metal = Components(componentCells, snapshot.Width, snapshot.Height, MaterialId.Metal);
-        ComponentMetrics concrete = Components(componentCells, snapshot.Width, snapshot.Height, MaterialId.Concrete);
+        ComponentMetrics metal = Components(componentCells, snapshot.Width, snapshot.Height, materials.Metal);
+        ComponentMetrics concrete = Components(componentCells, snapshot.Width, snapshot.Height, materials.Concrete);
         string offImage = Path.Combine(artifactDirectory, "B_gravity_off.png");
         string fallingImage = Path.Combine(artifactDirectory, "B_falling.png");
         string landedImage = Path.Combine(artifactDirectory, "B_landed.png");
@@ -659,14 +791,14 @@ public static class AcceptanceRegressionVerifier
         int suspendedMetal = CountColor(offImage, 50, 15, 120, 85, IsMetal);
         int suspendedConcrete = CountColor(offImage, 205, 45, 425, 75, IsConcrete);
         ColorMetrics colors = AnalyzeColors(splitImage);
-        int squareCells = CountMaterial(grid, snapshot.Width, 50, 120, 180, 245, MaterialId.Metal);
-        int supportedFragment = CountMaterial(grid, snapshot.Width, 125, 165, 90, 115, MaterialId.Metal);
-        int floorFragment = CountMaterial(grid, snapshot.Width, 170, 210, 225, 245, MaterialId.Metal);
-        int supportedConcrete = CountMaterial(grid, snapshot.Width, 210, 310, 155, 185, MaterialId.Concrete);
-        int floorConcrete = CountMaterial(grid, snapshot.Width, 320, 410, 225, 245, MaterialId.Concrete);
+        int squareCells = CountMaterial(grid, snapshot.Width, 50, 120, 180, 245, materials.Metal);
+        int supportedFragment = CountMaterial(grid, snapshot.Width, 125, 165, 90, 115, materials.Metal);
+        int floorFragment = CountMaterial(grid, snapshot.Width, 170, 210, 225, 245, materials.Metal);
+        int supportedConcrete = CountMaterial(grid, snapshot.Width, 210, 310, 155, 185, materials.Concrete);
+        int floorConcrete = CountMaterial(grid, snapshot.Width, 320, 410, 225, 245, materials.Concrete);
         int landedWholeConcrete = CountColor(landedImage, 205, 155, 425, 185, IsConcrete);
-        int water = CountMaterial(grid, snapshot.Width, 0, snapshot.Width - 1, 0, snapshot.Height - 1, MaterialId.Water);
-        int sand = CountMaterial(grid, snapshot.Width, 0, snapshot.Width - 1, 0, snapshot.Height - 1, MaterialId.Sand);
+        int water = CountMaterial(grid, snapshot.Width, 0, snapshot.Width - 1, 0, snapshot.Height - 1, materials.Water);
+        int sand = CountMaterial(grid, snapshot.Width, 0, snapshot.Width - 1, 0, snapshot.Height - 1, materials.Sand);
         bool metalWhole = metal.Count == 3 && metal.Largest > 1800 && squareCells > 1800 &&
             supportedFragment > 150 && floorFragment > 150;
         bool concreteSplit = concrete.Count == 2 && concrete.Largest > 700 &&
@@ -695,7 +827,7 @@ public static class AcceptanceRegressionVerifier
             for (int x = 0; x < snapshot.Width; x++)
             {
                 GridCell cell = grid[y * snapshot.Width + x];
-                if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Sand)
+                if (cell.IsActive == 0 || cell.MaterialIndex != materials.Sand)
                 {
                     continue;
                 }
@@ -759,7 +891,7 @@ public static class AcceptanceRegressionVerifier
         int wallGaps = 0;
         foreach (GridCell cell in grid)
         {
-            if (cell.IsActive == 0 || cell.MaterialId != (uint)MaterialId.Water)
+            if (cell.IsActive == 0 || cell.MaterialIndex != materials.Water)
             {
                 continue;
             }
@@ -772,7 +904,7 @@ public static class AcceptanceRegressionVerifier
             for (int x = 0; x < snapshot.Width; x++)
             {
                 GridCell cell = grid[y * snapshot.Width + x];
-                if (cell.IsActive != 0 && cell.MaterialId == (uint)MaterialId.Water &&
+                if (cell.IsActive != 0 && cell.MaterialIndex == materials.Water &&
                     ((x < 10 || x > 470) || y > 249))
                 {
                     leaks++;
@@ -786,12 +918,12 @@ public static class AcceptanceRegressionVerifier
         }
         for (int y = 95; y <= 254; y++)
         {
-            wallGaps += HasMaterial(grid, snapshot.Width, 10, 20, y, MaterialId.Metal) ? 0 : 1;
-            wallGaps += HasMaterial(grid, snapshot.Width, 255, 265, y, MaterialId.Metal) ? 0 : 1;
+            wallGaps += HasMaterial(grid, snapshot.Width, 10, 20, y, materials.Metal) ? 0 : 1;
+            wallGaps += HasMaterial(grid, snapshot.Width, 255, 265, y, materials.Metal) ? 0 : 1;
         }
         for (int x = 15; x <= 260; x++)
         {
-            wallGaps += HasMaterial(grid, snapshot.Width, x, x, 245, 255, MaterialId.Metal) ? 0 : 1;
+            wallGaps += HasMaterial(grid, snapshot.Width, x, x, 245, 255, materials.Metal) ? 0 : 1;
         }
         string equalImage = Path.Combine(artifactDirectory, "D_equal_2s.png");
         string waterfallImage = Path.Combine(artifactDirectory, "D_waterfall.png");
@@ -816,7 +948,7 @@ public static class AcceptanceRegressionVerifier
         GridCell[] grid,
         int width,
         int height,
-        MaterialId material)
+        uint material)
     {
         bool[] visited = new bool[grid.Length];
         int[] queue = new int[grid.Length];
@@ -828,7 +960,7 @@ public static class AcceptanceRegressionVerifier
         int maxY = 0;
         for (int start = 0; start < grid.Length; start++)
         {
-            if (visited[start] || grid[start].IsActive == 0 || grid[start].MaterialId != (uint)material)
+            if (visited[start] || grid[start].IsActive == 0 || grid[start].MaterialIndex != material)
             {
                 continue;
             }
@@ -864,7 +996,7 @@ public static class AcceptanceRegressionVerifier
         int height,
         int seedX,
         int seedY,
-        MaterialId material)
+        uint material)
     {
         if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height)
         {
@@ -903,9 +1035,9 @@ public static class AcceptanceRegressionVerifier
         ref int tail,
         int index,
         bool valid,
-        MaterialId material)
+        uint material)
     {
-        if (!valid || visited[index] || grid[index].IsActive == 0 || grid[index].MaterialId != (uint)material)
+        if (!valid || visited[index] || grid[index].IsActive == 0 || grid[index].MaterialIndex != material)
         {
             return;
         }
@@ -934,7 +1066,7 @@ public static class AcceptanceRegressionVerifier
             for (int y = top; y <= bottom; y++)
             {
                 GridCell cell = grid[y * width + x];
-                if (cell.IsActive != 0 && cell.MaterialId == (uint)MaterialId.Water)
+                if (cell.IsActive != 0 && cell.MaterialIndex == materials.Water)
                 {
                     tops.Add(y);
                     break;
@@ -953,7 +1085,7 @@ public static class AcceptanceRegressionVerifier
         int right,
         int top,
         int bottom,
-        MaterialId material)
+        uint material)
     {
         for (int y = bottom; y >= top; y--)
         {
@@ -983,7 +1115,7 @@ public static class AcceptanceRegressionVerifier
             for (int x = left; x <= right + 1; x++)
             {
                 bool solid = x <= right && grid[y * width + x].IsActive != 0 &&
-                    grid[y * width + x].MaterialId != (uint)MaterialId.Water;
+                    grid[y * width + x].MaterialIndex != materials.Water;
                 if (solid && runStart < 0)
                 {
                     runStart = x;
@@ -1028,7 +1160,7 @@ public static class AcceptanceRegressionVerifier
                 interiorRight,
                 y,
                 y,
-                MaterialId.Water);
+                materials.Water);
             int interiorWidth = interiorRight - interiorLeft + 1;
             if (water * 2 >= interiorWidth)
             {
@@ -1174,18 +1306,18 @@ public static class AcceptanceRegressionVerifier
         int left,
         int right,
         int y,
-        MaterialId material)
+        uint material)
     {
         for (int x = left; x <= right; x++)
         {
             GridCell cell = grid[y * width + x];
-            if (cell.IsActive != 0 && cell.MaterialId == (uint)material) return true;
+            if (cell.IsActive != 0 && cell.MaterialIndex == material) return true;
         }
         return false;
     }
 
-    private static bool IsMaterial(GridCell cell, MaterialId material) =>
-        cell.IsActive != 0 && cell.MaterialId == (uint)material;
+    private static bool IsMaterial(GridCell cell, uint material) =>
+        cell.IsActive != 0 && cell.MaterialIndex == material;
 
     private static int CountMaterial(
         ReadOnlySpan<GridCell> grid,
@@ -1194,7 +1326,7 @@ public static class AcceptanceRegressionVerifier
         int right,
         int top,
         int bottom,
-        MaterialId material)
+        uint material)
     {
         int count = 0;
         for (int y = top; y <= bottom; y++)
@@ -1202,7 +1334,7 @@ public static class AcceptanceRegressionVerifier
             for (int x = left; x <= right; x++)
             {
                 GridCell cell = grid[y * width + x];
-                count += cell.IsActive != 0 && cell.MaterialId == (uint)material ? 1 : 0;
+                count += cell.IsActive != 0 && cell.MaterialIndex == material ? 1 : 0;
             }
         }
         return count;
@@ -1215,12 +1347,12 @@ public static class AcceptanceRegressionVerifier
         int ignored,
         int top,
         int bottom,
-        MaterialId material)
+        uint material)
     {
         for (int y = top; y <= bottom; y++)
         {
             GridCell cell = grid[y * width + x];
-            if (cell.IsActive != 0 && cell.MaterialId == (uint)material) return true;
+            if (cell.IsActive != 0 && cell.MaterialIndex == material) return true;
         }
         return false;
     }

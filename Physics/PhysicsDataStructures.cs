@@ -5,7 +5,7 @@ namespace Phyxel.Physics;
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct GridCell
 {
-    public uint MaterialId;
+    public uint MaterialIndex;
     public float Mass;
     public float VelocityX;
     public float VelocityY;
@@ -34,7 +34,7 @@ public struct BrushDrawCommand
 {
     public int X;
     public int Y;
-    public uint MaterialId;
+    public uint MaterialIndex;
     public float Radius;
     public float Density;
     public uint Mode;

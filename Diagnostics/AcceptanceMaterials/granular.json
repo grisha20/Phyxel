@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "id": "acceptance:granular",
+  "name": "Acceptance Granular",
+  "kind": "granular",
+  "color": "#C98B3C",
+  "physics": { "density": 1.65, "friction": 0.75, "flowRate": 0.18 },
+  "ui": { "order": 1000, "hidden": false }
+}

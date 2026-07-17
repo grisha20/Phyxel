@@ -20,7 +20,6 @@ public sealed class MaterialRegistry
     public MaterialRegistry(string? externalDirectory = null)
     {
         List<MaterialDefinition> definitions = CreateBuiltIns();
-        ValidateLegacyIndices(definitions);
 
         HashSet<string> reservedIds = definitions
             .Select(material => material.Id)
@@ -97,24 +96,6 @@ public sealed class MaterialRegistry
     }
 
     public static string NormalizeId(string id) => id.Trim().ToLowerInvariant();
-
-    private static void ValidateLegacyIndices(IReadOnlyList<MaterialDefinition> definitions)
-    {
-        if (definitions.Count != CoreMaterialIds.LegacyV3Palette.Length)
-        {
-            throw new InvalidOperationException("Набор встроенных материалов не соответствует legacy-палитре v3.");
-        }
-
-        for (int index = 0; index < definitions.Count; index++)
-        {
-            if (definitions[index].Id != CoreMaterialIds.LegacyV3Palette[index] ||
-                definitions[index].RuntimeIndex != index)
-            {
-                throw new InvalidOperationException(
-                    $"Встроенный материал {definitions[index].Id} нарушает legacy-индекс {index}.");
-            }
-        }
-    }
 
     private static List<MaterialDefinition> CreateBuiltIns()
     {
