@@ -25,7 +25,8 @@ public sealed class SandboxUiCoordinator
     private readonly Texture2D pixel;
     private readonly Texture2D brushOutline;
     private readonly UiPanelBackdropRenderer panelRenderer;
-    private readonly List<(MaterialId Material, UiIconButton Button)> materialButtons = [];
+    private readonly List<(ushort RuntimeIndex, UiIconButton Button)> materialButtons = [];
+    private readonly ushort eraserRuntimeIndex;
     private readonly UiIconButton pauseButton = new(UiLocalizationProvider.Pause);
     private readonly UiIconButton clearButton = new(UiLocalizationProvider.Clear);
     private readonly UiIconButton saveButton = new(UiLocalizationProvider.Save);
@@ -48,13 +49,14 @@ public sealed class SandboxUiCoordinator
         pixel = resources.PixelTexture;
         brushOutline = resources.BrushOutlineTexture;
         panelRenderer = new UiPanelBackdropRenderer(resources.PixelTexture, resources.CircleTexture);
+        eraserRuntimeIndex = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Eraser);
         foreach (MaterialDefinition material in materialRegistry.SelectableMaterials)
         {
-            UiIconButton button = new(UiLocalizationProvider.Material(material.Id))
+            UiIconButton button = new(material.Name)
             {
                 AccentColor = material.Color
             };
-            materialButtons.Add((material.Id, button));
+            materialButtons.Add((material.RuntimeIndex, button));
         }
 
         brushSlider = new UiValueSlider(UiLocalizationProvider.BrushSize, 1, 96, 1, 18, " px");
@@ -66,9 +68,10 @@ public sealed class SandboxUiCoordinator
             25,
             SimulationSettings.DefaultScale * 100,
             "%");
+        SelectedMaterial = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
     }
 
-    public MaterialId SelectedMaterial { get; set; } = MaterialId.Sand;
+    public ushort SelectedMaterial { get; set; }
     public Rectangle CanvasBounds { get; private set; }
     public Rectangle SidePanelBounds { get; private set; }
     public Rectangle InfoPanelBounds { get; private set; }
@@ -86,11 +89,11 @@ public sealed class SandboxUiCoordinator
         clearConfirmationRemaining = Math.Max(0f, clearConfirmationRemaining - input.DeltaSeconds);
         for (int index = 0; index < materialButtons.Count; index++)
         {
-            (MaterialId material, UiIconButton button) = materialButtons[index];
-            button.Active = material == SelectedMaterial;
+            (ushort runtimeIndex, UiIconButton button) = materialButtons[index];
+            button.Active = runtimeIndex == SelectedMaterial;
             if (button.Update(input))
             {
-                SelectedMaterial = material;
+                SelectedMaterial = runtimeIndex;
             }
         }
 
@@ -186,7 +189,7 @@ public sealed class SandboxUiCoordinator
             UiLocalizationProvider.Materials,
             new Vector2(SidePanelBounds.X + 14, SidePanelBounds.Y + 12),
             new Color(170, 170, 170));
-        foreach ((MaterialId _, UiIconButton button) in materialButtons)
+        foreach ((ushort _, UiIconButton button) in materialButtons)
         {
             button.Draw(spriteBatch, font, panelRenderer, pixel, true);
         }
@@ -231,7 +234,7 @@ public sealed class SandboxUiCoordinator
         float pixelScale = worldBounds.Width / (float)Math.Max(1, settings.Width);
         int diameter = Math.Max(3, (int)MathF.Round((settings.BrushRadius * 2 + 1) * pixelScale));
         Rectangle bounds = new(pointer.X - diameter / 2, pointer.Y - diameter / 2, diameter, diameter);
-        bool erasing = eraseOverride || SelectedMaterial == MaterialId.Eraser;
+        bool erasing = eraseOverride || SelectedMaterial == eraserRuntimeIndex;
         Color color = erasing ? new Color(255, 96, 96, 190) : new Color(210, 235, 255, 175);
         spriteBatch.Draw(brushOutline, bounds, color);
     }
@@ -264,7 +267,7 @@ public sealed class SandboxUiCoordinator
         int cursorY = SidePanelBounds.Y + 42;
         int buttonHeight = compactLayout ? 30 : Math.Max(36, (int)(40 * scale));
         int buttonSpacing = compactLayout ? 3 : 5;
-        foreach ((MaterialId _, UiIconButton button) in materialButtons)
+        foreach ((ushort _, UiIconButton button) in materialButtons)
         {
             button.Bounds = new Rectangle(innerX, cursorY, innerWidth, buttonHeight);
             cursorY += buttonHeight + buttonSpacing;

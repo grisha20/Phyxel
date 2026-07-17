@@ -23,6 +23,10 @@ public struct MaterialProperties
     public float Density;
     public float Friction;
     public float FlowRate;
+    public float ColorR;
+    public float ColorG;
+    public float ColorB;
+    public float ColorA;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

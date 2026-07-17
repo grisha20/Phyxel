@@ -25,8 +25,36 @@ public enum MaterialSimulationKind : uint
     Gas = 5
 }
 
+public static class CoreMaterialIds
+{
+    public const string Empty = "core:empty";
+    public const string Sand = "core:sand";
+    public const string Water = "core:water";
+    public const string Metal = "core:metal";
+    public const string Concrete = "core:concrete";
+    public const string Eraser = "core:eraser";
+    public const string Gas = "core:gas";
+    public const string Fixture = "core:fixture";
+    public const string GoldSand = "core:gold_sand";
+
+    public static readonly string[] LegacyV3Palette =
+    [
+        Empty,
+        Sand,
+        Water,
+        Metal,
+        Concrete,
+        Eraser,
+        Gas,
+        Fixture
+    ];
+}
+
 public sealed record MaterialDefinition(
-    MaterialId Id,
+    string Id,
+    ushort RuntimeIndex,
     string Name,
     Color Color,
-    MaterialProperties Properties);
+    MaterialProperties Properties,
+    int UiOrder = 0,
+    bool Hidden = false);

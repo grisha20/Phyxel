@@ -907,7 +907,7 @@ public sealed class SimulationDispatchCoordinator
         {
             ExpandActiveRegion(command.X, command.Y, (int)MathF.Ceiling(command.Radius), width, height);
 
-            if (command.Mode != 0 || command.MaterialId == (uint)MaterialId.Eraser)
+            if (command.Mode != 0)
             {
                 topologyDirty = true;
                 cellularSleeping = false;
@@ -917,7 +917,7 @@ public sealed class SimulationDispatchCoordinator
                 settledObservations = 0;
                 continue;
             }
-            MaterialSimulationKind kind = (MaterialSimulationKind)materialRegistry[(MaterialId)command.MaterialId]
+            MaterialSimulationKind kind = (MaterialSimulationKind)materialRegistry[command.MaterialId]
                 .Properties.SimulationKind;
             if (kind == MaterialSimulationKind.Solid)
             {
@@ -965,7 +965,7 @@ public sealed class SimulationDispatchCoordinator
     {
         foreach (BrushDrawCommand command in commands)
         {
-            if (command.Mode == 0 && command.MaterialId != (uint)MaterialId.Eraser)
+            if (command.Mode == 0)
             {
                 return true;
             }

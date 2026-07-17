@@ -23,14 +23,16 @@ public enum AcceptanceScenarioMode
     SavedIsolation,
     SavedGravity,
     Buoyancy,
-    SavedSandWater
+    SavedSandWater,
+    GoldSand
 }
 
 public static class AcceptanceRegressionScenario
 {
     public static IReadOnlyList<BrushDrawCommand> CreateCommands(
         AcceptanceScenarioMode mode,
-        uint frame)
+        uint frame,
+        MaterialRegistry? materialRegistry = null)
     {
         return mode switch
         {
@@ -50,6 +52,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.SavedGravity => [],
             AcceptanceScenarioMode.Buoyancy => CreateBuoyancy(frame),
             AcceptanceScenarioMode.SavedSandWater => [],
+            AcceptanceScenarioMode.GoldSand => CreateGoldSand(frame, materialRegistry),
             _ => []
         };
     }
@@ -244,6 +247,32 @@ public static class AcceptanceRegressionScenario
             return commands;
         }
         return commands;
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateGoldSand(
+        uint frame,
+        MaterialRegistry? materialRegistry)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            AddLine(commands, 80, 245, 400, 245, 7, 4, MaterialId.Fixture, 11001);
+            return commands;
+        }
+        if (frame != 1)
+        {
+            return [];
+        }
+        if (materialRegistry is null)
+        {
+            throw new InvalidOperationException("Реестр материалов не настроен для gold_sand acceptance.");
+        }
+
+        ushort runtimeIndex = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.GoldSand);
+        BrushDrawCommand goldSand = Create(240, 75, 25, runtimeIndex, 0, 0);
+        goldSand.Density = 0.51f;
+        goldSand.Seed = 11002;
+        return [goldSand];
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateFlatSurface(uint frame)
@@ -443,11 +472,22 @@ public static class AcceptanceRegressionScenario
         uint mode,
         uint bodyId)
     {
+        return Create(x, y, radius, (uint)material, mode, bodyId);
+    }
+
+    private static BrushDrawCommand Create(
+        int x,
+        int y,
+        float radius,
+        uint material,
+        uint mode,
+        uint bodyId)
+    {
         return new BrushDrawCommand
         {
             X = x,
             Y = y,
-            MaterialId = (uint)material,
+            MaterialId = material,
             Radius = radius,
             Density = 1,
             Mode = mode,

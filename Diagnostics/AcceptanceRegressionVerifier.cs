@@ -21,6 +21,7 @@ public static class AcceptanceRegressionVerifier
 
     public static bool Validate(
         AcceptanceScenarioMode mode,
+        MaterialRegistry? materialRegistry,
         SimulationWorldSnapshot snapshot,
         SimulationStatistics statistics,
         double framesPerSecond,
@@ -78,6 +79,13 @@ public static class AcceptanceRegressionVerifier
                 out report),
             AcceptanceScenarioMode.Buoyancy => ValidateBuoyancy(snapshot, framesPerSecond, out report),
             AcceptanceScenarioMode.SavedSandWater => ValidateSavedSandWater(snapshot, out report),
+            AcceptanceScenarioMode.GoldSand when materialRegistry is not null =>
+                MaterialRegressionVerifier.ValidateGranularPile(
+                    snapshot,
+                    materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.GoldSand),
+                    artifactDirectory,
+                    "P_gold_sand.png",
+                    out report),
             _ => Fail(out report)
         };
     }

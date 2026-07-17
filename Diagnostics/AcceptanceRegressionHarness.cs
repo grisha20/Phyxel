@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Phyxel.Core;
 using Phyxel.Graphics;
+using Phyxel.Materials;
 using Phyxel.Physics;
 using Phyxel.Serialization;
 
@@ -10,6 +11,8 @@ namespace Phyxel.Diagnostics;
 
 public sealed class AcceptanceRegressionHarness
 {
+    private MaterialRegistry? materialRegistry;
+
     public AcceptanceRegressionHarness()
     {
         string? requested = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_MODE") ??
@@ -32,6 +35,7 @@ public sealed class AcceptanceRegressionHarness
             "saved_gravity" => AcceptanceScenarioMode.SavedGravity,
             "buoyancy" or "float" => AcceptanceScenarioMode.Buoyancy,
             "saved_sand_water" or "sand_basin" => AcceptanceScenarioMode.SavedSandWater,
+            "gold_sand" or "core:gold_sand" => AcceptanceScenarioMode.GoldSand,
             _ => AcceptanceScenarioMode.None
         };
     }
@@ -42,6 +46,11 @@ public sealed class AcceptanceRegressionHarness
     public bool RequiresSavedScene => Mode is
         AcceptanceScenarioMode.SavedPressure or AcceptanceScenarioMode.SavedIsolation or
         AcceptanceScenarioMode.SavedGravity or AcceptanceScenarioMode.SavedSandWater;
+
+    public void ConfigureMaterials(MaterialRegistry registry)
+    {
+        materialRegistry = registry;
+    }
     public uint CaptureFrame
     {
         get
@@ -70,6 +79,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.SavedGravity => 400,
                 AcceptanceScenarioMode.Buoyancy => 500,
                 AcceptanceScenarioMode.SavedSandWater => 900,
+                AcceptanceScenarioMode.GoldSand => 190,
                 _ => uint.MaxValue
             };
         }
@@ -77,7 +87,7 @@ public sealed class AcceptanceRegressionHarness
 
     public IReadOnlyList<BrushDrawCommand> CreateCommands(uint frame)
     {
-        return AcceptanceRegressionScenario.CreateCommands(Mode, frame);
+        return AcceptanceRegressionScenario.CreateCommands(Mode, frame, materialRegistry);
     }
 
     public void ConfigureSettings(uint frame, SimulationSettings settings)
@@ -154,6 +164,7 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.SavedGravity when frame == 399 => "L_saved_gravity",
             AcceptanceScenarioMode.Buoyancy when frame == 499 => "M_buoyancy",
             AcceptanceScenarioMode.SavedSandWater when frame == 899 => "N_saved_sand_water",
+            AcceptanceScenarioMode.GoldSand when frame == 189 => "P_gold_sand",
             _ => null
         };
         if (label is null)
@@ -172,6 +183,7 @@ public sealed class AcceptanceRegressionHarness
     {
         bool passed = AcceptanceRegressionVerifier.Validate(
             Mode,
+            materialRegistry,
             snapshot,
             statistics,
             framesPerSecond,

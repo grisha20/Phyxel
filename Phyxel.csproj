@@ -31,5 +31,6 @@
   <ItemGroup>
     <KniContentReference Include="Content\PhyxelContent.mgcb" />
     <None Update="Content\Shaders\**\*.*" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Materials\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

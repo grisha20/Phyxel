@@ -1,23 +1,7 @@
-using System.Collections.Generic;
-using Phyxel.Materials;
-
 namespace Phyxel.UI;
 
 public static class UiLocalizationProvider
 {
-    private static readonly IReadOnlyDictionary<MaterialId, string> MaterialNames =
-        new Dictionary<MaterialId, string>
-        {
-            [MaterialId.Sand] = "Песок",
-            [MaterialId.Water] = "Вода",
-            [MaterialId.Metal] = "Металл",
-            [MaterialId.Concrete] = "Бетон",
-            [MaterialId.Eraser] = "Ластик",
-            [MaterialId.Gas] = "Газ",
-            [MaterialId.Fixture] = "Опора"
-        };
-
-    public static string Material(MaterialId materialId) => MaterialNames[materialId];
     public static string BrushSize => "Размер кисти";
     public static string SpawnDensity => "Плотность спавна";
     public static string Pause => "Пауза симуляции";

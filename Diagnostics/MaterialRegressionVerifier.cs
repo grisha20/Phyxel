@@ -9,6 +9,49 @@ namespace Phyxel.Diagnostics;
 
 public static class MaterialRegressionVerifier
 {
+    public static bool ValidateGranularPile(
+        SimulationWorldSnapshot snapshot,
+        ushort runtimeIndex,
+        string artifactDirectory,
+        string imageName,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid);
+        int granular = 0;
+        int resting = 0;
+        int moving = 0;
+        int settled = 0;
+        int minimumX = snapshot.Width;
+        int maximumX = 0;
+        int minimumY = snapshot.Height;
+        int maximumY = 0;
+        for (int y = 0; y < snapshot.Height; y++)
+        {
+            for (int x = 0; x < snapshot.Width; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive == 0 || cell.MaterialId != runtimeIndex)
+                {
+                    continue;
+                }
+                granular++;
+                resting += cell.RestFrames >= 30 ? 1 : 0;
+                moving += Math.Abs(cell.VelocityX) + Math.Abs(cell.VelocityY) > 0.02f ? 1 : 0;
+                settled += y >= 205 ? 1 : 0;
+                minimumX = Math.Min(minimumX, x);
+                maximumX = Math.Max(maximumX, x);
+                minimumY = Math.Min(minimumY, y);
+                maximumY = Math.Max(maximumY, y);
+            }
+        }
+
+        bool image = File.Exists(Path.Combine(artifactDirectory, imageName));
+        bool passed = granular >= 700 && settled >= granular * 0.85 &&
+            resting == granular && moving == 0 && maximumX - minimumX >= 35 && image;
+        report = $"PHYXEL_GOLD_SAND cells={granular} settled={settled} resting={resting} moving={moving} bounds={minimumX},{minimumY}-{maximumX},{maximumY}";
+        return passed;
+    }
+
     public static bool ValidateSlope(
         SimulationWorldSnapshot snapshot,
         string artifactDirectory,

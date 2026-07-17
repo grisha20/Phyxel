@@ -17,6 +17,10 @@ struct MaterialProperties
     float Density;
     float Friction;
     float FlowRate;
+    float ColorR;
+    float ColorG;
+    float ColorB;
+    float ColorA;
 };
 
 struct BrushDrawCommand

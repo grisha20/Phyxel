@@ -9,13 +9,8 @@ RWStructuredBuffer<SimulationStatistics> Statistics : register(u1);
 
 float4 MaterialColor(uint materialId)
 {
-    if (materialId == 1) return float4(0.855, 0.722, 0.361, 1);
-    if (materialId == 2) return float4(0.169, 0.518, 0.812, 1);
-    if (materialId == 3) return float4(0.557, 0.612, 0.651, 1);
-    if (materialId == 4) return float4(0.361, 0.376, 0.396, 1);
-    if (materialId == 6) return float4(0.608, 0.769, 0.824, 0.58);
-    if (materialId == 7) return float4(0.322, 0.357, 0.388, 1);
-    return float4(0.035, 0.041, 0.047, 1);
+    MaterialProperties material = Materials[materialId];
+    return float4(material.ColorR, material.ColorG, material.ColorB, material.ColorA);
 }
 
 float WaterCoverage(uint2 coordinate)
@@ -50,9 +45,9 @@ void Collect(GridCell cell)
     uint kind = Materials[cell.MaterialId].SimulationKind;
     InterlockedAdd(Statistics[0].ActiveCells, 1, ignored);
     if (kind == 2) InterlockedAdd(Statistics[0].SolidCells, 1, ignored);
-    if (cell.MaterialId == 2) InterlockedAdd(Statistics[0].WaterCells, 1, ignored);
-    if (cell.MaterialId == 1) InterlockedAdd(Statistics[0].SandCells, 1, ignored);
-    if (cell.MaterialId == 6) InterlockedAdd(Statistics[0].GasCells, 1, ignored);
+    if (kind == 4) InterlockedAdd(Statistics[0].WaterCells, 1, ignored);
+    if (kind == 1) InterlockedAdd(Statistics[0].SandCells, 1, ignored);
+    if (kind == 5) InterlockedAdd(Statistics[0].GasCells, 1, ignored);
     bool restingSolid = kind == 2 && (SolidGravity == 0 || cell.RestFrames >= 2);
     uint cellularRestThreshold = kind == 1 ? 30 : 60;
     bool restingCellular = kind != 2 &&

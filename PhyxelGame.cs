@@ -38,7 +38,7 @@ public sealed class PhyxelGame : Game
     private Task<LoadedSimulationScene?>? pendingLoad;
     private bool pendingWorldCapture;
     private bool acceptanceSuccess;
-    private MaterialId capturedMaterial;
+    private ushort capturedMaterial;
     private string transientStatus = string.Empty;
     private float transientStatusRemaining;
     private double frameRateAccumulator;
@@ -88,20 +88,21 @@ public sealed class PhyxelGame : Game
         spriteBatch = new SpriteBatch(GraphicsDevice);
         SpriteFont font = Content.Load<SpriteFont>("Fonts/SandboxFont");
         materialRegistry = new MaterialRegistry();
+        acceptance.ConfigureMaterials(materialRegistry);
         resourceManager = new GpuResourceLifecycleManager(GraphicsDevice, materialRegistry);
         resourceManager.PrepareSimulation(settings);
         dispatchCoordinator = new SimulationDispatchCoordinator(resourceManager, materialRegistry);
         userInterface = new SandboxUiCoordinator(materialRegistry, font, resourceManager);
         if (acceptance.RequiresSavedScene)
         {
-            pendingLoad = stateSerializer.LoadAsync(scenePath);
+            pendingLoad = stateSerializer.LoadAsync(scenePath, materialRegistry);
         }
         base.LoadContent();
     }
 
     protected override void Update(GameTime gameTime)
     {
-        if (userInterface is null || dispatchCoordinator is null)
+        if (userInterface is null || dispatchCoordinator is null || materialRegistry is null)
         {
             base.Update(gameTime);
             return;
@@ -125,6 +126,7 @@ public sealed class PhyxelGame : Game
                 worldBounds,
                 settings,
                 userInterface.SelectedMaterial,
+                materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Eraser),
                 userInterface.PointerConsumed);
         try
         {
@@ -195,7 +197,7 @@ public sealed class PhyxelGame : Game
 
     private void ProcessUiActions(UiFrameActions actions)
     {
-        if (userInterface is null || dispatchCoordinator is null)
+        if (userInterface is null || dispatchCoordinator is null || materialRegistry is null)
         {
             return;
         }
@@ -224,14 +226,14 @@ public sealed class PhyxelGame : Game
         }
         if (actions.LoadRequested && pendingLoad is null)
         {
-            pendingLoad = stateSerializer.LoadAsync(scenePath);
+            pendingLoad = stateSerializer.LoadAsync(scenePath, materialRegistry);
             SetStatus("Загрузка…");
         }
     }
 
     private void ProcessSerializationCompletion()
     {
-        if (pendingWorldCapture && currentResources is not null &&
+        if (pendingWorldCapture && currentResources is not null && materialRegistry is not null &&
             stateSerializer.TryCompleteWorldCapture(currentResources, out SimulationWorldSnapshot? snapshot) &&
             snapshot is not null)
         {
@@ -248,7 +250,7 @@ public sealed class PhyxelGame : Game
                 Exit();
                 return;
             }
-            pendingSave = stateSerializer.SaveAsync(scenePath, settings, capturedMaterial, snapshot);
+            pendingSave = stateSerializer.SaveAsync(scenePath, settings, capturedMaterial, snapshot, materialRegistry);
             SetStatus("Сохранение сцены…");
         }
         if (pendingSave is { IsCompleted: true })
@@ -273,7 +275,9 @@ public sealed class PhyxelGame : Game
                     currentResources,
                     containsMatter,
                     settings.HydraulicPressure);
-                SetStatus("Сцена загружена");
+                SetStatus(loaded.Warnings.Count == 0
+                    ? "Сцена загружена"
+                    : $"Сцена загружена с предупреждениями: {loaded.Warnings[0]}");
             }
         }
         else

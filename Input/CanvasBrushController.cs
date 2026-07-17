@@ -21,7 +21,8 @@ public sealed class CanvasBrushController
         RawInputSnapshot input,
         Rectangle canvasBounds,
         SimulationSettings settings,
-        MaterialId selectedMaterial,
+        ushort selectedMaterial,
+        ushort eraserMaterial,
         bool pointerConsumedByUi)
     {
         frameCommands.Clear();
@@ -51,13 +52,19 @@ public sealed class CanvasBrushController
             gridPosition = SnapOrthogonally(strokeOrigin, gridPosition);
         }
 
-        MaterialId material = input.RightDown ? MaterialId.Eraser : selectedMaterial;
-        AppendInterpolatedCommands(previousGridPosition, gridPosition, material, settings);
+        bool erasing = input.RightDown || selectedMaterial == eraserMaterial;
+        ushort material = erasing ? eraserMaterial : selectedMaterial;
+        AppendInterpolatedCommands(previousGridPosition, gridPosition, material, erasing, settings);
         previousGridPosition = gridPosition;
         return frameCommands;
     }
 
-    private void AppendInterpolatedCommands(Point start, Point end, MaterialId material, SimulationSettings settings)
+    private void AppendInterpolatedCommands(
+        Point start,
+        Point end,
+        ushort material,
+        bool erasing,
+        SimulationSettings settings)
     {
         int deltaX = end.X - start.X;
         int deltaY = end.Y - start.Y;
@@ -71,10 +78,10 @@ public sealed class CanvasBrushController
             {
                 X = (int)MathF.Round(start.X + deltaX * interpolation),
                 Y = (int)MathF.Round(start.Y + deltaY * interpolation),
-                MaterialId = (uint)material,
+                MaterialId = material,
                 Radius = settings.BrushRadius,
                 Density = settings.SpawnDensity,
-                Mode = material == MaterialId.Eraser ? 1u : 0u,
+                Mode = erasing ? 1u : 0u,
                 Seed = ++commandSeed,
                 Reserved = activeBodyId
             });

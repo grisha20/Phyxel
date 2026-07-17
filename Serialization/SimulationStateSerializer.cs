@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -22,7 +23,7 @@ public sealed record SimulationSceneState(
     int BrushRadius,
     float SpawnDensity,
     bool SolidGravity,
-    MaterialId SelectedMaterial,
+    ushort SelectedMaterial,
     DateTimeOffset SavedAt,
     bool HydraulicPressure = false);
 
@@ -30,11 +31,42 @@ public sealed record SimulationWorldSnapshot(int Width, int Height, byte[] Grid)
 
 public sealed record LoadedSimulationScene(
     SimulationSceneState State,
-    SimulationWorldSnapshot? World);
+    SimulationWorldSnapshot? World,
+    IReadOnlyList<string> Warnings);
 
 public sealed class SimulationStateSerializer
 {
+    private sealed class SceneFileV3
+    {
+        public int Version { get; set; }
+        public float Scale { get; set; }
+        public float Gravity { get; set; }
+        public int BrushRadius { get; set; }
+        public float SpawnDensity { get; set; }
+        public bool SolidGravity { get; set; }
+        public MaterialId SelectedMaterial { get; set; }
+        public DateTimeOffset SavedAt { get; set; }
+        public bool HydraulicPressure { get; set; }
+    }
+
+    private sealed class SceneFileV4
+    {
+        public int Version { get; set; }
+        public float Scale { get; set; }
+        public float Gravity { get; set; }
+        public int BrushRadius { get; set; }
+        public float SpawnDensity { get; set; }
+        public bool SolidGravity { get; set; }
+        public string SelectedMaterialId { get; set; } = CoreMaterialIds.Sand;
+        public DateTimeOffset SavedAt { get; set; }
+        public bool HydraulicPressure { get; set; }
+        public string[] MaterialPalette { get; set; } = [];
+    }
+
+    private sealed record WorldFileData(int Version, SimulationWorldSnapshot Snapshot);
+
     private const uint WorldFileMagic = 0x5058594C;
+    private const int CurrentVersion = 4;
     private readonly JsonSerializerOptions options = new() { WriteIndented = true };
     private bool capturePending;
     private SimulationWorldSnapshot? emptySnapshot;
@@ -92,50 +124,77 @@ public sealed class SimulationStateSerializer
     public async Task SaveAsync(
         string path,
         SimulationSettings settings,
-        MaterialId selectedMaterial,
+        ushort selectedMaterial,
         SimulationWorldSnapshot world,
+        MaterialRegistry materialRegistry,
         CancellationToken cancellationToken = default)
     {
-        SimulationSceneState state = new(
-            3,
-            settings.Scale,
-            settings.Gravity,
-            settings.BrushRadius,
-            settings.SpawnDensity,
-            settings.SolidGravity,
-            selectedMaterial,
-            DateTimeOffset.UtcNow,
-            settings.HydraulicPressure);
+        if (!materialRegistry.TryGet(selectedMaterial, out MaterialDefinition selectedDefinition))
+        {
+            throw new InvalidDataException($"Выбранный runtime-индекс материала {selectedMaterial} отсутствует в реестре.");
+        }
+
+        (SimulationWorldSnapshot encodedWorld, string[] palette) = EncodeSceneSnapshot(world, materialRegistry);
+        SceneFileV4 state = new()
+        {
+            Version = CurrentVersion,
+            Scale = settings.Scale,
+            Gravity = settings.Gravity,
+            BrushRadius = settings.BrushRadius,
+            SpawnDensity = settings.SpawnDensity,
+            SolidGravity = settings.SolidGravity,
+            SelectedMaterialId = selectedDefinition.Id,
+            SavedAt = DateTimeOffset.UtcNow,
+            HydraulicPressure = settings.HydraulicPressure,
+            MaterialPalette = palette
+        };
         string directory = Path.GetDirectoryName(path) ?? AppContext.BaseDirectory;
         Directory.CreateDirectory(directory);
         await using (FileStream stream = File.Create(path))
         {
             await JsonSerializer.SerializeAsync(stream, state, options, cancellationToken);
         }
-        await WriteWorldAsync(Path.ChangeExtension(path, ".world"), world, cancellationToken);
+        await WriteWorldAsync(
+            Path.ChangeExtension(path, ".world"),
+            CurrentVersion,
+            encodedWorld,
+            cancellationToken);
     }
 
     public async Task<LoadedSimulationScene?> LoadAsync(
         string path,
+        MaterialRegistry materialRegistry,
         CancellationToken cancellationToken = default)
     {
         if (!File.Exists(path))
         {
             return null;
         }
-        SimulationSceneState? state;
-        await using (FileStream stream = File.OpenRead(path))
-        {
-            state = await JsonSerializer.DeserializeAsync<SimulationSceneState>(stream, options, cancellationToken);
-        }
-        if (state is null || state.Version != 3)
+
+        byte[] sceneJson = await File.ReadAllBytesAsync(path, cancellationToken);
+        using JsonDocument document = JsonDocument.Parse(sceneJson);
+        if (!document.RootElement.TryGetProperty("Version", out JsonElement versionElement) ||
+            !versionElement.TryGetInt32(out int version))
         {
             return null;
         }
-        SimulationWorldSnapshot? world = await ReadWorldAsync(
+
+        WorldFileData? worldFile = await ReadWorldAsync(
             Path.ChangeExtension(path, ".world"),
             cancellationToken);
-        return new LoadedSimulationScene(state, world);
+        if (worldFile is not null && worldFile.Version != version)
+        {
+            throw new InvalidDataException(
+                $"Версии scene.json ({version}) и .world ({worldFile.Version}) не совпадают.");
+        }
+
+        List<string> warnings = [];
+        return version switch
+        {
+            3 => LoadV3(sceneJson, worldFile?.Snapshot, materialRegistry, warnings),
+            CurrentVersion => LoadV4(sceneJson, worldFile?.Snapshot, materialRegistry, warnings),
+            _ => null
+        };
     }
 
     public void ApplyWorldSnapshot(GpuSimulationResources resources, SimulationWorldSnapshot world)
@@ -174,6 +233,194 @@ public sealed class SimulationStateSerializer
         return false;
     }
 
+    private LoadedSimulationScene LoadV3(
+        byte[] sceneJson,
+        SimulationWorldSnapshot? world,
+        MaterialRegistry materialRegistry,
+        List<string> warnings)
+    {
+        SceneFileV3 state = JsonSerializer.Deserialize<SceneFileV3>(sceneJson, options) ??
+            throw new InvalidDataException("Сцена v3 не содержит состояния.");
+        ushort selectedMaterial = ResolveLegacyIndex((uint)state.SelectedMaterial, materialRegistry);
+        if (world is not null)
+        {
+            RemapSnapshotToRuntime(world, CoreMaterialIds.LegacyV3Palette, materialRegistry, warnings);
+        }
+
+        return new LoadedSimulationScene(
+            new SimulationSceneState(
+                state.Version,
+                state.Scale,
+                state.Gravity,
+                state.BrushRadius,
+                state.SpawnDensity,
+                state.SolidGravity,
+                selectedMaterial,
+                state.SavedAt,
+                state.HydraulicPressure),
+            world,
+            warnings);
+    }
+
+    private LoadedSimulationScene LoadV4(
+        byte[] sceneJson,
+        SimulationWorldSnapshot? world,
+        MaterialRegistry materialRegistry,
+        List<string> warnings)
+    {
+        SceneFileV4 state = JsonSerializer.Deserialize<SceneFileV4>(sceneJson, options) ??
+            throw new InvalidDataException("Сцена v4 не содержит состояния.");
+        if (state.MaterialPalette.Length is 0 or > MaterialRegistry.MaximumMaterials)
+        {
+            throw new InvalidDataException("Палитра сцены v4 пуста или превышает допустимый размер.");
+        }
+        if (MaterialRegistry.NormalizeId(state.MaterialPalette[0]) != CoreMaterialIds.Empty)
+        {
+            throw new InvalidDataException("Индекс 0 палитры сцены v4 должен быть core:empty.");
+        }
+
+        ushort selectedMaterial;
+        if (!materialRegistry.TryGet(state.SelectedMaterialId, out MaterialDefinition selectedDefinition) ||
+            selectedDefinition.Hidden)
+        {
+            selectedMaterial = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
+            AddWarning(warnings, $"Выбранный материал '{state.SelectedMaterialId}' отсутствует; выбран core:sand.");
+        }
+        else
+        {
+            selectedMaterial = selectedDefinition.RuntimeIndex;
+        }
+        if (world is not null)
+        {
+            RemapSnapshotToRuntime(world, state.MaterialPalette, materialRegistry, warnings);
+        }
+
+        return new LoadedSimulationScene(
+            new SimulationSceneState(
+                state.Version,
+                state.Scale,
+                state.Gravity,
+                state.BrushRadius,
+                state.SpawnDensity,
+                state.SolidGravity,
+                selectedMaterial,
+                state.SavedAt,
+                state.HydraulicPressure),
+            world,
+            warnings);
+    }
+
+    private static (SimulationWorldSnapshot Snapshot, string[] Palette) EncodeSceneSnapshot(
+        SimulationWorldSnapshot world,
+        MaterialRegistry materialRegistry)
+    {
+        ValidateSnapshotSize(world);
+        bool[] usedRuntimeIndices = new bool[materialRegistry.Count];
+        ushort emptyRuntimeIndex = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Empty);
+        usedRuntimeIndices[emptyRuntimeIndex] = true;
+        ReadOnlySpan<GridCell> sourceCells = MemoryMarshal.Cast<byte, GridCell>(world.Grid);
+        foreach (GridCell cell in sourceCells)
+        {
+            if (cell.MaterialId >= materialRegistry.Count)
+            {
+                throw new InvalidDataException(
+                    $"Снимок содержит неизвестный runtime-индекс материала {cell.MaterialId}.");
+            }
+            usedRuntimeIndices[cell.MaterialId] = true;
+        }
+
+        ushort[] runtimeToScene = new ushort[materialRegistry.Count];
+        Array.Fill(runtimeToScene, ushort.MaxValue);
+        List<string> palette = [];
+        for (ushort runtimeIndex = 0; runtimeIndex < materialRegistry.Count; runtimeIndex++)
+        {
+            if (!usedRuntimeIndices[runtimeIndex])
+            {
+                continue;
+            }
+            runtimeToScene[runtimeIndex] = checked((ushort)palette.Count);
+            palette.Add(materialRegistry[runtimeIndex].Id);
+        }
+
+        byte[] encodedGrid = (byte[])world.Grid.Clone();
+        Span<GridCell> encodedCells = MemoryMarshal.Cast<byte, GridCell>(encodedGrid);
+        for (int index = 0; index < encodedCells.Length; index++)
+        {
+            uint runtimeIndex = encodedCells[index].MaterialId;
+            encodedCells[index].MaterialId = runtimeToScene[runtimeIndex];
+        }
+        return (new SimulationWorldSnapshot(world.Width, world.Height, encodedGrid), palette.ToArray());
+    }
+
+    private static void RemapSnapshotToRuntime(
+        SimulationWorldSnapshot world,
+        IReadOnlyList<string> scenePalette,
+        MaterialRegistry materialRegistry,
+        List<string> warnings)
+    {
+        ValidateSnapshotSize(world);
+        if (scenePalette.Count is 0 or > MaterialRegistry.MaximumMaterials)
+        {
+            throw new InvalidDataException("Палитра сцены пуста или превышает допустимый размер.");
+        }
+
+        uint[] sceneToRuntime = new uint[scenePalette.Count];
+        bool[] missing = new bool[scenePalette.Count];
+        HashSet<string> ids = new(StringComparer.Ordinal);
+        for (int sceneIndex = 0; sceneIndex < scenePalette.Count; sceneIndex++)
+        {
+            string id = MaterialRegistry.NormalizeId(scenePalette[sceneIndex]);
+            if (!ids.Add(id))
+            {
+                throw new InvalidDataException($"Палитра сцены содержит дублирующий ID '{id}'.");
+            }
+            if (materialRegistry.TryGet(id, out MaterialDefinition definition))
+            {
+                sceneToRuntime[sceneIndex] = definition.RuntimeIndex;
+            }
+            else
+            {
+                missing[sceneIndex] = true;
+                sceneToRuntime[sceneIndex] = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Empty);
+                AddWarning(warnings, $"Материал '{id}' отсутствует и заменён на core:empty.");
+            }
+        }
+
+        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(world.Grid);
+        for (int index = 0; index < cells.Length; index++)
+        {
+            uint sceneIndex = cells[index].MaterialId;
+            if (sceneIndex >= sceneToRuntime.Length || missing[sceneIndex])
+            {
+                cells[index] = default;
+                continue;
+            }
+            cells[index].MaterialId = sceneToRuntime[sceneIndex];
+        }
+    }
+
+    private static ushort ResolveLegacyIndex(uint legacyIndex, MaterialRegistry materialRegistry)
+    {
+        return legacyIndex < CoreMaterialIds.LegacyV3Palette.Length
+            ? materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.LegacyV3Palette[legacyIndex])
+            : materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
+    }
+
+    private static void AddWarning(List<string> warnings, string message)
+    {
+        warnings.Add(message);
+        Console.Error.WriteLine($"PHYXEL_SCENE_WARNING {message}");
+    }
+
+    private static void ValidateSnapshotSize(SimulationWorldSnapshot world)
+    {
+        int expected = checked(world.Width * world.Height * Marshal.SizeOf<GridCell>());
+        if (world.Grid.Length != 0 && world.Grid.Length != expected)
+        {
+            throw new InvalidDataException("Размер секции снимка мира некорректен.");
+        }
+    }
+
     private static byte[] ReadBuffer(DeviceContext context, Buffer buffer)
     {
         int length = buffer.Description.SizeInBytes;
@@ -201,19 +448,20 @@ public sealed class SimulationStateSerializer
 
     private static async Task WriteWorldAsync(
         string path,
+        int version,
         SimulationWorldSnapshot world,
         CancellationToken cancellationToken)
     {
         await using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, true);
         await stream.WriteAsync(BitConverter.GetBytes(WorldFileMagic), cancellationToken);
-        await stream.WriteAsync(BitConverter.GetBytes(3), cancellationToken);
+        await stream.WriteAsync(BitConverter.GetBytes(version), cancellationToken);
         await stream.WriteAsync(BitConverter.GetBytes(world.Width), cancellationToken);
         await stream.WriteAsync(BitConverter.GetBytes(world.Height), cancellationToken);
         await stream.WriteAsync(BitConverter.GetBytes(world.Grid.Length), cancellationToken);
         await stream.WriteAsync(world.Grid, cancellationToken);
     }
 
-    private static async Task<SimulationWorldSnapshot?> ReadWorldAsync(
+    private static async Task<WorldFileData?> ReadWorldAsync(
         string path,
         CancellationToken cancellationToken)
     {
@@ -224,7 +472,7 @@ public sealed class SimulationStateSerializer
         await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, true);
         uint magic = await ReadUInt32Async(stream, cancellationToken);
         int version = await ReadInt32Async(stream, cancellationToken);
-        if (magic != WorldFileMagic || version != 3)
+        if (magic != WorldFileMagic || version is not (3 or CurrentVersion))
         {
             throw new InvalidDataException("Формат снимка мира не поддерживается.");
         }
@@ -238,7 +486,7 @@ public sealed class SimulationStateSerializer
         }
         byte[] grid = new byte[length];
         await stream.ReadExactlyAsync(grid, cancellationToken);
-        return new SimulationWorldSnapshot(width, height, grid);
+        return new WorldFileData(version, new SimulationWorldSnapshot(width, height, grid));
     }
 
     private static async Task<int> ReadInt32Async(FileStream stream, CancellationToken cancellationToken)
