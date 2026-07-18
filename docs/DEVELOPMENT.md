@@ -117,7 +117,7 @@ $env:PHYXEL_VERIFY_PHASE_RUNTIME = '1'
 Remove-Item Env:PHYXEL_VERIFY_PHASE_RUNTIME
 ```
 
-Проверяет layout phase constants/summary, строгие предикаты и below-first priority, CPU-нормализацию всех kind-пар, summary-флаги, Pause/catch-up dispatch policy и одноразовый fallback wake-up.
+Проверяет layout phase constants/summary, строгие предикаты и below-first priority, CPU-нормализацию всех kind-пар, summary-флаги, Pause/catch-up dispatch policy, выбор свободного readback slot и повторно используемый coalescing fallback gate.
 
 Успешный verifier обязан вернуть exit code 0. После аварийного прерывания очистите установленную env-переменную вручную, чтобы следующий обычный запуск не повторил verifier.
 

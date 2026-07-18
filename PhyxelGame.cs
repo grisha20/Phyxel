@@ -323,6 +323,7 @@ public sealed class PhyxelGame : Game
                     dispatchCoordinator?.PhaseGpuTiming ?? default,
                     temperatureProbe.GpuTiming,
                     dispatchCoordinator?.PhaseDispatches ?? 0,
+                    dispatchCoordinator?.PhaseFallbackWakeUps ?? 0,
                     dispatchCoordinator?.MaximumPhaseDispatchesPerFrame ?? 0,
                     dispatchCoordinator?.LastPhaseSummary ?? PhaseTransitionSummaryFlags.None,
                     dispatchCoordinator?.PhasePresentationIsCurrent ?? false,

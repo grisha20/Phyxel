@@ -42,10 +42,10 @@ Pass запускается один раз после всей пачки therm
 - transitioning thread делает один `InterlockedOr` только в summary; запись самой клетки остаётся без atomics;
 - summary копируется в маленький staging slot и читается асинхронно без flush/stall;
 - coordinator использует кольцо из трёх query/staging slots;
-- если результат к началу следующего кадра ещё не готов, coordinator делает консервативное одноразовое wake-up по видам, присутствующим в графе переходов;
+- если все три slot заняты и summary текущего dispatch невозможно поставить в ring, coordinator не ждёт GPU и делает консервативное wake-up по видам, присутствующим в графе переходов;
 - точные GPU counters можно добавить только для diagnostics, если появится доказанная потребность.
 
-Сразу после phase dispatch coordinator устанавливает `presentationDirty=true`, не ожидая асинхронный GPU summary: смена материала уже могла изменить композицию текущего кадра. При ненулевом summary coordinator также устанавливает `cellMaterialsDirty`, при `TouchesLiquid` помечает hydraulic routes и warm-up dirty, сбрасывает cellular rest-finalization и будит нужные schedules. При `TouchesSolid` устанавливается `topologyDirty`; при target `movable-solid` component labeling обязателен до solid-body pass. Если readback-кольцо временно занято, заранее вычисленные kind-флаги графа дают одноразовый консервативный wake-up.
+Сразу после phase dispatch coordinator устанавливает `presentationDirty=true`, не ожидая асинхронный GPU summary: смена материала уже могла изменить композицию текущего кадра. При ненулевом summary coordinator также устанавливает `cellMaterialsDirty`, при `TouchesLiquid` помечает hydraulic routes и warm-up dirty, сбрасывает cellular rest-finalization и будит нужные schedules. При `TouchesSolid` устанавливается `topologyDirty`; при target `movable-solid` component labeling обязателен до solid-body pass. Если readback-кольцо временно занято, заранее вычисленные kind-флаги графа дают консервативный wake-up. Gate объединяет повторные запросы до `Consume`, после чего готов принять новую независимую нехватку slot; успешно поставленный summary fallback не запрашивает.
 
 ## 2. Утверждённая JSON-схема
 

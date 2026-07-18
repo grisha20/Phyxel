@@ -156,6 +156,31 @@ public static class PhaseTransitionDispatchPolicy
             : 0;
 }
 
+public enum PhaseSummaryReadbackScheduleResult
+{
+    Queued,
+    NoFreeSlot
+}
+
+public static class PhaseSummaryReadbackPolicy
+{
+    public static PhaseSummaryReadbackScheduleResult SelectSlot(
+        ReadOnlySpan<bool> pendingSlots,
+        out int slotIndex)
+    {
+        for (int index = 0; index < pendingSlots.Length; index++)
+        {
+            if (!pendingSlots[index])
+            {
+                slotIndex = index;
+                return PhaseSummaryReadbackScheduleResult.Queued;
+            }
+        }
+        slotIndex = -1;
+        return PhaseSummaryReadbackScheduleResult.NoFreeSlot;
+    }
+}
+
 public sealed class PhaseTransitionWakeUpGate
 {
     private bool pending;

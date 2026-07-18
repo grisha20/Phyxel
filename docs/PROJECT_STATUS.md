@@ -3,15 +3,15 @@
 > [!IMPORTANT]
 > ## CURRENT HANDOFF
 >
-> - **Last completed commit:** `Run universal phase transition GPU pass` (текущий коммит; SHA указывается в handoff после создания).
-> - **Last completed functional commit:** `Run universal phase transition GPU pass` (текущий коммит).
-> - **Just completed:** общий in-place GPU phase pass, строгая нормализация клетки, асинхронный summary ring, консервативный одноразовый wake-up и отдельные GPU timestamps.
+> - **Last completed commit:** `Fix reusable phase fallback readback` (текущий коммит; SHA указывается в handoff после создания).
+> - **Last completed functional commit:** `8cf3226 Run universal phase transition GPU pass`.
+> - **Just completed:** fallback теперь запрашивается только при полном summary ring, повторно используется после `Consume`, а normal GPU smoke подтверждает `PhaseFallbackWakeUps=0`.
 > - **Current project state:** базовая универсальная температура и общий runtime фазовых переходов готовы; пользовательские ice/steam и расширенная матрица phase acceptance ещё не добавлены.
-> - **Current task:** финальная regression-проверка и фиксация общего GPU phase pass.
+> - **Current task:** финальная regression-проверка исправленного fallback scheduling.
 > - **Next planned engine task:** отдельный расширенный phase GPU acceptance; core ice/water/steam — только следующим самостоятельным этапом.
 > - **Do not start yet:** огонь, взрывы, коррозию, пакеты и hub одновременно.
 > - **Blocking issues:** известных блокеров нет. Есть отдельный технический долг в OOM-fallback масштаба, описанный ниже.
-> - **Tests last run:** Debug build (0 ошибок/предупреждений), cold compilation 15 shader entry points, world/thermal/phase CPU verifiers, `phase_dispatch_smoke`, thermal/cellular/granular/solid/hydraulic GPU acceptance и v5 round-trip. Старый `hydro` сохраняет независимый flaky early-image threshold; финальные уровни/утечки и запуск без phase-реестра подтверждены.
+> - **Tests last run:** Debug build (0 ошибок/предупреждений), cold compilation 15 shader entry points, phase material/runtime verifiers, v5 round-trip, `phase_dispatch_smoke` (`PhaseFallbackWakeUps=0`), `thermal_contact`, `temperature_tool`, `water_drain`, `gas`, `solid_gravity` и `communicating_vessels`.
 > - **Documentation update rule:** после каждой завершённой крупной задачи обновлять этот блок.
 >
 > После каждой крупной задачи также обновляются соответствующие разделы статуса.

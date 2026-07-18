@@ -35,6 +35,7 @@ public static class AcceptanceRegressionVerifier
         TemperatureProbeAcceptanceTrace temperatureProbeTrace,
         ThermalGpuTimingStatistics phaseGpuTiming,
         ulong phaseDispatches,
+        ulong phaseFallbackWakeUps,
         int maximumPhaseDispatchesPerFrame,
         PhaseTransitionSummaryFlags phaseSummary,
         bool phasePresentationIsCurrent,
@@ -176,6 +177,7 @@ public static class AcceptanceRegressionVerifier
                 materialRegistry,
                 phaseGpuTiming,
                 phaseDispatches,
+                phaseFallbackWakeUps,
                 maximumPhaseDispatchesPerFrame,
                 phaseSummary,
                 phasePresentationIsCurrent,
@@ -189,6 +191,7 @@ public static class AcceptanceRegressionVerifier
         MaterialRegistry registry,
         ThermalGpuTimingStatistics timing,
         ulong dispatches,
+        ulong fallbackWakeUps,
         int maximumDispatchesPerFrame,
         PhaseTransitionSummaryFlags summary,
         bool presentationIsCurrent,
@@ -199,6 +202,12 @@ public static class AcceptanceRegressionVerifier
         int sourceCount = 0;
         int targetCount = 0;
         int normalizedCount = 0;
+        int massCount = 0;
+        int temperatureCount = 0;
+        int velocityCount = 0;
+        int pressureCount = 0;
+        int bodyCount = 0;
+        int restCount = 0;
         foreach (GridCell cell in Cells(snapshot))
         {
             sourceCount += cell.IsActive != 0 && cell.MaterialIndex == source ? 1 : 0;
@@ -207,6 +216,12 @@ public static class AcceptanceRegressionVerifier
                 continue;
             }
             targetCount++;
+            massCount += cell.Mass == 2 ? 1 : 0;
+            temperatureCount += cell.Temperature == 150 ? 1 : 0;
+            velocityCount += cell.VelocityX == 0 && cell.VelocityY == 0 ? 1 : 0;
+            pressureCount += cell.Pressure == 0 ? 1 : 0;
+            bodyCount += cell.BodyId == 0 ? 1 : 0;
+            restCount += cell.RestFrames == 2 ? 1 : 0;
             if (cell.Mass == 2 && cell.Temperature == 150 &&
                 cell.VelocityX == 0 && cell.VelocityY == 0 && cell.Pressure == 0 &&
                 cell.BodyId == 0 && cell.RestFrames == 2)
@@ -218,13 +233,16 @@ public static class AcceptanceRegressionVerifier
             PhaseTransitionSummaryFlags.TouchesLiquid |
             PhaseTransitionSummaryFlags.TouchesSolid;
         bool passed = sourceCount == 0 && targetCount == 256 && normalizedCount == targetCount &&
-            dispatches >= 40 && maximumDispatchesPerFrame == 1 &&
+            dispatches >= 40 && fallbackWakeUps == 0 && maximumDispatchesPerFrame == 1 &&
             (summary & expected) == expected && timing.Samples > 0 && presentationIsCurrent;
         report = passed
             ? $"PHASE_DISPATCH_SMOKE_OK target={targetCount} dispatches={dispatches} " +
-                $"summary=0x{(uint)summary:X} timingSamples={timing.Samples} compositionCurrent=true"
+                $"fallbackWakeUps={fallbackWakeUps} summary=0x{(uint)summary:X} " +
+                $"timingSamples={timing.Samples} compositionCurrent=true"
             : $"PHASE_DISPATCH_SMOKE_FAILED source={sourceCount} target={targetCount} " +
-                $"normalized={normalizedCount} dispatches={dispatches} maxPerFrame={maximumDispatchesPerFrame} " +
+                $"normalized={normalizedCount} dispatches={dispatches} fallbackWakeUps={fallbackWakeUps} " +
+                $"fields={massCount}/{temperatureCount}/{velocityCount}/{pressureCount}/{bodyCount}/{restCount} " +
+                $"maxPerFrame={maximumDispatchesPerFrame} " +
                 $"summary=0x{(uint)summary:X} timingSamples={timing.Samples} " +
                 $"compositionCurrent={presentationIsCurrent}";
         return passed;

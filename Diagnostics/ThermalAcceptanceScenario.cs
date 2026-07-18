@@ -106,6 +106,24 @@ internal static class ThermalAcceptanceScenario
             throw new InvalidOperationException("Phase dispatch acceptance requires at least 260x180 cells.");
         }
         uint source = materials.GetRequiredRuntimeIndex("acceptance:phase_source");
+        uint fixture = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Fixture);
+        for (int y = 119; y <= 136; y++)
+        {
+            for (int x = 219; x <= 236; x++)
+            {
+                if (x is 219 or 236 || y is 119 or 136)
+                {
+                    cells[y * width + x] = new GridCell
+                    {
+                        MaterialIndex = fixture,
+                        Mass = 2,
+                        IsActive = 1,
+                        RestFrames = 2,
+                        Temperature = 20
+                    };
+                }
+            }
+        }
         for (int y = 120; y < 136; y++)
         {
             for (int x = 220; x < 236; x++)

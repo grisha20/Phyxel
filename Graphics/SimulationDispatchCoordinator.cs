@@ -110,7 +110,7 @@ public sealed class SimulationDispatchCoordinator
     private double thermalTimingMaximumMilliseconds;
     private readonly PhaseTransitionWakeUpGate phaseWakeUpGate = new();
     private ulong phaseReadbackGeneration;
-    private bool phaseFallbackApplied;
+    private ulong phaseFallbackWakeUps;
     private bool phaseTimingPending;
     private int phaseTimingSamples;
     private double phaseTimingTotalMilliseconds;
@@ -197,6 +197,7 @@ public sealed class SimulationDispatchCoordinator
         phaseTimingSamples == 0 ? 0 : phaseTimingMinimumMilliseconds,
         phaseTimingMaximumMilliseconds);
     public ulong PhaseDispatches => phaseDispatches;
+    public ulong PhaseFallbackWakeUps => phaseFallbackWakeUps;
     public int MaximumPhaseDispatchesPerFrame => maximumPhaseDispatchesPerFrame;
     public PhaseTransitionSummaryFlags LastPhaseSummary => lastPhaseSummary;
     public bool PhasePresentationIsCurrent => phaseDispatches == 0 || lastCompositionFrame >= lastPhaseDispatchFrame;
@@ -434,13 +435,21 @@ public sealed class SimulationDispatchCoordinator
         if (phaseDispatchCount != 0)
         {
             bool measure = phaseDispatches >= 40 && !phaseTimingPending;
-            DispatchPhaseTransitions(resources, measure);
+            PhaseSummaryReadbackScheduleResult readbackResult =
+                DispatchPhaseTransitions(resources, measure);
             phaseDispatches++;
             maximumPhaseDispatchesPerFrame = Math.Max(maximumPhaseDispatchesPerFrame, phaseDispatchCount);
             lastPhaseDispatchFrame = frameIndex;
             presentationDirty = true;
-            RequestPhaseFallback();
-            ApplyPendingPhaseFallback(resources);
+            // A queued summary may become readable after the next cellular
+            // schedule. Invalidate the material map now so an already-awake
+            // cellular pass never interprets a transitioned cell as its old kind.
+            cellMaterialsDirty = true;
+            if (readbackResult == PhaseSummaryReadbackScheduleResult.NoFreeSlot)
+            {
+                phaseWakeUpGate.Request();
+                ApplyPendingPhaseFallback(resources);
+            }
         }
 
         constants.SolidGravity = settings.SolidGravity ? 1u : 0u;
@@ -1173,7 +1182,9 @@ public sealed class SimulationDispatchCoordinator
         thermalTimingMaximumMilliseconds = 0;
     }
 
-    private void DispatchPhaseTransitions(GpuSimulationResources resources, bool measure)
+    private PhaseSummaryReadbackScheduleResult DispatchPhaseTransitions(
+        GpuSimulationResources resources,
+        bool measure)
     {
         PhaseTransitionConstants constants = new()
         {
@@ -1208,24 +1219,24 @@ public sealed class SimulationDispatchCoordinator
         }
         Unbind(context, 1, 2);
 
-        GpuPhaseSummaryReadbackSlot? slot = null;
-        foreach (GpuPhaseSummaryReadbackSlot candidate in resources.PhaseSummaryReadbackSlots)
+        Span<bool> pendingSlots = stackalloc bool[resources.PhaseSummaryReadbackSlots.Length];
+        for (int index = 0; index < pendingSlots.Length; index++)
         {
-            if (!candidate.Pending)
-            {
-                slot = candidate;
-                break;
-            }
+            pendingSlots[index] = resources.PhaseSummaryReadbackSlots[index].Pending;
         }
-        if (slot is null)
+        PhaseSummaryReadbackScheduleResult result = PhaseSummaryReadbackPolicy.SelectSlot(
+            pendingSlots,
+            out int slotIndex);
+        if (result == PhaseSummaryReadbackScheduleResult.NoFreeSlot)
         {
-            RequestPhaseFallback();
-            return;
+            return result;
         }
+        GpuPhaseSummaryReadbackSlot slot = resources.PhaseSummaryReadbackSlots[slotIndex];
         context.CopyResource(resources.PhaseSummary.Buffer, slot.Staging);
         context.End(slot.Query);
         slot.Pending = true;
         slot.Generation = phaseReadbackGeneration;
+        return result;
     }
 
     private void PollPhaseSummary(GpuSimulationResources resources)
@@ -1291,21 +1302,13 @@ public sealed class SimulationDispatchCoordinator
         phaseTimingMaximumMilliseconds = Math.Max(phaseTimingMaximumMilliseconds, milliseconds);
     }
 
-    private void RequestPhaseFallback()
-    {
-        if (!phaseFallbackApplied)
-        {
-            phaseWakeUpGate.Request();
-        }
-    }
-
     private void ApplyPendingPhaseFallback(GpuSimulationResources resources)
     {
         if (!phaseWakeUpGate.Consume())
         {
             return;
         }
-        phaseFallbackApplied = true;
+        phaseFallbackWakeUps++;
         ApplyPhaseSummary(resources, materialRegistry.PhaseTransitionGraphFlags);
     }
 
@@ -1378,7 +1381,7 @@ public sealed class SimulationDispatchCoordinator
     {
         phaseReadbackGeneration++;
         phaseWakeUpGate.Reset();
-        phaseFallbackApplied = false;
+        phaseFallbackWakeUps = 0;
         phaseTimingPending = false;
         phaseTimingSamples = 0;
         phaseTimingTotalMilliseconds = 0;

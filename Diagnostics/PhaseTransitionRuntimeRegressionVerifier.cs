@@ -221,9 +221,37 @@ internal static class PhaseTransitionRuntimeRegressionVerifier
             "Registry without transitions dispatched phase transitions.");
 
         PhaseTransitionWakeUpGate gate = new();
-        gate.Request();
-        gate.Request();
-        Require(gate.Consume() && !gate.Consume(), "Fallback wake-up is not one-shot.");
+        PhaseSummaryReadbackScheduleResult queued = PhaseSummaryReadbackPolicy.SelectSlot(
+            [true, false, true],
+            out int queuedSlot);
+        if (queued == PhaseSummaryReadbackScheduleResult.NoFreeSlot)
+        {
+            gate.Request();
+        }
+        Require(queued == PhaseSummaryReadbackScheduleResult.Queued && queuedSlot == 1,
+            "Free readback slot was not selected.");
+        Require(!gate.Consume(), "Queued summary incorrectly requested fallback.");
+
+        PhaseSummaryReadbackScheduleResult full = PhaseSummaryReadbackPolicy.SelectSlot(
+            [true, true, true],
+            out int missingSlot);
+        Require(full == PhaseSummaryReadbackScheduleResult.NoFreeSlot && missingSlot == -1,
+            "Full readback ring was not reported.");
+        if (full == PhaseSummaryReadbackScheduleResult.NoFreeSlot)
+        {
+            gate.Request();
+            gate.Request();
+        }
+        Require(gate.Consume() && !gate.Consume(),
+            "Concurrent fallback requests were not coalesced into one wake-up.");
+
+        if (PhaseSummaryReadbackPolicy.SelectSlot([true, true, true], out _) ==
+            PhaseSummaryReadbackScheduleResult.NoFreeSlot)
+        {
+            gate.Request();
+        }
+        Require(gate.Consume() && !gate.Consume(),
+            "Fallback gate could not be reused after its first Consume.");
         gate.Request();
         gate.Reset();
         Require(!gate.Consume(), "Fallback reset retained a pending wake-up.");

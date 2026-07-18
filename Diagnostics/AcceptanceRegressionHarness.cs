@@ -346,6 +346,7 @@ public sealed class AcceptanceRegressionHarness
         ThermalGpuTimingStatistics phaseGpuTiming,
         ThermalGpuTimingStatistics probeGpuTiming,
         ulong phaseDispatches,
+        ulong phaseFallbackWakeUps,
         int maximumPhaseDispatchesPerFrame,
         PhaseTransitionSummaryFlags phaseSummary,
         bool phasePresentationIsCurrent,
@@ -363,6 +364,7 @@ public sealed class AcceptanceRegressionHarness
             temperatureProbeTrace,
             phaseGpuTiming,
             phaseDispatches,
+            phaseFallbackWakeUps,
             maximumPhaseDispatchesPerFrame,
             phaseSummary,
             phasePresentationIsCurrent,
@@ -377,6 +379,7 @@ public sealed class AcceptanceRegressionHarness
             $"{phaseGpuTiming.MinimumMilliseconds:0.0000}/" +
             $"{phaseGpuTiming.MaximumMilliseconds:0.0000} phaseSamples={phaseGpuTiming.Samples} " +
             $"phaseDispatches={phaseDispatches} phaseMaxPerFrame={maximumPhaseDispatchesPerFrame} " +
+            $"phaseFallbackWakeUps={phaseFallbackWakeUps} " +
             $"probeGpuMs={probeGpuTiming.AverageMilliseconds:0.0000}/" +
             $"{probeGpuTiming.MinimumMilliseconds:0.0000}/" +
             $"{probeGpuTiming.MaximumMilliseconds:0.0000} probeSamples={probeGpuTiming.Samples}";
