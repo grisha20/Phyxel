@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "id": "acceptance:aaa_padding",
+  "name": "Phase reorder acceptance:aaa_padding",
+  "kind": "solid",
+  "flags": [],
+  "color": "#6FA8DC",
+  "physics": {
+    "density": 1,
+    "friction": 0.6,
+    "flowRate": 0
+  },
+  "thermal": {
+    "initialTemperature": 20,
+    "conductivity": 0,
+    "heatCapacity": 1
+  },
+  "ui": {
+    "order": 2200,
+    "hidden": true
+  }
+}

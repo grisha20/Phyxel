@@ -116,7 +116,7 @@ public sealed class PhyxelGame : Game
             stateSerializer.ApplyWorldSnapshot(currentResources, initialAcceptanceWorld);
             dispatchCoordinator.RestoreWorldActivity(
                 currentResources,
-                true,
+                !acceptance.InitialWorldStartsDormant,
                 settings.HydraulicPressure);
         }
         if (acceptance.RequiresSavedScene)
@@ -168,7 +168,7 @@ public sealed class PhyxelGame : Game
             currentResources = dispatchCoordinator.DispatchFrame(
                 settings,
                 commandEncoder.Encode(commands),
-                input.DeltaSeconds);
+                acceptance.AdjustElapsedSeconds(input.DeltaSeconds));
             acceptance.CaptureScreenshot(currentResources, frameIndex);
             debugProbe.Update(currentResources, frameIndex++);
             Point? probeCoordinate = acceptance.OwnsTemperatureProbe
@@ -295,6 +295,7 @@ public sealed class PhyxelGame : Game
     private void ProcessSerializationCompletion()
     {
         if (pendingAcceptanceCheckpoint && currentResources is not null &&
+            dispatchCoordinator is not null &&
             stateSerializer.TryCompleteWorldCapture(
                 currentResources,
                 out SimulationWorldSnapshot? checkpointSnapshot) &&
@@ -304,7 +305,20 @@ public sealed class PhyxelGame : Game
             acceptance.RecordThermalCheckpoint(
                 pendingAcceptanceCheckpointFrame,
                 pendingAcceptanceCheckpointTick,
-                checkpointSnapshot);
+                checkpointSnapshot,
+                dispatchCoordinator);
+            if (materialRegistry is not null && userInterface is not null &&
+                acceptance.TryBeginPhaseRoundTripSave(out SimulationWorldSnapshot? roundTripSnapshot) &&
+                roundTripSnapshot is not null)
+            {
+                capturedMaterial = userInterface.SelectedMaterial;
+                pendingSave = stateSerializer.SaveAsync(
+                    scenePath,
+                    settings,
+                    capturedMaterial,
+                    roundTripSnapshot,
+                    materialRegistry);
+            }
         }
         if (pendingWorldCapture && currentResources is not null && materialRegistry is not null &&
             stateSerializer.TryCompleteWorldCapture(currentResources, out SimulationWorldSnapshot? snapshot) &&
@@ -323,6 +337,7 @@ public sealed class PhyxelGame : Game
                     dispatchCoordinator?.PhaseGpuTiming ?? default,
                     temperatureProbe.GpuTiming,
                     dispatchCoordinator?.PhaseDispatches ?? 0,
+                    dispatchCoordinator?.PhaseSummaryReadbacks ?? 0,
                     dispatchCoordinator?.PhaseFallbackWakeUps ?? 0,
                     dispatchCoordinator?.MaximumPhaseDispatchesPerFrame ?? 0,
                     dispatchCoordinator?.LastPhaseSummary ?? PhaseTransitionSummaryFlags.None,
@@ -338,6 +353,23 @@ public sealed class PhyxelGame : Game
         }
         if (pendingSave is { IsCompleted: true })
         {
+            if (acceptance.IsPhaseRoundTripSaving && dispatchCoordinator is not null &&
+                materialRegistry is not null)
+            {
+                if (!pendingSave.IsCompletedSuccessfully)
+                {
+                    Console.WriteLine("PHYXEL_ACCEPTANCE_FAILED phase_v5_roundtrip save failed");
+                    Environment.ExitCode = 1;
+                    Exit();
+                    return;
+                }
+                acceptance.MarkPhaseRoundTripLoading(dispatchCoordinator);
+                dispatchCoordinator.ClearCurrentWorld(settings);
+                temperatureProbe.Reset();
+                pendingLoad = stateSerializer.LoadAsync(scenePath, materialRegistry);
+                pendingSave = null;
+                return;
+            }
             SetStatus(pendingSave.IsCompletedSuccessfully ? "Сцена сохранена" : "Ошибка сохранения");
             pendingSave = null;
         }
@@ -359,6 +391,10 @@ public sealed class PhyxelGame : Game
                     currentResources,
                     containsMatter,
                     settings.HydraulicPressure);
+                if (acceptance.IsPhaseRoundTripLoading)
+                {
+                    acceptance.MarkPhaseRoundTripLoaded(frameIndex);
+                }
                 SetStatus(loaded.Warnings.Count == 0
                     ? "Сцена загружена"
                     : $"Сцена загружена с предупреждениями: {loaded.Warnings[0]}");
@@ -374,8 +410,12 @@ public sealed class PhyxelGame : Game
     private void BeginAcceptanceCapture()
     {
         if (acceptanceSuccess || !acceptance.Active || pendingWorldCapture ||
-            pendingAcceptanceCheckpoint || frameIndex < acceptance.CaptureFrame ||
+            pendingAcceptanceCheckpoint ||
             currentResources is null || userInterface is null || dispatchCoordinator is null)
+        {
+            return;
+        }
+        if (!acceptance.CanBeginFinalCapture(frameIndex, dispatchCoordinator))
         {
             return;
         }
@@ -396,7 +436,7 @@ public sealed class PhyxelGame : Game
             currentResources is null || dispatchCoordinator is null ||
             !acceptance.TryBeginAcceptanceCheckpoint(
                 frameIndex,
-                dispatchCoordinator.ThermalTicks,
+                dispatchCoordinator,
                 out ulong checkpointTick))
         {
             return;

@@ -3,15 +3,16 @@
 > [!IMPORTANT]
 > ## CURRENT HANDOFF
 >
-> - **Last completed commit:** `Fix reusable phase fallback readback` (текущий коммит; SHA указывается в handoff после создания).
+> - **Last completed commit:** `Add phase transition GPU acceptance matrix` (текущий коммит; SHA указывается в handoff после создания).
 > - **Last completed functional commit:** `8cf3226 Run universal phase transition GPU pass`.
-> - **Just completed:** fallback теперь запрашивается только при полном summary ring, повторно используется после `Consume`, а normal GPU smoke подтверждает `PhaseFallbackWakeUps=0`.
-> - **Current project state:** базовая универсальная температура и общий runtime фазовых переходов готовы; пользовательские ice/steam и расширенная матрица phase acceptance ещё не добавлены.
-> - **Current task:** финальная regression-проверка исправленного fallback scheduling.
-> - **Next planned engine task:** отдельный расширенный phase GPU acceptance; core ice/water/steam — только следующим самостоятельным этапом.
+> - **Last corrective commit:** `7f32357 Fix reusable phase fallback readback`.
+> - **Just completed:** полная generic GPU acceptance-матрица фазовых переходов: строгие thresholds/hysteresis, восемь kind-пар, one-transition/catch-up, Pause, wake-up, повторный readback overflow, runtime reorder, disabled registry, Model A, v5 round-trip и timing на шести scale presets.
+> - **Current project state:** базовая универсальная температура, общий runtime фазовых переходов и его GPU acceptance готовы; пользовательские ice/steam ещё не добавлены.
+> - **Current task:** добавление пользовательской цепочки `water ↔ ice ↔ steam`.
+> - **Next planned engine task:** core JSON ice/steam и transitions в water без изменения общего shader.
 > - **Do not start yet:** огонь, взрывы, коррозию, пакеты и hub одновременно.
 > - **Blocking issues:** известных блокеров нет. Есть отдельный технический долг в OOM-fallback масштаба, описанный ниже.
-> - **Tests last run:** Debug build (0 ошибок/предупреждений), cold compilation 15 shader entry points, phase material/runtime verifiers, v5 round-trip, `phase_dispatch_smoke` (`PhaseFallbackWakeUps=0`), `thermal_contact`, `temperature_tool`, `water_drain`, `gas`, `solid_gravity` и `communicating_vessels`.
+> - **Tests last run:** Debug build (0 ошибок/предупреждений), 31/31 новых phase GPU cases, включая performance steady/burst на 25/35/50/75/85/100%; полный прежний regression-набор перечислен в handoff этого коммита.
 > - **Documentation update rule:** после каждой завершённой крупной задачи обновлять этот блок.
 >
 > После каждой крупной задачи также обновляются соответствующие разделы статуса.
@@ -96,6 +97,7 @@
 - Acceptance harness создаёт воспроизводимые GPU-сценарии, снимает snapshot/метрики и возвращает явный success/failure.
 - Покрыты базовые sand, slope, water, hydraulics, gas, solid gravity, buoyancy, внешние материалы и granular/liquid-взаимодействие.
 - Thermal acceptance проверяет контакт, проводимость, разные теплоёмкости, изолятор, vacuum, газовую энергию, temperature probe и длительное равновесие.
+- Phase acceptance проверяет строгие пороги, hysteresis, один переход за pass и четыре catch-up ticks, нормализацию восьми kind-пар, точные summary flags, Pause при 30/60/100 FPS, физическое пробуждение gas/liquid, два независимых overflow readback ring, runtime reorder, disabled registry, Model A и v5 round-trip.
 - Проверяется v5 round-trip, чтение v3/v4 и миграции удалённых/переименованных core ID.
 
 ## Контрольные коммиты

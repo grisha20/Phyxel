@@ -16,6 +16,11 @@ internal static class ThermalAcceptanceScenario
         int height,
         MaterialRegistry materials)
     {
+        SimulationWorldSnapshot? phase = PhaseAcceptanceScenario.Create(mode, width, height, materials);
+        if (phase is not null)
+        {
+            return phase;
+        }
         if (mode is not (
             AcceptanceScenarioMode.ThermalUniform or
             AcceptanceScenarioMode.ThermalContact or

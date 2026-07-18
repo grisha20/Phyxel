@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "id": "acceptance:norm_liquid",
+  "name": "Phase acceptance norm_liquid",
+  "kind": "liquid",
+  "flags": [],
+  "color": "#8A6FD1",
+  "physics": {
+    "density": 1,
+    "friction": 0.05,
+    "flowRate": 0.9
+  },
+  "thermal": {
+    "initialTemperature": 20,
+    "conductivity": 0,
+    "heatCapacity": 1
+  },
+  "ui": {
+    "order": 2000,
+    "hidden": true
+  }
+}

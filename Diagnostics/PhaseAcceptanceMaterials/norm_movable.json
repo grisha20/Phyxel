@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "acceptance:norm_movable",
+  "name": "Phase acceptance norm_movable",
+  "kind": "solid",
+  "flags": [
+    "movable-solid"
+  ],
+  "color": "#8A6FD1",
+  "physics": {
+    "density": 3,
+    "friction": 0.6,
+    "flowRate": 0
+  },
+  "thermal": {
+    "initialTemperature": 20,
+    "conductivity": 0,
+    "heatCapacity": 1
+  },
+  "ui": {
+    "order": 2000,
+    "hidden": true
+  }
+}

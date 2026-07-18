@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "id": "acceptance:energy_source",
+  "name": "Phase acceptance energy_source",
+  "kind": "solid",
+  "flags": [],
+  "color": "#8A6FD1",
+  "physics": {
+    "density": 1,
+    "friction": 0.6,
+    "flowRate": 0
+  },
+  "thermal": {
+    "initialTemperature": 20,
+    "conductivity": 0,
+    "heatCapacity": 1,
+    "transitions": {
+      "above": {
+        "temperature": 50,
+        "into": "acceptance:energy_target"
+      }
+    }
+  },
+  "ui": {
+    "order": 2000,
+    "hidden": true
+  }
+}

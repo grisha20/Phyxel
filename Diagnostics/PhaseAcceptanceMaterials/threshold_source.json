@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "id": "acceptance:threshold_source",
+  "name": "Phase acceptance threshold_source",
+  "kind": "solid",
+  "flags": [],
+  "color": "#8A6FD1",
+  "physics": {
+    "density": 1,
+    "friction": 0.6,
+    "flowRate": 0
+  },
+  "thermal": {
+    "initialTemperature": 20,
+    "conductivity": 0,
+    "heatCapacity": 1,
+    "transitions": {
+      "below": {
+        "temperature": 0,
+        "into": "acceptance:threshold_below"
+      },
+      "above": {
+        "temperature": 100,
+        "into": "acceptance:threshold_above"
+      }
+    }
+  },
+  "ui": {
+    "order": 2000,
+    "hidden": true
+  }
+}

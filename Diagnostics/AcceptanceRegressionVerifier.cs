@@ -33,12 +33,15 @@ public static class AcceptanceRegressionVerifier
         TemperatureProbeResult? temperatureProbe,
         IReadOnlyList<ThermalAcceptanceCheckpoint> thermalCheckpoints,
         TemperatureProbeAcceptanceTrace temperatureProbeTrace,
+        ThermalGpuTimingStatistics thermalGpuTiming,
         ThermalGpuTimingStatistics phaseGpuTiming,
         ulong phaseDispatches,
+        ulong phaseSummaryReadbacks,
         ulong phaseFallbackWakeUps,
         int maximumPhaseDispatchesPerFrame,
         PhaseTransitionSummaryFlags phaseSummary,
         bool phasePresentationIsCurrent,
+        IReadOnlyList<PhaseAcceptanceCheckpoint> phaseCheckpoints,
         string artifactDirectory,
         out string report)
     {
@@ -177,6 +180,37 @@ public static class AcceptanceRegressionVerifier
                 materialRegistry,
                 phaseGpuTiming,
                 phaseDispatches,
+                phaseFallbackWakeUps,
+                maximumPhaseDispatchesPerFrame,
+                phaseSummary,
+                phasePresentationIsCurrent,
+                out report),
+            AcceptanceScenarioMode.PhaseThresholds or
+            AcceptanceScenarioMode.PhaseHysteresis or
+            AcceptanceScenarioMode.PhaseSingleTransition or
+            AcceptanceScenarioMode.PhaseNormalizationMatrix or
+            AcceptanceScenarioMode.PhaseSummaryLiquidGas or
+            AcceptanceScenarioMode.PhaseSummarySolidLiquid or
+            AcceptanceScenarioMode.PhaseSummaryGasMovable or
+            AcceptanceScenarioMode.PhaseSummaryLiquidFixed or
+            AcceptanceScenarioMode.PhasePauseContinue or
+            AcceptanceScenarioMode.PhaseWakeGas or
+            AcceptanceScenarioMode.PhaseWakeLiquid or
+            AcceptanceScenarioMode.PhaseReadbackFallback or
+            AcceptanceScenarioMode.PhaseExternalReorder or
+            AcceptanceScenarioMode.PhaseDisabledRegistry or
+            AcceptanceScenarioMode.PhaseEnergyContract or
+            AcceptanceScenarioMode.PhaseV5RoundTrip or
+            AcceptanceScenarioMode.PhasePerformanceSteady or
+            AcceptanceScenarioMode.PhasePerformanceBurst => PhaseAcceptanceVerifier.Validate(
+                mode,
+                materialRegistry,
+                snapshot,
+                phaseCheckpoints,
+                thermalGpuTiming,
+                phaseGpuTiming,
+                phaseDispatches,
+                phaseSummaryReadbacks,
                 phaseFallbackWakeUps,
                 maximumPhaseDispatchesPerFrame,
                 phaseSummary,

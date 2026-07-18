@@ -16,6 +16,7 @@ public sealed class AcceptanceRegressionHarness
     private MaterialRegistry? materialRegistry;
     private readonly List<ThermalAcceptanceCheckpoint> thermalCheckpoints = [];
     private readonly TemperatureProbeAcceptanceTrace temperatureProbeTrace = new();
+    private readonly PhaseAcceptanceController phaseAcceptance;
 
     public AcceptanceRegressionHarness()
     {
@@ -61,8 +62,27 @@ public sealed class AcceptanceRegressionHarness
             "thermal_gas" => AcceptanceScenarioMode.ThermalGas,
             "temperature_probe_gpu" or "thermal_probe" => AcceptanceScenarioMode.TemperatureProbeGpu,
             "phase_dispatch_smoke" => AcceptanceScenarioMode.PhaseDispatchSmoke,
+            "phase_thresholds" => AcceptanceScenarioMode.PhaseThresholds,
+            "phase_hysteresis" => AcceptanceScenarioMode.PhaseHysteresis,
+            "phase_single_transition" => AcceptanceScenarioMode.PhaseSingleTransition,
+            "phase_normalization_matrix" => AcceptanceScenarioMode.PhaseNormalizationMatrix,
+            "phase_summary_liquid_gas" => AcceptanceScenarioMode.PhaseSummaryLiquidGas,
+            "phase_summary_solid_liquid" => AcceptanceScenarioMode.PhaseSummarySolidLiquid,
+            "phase_summary_gas_movable" => AcceptanceScenarioMode.PhaseSummaryGasMovable,
+            "phase_summary_liquid_fixed" => AcceptanceScenarioMode.PhaseSummaryLiquidFixed,
+            "phase_pause_continue" => AcceptanceScenarioMode.PhasePauseContinue,
+            "phase_wake_gas" => AcceptanceScenarioMode.PhaseWakeGas,
+            "phase_wake_liquid" => AcceptanceScenarioMode.PhaseWakeLiquid,
+            "phase_readback_fallback" => AcceptanceScenarioMode.PhaseReadbackFallback,
+            "phase_external_reorder" => AcceptanceScenarioMode.PhaseExternalReorder,
+            "phase_disabled_registry" => AcceptanceScenarioMode.PhaseDisabledRegistry,
+            "phase_energy_contract" => AcceptanceScenarioMode.PhaseEnergyContract,
+            "phase_v5_roundtrip" => AcceptanceScenarioMode.PhaseV5RoundTrip,
+            "phase_performance_steady" => AcceptanceScenarioMode.PhasePerformanceSteady,
+            "phase_performance_burst" => AcceptanceScenarioMode.PhasePerformanceBurst,
             _ => AcceptanceScenarioMode.None
         };
+        phaseAcceptance = new PhaseAcceptanceController(Mode);
     }
 
     public AcceptanceScenarioMode Mode { get; }
@@ -71,6 +91,17 @@ public sealed class AcceptanceRegressionHarness
     public bool RequiresSavedScene => Mode is
         AcceptanceScenarioMode.SavedPressure or AcceptanceScenarioMode.SavedIsolation or
         AcceptanceScenarioMode.SavedGravity or AcceptanceScenarioMode.SavedSandWater;
+    public bool IsPhaseRoundTripSaving => phaseAcceptance.IsRoundTripSaving;
+    public bool IsPhaseRoundTripLoading => phaseAcceptance.IsRoundTripLoading;
+    public bool InitialWorldStartsDormant => Mode is
+        AcceptanceScenarioMode.PhaseHysteresis or
+        AcceptanceScenarioMode.PhaseNormalizationMatrix or
+        AcceptanceScenarioMode.PhaseSummaryLiquidGas or
+        AcceptanceScenarioMode.PhaseSummarySolidLiquid or
+        AcceptanceScenarioMode.PhaseSummaryGasMovable or
+        AcceptanceScenarioMode.PhaseSummaryLiquidFixed or
+        AcceptanceScenarioMode.PhaseReadbackFallback or
+        AcceptanceScenarioMode.PhaseV5RoundTrip;
 
     public void ConfigureMaterials(MaterialRegistry registry)
     {
@@ -161,6 +192,7 @@ public sealed class AcceptanceRegressionHarness
         SimulationDispatchCoordinator dispatchCoordinator,
         GpuTemperatureProbe temperatureProbe)
     {
+        phaseAcceptance.ApplyRuntimeControls(frame, settings, dispatchCoordinator);
         if (Mode == AcceptanceScenarioMode.TemperatureTool)
         {
             if (frame == 130)
@@ -200,10 +232,15 @@ public sealed class AcceptanceRegressionHarness
 
     public bool TryBeginAcceptanceCheckpoint(
         uint frame,
-        ulong thermalTicks,
+        SimulationDispatchCoordinator dispatchCoordinator,
         out ulong checkpointTick)
     {
         checkpointTick = 0;
+        if (phaseAcceptance.ShouldCaptureCheckpoint(frame, dispatchCoordinator))
+        {
+            checkpointTick = dispatchCoordinator.ThermalTicks;
+            return true;
+        }
         if (Mode == AcceptanceScenarioMode.TemperatureTool)
         {
             bool ready = thermalCheckpoints.Count switch
@@ -214,28 +251,50 @@ public sealed class AcceptanceRegressionHarness
             };
             if (ready)
             {
-                checkpointTick = thermalTicks;
+                checkpointTick = dispatchCoordinator.ThermalTicks;
             }
             return ready;
         }
         if (Mode != AcceptanceScenarioMode.ThermalContact ||
             thermalCheckpoints.Count >= ThermalContactCheckpointTicks.Length) return false;
         ulong target = ThermalContactCheckpointTicks[thermalCheckpoints.Count];
-        if (thermalTicks < target)
+        if (dispatchCoordinator.ThermalTicks < target)
         {
             return false;
         }
-        checkpointTick = thermalTicks;
+        checkpointTick = dispatchCoordinator.ThermalTicks;
         return true;
     }
 
     public void RecordThermalCheckpoint(
         uint frame,
         ulong thermalTicks,
-        SimulationWorldSnapshot snapshot)
+        SimulationWorldSnapshot snapshot,
+        SimulationDispatchCoordinator dispatchCoordinator)
     {
+        if (phaseAcceptance.IsPhaseMode)
+        {
+            phaseAcceptance.RecordCheckpoint(frame, dispatchCoordinator, snapshot);
+            return;
+        }
         thermalCheckpoints.Add(new ThermalAcceptanceCheckpoint(frame, thermalTicks, snapshot));
     }
+
+    public float AdjustElapsedSeconds(float elapsedSeconds) =>
+        phaseAcceptance.AdjustElapsedSeconds(elapsedSeconds);
+
+    public bool CanBeginFinalCapture(uint frame, SimulationDispatchCoordinator dispatchCoordinator) =>
+        phaseAcceptance.IsPhaseMode
+            ? phaseAcceptance.CanBeginFinalCapture(frame, dispatchCoordinator)
+            : frame >= CaptureFrame;
+
+    public bool TryBeginPhaseRoundTripSave(out SimulationWorldSnapshot? snapshot) =>
+        phaseAcceptance.TryBeginRoundTripSave(out snapshot);
+
+    public void MarkPhaseRoundTripLoading(SimulationDispatchCoordinator dispatchCoordinator) =>
+        phaseAcceptance.MarkRoundTripLoading(dispatchCoordinator);
+
+    public void MarkPhaseRoundTripLoaded(uint frame) => phaseAcceptance.MarkRoundTripLoaded(frame);
 
     public void ConfigureSettings(uint frame, SimulationSettings settings)
     {
@@ -346,6 +405,7 @@ public sealed class AcceptanceRegressionHarness
         ThermalGpuTimingStatistics phaseGpuTiming,
         ThermalGpuTimingStatistics probeGpuTiming,
         ulong phaseDispatches,
+        ulong phaseSummaryReadbacks,
         ulong phaseFallbackWakeUps,
         int maximumPhaseDispatchesPerFrame,
         PhaseTransitionSummaryFlags phaseSummary,
@@ -362,12 +422,15 @@ public sealed class AcceptanceRegressionHarness
             temperatureProbe,
             thermalCheckpoints,
             temperatureProbeTrace,
+            thermalGpuTiming,
             phaseGpuTiming,
             phaseDispatches,
+            phaseSummaryReadbacks,
             phaseFallbackWakeUps,
             maximumPhaseDispatchesPerFrame,
             phaseSummary,
             phasePresentationIsCurrent,
+            phaseAcceptance.Checkpoints,
             ArtifactDirectory,
             out report);
         report += Environment.NewLine +
@@ -379,6 +442,7 @@ public sealed class AcceptanceRegressionHarness
             $"{phaseGpuTiming.MinimumMilliseconds:0.0000}/" +
             $"{phaseGpuTiming.MaximumMilliseconds:0.0000} phaseSamples={phaseGpuTiming.Samples} " +
             $"phaseDispatches={phaseDispatches} phaseMaxPerFrame={maximumPhaseDispatchesPerFrame} " +
+            $"phaseSummaryReadbacks={phaseSummaryReadbacks} " +
             $"phaseFallbackWakeUps={phaseFallbackWakeUps} " +
             $"probeGpuMs={probeGpuTiming.AverageMilliseconds:0.0000}/" +
             $"{probeGpuTiming.MinimumMilliseconds:0.0000}/" +

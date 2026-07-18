@@ -117,6 +117,7 @@ public sealed class SimulationDispatchCoordinator
     private double phaseTimingMinimumMilliseconds = double.PositiveInfinity;
     private double phaseTimingMaximumMilliseconds;
     private ulong phaseDispatches;
+    private ulong phaseSummaryReadbacks;
     private int maximumPhaseDispatchesPerFrame;
     private PhaseTransitionSummaryFlags lastPhaseSummary;
     private uint lastPhaseDispatchFrame;
@@ -125,6 +126,8 @@ public sealed class SimulationDispatchCoordinator
     private int hydraulicWarmupFrames;
     private int fastSettleFrames;
     private int fastMaximumAwakeFrames;
+    private int lastThermalTicksPerFrame;
+    private bool diagnosticsSuppressPhaseReadbackPolling;
 
     // Active Region tracking
     private int activeMinX;
@@ -197,10 +200,34 @@ public sealed class SimulationDispatchCoordinator
         phaseTimingSamples == 0 ? 0 : phaseTimingMinimumMilliseconds,
         phaseTimingMaximumMilliseconds);
     public ulong PhaseDispatches => phaseDispatches;
+    public ulong PhaseSummaryReadbacks => phaseSummaryReadbacks;
     public ulong PhaseFallbackWakeUps => phaseFallbackWakeUps;
     public int MaximumPhaseDispatchesPerFrame => maximumPhaseDispatchesPerFrame;
     public PhaseTransitionSummaryFlags LastPhaseSummary => lastPhaseSummary;
     public bool PhasePresentationIsCurrent => phaseDispatches == 0 || lastCompositionFrame >= lastPhaseDispatchFrame;
+    public int LastThermalTicksPerFrame => lastThermalTicksPerFrame;
+    public int PendingPhaseReadbackSlots
+    {
+        get
+        {
+            if (boundResources is null)
+            {
+                return 0;
+            }
+            int pending = 0;
+            foreach (GpuPhaseSummaryReadbackSlot slot in boundResources.PhaseSummaryReadbackSlots)
+            {
+                pending += slot.Pending ? 1 : 0;
+            }
+            return pending;
+        }
+    }
+
+    internal void ConfigurePhaseAcceptanceDiagnostics(
+        bool suppressReadbackPolling)
+    {
+        diagnosticsSuppressPhaseReadbackPolling = suppressReadbackPolling;
+    }
 
     public void SetSolidGravityEnabled(bool enabled)
     {
@@ -268,7 +295,10 @@ public sealed class SimulationDispatchCoordinator
             ResetActivity(resources.IsSimulationAllocated);
         }
 
-        PollPhaseSummary(resources);
+        if (!diagnosticsSuppressPhaseReadbackPolling)
+        {
+            PollPhaseSummary(resources);
+        }
         PollPhaseTiming(resources);
         ApplyPendingPhaseFallback(resources);
 
@@ -420,6 +450,7 @@ public sealed class SimulationDispatchCoordinator
             elapsedSeconds,
             settings.Paused,
             thermalActive && resources.IsSimulationAllocated);
+        lastThermalTicksPerFrame = thermalTicks;
         for (int tick = 0; tick < thermalTicks; tick++)
         {
             bool measure = thermalScheduler.TotalTicks >= 40 && !thermalTimingPending;
@@ -1258,6 +1289,7 @@ public sealed class SimulationDispatchCoordinator
             {
                 continue;
             }
+            phaseSummaryReadbacks++;
             PhaseTransitionSummaryFlags flags = (PhaseTransitionSummaryFlags)rawFlags;
             if ((flags & PhaseTransitionSummaryFlags.PhaseOccurred) != 0)
             {
@@ -1388,10 +1420,12 @@ public sealed class SimulationDispatchCoordinator
         phaseTimingMinimumMilliseconds = double.PositiveInfinity;
         phaseTimingMaximumMilliseconds = 0;
         phaseDispatches = 0;
+        phaseSummaryReadbacks = 0;
         maximumPhaseDispatchesPerFrame = 0;
         lastPhaseSummary = PhaseTransitionSummaryFlags.None;
         lastPhaseDispatchFrame = 0;
         lastCompositionFrame = 0;
+        lastThermalTicksPerFrame = 0;
     }
 
     private static bool ContainsMaterialCommand(ReadOnlySpan<BrushDrawCommand> commands)

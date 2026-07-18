@@ -44,7 +44,25 @@ public enum AcceptanceScenarioMode
     ThermalVacuum,
     ThermalGas,
     TemperatureProbeGpu,
-    PhaseDispatchSmoke
+    PhaseDispatchSmoke,
+    PhaseThresholds,
+    PhaseHysteresis,
+    PhaseSingleTransition,
+    PhaseNormalizationMatrix,
+    PhaseSummaryLiquidGas,
+    PhaseSummarySolidLiquid,
+    PhaseSummaryGasMovable,
+    PhaseSummaryLiquidFixed,
+    PhasePauseContinue,
+    PhaseWakeGas,
+    PhaseWakeLiquid,
+    PhaseReadbackFallback,
+    PhaseExternalReorder,
+    PhaseDisabledRegistry,
+    PhaseEnergyContract,
+    PhaseV5RoundTrip,
+    PhasePerformanceSteady,
+    PhasePerformanceBurst
 }
 
 public static class AcceptanceRegressionScenario
@@ -100,6 +118,25 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.ThermalGas or
             AcceptanceScenarioMode.TemperatureProbeGpu => [],
             AcceptanceScenarioMode.PhaseDispatchSmoke => [],
+            AcceptanceScenarioMode.PhaseThresholds or
+            AcceptanceScenarioMode.PhaseHysteresis or
+            AcceptanceScenarioMode.PhaseSingleTransition or
+            AcceptanceScenarioMode.PhaseNormalizationMatrix or
+            AcceptanceScenarioMode.PhaseSummaryLiquidGas or
+            AcceptanceScenarioMode.PhaseSummarySolidLiquid or
+            AcceptanceScenarioMode.PhaseSummaryGasMovable or
+            AcceptanceScenarioMode.PhaseSummaryLiquidFixed or
+            AcceptanceScenarioMode.PhasePauseContinue or
+            AcceptanceScenarioMode.PhaseWakeGas or
+            AcceptanceScenarioMode.PhaseWakeLiquid or
+            AcceptanceScenarioMode.PhaseReadbackFallback or
+            AcceptanceScenarioMode.PhaseExternalReorder or
+            AcceptanceScenarioMode.PhaseDisabledRegistry or
+            AcceptanceScenarioMode.PhaseEnergyContract or
+            AcceptanceScenarioMode.PhaseV5RoundTrip or
+            AcceptanceScenarioMode.PhasePerformanceSteady or
+            AcceptanceScenarioMode.PhasePerformanceBurst =>
+                PhaseAcceptanceScenario.CreateCommands(mode, frame, materials),
             _ => []
         };
     }
