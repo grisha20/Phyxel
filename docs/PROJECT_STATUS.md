@@ -3,14 +3,15 @@
 > [!IMPORTANT]
 > ## CURRENT HANDOFF
 >
-> - **Last verified commit:** `4d4eb7c Add interactive temperature brush`.
-> - **Just completed:** интерактивный инструмент установки температуры клеток, включая работу на Pause, GPU probe и acceptance-покрытие.
-> - **Current project state:** базовая универсальная система температуры завершена; она хранится в клетке, сохраняется в v5, переносится движущимися материалами и распространяется общим GPU-проходом.
-> - **Current task:** создание общей документации без изменения исполняемого кода.
-> - **Next planned engine task:** спроектировать универсальные фазовые переходы, затем начать с `water ↔ ice ↔ steam`.
+> - **Last completed commit:** `242e8ff Add project documentation and development roadmap`.
+> - **Last completed functional commit:** `4d4eb7c Add interactive temperature brush`.
+> - **Just completed:** архитектурный анализ универсальных фазовых переходов; решение зафиксировано в `docs/PHASE_TRANSITIONS_DESIGN.md` без изменения исполняемого кода.
+> - **Current project state:** базовая универсальная температура завершена; для фазовых переходов утверждены JSON-схема, 64-байтный GPU layout материала, правила `GridCell`, отдельный in-place pass и acceptance-план.
+> - **Current task:** анализ универсальных фазовых переходов для `core:water ↔ core:ice ↔ core:steam`.
+> - **Next planned engine task:** после подтверждения спорных решений реализовать schema/registry/layout отдельным engine-коммитом, не добавляя ice/steam в тот же коммит.
 > - **Do not start yet:** огонь, взрывы, коррозию, пакеты и hub одновременно.
 > - **Blocking issues:** известных блокеров нет. Есть отдельный технический долг в OOM-fallback масштаба, описанный ниже.
-> - **Tests last run for the code baseline:** чистая Debug-сборка, холодная компиляция shader entry points, thermal CPU/GPU regression, temperature brush/tool и прежние acceptance-сценарии.
+> - **Tests last run for the code baseline:** на функциональном baseline — холодная компиляция shader entry points, thermal CPU/GPU regression, temperature brush/tool и прежние acceptance-сценарии; для текущей документационной задачи — `dotnet build Phyxel.sln -c Debug --nologo` (0 ошибок, 0 предупреждений), review исходного кода и документационный diff.
 > - **Documentation update rule:** после каждой завершённой крупной задачи обновлять этот блок.
 >
 > После каждой крупной задачи также обновляются соответствующие разделы статуса.
