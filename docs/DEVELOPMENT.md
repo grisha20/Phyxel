@@ -86,7 +86,17 @@ $env:PHYXEL_VERIFY_THERMAL_MATERIALS = '1'
 Remove-Item Env:PHYXEL_VERIFY_THERMAL_MATERIALS
 ```
 
-Проверяет 48-байтный C#/HLSL layout, core-значения, defaults внешнего JSON, строгие диапазоны и runtime-позиции GPU-таблицы.
+Проверяет 64-байтный C#/HLSL layout, core-значения, defaults внешнего JSON, строгие диапазоны и runtime-позиции GPU-таблицы.
+
+### Phase-transition schema и registry
+
+```powershell
+$env:PHYXEL_VERIFY_PHASE_MATERIALS = '1'
+./bin/Debug/net8.0-windows/Phyxel.exe
+Remove-Item Env:PHYXEL_VERIFY_PHASE_MATERIALS
+```
+
+Проверяет raw string targets, строгую вложенную schema, двухэтапное разрешение ссылок, каскад external dependencies, interval-based cycle validation, offsets 64-байтного GPU layout и sentinel defaults.
 
 ### Thermal diffusion и brush logic
 

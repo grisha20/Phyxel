@@ -25,6 +25,10 @@ struct MaterialProperties
     float InitialTemperature;
     float ThermalConductivity;
     float HeatCapacity;
+    float TransitionBelowTemperature;
+    uint TransitionBelowMaterialIndex;
+    float TransitionAboveTemperature;
+    uint TransitionAboveMaterialIndex;
 };
 
 static const uint SimulationKindNone = 0;

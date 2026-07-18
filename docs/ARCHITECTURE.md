@@ -87,9 +87,11 @@ Loader выполняет следующие действия:
 
 `LegacyGridCellV3V4` навсегда остаётся отдельной 32-байтной структурой без температуры. Runtime-проверки фиксируют оба размера.
 
-### `MaterialProperties` — 48 байт
+### `MaterialProperties` — 64 байта
 
-Порядок полей: `Flags`, `SimulationKind`, `Density`, `Friction`, `FlowRate`, четыре компонента цвета, `InitialTemperature`, `ThermalConductivity`, `HeatCapacity`.
+Порядок полей: `Flags`, `SimulationKind`, `Density`, `Friction`, `FlowRate`, четыре компонента цвета, `InitialTemperature`, `ThermalConductivity`, `HeatCapacity`, затем порог и runtime target для перехода вниз и порог/runtime target для перехода вверх. Отсутствующий target кодируется `uint.MaxValue`.
+
+JSON хранит только строковые transition target IDs. Registry разрешает их после стабилизации полного набора материалов и назначения окончательных runtime-индексов. `RegistryHasPhaseTransitions` сообщает, остались ли в валидном реестре правила; phase compute pass пока не реализован.
 
 Thermal-параметры валидируются в пределах:
 
@@ -178,7 +180,7 @@ Cellular и solid-проходы используют несколько proposa
 
 Следующие возможности пока отсутствуют и не должны подразумеваться текущими структурами:
 
-- phase-transition schema и универсальный GPU pass;
+- универсальный phase-transition GPU pass и его resources/wake-up;
 - огонь, горение, дым и постоянные heat sources;
 - JSON reaction rules и GPU reaction table;
 - explosion/corrosion/dissolution;

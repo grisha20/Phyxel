@@ -45,6 +45,12 @@ public static class CoreMaterialIds
     ];
 }
 
+public sealed record MaterialTransitionRule(float Temperature, string IntoId);
+
+public sealed record MaterialTransitionDefinitions(
+    MaterialTransitionRule? Below,
+    MaterialTransitionRule? Above);
+
 public sealed record MaterialDefinition(
     string Id,
     ushort RuntimeIndex,
@@ -52,4 +58,9 @@ public sealed record MaterialDefinition(
     Color Color,
     MaterialProperties Properties,
     int UiOrder = 0,
-    bool Hidden = false);
+    bool Hidden = false)
+{
+    public MaterialTransitionDefinitions? PhaseTransitions { get; init; }
+    internal string SourcePath { get; init; } = string.Empty;
+    internal bool IsBundled { get; init; }
+}

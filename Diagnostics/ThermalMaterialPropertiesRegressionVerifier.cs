@@ -60,7 +60,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static async Task RunAsync()
     {
-        Require(Marshal.SizeOf<MaterialProperties>() == 48, "MaterialProperties must be 48 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == 64, "MaterialProperties must be 64 bytes.");
         string directory = Path.Combine(
             Path.GetTempPath(),
             $"phyxel-thermal-materials-{Guid.NewGuid():N}");
@@ -119,6 +119,10 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
                 $"{expected.Id} conductivity is incorrect.");
             Require(Same(properties.HeatCapacity, expected.HeatCapacity),
                 $"{expected.Id} heatCapacity is incorrect.");
+            Require(properties.TransitionBelowMaterialIndex == uint.MaxValue,
+                $"{expected.Id} unexpectedly has a below phase transition.");
+            Require(properties.TransitionAboveMaterialIndex == uint.MaxValue,
+                $"{expected.Id} unexpectedly has an above phase transition.");
         }
     }
 
@@ -281,7 +285,11 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         Same(left.ColorA, right.ColorA) &&
         Same(left.InitialTemperature, right.InitialTemperature) &&
         Same(left.ThermalConductivity, right.ThermalConductivity) &&
-        Same(left.HeatCapacity, right.HeatCapacity);
+        Same(left.HeatCapacity, right.HeatCapacity) &&
+        Same(left.TransitionBelowTemperature, right.TransitionBelowTemperature) &&
+        left.TransitionBelowMaterialIndex == right.TransitionBelowMaterialIndex &&
+        Same(left.TransitionAboveTemperature, right.TransitionAboveTemperature) &&
+        left.TransitionAboveMaterialIndex == right.TransitionAboveMaterialIndex;
 
     private static Color ParseColor(string value)
     {

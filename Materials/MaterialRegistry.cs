@@ -27,23 +27,31 @@ public sealed class MaterialRegistry
     private readonly Dictionary<string, MaterialDefinition> byId;
 
     public MaterialRegistry(string? externalDirectory = null)
+        : this(
+            ResolveCoreDirectory(),
+            externalDirectory ?? ResolveExternalDirectory())
     {
-        string coreDirectory = ResolveCoreDirectory();
+    }
+
+    internal MaterialRegistry(string coreDirectory, string externalDirectory)
+    {
         List<MaterialDefinition> coreDefinitions = MaterialFileLoader
             .LoadCore(coreDirectory, MaximumMaterials)
             .ToList();
         ValidateRequiredCoreMaterials(coreDefinitions);
+        ValidateCorePhaseTransitions(coreDefinitions);
 
         HashSet<string> reservedIds = coreDefinitions
             .Select(material => material.Id)
             .ToHashSet(StringComparer.Ordinal);
-        string directory = externalDirectory ?? ResolveExternalDirectory();
-        List<MaterialDefinition> definitions = coreDefinitions
-            .Concat(MaterialFileLoader.LoadExternal(
-                directory,
+        List<MaterialDefinition> externalDefinitions = MaterialFileLoader.LoadExternal(
+                externalDirectory,
                 reservedIds,
                 MaximumMaterials - coreDefinitions.Count,
-                coreDirectory))
+                coreDirectory)
+            .ToList();
+        List<MaterialDefinition> definitions = coreDefinitions
+            .Concat(FilterExternalPhaseTransitions(coreDefinitions, externalDefinitions))
             .OrderBy(material => material.Id == CoreMaterialIds.Empty ? 0 : 1)
             .ThenBy(material => material.Id, StringComparer.Ordinal)
             .ToList();
@@ -57,6 +65,17 @@ public sealed class MaterialRegistry
             };
         }
 
+        Dictionary<string, MaterialDefinition> indexedById = definitions
+            .ToDictionary(material => material.Id, StringComparer.Ordinal);
+        for (int index = 0; index < definitions.Count; index++)
+        {
+            MaterialDefinition definition = definitions[index];
+            definitions[index] = definition with
+            {
+                Properties = ResolvePhaseTransitionProperties(definition, indexedById)
+            };
+        }
+
         materials = definitions.AsReadOnly();
         selectableMaterials = definitions
             .Where(material => !material.Hidden && material.Id != CoreMaterialIds.Empty)
@@ -65,11 +84,13 @@ public sealed class MaterialRegistry
             .ToList()
             .AsReadOnly();
         byId = definitions.ToDictionary(material => material.Id, StringComparer.Ordinal);
+        RegistryHasPhaseTransitions = definitions.Any(material => material.PhaseTransitions is not null);
     }
 
     public IReadOnlyList<MaterialDefinition> Materials => materials;
     public IReadOnlyList<MaterialDefinition> SelectableMaterials => selectableMaterials;
     public int Count => materials.Count;
+    public bool RegistryHasPhaseTransitions { get; }
 
     public MaterialDefinition this[ushort runtimeIndex] => materials[runtimeIndex];
     public MaterialDefinition this[uint runtimeIndex] => materials[checked((int)runtimeIndex)];
@@ -142,6 +163,154 @@ public sealed class MaterialRegistry
         }
     }
 
+    private static void ValidateCorePhaseTransitions(IReadOnlyCollection<MaterialDefinition> coreDefinitions)
+    {
+        Dictionary<string, MaterialDefinition> coreById = coreDefinitions
+            .ToDictionary(material => material.Id, StringComparer.Ordinal);
+        foreach (MaterialDefinition source in coreDefinitions.OrderBy(material => material.Id, StringComparer.Ordinal))
+        {
+            string? error = FindPhaseTransitionReferenceError(source, coreById, requireBundledTarget: true);
+            if (error is not null)
+            {
+                throw new InvalidDataException(
+                    $"Invalid core phase transition in '{source.Id}' from '{source.SourcePath}': {error}");
+            }
+        }
+
+        IReadOnlySet<string> cycles =
+            PhaseTransitionCycleValidator.FindInstantaneousCycleMaterials(coreDefinitions);
+        if (cycles.Count > 0)
+        {
+            throw new InvalidDataException(
+                $"Core phase transitions contain an instantaneous cycle: {string.Join(", ", cycles.OrderBy(id => id, StringComparer.Ordinal))}.");
+        }
+    }
+
+    private static IReadOnlyList<MaterialDefinition> FilterExternalPhaseTransitions(
+        IReadOnlyCollection<MaterialDefinition> coreDefinitions,
+        IReadOnlyCollection<MaterialDefinition> externalDefinitions)
+    {
+        List<MaterialDefinition> valid = externalDefinitions
+            .OrderBy(material => material.Id, StringComparer.Ordinal)
+            .ToList();
+        while (true)
+        {
+            Dictionary<string, MaterialDefinition> available = coreDefinitions
+                .Concat(valid)
+                .ToDictionary(material => material.Id, StringComparer.Ordinal);
+            List<(MaterialDefinition Source, string Error)> invalidReferences = valid
+                .Select(source => (
+                    Source: source,
+                    Error: FindPhaseTransitionReferenceError(source, available, requireBundledTarget: false)))
+                .Where(result => result.Error is not null)
+                .Select(result => (result.Source, result.Error!))
+                .ToList();
+            if (invalidReferences.Count > 0)
+            {
+                foreach ((MaterialDefinition source, string error) in invalidReferences)
+                {
+                    MaterialFileLoader.LogError(
+                        source.SourcePath,
+                        $"Material '{source.Id}' has an invalid phase transition: {error}");
+                }
+                HashSet<string> removedIds = invalidReferences
+                    .Select(result => result.Source.Id)
+                    .ToHashSet(StringComparer.Ordinal);
+                valid.RemoveAll(material => removedIds.Contains(material.Id));
+                continue;
+            }
+
+            MaterialDefinition[] allDefinitions = coreDefinitions.Concat(valid).ToArray();
+            IReadOnlySet<string> cycleIds =
+                PhaseTransitionCycleValidator.FindInstantaneousCycleMaterials(allDefinitions);
+            if (cycleIds.Count == 0)
+            {
+                return valid;
+            }
+
+            HashSet<string> externalCycleIds = valid
+                .Where(material => cycleIds.Contains(material.Id))
+                .Select(material => material.Id)
+                .ToHashSet(StringComparer.Ordinal);
+            if (externalCycleIds.Count == 0)
+            {
+                throw new InvalidDataException(
+                    $"Core phase transitions contain an instantaneous cycle: {string.Join(", ", cycleIds.OrderBy(id => id, StringComparer.Ordinal))}.");
+            }
+
+            foreach (MaterialDefinition source in valid
+                .Where(material => externalCycleIds.Contains(material.Id))
+                .OrderBy(material => material.Id, StringComparer.Ordinal))
+            {
+                MaterialFileLoader.LogError(
+                    source.SourcePath,
+                    $"Material '{source.Id}' participates in an instantaneous phase-transition cycle.");
+            }
+            valid.RemoveAll(material => externalCycleIds.Contains(material.Id));
+        }
+    }
+
+    private static string? FindPhaseTransitionReferenceError(
+        MaterialDefinition source,
+        IReadOnlyDictionary<string, MaterialDefinition> available,
+        bool requireBundledTarget)
+    {
+        foreach ((string direction, MaterialTransitionRule rule) in EnumerateTransitionRules(source))
+        {
+            if (!available.TryGetValue(rule.IntoId, out MaterialDefinition? target))
+            {
+                return $"{direction} target '{rule.IntoId}' does not exist in the valid material set.";
+            }
+            if (requireBundledTarget && !target.IsBundled)
+            {
+                return $"{direction} target '{rule.IntoId}' is not a bundled core material.";
+            }
+            MaterialSimulationKind targetKind = (MaterialSimulationKind)target.Properties.SimulationKind;
+            if (target.Id == CoreMaterialIds.Empty)
+            {
+                return $"{direction} target '{rule.IntoId}' cannot be core:empty.";
+            }
+            if (targetKind is MaterialSimulationKind.None or MaterialSimulationKind.Tool)
+            {
+                return $"{direction} target '{rule.IntoId}' has forbidden kind '{targetKind.ToString().ToLowerInvariant()}'.";
+            }
+            if (target.Id == source.Id)
+            {
+                return $"{direction} target cannot be the source material itself ('{source.Id}').";
+            }
+        }
+        return null;
+    }
+
+    private static IEnumerable<(string Direction, MaterialTransitionRule Rule)> EnumerateTransitionRules(
+        MaterialDefinition source)
+    {
+        if (source.PhaseTransitions?.Below is { } below)
+        {
+            yield return ("below", below);
+        }
+        if (source.PhaseTransitions?.Above is { } above)
+        {
+            yield return ("above", above);
+        }
+    }
+
+    private static MaterialProperties ResolvePhaseTransitionProperties(
+        MaterialDefinition source,
+        IReadOnlyDictionary<string, MaterialDefinition> indexedById)
+    {
+        MaterialProperties properties = source.Properties;
+        properties.TransitionBelowTemperature = source.PhaseTransitions?.Below?.Temperature ?? 0;
+        properties.TransitionBelowMaterialIndex = source.PhaseTransitions?.Below is { } below
+            ? indexedById[below.IntoId].RuntimeIndex
+            : uint.MaxValue;
+        properties.TransitionAboveTemperature = source.PhaseTransitions?.Above?.Temperature ?? 0;
+        properties.TransitionAboveMaterialIndex = source.PhaseTransitions?.Above is { } above
+            ? indexedById[above.IntoId].RuntimeIndex
+            : uint.MaxValue;
+        return properties;
+    }
+
     internal static MaterialProperties CreateProperties(
         MaterialSimulationKind kind,
         MaterialFlags flags,
@@ -166,7 +335,9 @@ public sealed class MaterialRegistry
             ColorA = color.A / 255f,
             InitialTemperature = initialTemperature,
             ThermalConductivity = thermalConductivity,
-            HeatCapacity = heatCapacity
+            HeatCapacity = heatCapacity,
+            TransitionBelowMaterialIndex = uint.MaxValue,
+            TransitionAboveMaterialIndex = uint.MaxValue
         };
     }
 }

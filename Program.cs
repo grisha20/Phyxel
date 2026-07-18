@@ -23,6 +23,11 @@ public static class Program
             Environment.ExitCode = ThermalDiffusionRegressionVerifier.Run();
             return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_PHASE_MATERIALS") == "1")
+        {
+            Environment.ExitCode = PhaseTransitionMaterialRegressionVerifier.Run();
+            return;
+        }
 
         using PhyxelGame game = new();
         game.Run();

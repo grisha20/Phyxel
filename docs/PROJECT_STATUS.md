@@ -3,15 +3,15 @@
 > [!IMPORTANT]
 > ## CURRENT HANDOFF
 >
-> - **Last completed commit:** `242e8ff Add project documentation and development roadmap`.
+> - **Last completed commit:** `Add phase transition material schema` (текущий коммит; SHA указывается в handoff после создания).
 > - **Last completed functional commit:** `4d4eb7c Add interactive temperature brush`.
-> - **Just completed:** архитектурный анализ универсальных фазовых переходов; решение зафиксировано в `docs/PHASE_TRANSITIONS_DESIGN.md` без изменения исполняемого кода.
-> - **Current project state:** базовая универсальная температура завершена; для фазовых переходов утверждены JSON-схема, 64-байтный GPU layout материала, правила `GridCell`, отдельный in-place pass и acceptance-план.
-> - **Current task:** анализ универсальных фазовых переходов для `core:water ↔ core:ice ↔ core:steam`.
-> - **Next planned engine task:** после подтверждения спорных решений реализовать schema/registry/layout отдельным engine-коммитом, не добавляя ice/steam в тот же коммит.
+> - **Just completed:** phase-transition JSON schema v1, строгая локальная/registry validation, interval-based cycle validation и 64-байтный GPU layout `MaterialProperties`.
+> - **Current project state:** базовая универсальная температура завершена; data/registry/layout-слой фазовых переходов готов, но phase compute shader и фактическая смена материала ещё отсутствуют.
+> - **Current task:** реализация общего GPU phase pass.
+> - **Next planned engine task:** `PhaseTransitions.hlsl`, dispatch, консервативный wake-up и GPU timestamps; без добавления ice/steam в тот же коммит.
 > - **Do not start yet:** огонь, взрывы, коррозию, пакеты и hub одновременно.
 > - **Blocking issues:** известных блокеров нет. Есть отдельный технический долг в OOM-fallback масштаба, описанный ниже.
-> - **Tests last run for the code baseline:** на функциональном baseline — холодная компиляция shader entry points, thermal CPU/GPU regression, temperature brush/tool и прежние acceptance-сценарии; для текущей документационной задачи — `dotnet build Phyxel.sln -c Debug --nologo` (0 ошибок, 0 предупреждений), review исходного кода и документационный diff.
+> - **Tests last run:** Debug build (0 ошибок/предупреждений), cold shader compilation, world/thermal/phase CPU verifiers, загрузка core и external granular, полный существующий thermal GPU acceptance.
 > - **Documentation update rule:** после каждой завершённой крупной задачи обновлять этот блок.
 >
 > После каждой крупной задачи также обновляются соответствующие разделы статуса.
@@ -44,6 +44,8 @@
 - Старые `CreateBuiltIns()` и `MaterialId` удалены из основного пути.
 - `core:gold_sand` удалён и при загрузке v4 мигрирует в `core:sand`; `core:concrete` переименован и мигрирует в `core:stone`.
 - Реестр ограничен 256 материалами. Некорректный core JSON прерывает запуск; некорректный внешний файл пропускается с `PHYXEL_MATERIAL_ERROR`.
+- Необязательные `thermal.transitions.below/above` хранят string target IDs, после стабилизации реестра разрешаются в текущие runtime-индексы и попадают в 64-байтную GPU-таблицу материалов.
+- Registry отбрасывает невалидные внешние ссылки до устойчивого набора и запрещает мгновенные температурные циклы; фактического phase GPU pass пока нет.
 
 ### Физика
 

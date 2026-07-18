@@ -40,6 +40,7 @@ internal static partial class MaterialFileLoader
         public float InitialTemperature { get; set; } = MaterialRegistry.DefaultInitialTemperature;
         public float Conductivity { get; set; } = MaterialRegistry.DefaultThermalConductivity;
         public float HeatCapacity { get; set; } = MaterialRegistry.DefaultHeatCapacity;
+        public JsonElement Transitions { get; set; }
 
         [JsonExtensionData]
         public Dictionary<string, JsonElement>? UnknownFields { get; set; }
@@ -94,7 +95,11 @@ internal static partial class MaterialFileLoader
         {
             try
             {
-                MaterialDefinition definition = Parse(path);
+                MaterialDefinition definition = Parse(path) with
+                {
+                    IsBundled = true,
+                    SourcePath = path
+                };
                 if (!definition.Id.StartsWith("core:", StringComparison.Ordinal))
                 {
                     throw new InvalidDataException($"Bundled material ID '{definition.Id}' must use the core namespace.");
@@ -153,7 +158,11 @@ internal static partial class MaterialFileLoader
 
             try
             {
-                MaterialDefinition definition = Parse(path);
+                MaterialDefinition definition = Parse(path) with
+                {
+                    IsBundled = false,
+                    SourcePath = path
+                };
                 if (definition.Id.StartsWith("core:", StringComparison.Ordinal))
                 {
                     LogError(path, $"External material cannot declare the reserved core ID '{definition.Id}'.");
@@ -258,6 +267,11 @@ internal static partial class MaterialFileLoader
                 $"thermal.heatCapacity должна быть конечным числом от {MaterialRegistry.MinimumHeatCapacity} до {MaterialRegistry.MaximumHeatCapacity}.");
         }
 
+        MaterialTransitionDefinitions? transitions = ParseTransitions(
+            thermal.Transitions,
+            id,
+            kind);
+
         MaterialFlags flags = ParseFlags(document.Flags, kind);
         if ((flags & MaterialFlags.MovableSolid) != 0 && physics.Density <= 0)
         {
@@ -281,7 +295,145 @@ internal static partial class MaterialFileLoader
                 thermal.HeatCapacity,
                 color),
             ui.Order,
-            ui.Hidden);
+            ui.Hidden)
+        {
+            PhaseTransitions = transitions,
+            SourcePath = path
+        };
+    }
+
+    private static MaterialTransitionDefinitions? ParseTransitions(
+        JsonElement value,
+        string sourceId,
+        MaterialSimulationKind sourceKind)
+    {
+        if (value.ValueKind == JsonValueKind.Undefined)
+        {
+            return null;
+        }
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("thermal.transitions должен быть объектом.");
+        }
+
+        MaterialTransitionRule? below = null;
+        MaterialTransitionRule? above = null;
+        HashSet<string> fields = new(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            if (!fields.Add(property.Name))
+            {
+                throw new InvalidDataException(
+                    $"Дублирующее поле thermal.transitions '{property.Name}'.");
+            }
+
+            if (property.Name.Equals("below", StringComparison.OrdinalIgnoreCase))
+            {
+                below = ParseTransitionDirection(property.Value, "below", sourceId);
+            }
+            else if (property.Name.Equals("above", StringComparison.OrdinalIgnoreCase))
+            {
+                above = ParseTransitionDirection(property.Value, "above", sourceId);
+            }
+            else
+            {
+                throw new InvalidDataException(
+                    $"Неизвестное поле thermal.transitions '{property.Name}'.");
+            }
+        }
+
+        if (below is null && above is null)
+        {
+            throw new InvalidDataException(
+                "thermal.transitions должен содержать below и/или above.");
+        }
+        if (sourceKind is MaterialSimulationKind.None or MaterialSimulationKind.Tool)
+        {
+            throw new InvalidDataException(
+                $"Материал '{sourceId}' с kind '{sourceKind.ToString().ToLowerInvariant()}' не может иметь thermal.transitions.");
+        }
+        if (below is not null && above is not null && below.Temperature >= above.Temperature)
+        {
+            throw new InvalidDataException(
+                "thermal.transitions.below.temperature должен быть меньше thermal.transitions.above.temperature.");
+        }
+
+        return new MaterialTransitionDefinitions(below, above);
+    }
+
+    private static MaterialTransitionRule ParseTransitionDirection(
+        JsonElement value,
+        string direction,
+        string sourceId)
+    {
+        string fieldPath = $"thermal.transitions.{direction}";
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException($"{fieldPath} должен быть объектом.");
+        }
+
+        JsonElement temperatureElement = default;
+        JsonElement intoElement = default;
+        HashSet<string> fields = new(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            if (!fields.Add(property.Name))
+            {
+                throw new InvalidDataException(
+                    $"Дублирующее поле {fieldPath} '{property.Name}'.");
+            }
+
+            if (property.Name.Equals("temperature", StringComparison.OrdinalIgnoreCase))
+            {
+                temperatureElement = property.Value;
+            }
+            else if (property.Name.Equals("into", StringComparison.OrdinalIgnoreCase))
+            {
+                intoElement = property.Value;
+            }
+            else
+            {
+                throw new InvalidDataException(
+                    $"Неизвестное поле {fieldPath} '{property.Name}'.");
+            }
+        }
+
+        if (temperatureElement.ValueKind == JsonValueKind.Undefined)
+        {
+            throw new InvalidDataException($"Поле {fieldPath}.temperature обязательно.");
+        }
+        if (intoElement.ValueKind == JsonValueKind.Undefined)
+        {
+            throw new InvalidDataException($"Поле {fieldPath}.into обязательно.");
+        }
+        if (temperatureElement.ValueKind != JsonValueKind.Number ||
+            !temperatureElement.TryGetSingle(out float temperature) ||
+            !float.IsFinite(temperature) ||
+            temperature < MaterialRegistry.MinimumInitialTemperature ||
+            temperature > MaterialRegistry.MaximumInitialTemperature)
+        {
+            throw new InvalidDataException(
+                $"{fieldPath}.temperature должна быть конечным числом от {MaterialRegistry.MinimumInitialTemperature} до {MaterialRegistry.MaximumInitialTemperature}.");
+        }
+        if (intoElement.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(intoElement.GetString()))
+        {
+            throw new InvalidDataException($"{fieldPath}.into должен быть строковым material ID.");
+        }
+
+        string targetId = MaterialRegistry.NormalizeId(intoElement.GetString()!);
+        if (!MaterialIdPattern().IsMatch(targetId))
+        {
+            throw new InvalidDataException(
+                $"{fieldPath}.into '{intoElement.GetString()}' должен иметь формат namespace:name.");
+        }
+        if (targetId == sourceId)
+        {
+            throw new InvalidDataException(
+                $"Материал '{sourceId}' не может переходить сам в себя ({fieldPath}.into).");
+        }
+
+        return new MaterialTransitionRule(temperature, targetId);
     }
 
     private static MaterialFlags ParseFlags(IEnumerable<string>? values, MaterialSimulationKind kind)
@@ -362,7 +514,7 @@ internal static partial class MaterialFileLoader
         return new Color(red, green, blue, alpha);
     }
 
-    private static void LogError(string path, string message)
+    internal static void LogError(string path, string message)
     {
         Console.Error.WriteLine($"PHYXEL_MATERIAL_ERROR file=\"{path}\" message=\"{message}\"");
     }

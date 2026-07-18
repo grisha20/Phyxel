@@ -31,6 +31,10 @@ public struct MaterialProperties
     public float InitialTemperature;
     public float ThermalConductivity;
     public float HeatCapacity;
+    public float TransitionBelowTemperature;
+    public uint TransitionBelowMaterialIndex;
+    public float TransitionAboveTemperature;
+    public uint TransitionAboveMaterialIndex;
 }
 
 public enum BrushCommandMode : uint
