@@ -78,7 +78,10 @@ internal sealed class PhaseAcceptanceController
             AcceptanceScenarioMode.PhaseReadbackFallback or
             AcceptanceScenarioMode.PhaseExternalReorder or
             AcceptanceScenarioMode.PhaseEnergyContract or
-            AcceptanceScenarioMode.PhaseV5RoundTrip)
+            AcceptanceScenarioMode.PhaseV5RoundTrip or
+            AcceptanceScenarioMode.WaterIceSteam or
+            AcceptanceScenarioMode.WaterIceSteamMotion or
+            AcceptanceScenarioMode.WaterIceSteamV5RoundTrip)
         {
             return 0.05f;
         }
@@ -115,6 +118,19 @@ internal sealed class PhaseAcceptanceController
                 roundTripStage != RoundTripStage.None || coordinator.PhaseDispatches >= 1,
             AcceptanceScenarioMode.PhasePauseContinue => frame < 10 || coordinator.PhaseDispatches >= 1,
             AcceptanceScenarioMode.PhaseWakeGas or AcceptanceScenarioMode.PhaseWakeLiquid => frame < 3,
+            AcceptanceScenarioMode.WaterIceSteam => checkpoints.Count switch
+            {
+                0 => coordinator.PhaseDispatches >= 1,
+                1 => coordinator.PhaseDispatches >= 2,
+                _ => coordinator.PhaseDispatches >= 5
+            },
+            AcceptanceScenarioMode.WaterIceSteamMotion => checkpoints.Count switch
+            {
+                0 => coordinator.PhaseDispatches >= 1,
+                _ => frame >= checkpoints[0].Frame + 90
+            },
+            AcceptanceScenarioMode.WaterIceSteamPause => frame < 10 || coordinator.PhaseDispatches >= 1,
+            AcceptanceScenarioMode.WaterIceSteamV5RoundTrip => PauseCoreRoundTrip(coordinator),
             _ => false
         };
 
@@ -168,6 +184,26 @@ internal sealed class PhaseAcceptanceController
                 2 => frame >= checkpoints[1].Frame + 30,
                 _ => false
             },
+            AcceptanceScenarioMode.WaterIceSteam => checkpoints.Count switch
+            {
+                0 => coordinator.PhaseDispatches >= 1 && coordinator.PhaseSummaryReadbacks >= 1,
+                1 => coordinator.PhaseDispatches >= 2 && coordinator.PhaseSummaryReadbacks >= 2,
+                2 => coordinator.PhaseDispatches >= 5 && coordinator.PhaseSummaryReadbacks >= 5,
+                _ => false
+            },
+            AcceptanceScenarioMode.WaterIceSteamMotion => checkpoints.Count switch
+            {
+                0 => coordinator.PhaseDispatches >= 1 && coordinator.PhaseSummaryReadbacks >= 1,
+                1 => frame >= checkpoints[0].Frame + 90,
+                _ => false
+            },
+            AcceptanceScenarioMode.WaterIceSteamPause => checkpoints.Count switch
+            {
+                0 => frame >= 3 && coordinator.PhaseDispatches == 0,
+                1 => coordinator.PhaseDispatches >= 1 && coordinator.PhaseSummaryReadbacks >= 1,
+                _ => false
+            },
+            AcceptanceScenarioMode.WaterIceSteamV5RoundTrip => CoreRoundTripCheckpointReady(frame, coordinator),
             _ => false
         };
         if (ready)
@@ -218,6 +254,10 @@ internal sealed class PhaseAcceptanceController
             AcceptanceScenarioMode.PhaseEnergyContract => checkpoints.Count >= 1,
             AcceptanceScenarioMode.PhasePauseContinue => checkpoints.Count >= 2,
             AcceptanceScenarioMode.PhaseWakeGas or AcceptanceScenarioMode.PhaseWakeLiquid => checkpoints.Count >= 3,
+            AcceptanceScenarioMode.WaterIceSteam => checkpoints.Count >= 3,
+            AcceptanceScenarioMode.WaterIceSteamMotion or AcceptanceScenarioMode.WaterIceSteamPause =>
+                checkpoints.Count >= 2,
+            AcceptanceScenarioMode.WaterIceSteamV5RoundTrip => checkpoints.Count >= 3,
             AcceptanceScenarioMode.PhaseReadbackFallback => readbackStage == ReadbackStage.Complete,
             AcceptanceScenarioMode.PhaseDisabledRegistry => frame >= 120,
             AcceptanceScenarioMode.PhaseV5RoundTrip =>
@@ -231,7 +271,8 @@ internal sealed class PhaseAcceptanceController
     public bool TryBeginRoundTripSave(out SimulationWorldSnapshot? snapshot)
     {
         snapshot = null;
-        if (mode != AcceptanceScenarioMode.PhaseV5RoundTrip ||
+        if (mode is not (AcceptanceScenarioMode.PhaseV5RoundTrip or
+                AcceptanceScenarioMode.WaterIceSteamV5RoundTrip) ||
             roundTripStage != RoundTripStage.None || checkpoints.Count == 0)
         {
             return false;
@@ -279,6 +320,37 @@ internal sealed class PhaseAcceptanceController
             return true;
         }
         return coordinator.PhaseDispatches >= 2;
+    }
+
+    private bool PauseCoreRoundTrip(SimulationDispatchCoordinator coordinator)
+    {
+        return roundTripStage switch
+        {
+            RoundTripStage.None => coordinator.PhaseDispatches >= 1,
+            RoundTripStage.Saving or RoundTripStage.Loading => true,
+            RoundTripStage.Loaded when checkpoints.Count < 2 => true,
+            RoundTripStage.Loaded => coordinator.PhaseDispatches >= 1,
+            _ => true
+        };
+    }
+
+    private bool CoreRoundTripCheckpointReady(uint frame, SimulationDispatchCoordinator coordinator)
+    {
+        if (roundTripStage == RoundTripStage.None)
+        {
+            return checkpoints.Count == 0 && coordinator.PhaseDispatches >= 1 &&
+                coordinator.PhaseSummaryReadbacks >= 1;
+        }
+        if (roundTripStage != RoundTripStage.Loaded)
+        {
+            return false;
+        }
+        return checkpoints.Count switch
+        {
+            1 => frame >= roundTripLoadedFrame + 3 && coordinator.PhaseDispatches == 0,
+            2 => coordinator.PhaseDispatches >= 1 && coordinator.PhaseSummaryReadbacks >= 1,
+            _ => false
+        };
     }
 
     private void UpdateReadbackState(

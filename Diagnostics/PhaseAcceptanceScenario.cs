@@ -27,7 +27,11 @@ internal static class PhaseAcceptanceScenario
         AcceptanceScenarioMode.PhaseEnergyContract or
         AcceptanceScenarioMode.PhaseV5RoundTrip or
         AcceptanceScenarioMode.PhasePerformanceSteady or
-        AcceptanceScenarioMode.PhasePerformanceBurst;
+        AcceptanceScenarioMode.PhasePerformanceBurst or
+        AcceptanceScenarioMode.WaterIceSteam or
+        AcceptanceScenarioMode.WaterIceSteamMotion or
+        AcceptanceScenarioMode.WaterIceSteamPause or
+        AcceptanceScenarioMode.WaterIceSteamV5RoundTrip;
 
     public static SimulationWorldSnapshot? Create(
         AcceptanceScenarioMode mode,
@@ -46,6 +50,11 @@ internal static class PhaseAcceptanceScenario
 
         byte[] bytes = new byte[checked(width * height * Marshal.SizeOf<GridCell>())];
         Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes);
+        if (CorePhaseAcceptanceScenario.IsCorePhaseMode(mode))
+        {
+            CorePhaseAcceptanceScenario.Populate(mode, cells, width, materials);
+            return new SimulationWorldSnapshot(width, height, bytes);
+        }
         switch (mode)
         {
             case AcceptanceScenarioMode.PhaseThresholds:
@@ -116,6 +125,10 @@ internal static class PhaseAcceptanceScenario
         uint frame,
         AcceptanceMaterialIndices materials)
     {
+        if (CorePhaseAcceptanceScenario.IsCorePhaseMode(mode))
+        {
+            return CorePhaseAcceptanceScenario.CreateCommands(mode, frame, materials);
+        }
         if (frame == 0 && mode is
             AcceptanceScenarioMode.PhaseHysteresis or
             AcceptanceScenarioMode.PhaseNormalizationMatrix or

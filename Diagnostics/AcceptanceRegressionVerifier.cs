@@ -202,7 +202,11 @@ public static class AcceptanceRegressionVerifier
             AcceptanceScenarioMode.PhaseEnergyContract or
             AcceptanceScenarioMode.PhaseV5RoundTrip or
             AcceptanceScenarioMode.PhasePerformanceSteady or
-            AcceptanceScenarioMode.PhasePerformanceBurst => PhaseAcceptanceVerifier.Validate(
+            AcceptanceScenarioMode.PhasePerformanceBurst or
+            AcceptanceScenarioMode.WaterIceSteam or
+            AcceptanceScenarioMode.WaterIceSteamMotion or
+            AcceptanceScenarioMode.WaterIceSteamPause or
+            AcceptanceScenarioMode.WaterIceSteamV5RoundTrip => PhaseAcceptanceVerifier.Validate(
                 mode,
                 materialRegistry,
                 snapshot,

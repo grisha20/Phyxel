@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "id": "core:ice",
+  "name": {
+    "ru": "Лёд",
+    "en": "Ice"
+  },
+  "kind": "solid",
+  "color": "#A9DDF2",
+  "physics": {
+    "density": 0.92,
+    "friction": 0.10,
+    "flowRate": 0.0
+  },
+  "thermal": {
+    "initialTemperature": -5.0,
+    "conductivity": 0.80,
+    "heatCapacity": 2.10,
+    "transitions": {
+      "above": {
+        "temperature": 2.0,
+        "into": "core:water"
+      }
+    }
+  },
+  "ui": {
+    "order": 21,
+    "hidden": false
+  }
+}

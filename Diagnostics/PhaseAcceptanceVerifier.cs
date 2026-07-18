@@ -69,6 +69,11 @@ internal static class PhaseAcceptanceVerifier
             AcceptanceScenarioMode.PhaseV5RoundTrip => ValidateRoundTrip(materials, snapshot, checkpoints, errors),
             AcceptanceScenarioMode.PhasePerformanceSteady or AcceptanceScenarioMode.PhasePerformanceBurst =>
                 ValidatePerformance(mode, materials, snapshot, thermalTiming, phaseTiming, errors),
+            AcceptanceScenarioMode.WaterIceSteam or
+            AcceptanceScenarioMode.WaterIceSteamMotion or
+            AcceptanceScenarioMode.WaterIceSteamPause or
+            AcceptanceScenarioMode.WaterIceSteamV5RoundTrip =>
+                CorePhaseAcceptanceVerifier.Validate(mode, materials, snapshot, checkpoints, errors),
             _ => 0
         };
 
@@ -85,9 +90,17 @@ internal static class PhaseAcceptanceVerifier
             Require(summaryReadbacks >= 5,
                 $"readback fallback completed too few real summaries={summaryReadbacks}", errors);
         }
-        PhaseTransitionSummaryFlags observedSummary = mode == AcceptanceScenarioMode.PhaseV5RoundTrip && checkpoints.Count > 0
-            ? checkpoints[0].Summary
-            : summary;
+        PhaseTransitionSummaryFlags observedSummary = mode switch
+        {
+            AcceptanceScenarioMode.PhaseV5RoundTrip or
+            AcceptanceScenarioMode.WaterIceSteam or
+            AcceptanceScenarioMode.WaterIceSteamMotion or
+            AcceptanceScenarioMode.WaterIceSteamV5RoundTrip when checkpoints.Count > 0 =>
+                checkpoints[0].Summary,
+            AcceptanceScenarioMode.WaterIceSteamPause when checkpoints.Count > 1 =>
+                checkpoints[1].Summary,
+            _ => summary
+        };
         PhaseTransitionSummaryFlags expectedSummary = ExpectedSummary(mode);
         Require(observedSummary == expectedSummary,
             $"summary expected=0x{(uint)expectedSummary:X} actual=0x{(uint)observedSummary:X}", errors);
@@ -112,6 +125,10 @@ internal static class PhaseAcceptanceVerifier
             reportedSummary = ExpectedNormalizationSummary;
             reportedFallback = checkpoints[0].FallbackWakeUps;
             reportedSummaryReadbacks = checkpoints[0].SummaryReadbacks;
+        }
+        else if (CorePhaseAcceptanceScenario.IsCorePhaseMode(mode))
+        {
+            reportedSummary = observedSummary;
         }
 
         bool passed = errors.Count == 0;
@@ -644,6 +661,10 @@ internal static class PhaseAcceptanceVerifier
         AcceptanceScenarioMode.PhaseV5RoundTrip => "phase_v5_roundtrip",
         AcceptanceScenarioMode.PhasePerformanceSteady => "phase_performance_steady",
         AcceptanceScenarioMode.PhasePerformanceBurst => "phase_performance_burst",
+        AcceptanceScenarioMode.WaterIceSteam => "water_ice_steam",
+        AcceptanceScenarioMode.WaterIceSteamMotion => "water_ice_steam_motion",
+        AcceptanceScenarioMode.WaterIceSteamPause => "water_ice_steam_pause",
+        AcceptanceScenarioMode.WaterIceSteamV5RoundTrip => "water_ice_steam_v5_roundtrip",
         _ => mode.ToString().ToLowerInvariant()
     };
 
@@ -688,6 +709,21 @@ internal static class PhaseAcceptanceVerifier
             PhaseTransitionSummaryFlags.PhaseOccurred |
             PhaseTransitionSummaryFlags.TargetCellular |
             PhaseTransitionSummaryFlags.TargetGas |
+            PhaseTransitionSummaryFlags.TouchesSolid,
+        AcceptanceScenarioMode.WaterIceSteam or
+        AcceptanceScenarioMode.WaterIceSteamMotion or
+        AcceptanceScenarioMode.WaterIceSteamV5RoundTrip =>
+            PhaseTransitionSummaryFlags.PhaseOccurred |
+            PhaseTransitionSummaryFlags.TargetCellular |
+            PhaseTransitionSummaryFlags.TargetLiquid |
+            PhaseTransitionSummaryFlags.TargetGas |
+            PhaseTransitionSummaryFlags.TouchesLiquid |
+            PhaseTransitionSummaryFlags.TouchesSolid,
+        AcceptanceScenarioMode.WaterIceSteamPause =>
+            PhaseTransitionSummaryFlags.PhaseOccurred |
+            PhaseTransitionSummaryFlags.TargetCellular |
+            PhaseTransitionSummaryFlags.TargetGas |
+            PhaseTransitionSummaryFlags.TouchesLiquid |
             PhaseTransitionSummaryFlags.TouchesSolid,
         _ => PhaseTransitionSummaryFlags.None
     };

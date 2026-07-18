@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "id": "core:steam",
+  "name": {
+    "ru": "Пар",
+    "en": "Steam"
+  },
+  "kind": "gas",
+  "color": "#DDEBF0A0",
+  "physics": {
+    "density": 0.03,
+    "friction": 0.005,
+    "flowRate": 1.20
+  },
+  "thermal": {
+    "initialTemperature": 105.0,
+    "conductivity": 0.04,
+    "heatCapacity": 2.08,
+    "transitions": {
+      "below": {
+        "temperature": 95.0,
+        "into": "core:water"
+      }
+    }
+  },
+  "ui": {
+    "order": 22,
+    "hidden": false
+  }
+}

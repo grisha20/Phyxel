@@ -27,6 +27,8 @@ public static class CoreMaterialIds
     public const string Empty = "core:empty";
     public const string Sand = "core:sand";
     public const string Water = "core:water";
+    public const string Ice = "core:ice";
+    public const string Steam = "core:steam";
     public const string Metal = "core:metal";
     public const string Stone = "core:stone";
     public const string Eraser = "core:eraser";
@@ -37,6 +39,8 @@ public static class CoreMaterialIds
         Empty,
         Sand,
         Water,
+        Ice,
+        Steam,
         Metal,
         Stone,
         Eraser,

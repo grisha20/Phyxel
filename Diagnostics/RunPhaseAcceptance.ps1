@@ -9,7 +9,9 @@ $executable = Join-Path $repository "bin/$Configuration/net8.0-windows/Phyxel.ex
 $phaseMaterials = Join-Path $PSScriptRoot 'PhaseAcceptanceMaterials'
 $reorderA = Join-Path $PSScriptRoot 'PhaseReorderA'
 $reorderB = Join-Path $PSScriptRoot 'PhaseReorderB'
+$bundledCoreMaterials = Join-Path $repository 'Materials/core'
 $artifactDirectory = [System.IO.Path]::GetFullPath((Join-Path $repository $ArtifactRoot))
+$disabledCoreMaterials = Join-Path ([System.IO.Path]::GetTempPath()) "phyxel-phase-disabled-core-$([Guid]::NewGuid().ToString('N'))"
 $results = [System.Collections.Generic.List[object]]::new()
 $performance = [System.Collections.Generic.List[string]]::new()
 
@@ -25,7 +27,8 @@ function Invoke-PhaseCase {
         [AllowEmptyString()][string]$MaterialsPath,
         [string]$Scale = '0.25',
         [int]$TargetFps = 60,
-        [string]$ScenePath = ''
+        [string]$ScenePath = '',
+        [string]$CoreMaterialsPath = ''
     )
 
     $caseDirectory = Join-Path $artifactDirectory $Label
@@ -45,6 +48,12 @@ function Invoke-PhaseCase {
     }
     else {
         $env:PHYXEL_VERIFY_SCENE_PATH = $ScenePath
+    }
+    if ([string]::IsNullOrEmpty($CoreMaterialsPath)) {
+        Remove-Item Env:PHYXEL_CORE_MATERIALS_PATH -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:PHYXEL_CORE_MATERIALS_PATH = $CoreMaterialsPath
     }
 
     Write-Host "PHYXEL_PHASE_CASE_BEGIN $Label"
@@ -80,6 +89,14 @@ function Invoke-PhaseCase {
 }
 
 try {
+    [System.IO.Directory]::CreateDirectory($disabledCoreMaterials) | Out-Null
+    Copy-Item -Path (Join-Path $bundledCoreMaterials '*') -Destination $disabledCoreMaterials
+    foreach ($name in 'water.json', 'ice.json', 'steam.json') {
+        $path = Join-Path $disabledCoreMaterials $name
+        $document = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.thermal.PSObject.Properties.Remove('transitions')
+        $document | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
+    }
     $functionalModes = @(
         'phase_thresholds',
         'phase_hysteresis',
@@ -102,7 +119,8 @@ try {
             -MaterialsPath $phaseMaterials -TargetFps $fps | Out-Null
     }
 
-    Invoke-PhaseCase -Label 'phase_disabled_registry' -Mode 'phase_disabled_registry' -MaterialsPath '' | Out-Null
+    Invoke-PhaseCase -Label 'phase_disabled_registry' -Mode 'phase_disabled_registry' -MaterialsPath $disabledCoreMaterials `
+        -CoreMaterialsPath $disabledCoreMaterials | Out-Null
     $reorderAOutput = Invoke-PhaseCase -Label 'phase_external_reorder_a' -Mode 'phase_external_reorder' `
         -MaterialsPath $reorderA
     $reorderBOutput = Invoke-PhaseCase -Label 'phase_external_reorder_b' -Mode 'phase_external_reorder' `
@@ -152,6 +170,10 @@ finally {
         'PHYXEL_ACCEPTANCE_TARGET_FPS',
         'PHYXEL_ARTIFACT_DIR',
         'PHYXEL_MATERIALS_PATH',
+        'PHYXEL_CORE_MATERIALS_PATH',
         'PHYXEL_VERIFY_SCENE_PATH'
     ) | ForEach-Object { Remove-Item "Env:$_" -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath $disabledCoreMaterials) {
+        [System.IO.Directory]::Delete($disabledCoreMaterials, $true)
+    }
 }

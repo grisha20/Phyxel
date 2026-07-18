@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.Xna.Framework;
@@ -31,6 +32,10 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             1.5f, 0.75f, 0.18f, "#DAB85C", 20f, 0.15f, 0.83f),
         new(CoreMaterialIds.Water, MaterialSimulationKind.Liquid, MaterialFlags.None,
             1f, 0.025f, 0.92f, "#2B84CF", 20f, 0.60f, 4.18f),
+        new(CoreMaterialIds.Ice, MaterialSimulationKind.Solid, MaterialFlags.None,
+            0.92f, 0.10f, 0f, "#A9DDF2", -5f, 0.80f, 2.10f),
+        new(CoreMaterialIds.Steam, MaterialSimulationKind.Gas, MaterialFlags.None,
+            0.03f, 0.005f, 1.20f, "#DDEBF0A0", 105f, 0.04f, 2.08f),
         new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
             7.8f, 0.35f, 0f, "#8E9CA6", 20f, 1f, 0.50f),
         new(CoreMaterialIds.Stone, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
@@ -96,6 +101,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static void VerifyCoreMaterials(MaterialRegistry registry)
     {
+        Require(ExpectedCoreMaterials.Length == 10, "Expected bundled core material count changed.");
         foreach (ExpectedMaterial expected in ExpectedCoreMaterials)
         {
             MaterialDefinition actual = registry[expected.Id];
@@ -119,10 +125,64 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
                 $"{expected.Id} conductivity is incorrect.");
             Require(Same(properties.HeatCapacity, expected.HeatCapacity),
                 $"{expected.Id} heatCapacity is incorrect.");
-            Require(properties.TransitionBelowMaterialIndex == uint.MaxValue,
-                $"{expected.Id} unexpectedly has a below phase transition.");
-            Require(properties.TransitionAboveMaterialIndex == uint.MaxValue,
-                $"{expected.Id} unexpectedly has an above phase transition.");
+            VerifyCoreTransitions(registry, expected.Id, properties);
+        }
+        MaterialDefinition water = registry[CoreMaterialIds.Water];
+        MaterialDefinition ice = registry[CoreMaterialIds.Ice];
+        MaterialDefinition steam = registry[CoreMaterialIds.Steam];
+        Require(water.UiOrder == 20 && ice.UiOrder == 21 && steam.UiOrder == 22,
+            "Water/Ice/Steam UI order is not 20/21/22.");
+        Require(!water.Hidden && !ice.Hidden && !steam.Hidden,
+            "Water/Ice/Steam must be visible in the material menu.");
+        Require(water.Name == "Вода" && ice.Name == "Лёд" && steam.Name == "Пар",
+            "Water/Ice/Steam Russian names changed.");
+        string[] visibleIds = registry.SelectableMaterials.Select(material => material.Id).ToArray();
+        int waterPosition = Array.IndexOf(visibleIds, CoreMaterialIds.Water);
+        Require(waterPosition >= 0 && waterPosition + 2 < visibleIds.Length &&
+            visibleIds[waterPosition + 1] == CoreMaterialIds.Ice &&
+            visibleIds[waterPosition + 2] == CoreMaterialIds.Steam,
+            "Material menu does not place Water, Ice and Steam consecutively.");
+    }
+
+    private static void VerifyCoreTransitions(
+        MaterialRegistry registry,
+        string id,
+        MaterialProperties properties)
+    {
+        switch (id)
+        {
+            case CoreMaterialIds.Water:
+                Require(Same(properties.TransitionBelowTemperature, 0f),
+                    "core:water freeze threshold changed.");
+                Require(properties.TransitionBelowMaterialIndex == registry[CoreMaterialIds.Ice].RuntimeIndex,
+                    "core:water freeze target is not core:ice.");
+                Require(Same(properties.TransitionAboveTemperature, 100f),
+                    "core:water boiling threshold changed.");
+                Require(properties.TransitionAboveMaterialIndex == registry[CoreMaterialIds.Steam].RuntimeIndex,
+                    "core:water boiling target is not core:steam.");
+                break;
+            case CoreMaterialIds.Ice:
+                Require(properties.TransitionBelowMaterialIndex == uint.MaxValue,
+                    "core:ice unexpectedly has a below transition.");
+                Require(Same(properties.TransitionAboveTemperature, 2f),
+                    "core:ice melting threshold changed.");
+                Require(properties.TransitionAboveMaterialIndex == registry[CoreMaterialIds.Water].RuntimeIndex,
+                    "core:ice melting target is not core:water.");
+                break;
+            case CoreMaterialIds.Steam:
+                Require(Same(properties.TransitionBelowTemperature, 95f),
+                    "core:steam condensation threshold changed.");
+                Require(properties.TransitionBelowMaterialIndex == registry[CoreMaterialIds.Water].RuntimeIndex,
+                    "core:steam condensation target is not core:water.");
+                Require(properties.TransitionAboveMaterialIndex == uint.MaxValue,
+                    "core:steam unexpectedly has an above transition.");
+                break;
+            default:
+                Require(properties.TransitionBelowMaterialIndex == uint.MaxValue,
+                    $"{id} unexpectedly has a below phase transition.");
+                Require(properties.TransitionAboveMaterialIndex == uint.MaxValue,
+                    $"{id} unexpectedly has an above phase transition.");
+                break;
         }
     }
 

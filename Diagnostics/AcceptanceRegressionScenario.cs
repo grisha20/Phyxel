@@ -62,7 +62,11 @@ public enum AcceptanceScenarioMode
     PhaseEnergyContract,
     PhaseV5RoundTrip,
     PhasePerformanceSteady,
-    PhasePerformanceBurst
+    PhasePerformanceBurst,
+    WaterIceSteam,
+    WaterIceSteamMotion,
+    WaterIceSteamPause,
+    WaterIceSteamV5RoundTrip
 }
 
 public static class AcceptanceRegressionScenario
@@ -135,7 +139,11 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.PhaseEnergyContract or
             AcceptanceScenarioMode.PhaseV5RoundTrip or
             AcceptanceScenarioMode.PhasePerformanceSteady or
-            AcceptanceScenarioMode.PhasePerformanceBurst =>
+            AcceptanceScenarioMode.PhasePerformanceBurst or
+            AcceptanceScenarioMode.WaterIceSteam or
+            AcceptanceScenarioMode.WaterIceSteamMotion or
+            AcceptanceScenarioMode.WaterIceSteamPause or
+            AcceptanceScenarioMode.WaterIceSteamV5RoundTrip =>
                 PhaseAcceptanceScenario.CreateCommands(mode, frame, materials),
             _ => []
         };

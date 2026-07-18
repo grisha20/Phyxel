@@ -32,6 +32,10 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             1.5f, 0.75f, 0.18f, "#DAB85C", 20, 0.15f, 0.83f),
         new(CoreMaterialIds.Water, MaterialSimulationKind.Liquid, MaterialFlags.None,
             1, 0.025f, 0.92f, "#2B84CF", 20, 0.60f, 4.18f),
+        new(CoreMaterialIds.Ice, MaterialSimulationKind.Solid, MaterialFlags.None,
+            0.92f, 0.10f, 0, "#A9DDF2", -5, 0.80f, 2.10f),
+        new(CoreMaterialIds.Steam, MaterialSimulationKind.Gas, MaterialFlags.None,
+            0.03f, 0.005f, 1.20f, "#DDEBF0A0", 105, 0.04f, 2.08f),
         new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
             7.8f, 0.35f, 0, "#8E9CA6", 20, 1, 0.50f),
         new(CoreMaterialIds.Stone, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
@@ -133,15 +137,14 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             CreateMaterialJson("test:granular", "granular", null));
         MaterialRegistry registry = new(coreDirectory, externalDirectory);
 
-        Require(!registry.RegistryHasPhaseTransitions,
-            "Registry without transition rules reported phase transitions.");
+        Require(registry.RegistryHasPhaseTransitions,
+            "Bundled water/ice/steam transitions did not enable registry metadata.");
         Require(registry[CoreMaterialIds.Empty].RuntimeIndex == 0,
             "core:empty no longer has runtime index 0.");
         foreach (ExpectedCoreMaterial expected in ExpectedCoreMaterials)
         {
             MaterialDefinition material = registry[expected.Id];
             MaterialProperties properties = material.Properties;
-            Require(material.PhaseTransitions is null, $"{expected.Id} unexpectedly has raw transitions.");
             Require((MaterialSimulationKind)properties.SimulationKind == expected.Kind,
                 $"{expected.Id} kind changed.");
             Require((MaterialFlags)properties.Flags == expected.Flags, $"{expected.Id} flags changed.");
@@ -155,7 +158,7 @@ internal static class PhaseTransitionMaterialRegressionVerifier
                 $"{expected.Id} conductivity changed.");
             Require(Same(properties.HeatCapacity, expected.HeatCapacity),
                 $"{expected.Id} heatCapacity changed.");
-            VerifyNoTransitions(properties, expected.Id);
+            VerifyExpectedCoreTransitions(registry, material);
         }
 
         MaterialProperties legacy = registry["test:granular"].Properties;
@@ -307,8 +310,8 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             "Invalid documents did not produce exactly one error each.");
         Require(registry.Count == ExpectedCoreMaterials.Length + 1,
             "An invalid transition document entered the registry.");
-        Require(!registry.RegistryHasPhaseTransitions,
-            "Invalid transition documents incorrectly enabled registry transitions.");
+        Require(registry.RegistryHasPhaseTransitions,
+            "Invalid external documents disabled bundled core transitions.");
         Require(errors.Contains("thermal.transitions", StringComparison.Ordinal),
             "Nested validation errors do not identify thermal.transitions.");
     }
@@ -356,8 +359,8 @@ internal static class PhaseTransitionMaterialRegressionVerifier
         }
         Require(CountOccurrences(errors, "PHYXEL_MATERIAL_ERROR") == 3,
             "Dependency cascade did not report each removed source exactly once.");
-        Require(!registry.RegistryHasPhaseTransitions,
-            "Removed dependency cascade left registry transition metadata enabled.");
+        Require(registry.RegistryHasPhaseTransitions,
+            "Removed dependency cascade disabled bundled core transitions.");
     }
 
     private static async Task VerifyCoreFailuresAsync(string root, string sourceCoreDirectory)
@@ -442,6 +445,32 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             CoreMaterialIds.Sand, "below", 20, CoreMaterialIds.Water, "granular"));
         ExpectRegistryFailure(coreCycle, CreateDirectory(root, "core-cycle-external"),
             "instantaneous", CoreMaterialIds.Water);
+    }
+
+    private static void VerifyExpectedCoreTransitions(
+        MaterialRegistry registry,
+        MaterialDefinition material)
+    {
+        switch (material.Id)
+        {
+            case CoreMaterialIds.Water:
+                VerifyRule(registry, material.Id, true, 0, CoreMaterialIds.Ice,
+                    true, 100, CoreMaterialIds.Steam);
+                break;
+            case CoreMaterialIds.Ice:
+                VerifyRule(registry, material.Id, false, 0, null,
+                    true, 2, CoreMaterialIds.Water);
+                break;
+            case CoreMaterialIds.Steam:
+                VerifyRule(registry, material.Id, true, 95, CoreMaterialIds.Water,
+                    false, 0, null);
+                break;
+            default:
+                Require(material.PhaseTransitions is null,
+                    $"{material.Id} unexpectedly has raw transitions.");
+                VerifyNoTransitions(material.Properties, material.Id);
+                break;
+        }
     }
 
     private static void VerifyRule(

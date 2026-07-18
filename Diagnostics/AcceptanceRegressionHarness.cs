@@ -80,6 +80,10 @@ public sealed class AcceptanceRegressionHarness
             "phase_v5_roundtrip" => AcceptanceScenarioMode.PhaseV5RoundTrip,
             "phase_performance_steady" => AcceptanceScenarioMode.PhasePerformanceSteady,
             "phase_performance_burst" => AcceptanceScenarioMode.PhasePerformanceBurst,
+            "water_ice_steam" => AcceptanceScenarioMode.WaterIceSteam,
+            "water_ice_steam_motion" => AcceptanceScenarioMode.WaterIceSteamMotion,
+            "water_ice_steam_pause" => AcceptanceScenarioMode.WaterIceSteamPause,
+            "water_ice_steam_v5_roundtrip" => AcceptanceScenarioMode.WaterIceSteamV5RoundTrip,
             _ => AcceptanceScenarioMode.None
         };
         phaseAcceptance = new PhaseAcceptanceController(Mode);
@@ -101,7 +105,11 @@ public sealed class AcceptanceRegressionHarness
         AcceptanceScenarioMode.PhaseSummaryGasMovable or
         AcceptanceScenarioMode.PhaseSummaryLiquidFixed or
         AcceptanceScenarioMode.PhaseReadbackFallback or
-        AcceptanceScenarioMode.PhaseV5RoundTrip;
+        AcceptanceScenarioMode.PhaseV5RoundTrip or
+        AcceptanceScenarioMode.WaterIceSteam or
+        AcceptanceScenarioMode.WaterIceSteamMotion or
+        AcceptanceScenarioMode.WaterIceSteamPause or
+        AcceptanceScenarioMode.WaterIceSteamV5RoundTrip;
 
     public void ConfigureMaterials(MaterialRegistry registry)
     {
