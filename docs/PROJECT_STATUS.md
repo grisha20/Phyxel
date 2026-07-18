@@ -2,15 +2,40 @@
 
 > [!IMPORTANT]
 > ## CURRENT HANDOFF
+
+> **Steam movement correction (2026-07-19):** Sparse low-density gas now
+> switches to generic frame-rate-independent buoyant-particle movement instead
+> of freezing at the gas transfer tolerance. The user's saved 1440x810 scene
+> was reproduced from a copy and steam visibly diffuses upward and along the
+> ceiling. `water_ice_steam_motion` passes at 30/60/100 FPS with mass=64,
+> average Y about 120-122 and horizontal span 29-31; ordinary gas and the full
+> combustion chain remain green. No commit has been created.
+
+> **Latest working-tree fire verification (2026-07-18):** Powder-Toy-style
+> tuning is validated on the actual GPU after fixing flame dilution, over-fast
+> rise, solid-brush contact, transient smoke mass, and slow universal thermal
+> exchange. Full `combustion_chain` at 144 FPS reached
+> `PHYXEL_ACCEPTANCE_SUCCESS`: `coal=38`, `partialWood=147`, `hotWood=140`,
+> `maxWoodTemp=1491.6 C`, `flame=39`, `smoke=90`, average combustion pass
+> `0.0993 ms`. CPU verifiers for world codec, thermal, combustion, and phase
+> systems are green. Manual gameplay visual check is the only remaining step;
+> no commit has been created.
 >
-> - **Last completed commit:** `Add water ice steam phase chain` (текущий коммит; SHA указывается в handoff после создания).
-> - **Last completed functional commit:** `Add water ice steam phase chain` (текущий коммит; SHA указывается в handoff после создания).
+> **Fire update (2026-07-18):** The combustion prototype has been expanded to a Powder-Toy-style selectable `core:fire` gas with lifetime, radius-2 flame ignition, smoke decay, and a user brush. `GridCell` is now 40 bytes and the current save format is v6; v3/v4/v5 remain loadable with zero transient lifetime. Full GPU acceptance reports real flame, smoke, coal, and partially burned wood.
+>
+> **Working-tree fire update (2026-07-18):** The Powder-Toy-style fire extension is implemented in the working tree for review: selectable `core:fire` gas, lifetime/decay, radius-2 flame ignition, data-driven smoke/CO2/flame emissions, wood/coal fuel burn, v6 world cells, and render-only flame halo. v3/v4/v5 remain loadable through migration. Next: optional visual check in the game window, then manually split and commit the changes.
+> **Verification:** compile target and CPU regression verifiers are green; the latest real GPU `combustion_chain` reached `PHYXEL_ACCEPTANCE_SUCCESS` with `coal=38`, `partialWood=147`, `hotWood=140`, `flame=39`, `smoke=90`, and `maxWoodTemp=1491.6 °C`.
+>
+> - **Last completed commit:** `e13d065 Add water ice steam phase chain`.
+> - **Current implementation step:** separate `core:fire` lifetime/spread, emission resolve, v6 migration, and acceptance are implemented in the working tree.
+> - **Next planned engine task:** optional visual tuning after manual gameplay check; then split the implementation into reviewable commits.
+> - **Last completed functional commit:** `e13d065 Add water ice steam phase chain`.
 > - **Last corrective commit:** `7f32357 Fix reusable phase fallback readback`.
 > - **Just completed:** пользовательские `core:ice` и `core:steam`, переходы `water ↔ ice ↔ steam`, меню, реальное движение фаз, Pause/Continue, v5 round-trip и отдельное core GPU acceptance-покрытие.
 > - **Current project state:** базовая универсальная температура и первая полная пользовательская фазовая цепочка работают через общий data-driven runtime без material-specific веток в shader.
-> - **Current task:** проверка и настройка пользовательского поведения воды, льда и пара.
-> - **Next planned engine task:** после подтверждения поведения выбрать следующий универсальный материал либо перейти к отдельному проектированию горения.
-> - **Do not start yet:** огонь, взрывы, коррозию, пакеты и hub одновременно.
+> - **Current task:** финальная проверка Powder-Toy-style fire implementation.
+> - **Next planned engine task:** после ручного visual check — отдельные reviewable commits; smoke/CO₂ reactions остаются следующим расширением.
+> - **Do not start yet:** explosions, corrosion, packs, hub, and a larger reaction system.
 > - **Blocking issues:** известных блокеров нет. Есть отдельный технический долг в OOM-fallback масштаба, описанный ниже.
 > - **Tests last run:** Debug build (0 ошибок/предупреждений), холодная компиляция 15 shader entry points, 31/31 generic phase GPU cases, 6/6 core water/ice/steam cases, performance на 25/35/50/75/85/100% и 14/14 прежних cellular/solid/thermal regression-сценариев.
 > - **Documentation update rule:** после каждой завершённой крупной задачи обновлять этот блок.
@@ -192,3 +217,12 @@
 - есть acceptance, подтверждающий его kind/properties и нужное поведение;
 - ID не конфликтует с core/другими материалами;
 - save/load сохраняет материал через строковую палитру.
+# Актуальный handoff — fire implementation (2026-07-18)
+
+Последний подтверждённый commit в истории проекта: `e13d065 Add water ice steam phase chain`.
+В рабочем дереве реализован следующий этап: отдельный выбираемый `core:fire` как gas/flame-клетка, lifetime/decay, радиус-2 распространение, расход Mass дерева и угля, smoke-продукты, GPU acceptance и сохранение v6 с загрузкой v3/v4/v5.
+
+- **Текущая задача:** финальная проверка и ручное разделение изменений на коммиты.
+- **Следующий шаг:** проверить визуальное поведение fire tool в окне игры и после подтверждения вручную закоммитить изменения.
+- **Сборка:** compile target проходит; полный `dotnet build` на UNC-пути блокируется существующим wildcard Content-copy ограничением среды.
+- **Проверки:** CPU material/world/phase/thermal verifiers зелёные; реальный GPU `combustion_chain` завершён `PHYXEL_ACCEPTANCE_SUCCESS`.

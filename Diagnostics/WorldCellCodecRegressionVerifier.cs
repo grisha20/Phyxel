@@ -52,6 +52,7 @@ internal static class WorldCellCodecRegressionVerifier
             await VerifyV3Async(directory, serializer, materials);
             await VerifyV4MigrationsAsync(directory, serializer, materials);
             await VerifyV5RoundTripAsync(directory, serializer, materials);
+            VerifyV5Migration();
             await VerifyV5RuntimeRemapAsync(directory);
             await VerifyCorruptWorldsAsync(directory);
         }
@@ -68,8 +69,11 @@ internal static class WorldCellCodecRegressionVerifier
             Marshal.SizeOf<LegacyGridCellV3V4>() == WorldCellCodec.LegacyCellStride,
             "LegacyGridCellV3V4 must remain 32 bytes.");
         Require(
+            Marshal.SizeOf<LegacyGridCellV5>() == WorldCellCodec.V5CellStride,
+            "LegacyGridCellV5 must remain 36 bytes.");
+        Require(
             Marshal.SizeOf<GridCell>() == WorldCellCodec.CurrentCellStride,
-            "GridCell must be 36 bytes.");
+            "GridCell must be 40 bytes.");
         string shaderPath = Path.Combine(AppContext.BaseDirectory, "Content", "Shaders", "PhysicsShared.hlsli");
         string shader = File.ReadAllText(shaderPath);
         int layoutStart = shader.IndexOf("struct GridCell", StringComparison.Ordinal);
@@ -80,7 +84,7 @@ internal static class WorldCellCodecRegressionVerifier
         [
             "uint MaterialIndex;", "float Mass;", "float VelocityX;", "float VelocityY;",
             "float Pressure;", "uint IsActive;", "uint BodyId;", "uint RestFrames;",
-            "float Temperature;"
+            "float Temperature;", "float Lifetime;"
         ];
         int previous = -1;
         foreach (string field in fields)
@@ -242,7 +246,8 @@ internal static class WorldCellCodecRegressionVerifier
             IsActive = 1,
             BodyId = 0,
             RestFrames = 11,
-            Temperature = -120.5f
+            Temperature = -120.5f,
+            Lifetime = 0.75f
         };
         GridCell stone = new()
         {
@@ -254,7 +259,8 @@ internal static class WorldCellCodecRegressionVerifier
             IsActive = 1,
             BodyId = 701,
             RestFrames = 19,
-            Temperature = 1450.25f
+            Temperature = 1450.25f,
+            Lifetime = 2.25f
         };
         GridCell dirtyInactive = new()
         {
@@ -281,14 +287,33 @@ internal static class WorldCellCodecRegressionVerifier
         string worldPath = Path.ChangeExtension(scenePath, ".world");
         RawWorldFile raw = await SimulationStateSerializer.ReadWorldAsync(worldPath, CancellationToken.None) ??
             throw new InvalidOperationException("Saved v5 world file is missing.");
-        Require(raw.Version == 5, "CurrentVersion is not 5.");
-        Require(raw.StoredCellStride == 36, "v5 did not store the explicit 36-byte stride.");
+        Require(raw.Version == 6, "CurrentVersion is not 6.");
+        Require(raw.StoredCellStride == 40, "v6 did not store the explicit 40-byte stride.");
         Require(new FileInfo(worldPath).Length == CurrentHeaderSize + raw.CellBytes.Length,
-            "v5 world header is not 24 bytes.");
+            "v6 world header is not 24 bytes.");
 
         LoadedSimulationScene loaded = await serializer.LoadAsync(scenePath, materials) ??
             throw new InvalidOperationException("Saved v5 scene did not reload.");
         AssertCells(loaded.World, sand, stone, default);
+    }
+
+    private static void VerifyV5Migration()
+    {
+        LegacyGridCellV5 legacy = new()
+        {
+            MaterialIndex = 4,
+            Mass = 0.04f,
+            VelocityY = -8,
+            IsActive = 1,
+            RestFrames = 2,
+            Temperature = 650
+        };
+        SimulationWorldSnapshot migrated = WorldCellCodec.Decode(
+            new RawWorldFile(5, 1, 1, WorldCellCodec.V5CellStride, EncodeV5Cells(legacy)));
+        ReadOnlySpan<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(migrated.Grid);
+        Require(cells.Length == 1 && cells[0].MaterialIndex == legacy.MaterialIndex &&
+            SameFloat(cells[0].Temperature, legacy.Temperature) && cells[0].Lifetime == 0,
+            "v5 world did not migrate to v6 GridCell with zero transient lifetime.");
     }
 
     private static async Task VerifyV5RuntimeRemapAsync(string directory)
@@ -360,15 +385,15 @@ internal static class WorldCellCodecRegressionVerifier
 
         GridCell valid = new() { MaterialIndex = 0, Mass = 1, IsActive = 1, Temperature = 20 };
         byte[] currentCell = EncodeCurrentCells(valid);
-        await ExpectInvalidCurrentWorldAsync(directory, "v5-wrong-stride", 35, 36, currentCell);
-        await ExpectInvalidCurrentWorldAsync(directory, "v5-truncated", 36, 36, currentCell[..^1]);
-        await ExpectInvalidCurrentWorldAsync(directory, "v5-trailing", 36, 36, [.. currentCell, 0x7f]);
-        await ExpectInvalidTemperatureAsync(directory, "v5-nan", float.NaN);
-        await ExpectInvalidTemperatureAsync(directory, "v5-infinity", float.PositiveInfinity);
-        await ExpectInvalidTemperatureAsync(directory, "v5-too-cold", -273.16f);
-        await ExpectInvalidTemperatureAsync(directory, "v5-too-hot", 5000.01f);
+        await ExpectInvalidCurrentWorldAsync(directory, "v6-wrong-stride", 39, 40, currentCell);
+        await ExpectInvalidCurrentWorldAsync(directory, "v6-truncated", 40, 40, currentCell[..^1]);
+        await ExpectInvalidCurrentWorldAsync(directory, "v6-trailing", 40, 40, [.. currentCell, 0x7f]);
+        await ExpectInvalidTemperatureAsync(directory, "v6-nan", float.NaN);
+        await ExpectInvalidTemperatureAsync(directory, "v6-infinity", float.PositiveInfinity);
+        await ExpectInvalidTemperatureAsync(directory, "v6-too-cold", -273.16f);
+        await ExpectInvalidTemperatureAsync(directory, "v6-too-hot", 5000.01f);
         WorldCellCodec.Decode(new RawWorldFile(
-            5,
+            6,
             2,
             1,
             WorldCellCodec.CurrentCellStride,
@@ -376,8 +401,8 @@ internal static class WorldCellCodecRegressionVerifier
                 new GridCell { IsActive = 1, Temperature = -273.15f },
                 new GridCell { IsActive = 1, Temperature = 5000f })));
         Require(
-            WorldCellCodec.Decode(new RawWorldFile(5, 1, 1, 36, [])).Grid.Length == 0,
-            "v5 zero-length unallocated world was rejected.");
+            WorldCellCodec.Decode(new RawWorldFile(6, 1, 1, 40, [])).Grid.Length == 0,
+            "v6 zero-length unallocated world was rejected.");
 
         GridCell dirtyInactive = new()
         {
@@ -392,7 +417,7 @@ internal static class WorldCellCodecRegressionVerifier
             Temperature = float.NaN
         };
         SimulationWorldSnapshot normalized = WorldCellCodec.Decode(
-            new RawWorldFile(5, 1, 1, 36, EncodeCurrentCells(dirtyInactive)));
+            new RawWorldFile(6, 1, 1, 40, EncodeCurrentCells(dirtyInactive)));
         AssertCells(normalized, default(GridCell));
     }
 
@@ -505,7 +530,7 @@ internal static class WorldCellCodecRegressionVerifier
     {
         byte[] header = new byte[CurrentHeaderSize];
         BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0, 4), WorldFileMagic);
-        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(4, 4), 5);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(4, 4), 6);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(8, 4), width);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(12, 4), height);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(16, 4), stride);
@@ -538,6 +563,13 @@ internal static class WorldCellCodecRegressionVerifier
     {
         byte[] bytes = new byte[checked(cells.Length * WorldCellCodec.CurrentCellStride)];
         cells.AsSpan().CopyTo(MemoryMarshal.Cast<byte, GridCell>(bytes));
+        return bytes;
+    }
+
+    private static byte[] EncodeV5Cells(params LegacyGridCellV5[] cells)
+    {
+        byte[] bytes = new byte[checked(cells.Length * WorldCellCodec.V5CellStride)];
+        cells.AsSpan().CopyTo(MemoryMarshal.Cast<byte, LegacyGridCellV5>(bytes));
         return bytes;
     }
 
@@ -607,6 +639,7 @@ internal static class WorldCellCodecRegressionVerifier
             Require(left.BodyId == right.BodyId, $"Cell {index} BodyId changed.");
             Require(left.RestFrames == right.RestFrames, $"Cell {index} RestFrames changed.");
             Require(SameFloat(left.Temperature, right.Temperature), $"Cell {index} Temperature changed.");
+            Require(SameFloat(left.Lifetime, right.Lifetime), $"Cell {index} Lifetime changed.");
         }
     }
 

@@ -16,7 +16,8 @@ internal sealed record RawWorldFile(
 internal static class WorldCellCodec
 {
     public const int LegacyCellStride = 32;
-    public const int CurrentCellStride = 36;
+    public const int V5CellStride = 36;
+    public const int CurrentCellStride = 40;
 
     public static void ValidateLayoutContracts()
     {
@@ -25,6 +26,12 @@ internal static class WorldCellCodec
         {
             throw new InvalidOperationException(
                 $"LegacyGridCellV3V4 layout changed: expected {LegacyCellStride} bytes, got {legacySize}.");
+        }
+        int v5Size = Marshal.SizeOf<LegacyGridCellV5>();
+        if (v5Size != V5CellStride)
+        {
+            throw new InvalidOperationException(
+                $"LegacyGridCellV5 layout changed: expected {V5CellStride} bytes, got {v5Size}.");
         }
 
         int currentSize = Marshal.SizeOf<GridCell>();
@@ -50,7 +57,8 @@ internal static class WorldCellCodec
         int expectedStride = version switch
         {
             3 or 4 => LegacyCellStride,
-            5 => CurrentCellStride,
+            5 => V5CellStride,
+            6 => CurrentCellStride,
             _ => throw new InvalidDataException($"Unsupported world version {version}.")
         };
         if (storedCellStride != expectedStride)
@@ -105,7 +113,8 @@ internal static class WorldCellCodec
         return world.Version switch
         {
             3 or 4 => DecodeLegacy(world),
-            5 => DecodeCurrent(world),
+            5 => DecodeV5(world),
+            6 => DecodeCurrent(world),
             _ => throw new InvalidDataException($"Unsupported world version {world.Version}.")
         };
     }
@@ -155,6 +164,50 @@ internal static class WorldCellCodec
                 throw new InvalidDataException(
                     $"World cell {index} contains invalid temperature {temperature}.");
             }
+            float lifetime = cells[index].Lifetime;
+            if (!float.IsFinite(lifetime) || lifetime < 0 || lifetime > MaterialRegistry.MaximumLifetime)
+            {
+                throw new InvalidDataException(
+                    $"World cell {index} contains invalid lifetime {lifetime}.");
+            }
+        }
+        return new SimulationWorldSnapshot(world.Width, world.Height, currentBytes);
+    }
+
+    private static SimulationWorldSnapshot DecodeV5(RawWorldFile world)
+    {
+        ReadOnlySpan<LegacyGridCellV5> oldCells =
+            MemoryMarshal.Cast<byte, LegacyGridCellV5>(world.CellBytes);
+        byte[] currentBytes = new byte[checked(oldCells.Length * CurrentCellStride)];
+        Span<GridCell> currentCells = MemoryMarshal.Cast<byte, GridCell>(currentBytes);
+        for (int index = 0; index < oldCells.Length; index++)
+        {
+            LegacyGridCellV5 source = oldCells[index];
+            if (source.IsActive == 0)
+            {
+                currentCells[index] = default;
+                continue;
+            }
+            if (!float.IsFinite(source.Temperature) ||
+                source.Temperature < MaterialRegistry.MinimumInitialTemperature ||
+                source.Temperature > MaterialRegistry.MaximumInitialTemperature)
+            {
+                throw new InvalidDataException(
+                    $"World cell {index} contains invalid temperature {source.Temperature}.");
+            }
+            currentCells[index] = new GridCell
+            {
+                MaterialIndex = source.MaterialIndex,
+                Mass = source.Mass,
+                VelocityX = source.VelocityX,
+                VelocityY = source.VelocityY,
+                Pressure = source.Pressure,
+                IsActive = source.IsActive,
+                BodyId = source.BodyId,
+                RestFrames = source.RestFrames,
+                Temperature = source.Temperature,
+                Lifetime = 0
+            };
         }
         return new SimulationWorldSnapshot(world.Width, world.Height, currentBytes);
     }

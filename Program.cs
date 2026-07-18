@@ -18,6 +18,11 @@ public static class Program
             Environment.ExitCode = ThermalMaterialPropertiesRegressionVerifier.Run();
             return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_COMBUSTION_MATERIALS") == "1")
+        {
+            Environment.ExitCode = CombustionMaterialRegressionVerifier.Run();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_THERMAL_DIFFUSION") == "1")
         {
             Environment.ExitCode = ThermalDiffusionRegressionVerifier.Run();

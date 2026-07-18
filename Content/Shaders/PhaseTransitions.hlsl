@@ -108,6 +108,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     cell.RestFrames = target.SimulationKind == SimulationKindSolid && !IsMovableSolidMaterial(target)
         ? 2u
         : 0u;
+    cell.Lifetime = InitialMaterialLifetime(target, index);
     Grid[index] = cell;
     InterlockedOr(PhaseSummary[0], BuildPhaseSummary(source, target));
 }

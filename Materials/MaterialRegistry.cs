@@ -21,6 +21,10 @@ public sealed class MaterialRegistry
     public const float MaximumThermalConductivity = 1f;
     public const float MinimumHeatCapacity = 0.01f;
     public const float MaximumHeatCapacity = 100f;
+    public const float MaximumCombustionBurnRate = 100f;
+    public const float MaximumCombustionHeatPerMass = 1_000_000f;
+    public const float MaximumFlameSpreadRate = 100f;
+    public const float MaximumLifetime = 3600f;
 
     private readonly ReadOnlyCollection<MaterialDefinition> materials;
     private readonly ReadOnlyCollection<MaterialDefinition> selectableMaterials;
@@ -40,6 +44,9 @@ public sealed class MaterialRegistry
             .ToList();
         ValidateRequiredCoreMaterials(coreDefinitions);
         ValidateCorePhaseTransitions(coreDefinitions);
+        ValidateCoreCombustion(coreDefinitions);
+        ValidateCoreEmissions(coreDefinitions);
+        ValidateCoreLifecycles(coreDefinitions);
 
         HashSet<string> reservedIds = coreDefinitions
             .Select(material => material.Id)
@@ -72,7 +79,7 @@ public sealed class MaterialRegistry
             MaterialDefinition definition = definitions[index];
             definitions[index] = definition with
             {
-                Properties = ResolvePhaseTransitionProperties(definition, indexedById)
+                Properties = ResolveProperties(definition, indexedById)
             };
         }
 
@@ -85,6 +92,8 @@ public sealed class MaterialRegistry
             .AsReadOnly();
         byId = definitions.ToDictionary(material => material.Id, StringComparer.Ordinal);
         RegistryHasPhaseTransitions = definitions.Any(material => material.PhaseTransitions is not null);
+        RegistryHasCombustibleMaterials = definitions.Any(material => material.Combustion is not null);
+        RegistryHasTransientMaterials = definitions.Any(material => material.Lifecycle is not null);
         PhaseTransitionGraphFlags = definitions
             .Where(material => material.PhaseTransitions is not null)
             .Aggregate(
@@ -100,6 +109,8 @@ public sealed class MaterialRegistry
     public IReadOnlyList<MaterialDefinition> SelectableMaterials => selectableMaterials;
     public int Count => materials.Count;
     public bool RegistryHasPhaseTransitions { get; }
+    public bool RegistryHasCombustibleMaterials { get; }
+    public bool RegistryHasTransientMaterials { get; }
     public PhaseTransitionSummaryFlags PhaseTransitionGraphFlags { get; }
 
     public MaterialDefinition this[ushort runtimeIndex] => materials[runtimeIndex];
@@ -131,6 +142,16 @@ public sealed class MaterialRegistry
             table[material.RuntimeIndex] = material.Properties;
         }
 
+        return table;
+    }
+
+    public MaterialEmissionProperties[] CreateEmissionGpuTable()
+    {
+        MaterialEmissionProperties[] table = new MaterialEmissionProperties[materials.Count];
+        foreach (MaterialDefinition material in materials)
+        {
+            table[material.RuntimeIndex] = ResolveEmissionProperties(material, byId);
+        }
         return table;
     }
 
@@ -196,6 +217,51 @@ public sealed class MaterialRegistry
         }
     }
 
+    private static void ValidateCoreCombustion(IReadOnlyCollection<MaterialDefinition> coreDefinitions)
+    {
+        Dictionary<string, MaterialDefinition> coreById = coreDefinitions
+            .ToDictionary(material => material.Id, StringComparer.Ordinal);
+        foreach (MaterialDefinition source in coreDefinitions.OrderBy(material => material.Id, StringComparer.Ordinal))
+        {
+            string? error = FindCombustionReferenceError(source, coreById, requireBundledTarget: true);
+            if (error is not null)
+            {
+                throw new InvalidDataException(
+                    $"Invalid core combustion in '{source.Id}' from '{source.SourcePath}': {error}");
+            }
+        }
+    }
+
+    private static void ValidateCoreEmissions(IReadOnlyCollection<MaterialDefinition> coreDefinitions)
+    {
+        Dictionary<string, MaterialDefinition> coreById = coreDefinitions
+            .ToDictionary(material => material.Id, StringComparer.Ordinal);
+        foreach (MaterialDefinition source in coreDefinitions.OrderBy(material => material.Id, StringComparer.Ordinal))
+        {
+            string? error = FindEmissionReferenceError(source, coreById, requireBundledTarget: true);
+            if (error is not null)
+            {
+                throw new InvalidDataException(
+                    $"Invalid core emissions in '{source.Id}' from '{source.SourcePath}': {error}");
+            }
+        }
+    }
+
+    private static void ValidateCoreLifecycles(IReadOnlyCollection<MaterialDefinition> coreDefinitions)
+    {
+        Dictionary<string, MaterialDefinition> coreById = coreDefinitions
+            .ToDictionary(material => material.Id, StringComparer.Ordinal);
+        foreach (MaterialDefinition source in coreDefinitions.OrderBy(material => material.Id, StringComparer.Ordinal))
+        {
+            string? error = FindLifecycleReferenceError(source, coreById, requireBundledTarget: true);
+            if (error is not null)
+            {
+                throw new InvalidDataException(
+                    $"Invalid core lifecycle in '{source.Id}' from '{source.SourcePath}': {error}");
+            }
+        }
+    }
+
     private static IReadOnlyList<MaterialDefinition> FilterExternalPhaseTransitions(
         IReadOnlyCollection<MaterialDefinition> coreDefinitions,
         IReadOnlyCollection<MaterialDefinition> externalDefinitions)
@@ -211,7 +277,10 @@ public sealed class MaterialRegistry
             List<(MaterialDefinition Source, string Error)> invalidReferences = valid
                 .Select(source => (
                     Source: source,
-                    Error: FindPhaseTransitionReferenceError(source, available, requireBundledTarget: false)))
+                    Error: FindPhaseTransitionReferenceError(source, available, requireBundledTarget: false) ??
+                        FindCombustionReferenceError(source, available, requireBundledTarget: false) ??
+                        FindEmissionReferenceError(source, available, requireBundledTarget: false) ??
+                        FindLifecycleReferenceError(source, available, requireBundledTarget: false)))
                 .Where(result => result.Error is not null)
                 .Select(result => (result.Source, result.Error!))
                 .ToList();
@@ -221,7 +290,7 @@ public sealed class MaterialRegistry
                 {
                     MaterialFileLoader.LogError(
                         source.SourcePath,
-                        $"Material '{source.Id}' has an invalid phase transition: {error}");
+                        $"Material '{source.Id}' has an invalid material rule: {error}");
                 }
                 HashSet<string> removedIds = invalidReferences
                     .Select(result => result.Source.Id)
@@ -292,6 +361,124 @@ public sealed class MaterialRegistry
         return null;
     }
 
+    private static string? FindCombustionReferenceError(
+        MaterialDefinition source,
+        IReadOnlyDictionary<string, MaterialDefinition> available,
+        bool requireBundledTarget)
+    {
+        if (source.Combustion is not { } combustion)
+        {
+            return null;
+        }
+
+        if (!available.TryGetValue(combustion.BurnedIntoId, out MaterialDefinition? target))
+        {
+            return $"burnedInto target '{combustion.BurnedIntoId}' does not exist in the valid material set.";
+        }
+        if (requireBundledTarget && !target.IsBundled)
+        {
+            return $"burnedInto target '{combustion.BurnedIntoId}' is not a bundled core material.";
+        }
+        if (target.Id == source.Id)
+        {
+            return $"burnedInto target cannot be the source material itself ('{source.Id}').";
+        }
+        if (target.Id == CoreMaterialIds.Empty)
+        {
+            return null;
+        }
+
+        MaterialSimulationKind targetKind = (MaterialSimulationKind)target.Properties.SimulationKind;
+        if (targetKind != MaterialSimulationKind.Solid)
+        {
+            return $"burnedInto target '{combustion.BurnedIntoId}' must be fixed solid in combustion v1.";
+        }
+        if ((target.Properties.Flags & (uint)MaterialFlags.MovableSolid) != 0)
+        {
+            return $"burnedInto target '{combustion.BurnedIntoId}' cannot be movable solid in combustion v1.";
+        }
+        if (target.PhaseTransitions is not null)
+        {
+            return $"burnedInto target '{combustion.BurnedIntoId}' cannot also have thermal.transitions in combustion v1.";
+        }
+        if (target.Properties.Density <= 0 || target.Properties.Density >= source.Properties.Density)
+        {
+            return $"burnedInto target density {target.Properties.Density} must be greater than 0 and less than source density {source.Properties.Density}.";
+        }
+        return null;
+    }
+
+    private static string? FindEmissionReferenceError(
+        MaterialDefinition source,
+        IReadOnlyDictionary<string, MaterialDefinition> available,
+        bool requireBundledTarget)
+    {
+        if (source.Emissions is not { } emissions)
+        {
+            return null;
+        }
+        List<(string Field, string TargetId)> targets =
+        [
+            ("smokeInto", emissions.SmokeIntoId),
+            ("gasInto", emissions.GasIntoId)
+        ];
+        if (emissions.FlameIntoId is { } flameTarget)
+        {
+            targets.Add(("flameInto", flameTarget));
+        }
+        foreach ((string field, string targetId) in targets)
+        {
+            if (!available.TryGetValue(targetId, out MaterialDefinition? target))
+            {
+                return $"emissions.{field} target '{targetId}' does not exist in the valid material set.";
+            }
+            if (requireBundledTarget && !target.IsBundled)
+            {
+                return $"emissions.{field} target '{targetId}' is not a bundled core material.";
+            }
+            MaterialSimulationKind targetKind = (MaterialSimulationKind)target.Properties.SimulationKind;
+            if (targetKind != MaterialSimulationKind.Gas)
+            {
+                return $"emissions.{field} target '{targetId}' must be gas.";
+            }
+            if (target.Properties.Density <= 0)
+            {
+                return $"emissions.{field} target '{targetId}' must have density greater than 0.";
+            }
+            if (field == "flameInto" &&
+                (target.Properties.Flags & (uint)MaterialFlags.Flame) == 0)
+            {
+                return $"emissions.flameInto target '{targetId}' must have flag 'flame'.";
+            }
+        }
+        return null;
+    }
+
+    private static string? FindLifecycleReferenceError(
+        MaterialDefinition source,
+        IReadOnlyDictionary<string, MaterialDefinition> available,
+        bool requireBundledTarget)
+    {
+        if (source.Lifecycle is not { } lifecycle)
+        {
+            return null;
+        }
+        if (!available.TryGetValue(lifecycle.DecayIntoId, out MaterialDefinition? target))
+        {
+            return $"lifecycle.decayInto target '{lifecycle.DecayIntoId}' does not exist in the valid material set.";
+        }
+        if (requireBundledTarget && !target.IsBundled)
+        {
+            return $"lifecycle.decayInto target '{lifecycle.DecayIntoId}' is not a bundled core material.";
+        }
+        MaterialSimulationKind targetKind = (MaterialSimulationKind)target.Properties.SimulationKind;
+        if (target.Id != CoreMaterialIds.Empty && targetKind != MaterialSimulationKind.Gas)
+        {
+            return $"lifecycle.decayInto target '{lifecycle.DecayIntoId}' must be gas or core:empty.";
+        }
+        return null;
+    }
+
     private static IEnumerable<(string Direction, MaterialTransitionRule Rule)> EnumerateTransitionRules(
         MaterialDefinition source)
     {
@@ -315,7 +502,7 @@ public sealed class MaterialRegistry
         }
     }
 
-    private static MaterialProperties ResolvePhaseTransitionProperties(
+    private static MaterialProperties ResolveProperties(
         MaterialDefinition source,
         IReadOnlyDictionary<string, MaterialDefinition> indexedById)
     {
@@ -328,7 +515,45 @@ public sealed class MaterialRegistry
         properties.TransitionAboveMaterialIndex = source.PhaseTransitions?.Above is { } above
             ? indexedById[above.IntoId].RuntimeIndex
             : uint.MaxValue;
+        properties.IgnitionTemperature = source.Combustion?.IgnitionTemperature ?? 0;
+        properties.BurnRate = source.Combustion?.BurnRate ?? 0;
+        properties.HeatPerMass = source.Combustion?.HeatPerMass ?? 0;
+        properties.BurnedIntoMaterialIndex = source.Combustion is { } combustion
+            ? indexedById[combustion.BurnedIntoId].RuntimeIndex
+            : uint.MaxValue;
+        properties.FlameSpreadRate = source.Combustion?.FlameSpreadRate ?? 0;
+        properties.MinimumLifetime = source.Lifecycle?.MinimumLifetime ?? 0;
+        properties.MaximumLifetime = source.Lifecycle?.MaximumLifetime ?? 0;
+        properties.DecayIntoMaterialIndex = source.Lifecycle is { } lifecycle
+            ? indexedById[lifecycle.DecayIntoId].RuntimeIndex
+            : uint.MaxValue;
         return properties;
+    }
+
+    private static MaterialEmissionProperties ResolveEmissionProperties(
+        MaterialDefinition source,
+        IReadOnlyDictionary<string, MaterialDefinition> indexedById)
+    {
+        if (source.Emissions is not { } emissions)
+        {
+            return new MaterialEmissionProperties
+            {
+                SmokeIntoMaterialIndex = uint.MaxValue,
+                GasIntoMaterialIndex = uint.MaxValue,
+                FlameIntoMaterialIndex = uint.MaxValue
+            };
+        }
+        return new MaterialEmissionProperties
+        {
+            SmokeIntoMaterialIndex = indexedById[emissions.SmokeIntoId].RuntimeIndex,
+            SmokeRate = emissions.SmokeRate,
+            GasIntoMaterialIndex = indexedById[emissions.GasIntoId].RuntimeIndex,
+            GasRate = emissions.GasRate,
+            FlameIntoMaterialIndex = emissions.FlameIntoId is { } flameId
+                ? indexedById[flameId].RuntimeIndex
+                : uint.MaxValue,
+            FlameRate = emissions.FlameRate
+        };
     }
 
     internal static MaterialProperties CreateProperties(
@@ -357,7 +582,9 @@ public sealed class MaterialRegistry
             ThermalConductivity = thermalConductivity,
             HeatCapacity = heatCapacity,
             TransitionBelowMaterialIndex = uint.MaxValue,
-            TransitionAboveMaterialIndex = uint.MaxValue
+            TransitionAboveMaterialIndex = uint.MaxValue,
+            BurnedIntoMaterialIndex = uint.MaxValue,
+            DecayIntoMaterialIndex = uint.MaxValue
         };
     }
 }

@@ -62,8 +62,23 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
     if (IsCellularMaterial(material.SimulationKind) && existing.IsActive != 0 &&
-        Materials[existing.MaterialIndex].SimulationKind == 2)
+        Materials[existing.MaterialIndex].SimulationKind == SimulationKindSolid)
     {
+        if ((material.Flags & MaterialFlagFlame) != 0)
+        {
+            MaterialProperties existingMaterial = Materials[existing.MaterialIndex];
+            if (existingMaterial.BurnedIntoMaterialIndex != 0xffffffffu &&
+                existingMaterial.FlameSpreadRate > 0)
+            {
+                // The FIRE brush ignites a combustible solid in place. Empty
+                // brush pixels still become physical flame particles, while
+                // the solid itself is never replaced by a circular gas hole.
+                existing.Temperature = max(
+                    existing.Temperature,
+                    existingMaterial.IgnitionTemperature + 1.0);
+                Grid[index] = existing;
+            }
+        }
         return;
     }
 
@@ -73,5 +88,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     cell.IsActive = 1;
     cell.BodyId = IsMovableSolidMaterial(material) ? command.Reserved : 0;
     cell.Temperature = material.InitialTemperature;
+    cell.Lifetime = InitialMaterialLifetime(material, index ^ command.Seed ^ FrameIndex);
     Grid[index] = cell;
 }

@@ -122,6 +122,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         MaterialProperties[] materialTable = materialRegistry.CreateGpuTable();
         GpuUploadBuffer<MaterialProperties> materials = new(Device, materialTable.Length);
         materials.Upload(Device.ImmediateContext, materialTable);
+        MaterialEmissionProperties[] emissionTable = materialRegistry.CreateEmissionGpuTable();
+        GpuUploadBuffer<MaterialEmissionProperties> emissions = new(Device, emissionTable.Length);
+        emissions.Upload(Device.ImmediateContext, emissionTable);
         Buffer constants = new(Device, new BufferDescription
         {
             SizeInBytes = Marshal.SizeOf<SimulationFrameConstants>(),
@@ -138,6 +141,24 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         for (int index = 0; index < phaseSummaryReadbackSlots.Length; index++)
         {
             phaseSummaryReadbackSlots[index] = new GpuPhaseSummaryReadbackSlot
+            {
+                Staging = CreateReadStagingBuffer(sizeof(uint)),
+                Query = new Query(Device, new QueryDescription
+                {
+                    Type = QueryType.Event,
+                    Flags = QueryFlags.None
+                })
+            };
+        }
+        Buffer combustionConstants = CreateConstantBuffer<CombustionConstants>();
+        GpuStructuredBuffer<uint> combustionSummary = new(Device, 1);
+        GpuStructuredBuffer<uint> emissionClaims = new(Device, cellCount);
+        GpuStructuredBuffer<EmissionRequest> emissionRequests = new(Device, checked(cellCount * 3));
+        Buffer emissionConstants = CreateConstantBuffer<EmissionConstants>();
+        GpuPhaseSummaryReadbackSlot[] combustionSummaryReadbackSlots = new GpuPhaseSummaryReadbackSlot[3];
+        for (int index = 0; index < combustionSummaryReadbackSlots.Length; index++)
+        {
+            combustionSummaryReadbackSlots[index] = new GpuPhaseSummaryReadbackSlot
             {
                 Staging = CreateReadStagingBuffer(sizeof(uint)),
                 Query = new Query(Device, new QueryDescription
@@ -181,6 +202,21 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Flags = QueryFlags.None
         });
         Query phaseTimestampEndQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Timestamp,
+            Flags = QueryFlags.None
+        });
+        Query combustionTimestampDisjointQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.TimestampDisjoint,
+            Flags = QueryFlags.None
+        });
+        Query combustionTimestampStartQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Timestamp,
+            Flags = QueryFlags.None
+        });
+        Query combustionTimestampEndQuery = new(Device, new QueryDescription
         {
             Type = QueryType.Timestamp,
             Flags = QueryFlags.None
@@ -259,11 +295,18 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Statistics = statistics,
             Commands = commands,
             Materials = materials,
+            Emissions = emissions,
             FrameConstants = constants,
             ThermalConstants = thermalConstants,
             PhaseConstants = phaseConstants,
             PhaseSummary = phaseSummary,
             PhaseSummaryReadbackSlots = phaseSummaryReadbackSlots,
+            CombustionConstants = combustionConstants,
+            CombustionSummary = combustionSummary,
+            EmissionClaims = emissionClaims,
+            EmissionRequests = emissionRequests,
+            EmissionConstants = emissionConstants,
+            CombustionSummaryReadbackSlots = combustionSummaryReadbackSlots,
             TemperatureProbeConstants = temperatureProbeConstants,
             TemperatureProbeResult = temperatureProbeResult,
             TemperatureProbeStaging = temperatureProbeStaging,
@@ -274,6 +317,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             PhaseTimestampDisjointQuery = phaseTimestampDisjointQuery,
             PhaseTimestampStartQuery = phaseTimestampStartQuery,
             PhaseTimestampEndQuery = phaseTimestampEndQuery,
+            CombustionTimestampDisjointQuery = combustionTimestampDisjointQuery,
+            CombustionTimestampStartQuery = combustionTimestampStartQuery,
+            CombustionTimestampEndQuery = combustionTimestampEndQuery,
             ProbeTimestampDisjointQuery = probeTimestampDisjointQuery,
             ProbeTimestampStartQuery = probeTimestampStartQuery,
             ProbeTimestampEndQuery = probeTimestampEndQuery,
@@ -298,6 +344,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             CompositionShader = allocateSimulation ? CompileShader("RenderComposition.hlsl") : null,
             ThermalDiffusionShader = allocateSimulation ? CompileShader("ThermalDiffusion.hlsl") : null,
             PhaseTransitionShader = allocateSimulation ? CompileShader("PhaseTransitions.hlsl") : null,
+            CombustionShader = allocateSimulation ? CompileShader("Combustion.hlsl") : null,
+            EmissionResolveShader = allocateSimulation ? CompileShader("EmissionResolve.hlsl") : null,
+            TransientLifecycleShader = allocateSimulation ? CompileShader("TransientLifecycle.hlsl") : null,
             TemperatureProbeShader = allocateSimulation ? CompileShader("TemperatureProbe.hlsl") : null
         };
     }

@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "core:coal",
+  "name": { "ru": "Coal", "en": "Coal" },
+  "kind": "solid",
+  "color": "#292929",
+  "physics": { "density": 0.2, "friction": 0.8, "flowRate": 0.0 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.78, "heatCapacity": 1.0 },
+  "combustion": {
+    "ignitionTemperature": 420.0,
+    "burnRate": 0.006,
+    "heatPerMass": 2400.0,
+    "burnedInto": "core:empty",
+    "spreadRate": 0.35
+  },
+  "emissions": {
+    "smokeInto": "core:smoke",
+    "smokeRate": 0.04,
+    "gasInto": "core:co2",
+    "gasRate": 0.04,
+    "flameInto": "core:fire",
+    "flameRate": 0.8
+  },
+  "ui": { "order": 90, "hidden": false }
+}

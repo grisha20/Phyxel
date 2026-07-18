@@ -44,6 +44,16 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             0.08f, 0.005f, 1.2f, "#9BC4D29B", 20, 0.03f, 1),
         new(CoreMaterialIds.Fixture, MaterialSimulationKind.Solid, MaterialFlags.None,
             100, 0.9f, 0, "#525B63", 20, 0.25f, 0.84f),
+        new(CoreMaterialIds.Wood, MaterialSimulationKind.Solid, MaterialFlags.None,
+            0.8f, 0.65f, 0, "#8B5A2B", 20, 0.65f, 1.0f),
+        new(CoreMaterialIds.Coal, MaterialSimulationKind.Solid, MaterialFlags.None,
+            0.2f, 0.8f, 0, "#292929", 20, 0.78f, 1.0f),
+        new(CoreMaterialIds.Smoke, MaterialSimulationKind.Gas, MaterialFlags.None,
+            0.04f, 0, 1, "#777777B0", 120, 0.08f, 1),
+        new(CoreMaterialIds.Co2, MaterialSimulationKind.Gas, MaterialFlags.None,
+            0.06f, 0, 0.8f, "#B5B5B580", 120, 0.06f, 0.85f),
+        new(CoreMaterialIds.Fire, MaterialSimulationKind.Gas, MaterialFlags.Flame,
+            1.0f, 0, 1.4f, "#FF3A08E8", 650, 0.35f, 1.0f),
         new(CoreMaterialIds.Eraser, MaterialSimulationKind.Tool, MaterialFlags.None,
             0, 0, 0, "#DE5858", 20, 0, 1)
     ];
@@ -88,8 +98,8 @@ internal static class PhaseTransitionMaterialRegressionVerifier
 
     private static void VerifyLayouts()
     {
-        Require(Marshal.SizeOf<MaterialProperties>() == 64,
-            "MaterialProperties must be 64 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == 96,
+            "MaterialProperties must be 96 bytes.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.TransitionBelowTemperature)).ToInt32() == 48,
             "TransitionBelowTemperature offset must be 48.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.TransitionBelowMaterialIndex)).ToInt32() == 52,
@@ -98,7 +108,7 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             "TransitionAboveTemperature offset must be 56.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.TransitionAboveMaterialIndex)).ToInt32() == 60,
             "TransitionAboveMaterialIndex offset must be 60.");
-        Require(Marshal.SizeOf<GridCell>() == 36, "GridCell must remain 36 bytes.");
+        Require(Marshal.SizeOf<GridCell>() == 40, "GridCell must be 40 bytes.");
 
         string shaderPath = Path.Combine(
             AppContext.BaseDirectory,
@@ -117,7 +127,10 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             "float FlowRate", "float ColorR", "float ColorG", "float ColorB", "float ColorA",
             "float InitialTemperature", "float ThermalConductivity", "float HeatCapacity",
             "float TransitionBelowTemperature", "uint TransitionBelowMaterialIndex",
-            "float TransitionAboveTemperature", "uint TransitionAboveMaterialIndex"
+            "float TransitionAboveTemperature", "uint TransitionAboveMaterialIndex",
+            "float IgnitionTemperature", "float BurnRate", "float HeatPerMass",
+            "uint BurnedIntoMaterialIndex", "float FlameSpreadRate",
+            "float MinimumLifetime", "float MaximumLifetime", "uint DecayIntoMaterialIndex"
         ];
         int previous = -1;
         foreach (string field in fields)
@@ -667,7 +680,15 @@ internal static class PhaseTransitionMaterialRegressionVerifier
         Same(left.TransitionBelowTemperature, right.TransitionBelowTemperature) &&
         left.TransitionBelowMaterialIndex == right.TransitionBelowMaterialIndex &&
         Same(left.TransitionAboveTemperature, right.TransitionAboveTemperature) &&
-        left.TransitionAboveMaterialIndex == right.TransitionAboveMaterialIndex;
+        left.TransitionAboveMaterialIndex == right.TransitionAboveMaterialIndex &&
+        Same(left.IgnitionTemperature, right.IgnitionTemperature) &&
+        Same(left.BurnRate, right.BurnRate) &&
+        Same(left.HeatPerMass, right.HeatPerMass) &&
+        left.BurnedIntoMaterialIndex == right.BurnedIntoMaterialIndex &&
+        Same(left.FlameSpreadRate, right.FlameSpreadRate) &&
+        Same(left.MinimumLifetime, right.MinimumLifetime) &&
+        Same(left.MaximumLifetime, right.MaximumLifetime) &&
+        left.DecayIntoMaterialIndex == right.DecayIntoMaterialIndex;
 
     private static Color ParseColor(string value)
     {

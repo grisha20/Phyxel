@@ -84,6 +84,7 @@ public sealed class AcceptanceRegressionHarness
             "water_ice_steam_motion" => AcceptanceScenarioMode.WaterIceSteamMotion,
             "water_ice_steam_pause" => AcceptanceScenarioMode.WaterIceSteamPause,
             "water_ice_steam_v5_roundtrip" => AcceptanceScenarioMode.WaterIceSteamV5RoundTrip,
+            "combustion" or "combustion_chain" => AcceptanceScenarioMode.CombustionChain,
             _ => AcceptanceScenarioMode.None
         };
         phaseAcceptance = new PhaseAcceptanceController(Mode);
@@ -154,9 +155,12 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.TemperatureBrush => 3,
                 AcceptanceScenarioMode.TemperatureTool => 140,
                 AcceptanceScenarioMode.ThermalGas => 120,
-                AcceptanceScenarioMode.ThermalContact => 500,
+                // Four contact checkpoints are at 20/40/60/80 thermal ticks;
+                // at 144 FPS the final capture must be after tick 80.
+                AcceptanceScenarioMode.ThermalContact => 700,
                 AcceptanceScenarioMode.ThermalCapacity => 1300,
                 AcceptanceScenarioMode.TemperatureProbeGpu => 240,
+                AcceptanceScenarioMode.CombustionChain => 1800,
                 AcceptanceScenarioMode.PhaseDispatchSmoke => 240,
                 AcceptanceScenarioMode.ThermalUniform or
                 AcceptanceScenarioMode.ThermalConductivityCompare or
@@ -411,6 +415,9 @@ public sealed class AcceptanceRegressionHarness
         TemperatureProbeResult? temperatureProbe,
         ThermalGpuTimingStatistics thermalGpuTiming,
         ThermalGpuTimingStatistics phaseGpuTiming,
+        ThermalGpuTimingStatistics combustionGpuTiming,
+        ulong combustionDispatches,
+        ulong combustionSummaryReadbacks,
         ThermalGpuTimingStatistics probeGpuTiming,
         ulong phaseDispatches,
         ulong phaseSummaryReadbacks,
@@ -432,6 +439,9 @@ public sealed class AcceptanceRegressionHarness
             temperatureProbeTrace,
             thermalGpuTiming,
             phaseGpuTiming,
+            combustionGpuTiming,
+            combustionDispatches,
+            combustionSummaryReadbacks,
             phaseDispatches,
             phaseSummaryReadbacks,
             phaseFallbackWakeUps,
@@ -452,6 +462,10 @@ public sealed class AcceptanceRegressionHarness
             $"phaseDispatches={phaseDispatches} phaseMaxPerFrame={maximumPhaseDispatchesPerFrame} " +
             $"phaseSummaryReadbacks={phaseSummaryReadbacks} " +
             $"phaseFallbackWakeUps={phaseFallbackWakeUps} " +
+            $"combustionGpuMs={combustionGpuTiming.AverageMilliseconds:0.0000}/" +
+            $"{combustionGpuTiming.MinimumMilliseconds:0.0000}/" +
+            $"{combustionGpuTiming.MaximumMilliseconds:0.0000} combustionSamples={combustionGpuTiming.Samples} " +
+            $"combustionDispatches={combustionDispatches} combustionSummaryReadbacks={combustionSummaryReadbacks} " +
             $"probeGpuMs={probeGpuTiming.AverageMilliseconds:0.0000}/" +
             $"{probeGpuTiming.MinimumMilliseconds:0.0000}/" +
             $"{probeGpuTiming.MaximumMilliseconds:0.0000} probeSamples={probeGpuTiming.Samples}";

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Phyxel")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6ad6b3acaeb3208564ec27752fc3b04bcb51aae6")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
 [assembly: System.Reflection.AssemblyProductAttribute("Phyxel")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Phyxel")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

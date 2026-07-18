@@ -29,8 +29,8 @@ internal static class PhaseTransitionRuntimeRegressionVerifier
 
     private static void VerifyLayoutsAndDeclarations()
     {
-        Require(Marshal.SizeOf<GridCell>() == 36, "GridCell must remain 36 bytes.");
-        Require(Marshal.SizeOf<MaterialProperties>() == 64, "MaterialProperties must remain 64 bytes.");
+        Require(Marshal.SizeOf<GridCell>() == 40, "GridCell must be 40 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == 96, "MaterialProperties must be 96 bytes.");
         Require(Marshal.SizeOf<PhaseTransitionConstants>() == 16,
             "PhaseTransitionConstants must be 16 bytes.");
         Require((uint)PhaseTransitionSummaryFlags.PhaseOccurred == 1u << 0 &&

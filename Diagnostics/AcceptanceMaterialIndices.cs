@@ -16,6 +16,9 @@ internal sealed class AcceptanceMaterialIndices
         Eraser = Resolve(CoreMaterialIds.Eraser);
         Gas = Resolve(CoreMaterialIds.Gas);
         Fixture = Resolve(CoreMaterialIds.Fixture);
+        Wood = Resolve(CoreMaterialIds.Wood);
+        Coal = Resolve(CoreMaterialIds.Coal);
+        Fire = Resolve(CoreMaterialIds.Fire);
     }
 
     public uint Sand { get; }
@@ -25,5 +28,8 @@ internal sealed class AcceptanceMaterialIndices
     public uint Eraser { get; }
     public uint Gas { get; }
     public uint Fixture { get; }
+    public uint Wood { get; }
+    public uint Coal { get; }
+    public uint Fire { get; }
     public uint Resolve(string id) => registry.GetRequiredRuntimeIndex(id);
 }

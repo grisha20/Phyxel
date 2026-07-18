@@ -12,7 +12,9 @@ namespace Phyxel.Graphics;
 public sealed class SimulationDispatchCoordinator
 {
     public const float FixedThermalStep = 0.05f;
-    public const float ThermalExchangeRate = 4f;
+    // A larger fixed-step exchange keeps thermal fronts visible at gameplay
+    // scale while remaining stable with the 0.05 s Jacobi step.
+    public const float ThermalExchangeRate = 10f;
     public const int MaximumThermalTicksPerFrame = 4;
     private static readonly uint[] PrimaryEvenPhases =
     [
@@ -122,6 +124,15 @@ public sealed class SimulationDispatchCoordinator
     private PhaseTransitionSummaryFlags lastPhaseSummary;
     private uint lastPhaseDispatchFrame;
     private uint lastCompositionFrame;
+    private ulong combustionDispatches;
+    private ulong combustionSummaryReadbacks;
+    private ulong combustionReadbackGeneration;
+    private CombustionSummaryFlags lastCombustionSummary;
+    private bool combustionTimingPending;
+    private int combustionTimingSamples;
+    private double combustionTimingTotalMilliseconds;
+    private double combustionTimingMinimumMilliseconds = double.PositiveInfinity;
+    private double combustionTimingMaximumMilliseconds;
     private int settledObservations;
     private int hydraulicWarmupFrames;
     private int fastSettleFrames;
@@ -204,6 +215,14 @@ public sealed class SimulationDispatchCoordinator
     public ulong PhaseFallbackWakeUps => phaseFallbackWakeUps;
     public int MaximumPhaseDispatchesPerFrame => maximumPhaseDispatchesPerFrame;
     public PhaseTransitionSummaryFlags LastPhaseSummary => lastPhaseSummary;
+    public ulong CombustionDispatches => combustionDispatches;
+    public ulong CombustionSummaryReadbacks => combustionSummaryReadbacks;
+    public CombustionSummaryFlags LastCombustionSummary => lastCombustionSummary;
+    public ThermalGpuTimingStatistics CombustionGpuTiming => new(
+        combustionTimingSamples,
+        combustionTimingSamples == 0 ? 0 : combustionTimingTotalMilliseconds / combustionTimingSamples,
+        combustionTimingSamples == 0 ? 0 : combustionTimingMinimumMilliseconds,
+        combustionTimingMaximumMilliseconds);
     public bool PhasePresentationIsCurrent => phaseDispatches == 0 || lastCompositionFrame >= lastPhaseDispatchFrame;
     public int LastThermalTicksPerFrame => lastThermalTicksPerFrame;
     public int PendingPhaseReadbackSlots
@@ -298,8 +317,10 @@ public sealed class SimulationDispatchCoordinator
         if (!diagnosticsSuppressPhaseReadbackPolling)
         {
             PollPhaseSummary(resources);
+            PollCombustionSummary(resources);
         }
         PollPhaseTiming(resources);
+        PollCombustionTiming(resources);
         ApplyPendingPhaseFallback(resources);
 
         if (settings.HydraulicPressure != previousHydraulicPressure)
@@ -457,6 +478,20 @@ public sealed class SimulationDispatchCoordinator
             DispatchThermalDiffusion(resources, measure);
         }
 
+        int combustionDispatchCount = CombustionDispatchPolicy.GetDispatchCount(
+            materialRegistry.RegistryHasCombustibleMaterials || materialRegistry.RegistryHasTransientMaterials,
+            resources.IsSimulationAllocated,
+            thermalActive,
+            settings.Paused,
+            thermalTicks);
+        if (combustionDispatchCount != 0)
+        {
+            bool measure = combustionDispatches >= 40 && !combustionTimingPending;
+            DispatchCombustion(resources, thermalTicks * FixedThermalStep, measure);
+            combustionDispatches++;
+            presentationDirty = true;
+        }
+
         int phaseDispatchCount = PhaseTransitionDispatchPolicy.GetDispatchCount(
             materialRegistry.RegistryHasPhaseTransitions,
             resources.IsSimulationAllocated,
@@ -516,6 +551,7 @@ public sealed class SimulationDispatchCoordinator
         thermalScheduler.Reset();
         ResetThermalTiming();
         ResetPhaseRuntime();
+        ResetCombustionRuntime();
         cellularMatter = containsMatter;
         fluidMatter = containsMatter;
         liquidMatter = containsMatter;
@@ -1017,6 +1053,7 @@ public sealed class SimulationDispatchCoordinator
         {
             resources.Context.ClearUnorderedAccessView(view, zero);
         }
+        resources.Context.ClearUnorderedAccessView(resources.CombustionSummary.UnorderedView, zero);
     }
 
     private SimulationFrameConstants CreateConstants(
@@ -1129,6 +1166,7 @@ public sealed class SimulationDispatchCoordinator
             ResetThermalTiming();
         }
         ResetPhaseRuntime();
+        ResetCombustionRuntime();
         ResetActiveRegion();
     }
 
@@ -1211,6 +1249,217 @@ public sealed class SimulationDispatchCoordinator
         thermalTimingTotalMilliseconds = 0;
         thermalTimingMinimumMilliseconds = double.PositiveInfinity;
         thermalTimingMaximumMilliseconds = 0;
+    }
+
+    private void DispatchCombustion(
+        GpuSimulationResources resources,
+        float elapsedSeconds,
+        bool measure)
+    {
+        CombustionConstants constants = new()
+        {
+            DeltaTime = elapsedSeconds,
+            Width = (uint)resources.Width,
+            Height = (uint)resources.Height,
+            MaterialCount = (uint)materialRegistry.Count,
+            TickIndex = unchecked((uint)thermalScheduler.TotalTicks)
+        };
+        DeviceContext context = resources.Context;
+        context.ClearUnorderedAccessView(resources.CombustionSummary.UnorderedView, new RawInt4(0, 0, 0, 0));
+        context.ClearUnorderedAccessView(resources.EmissionClaims.UnorderedView, new RawInt4(-1, -1, -1, -1));
+        if (measure)
+        {
+            context.Begin(resources.CombustionTimestampDisjointQuery);
+            context.End(resources.CombustionTimestampStartQuery);
+        }
+        context.UpdateSubresource(ref constants, resources.CombustionConstants);
+        context.ComputeShader.Set(resources.CombustionShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.CombustionConstants);
+        context.ComputeShader.SetShaderResources(0, resources.Materials.View, resources.Emissions.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Grid.ReadUnorderedView,
+            resources.CombustionSummary.UnorderedView,
+            resources.EmissionClaims.UnorderedView,
+            resources.EmissionRequests.UnorderedView);
+        context.Dispatch(
+            DivideRoundUp(resources.Width, 16),
+            DivideRoundUp(resources.Height, 16),
+            1);
+        Unbind(context, 2, 4);
+
+        DispatchEmissionResolve(resources);
+        DispatchTransientLifecycle(resources, constants);
+
+        if (measure)
+        {
+            context.End(resources.CombustionTimestampEndQuery);
+            context.End(resources.CombustionTimestampDisjointQuery);
+            combustionTimingPending = true;
+        }
+
+        Span<bool> pendingSlots = stackalloc bool[resources.CombustionSummaryReadbackSlots.Length];
+        for (int index = 0; index < pendingSlots.Length; index++)
+        {
+            pendingSlots[index] = resources.CombustionSummaryReadbackSlots[index].Pending;
+        }
+        if (PhaseSummaryReadbackPolicy.SelectSlot(pendingSlots, out int slotIndex) ==
+            PhaseSummaryReadbackScheduleResult.NoFreeSlot)
+        {
+            return;
+        }
+        GpuPhaseSummaryReadbackSlot slot = resources.CombustionSummaryReadbackSlots[slotIndex];
+        context.CopyResource(resources.CombustionSummary.Buffer, slot.Staging);
+        context.End(slot.Query);
+        slot.Pending = true;
+        slot.Generation = combustionReadbackGeneration;
+    }
+
+    private void DispatchEmissionResolve(GpuSimulationResources resources)
+    {
+        EmissionConstants constants = new()
+        {
+            Width = (uint)resources.Width,
+            Height = (uint)resources.Height,
+            MaterialCount = (uint)materialRegistry.Count,
+            RequestCount = (uint)(resources.Width * resources.Height * 3)
+        };
+        DeviceContext context = resources.Context;
+        context.UpdateSubresource(ref constants, resources.EmissionConstants);
+        context.ComputeShader.Set(resources.EmissionResolveShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.EmissionConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.EmissionRequests.View,
+            resources.EmissionClaims.View,
+            resources.Materials.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Grid.ReadUnorderedView,
+            resources.CombustionSummary.UnorderedView);
+        context.Dispatch(
+            DivideRoundUp(resources.Width, 16),
+            DivideRoundUp(resources.Height, 16),
+            1);
+        Unbind(context, 3, 2);
+    }
+
+    private static void DispatchTransientLifecycle(
+        GpuSimulationResources resources,
+        CombustionConstants constants)
+    {
+        DeviceContext context = resources.Context;
+        context.UpdateSubresource(ref constants, resources.CombustionConstants);
+        context.ComputeShader.Set(resources.TransientLifecycleShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.CombustionConstants);
+        context.ComputeShader.SetShaderResource(0, resources.Materials.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Grid.ReadUnorderedView,
+            resources.CombustionSummary.UnorderedView);
+        context.Dispatch(
+            DivideRoundUp(resources.Width, 16),
+            DivideRoundUp(resources.Height, 16),
+            1);
+        Unbind(context, 1, 2);
+    }
+
+    private void PollCombustionSummary(GpuSimulationResources resources)
+    {
+        DeviceContext context = resources.Context;
+        foreach (GpuPhaseSummaryReadbackSlot slot in resources.CombustionSummaryReadbackSlots)
+        {
+            if (!slot.Pending ||
+                !context.GetData(slot.Query, AsynchronousFlags.DoNotFlush, out RawBool complete) ||
+                !complete)
+            {
+                continue;
+            }
+            DataBox mapping = context.MapSubresource(slot.Staging, 0, MapMode.Read, MapFlags.None);
+            uint rawFlags = unchecked((uint)Marshal.ReadInt32(mapping.DataPointer));
+            context.UnmapSubresource(slot.Staging, 0);
+            slot.Pending = false;
+            if (slot.Generation != combustionReadbackGeneration)
+            {
+                continue;
+            }
+            combustionSummaryReadbacks++;
+            lastCombustionSummary = (CombustionSummaryFlags)rawFlags;
+            if ((lastCombustionSummary & CombustionSummaryFlags.CombustionOccurred) != 0)
+            {
+                presentationDirty = true;
+                thermalActive = true;
+                if ((lastCombustionSummary & CombustionSummaryFlags.TargetCellular) != 0)
+                {
+                    cellularMatter = true;
+                    cellularSleeping = false;
+                    ActivateFullRegion(resources);
+                }
+                if ((lastCombustionSummary & CombustionSummaryFlags.TouchesLiquid) != 0)
+                {
+                    liquidMatter = true;
+                    fluidMatter = true;
+                    waterPressureRoutesDirty = true;
+                    ActivateFullRegion(resources);
+                }
+                if ((lastCombustionSummary & CombustionSummaryFlags.TouchesSolid) != 0)
+                {
+                    solidMatter = true;
+                    solidSleeping = false;
+                    topologyDirty = true;
+                    solidMotionNeedsCellular = true;
+                    ActivateFullRegion(resources);
+                }
+            }
+        }
+    }
+
+    private void PollCombustionTiming(GpuSimulationResources resources)
+    {
+        if (!combustionTimingPending)
+        {
+            return;
+        }
+        DeviceContext context = resources.Context;
+        bool disjointReady = context.GetData(
+            resources.CombustionTimestampDisjointQuery,
+            AsynchronousFlags.DoNotFlush,
+            out QueryDataTimestampDisjoint disjoint);
+        bool startReady = context.GetData(
+            resources.CombustionTimestampStartQuery,
+            AsynchronousFlags.DoNotFlush,
+            out long start);
+        bool endReady = context.GetData(
+            resources.CombustionTimestampEndQuery,
+            AsynchronousFlags.DoNotFlush,
+            out long end);
+        if (!disjointReady || !startReady || !endReady)
+        {
+            return;
+        }
+        combustionTimingPending = false;
+        if (disjoint.Disjoint || disjoint.Frequency <= 0 || end < start)
+        {
+            return;
+        }
+        double milliseconds = (end - start) * 1000d / disjoint.Frequency;
+        combustionTimingSamples++;
+        combustionTimingTotalMilliseconds += milliseconds;
+        combustionTimingMinimumMilliseconds = Math.Min(combustionTimingMinimumMilliseconds, milliseconds);
+        combustionTimingMaximumMilliseconds = Math.Max(combustionTimingMaximumMilliseconds, milliseconds);
+    }
+
+    private void ResetCombustionRuntime()
+    {
+        combustionReadbackGeneration++;
+        combustionTimingPending = false;
+        combustionTimingSamples = 0;
+        combustionTimingTotalMilliseconds = 0;
+        combustionTimingMinimumMilliseconds = double.PositiveInfinity;
+        combustionTimingMaximumMilliseconds = 0;
+        combustionDispatches = 0;
+        combustionSummaryReadbacks = 0;
+        lastCombustionSummary = CombustionSummaryFlags.None;
     }
 
     private PhaseSummaryReadbackScheduleResult DispatchPhaseTransitions(

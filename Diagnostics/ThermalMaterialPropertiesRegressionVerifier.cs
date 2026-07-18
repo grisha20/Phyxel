@@ -44,6 +44,16 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             0.08f, 0.005f, 1.2f, "#9BC4D29B", 20f, 0.03f, 1f),
         new(CoreMaterialIds.Fixture, MaterialSimulationKind.Solid, MaterialFlags.None,
             100f, 0.9f, 0f, "#525B63", 20f, 0.25f, 0.84f),
+        new(CoreMaterialIds.Wood, MaterialSimulationKind.Solid, MaterialFlags.None,
+            0.8f, 0.65f, 0f, "#8B5A2B", 20f, 0.65f, 1.0f),
+        new(CoreMaterialIds.Coal, MaterialSimulationKind.Solid, MaterialFlags.None,
+            0.2f, 0.8f, 0f, "#292929", 20f, 0.78f, 1.0f),
+        new(CoreMaterialIds.Smoke, MaterialSimulationKind.Gas, MaterialFlags.None,
+            0.04f, 0f, 1f, "#777777B0", 120f, 0.08f, 1f),
+        new(CoreMaterialIds.Co2, MaterialSimulationKind.Gas, MaterialFlags.None,
+            0.06f, 0f, 0.8f, "#B5B5B580", 120f, 0.06f, 0.85f),
+        new(CoreMaterialIds.Fire, MaterialSimulationKind.Gas, MaterialFlags.Flame,
+            1.0f, 0f, 1.4f, "#FF3A08E8", 650f, 0.35f, 1.0f),
         new(CoreMaterialIds.Eraser, MaterialSimulationKind.Tool, MaterialFlags.None,
             0f, 0f, 0f, "#DE5858", 20f, 0f, 1f)
     ];
@@ -65,7 +75,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static async Task RunAsync()
     {
-        Require(Marshal.SizeOf<MaterialProperties>() == 64, "MaterialProperties must be 64 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == 96, "MaterialProperties must be 96 bytes.");
         string directory = Path.Combine(
             Path.GetTempPath(),
             $"phyxel-thermal-materials-{Guid.NewGuid():N}");
@@ -101,7 +111,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static void VerifyCoreMaterials(MaterialRegistry registry)
     {
-        Require(ExpectedCoreMaterials.Length == 10, "Expected bundled core material count changed.");
+        Require(ExpectedCoreMaterials.Length == 15, "Expected bundled core material count changed.");
         foreach (ExpectedMaterial expected in ExpectedCoreMaterials)
         {
             MaterialDefinition actual = registry[expected.Id];
@@ -349,7 +359,15 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         Same(left.TransitionBelowTemperature, right.TransitionBelowTemperature) &&
         left.TransitionBelowMaterialIndex == right.TransitionBelowMaterialIndex &&
         Same(left.TransitionAboveTemperature, right.TransitionAboveTemperature) &&
-        left.TransitionAboveMaterialIndex == right.TransitionAboveMaterialIndex;
+        left.TransitionAboveMaterialIndex == right.TransitionAboveMaterialIndex &&
+        Same(left.IgnitionTemperature, right.IgnitionTemperature) &&
+        Same(left.BurnRate, right.BurnRate) &&
+        Same(left.HeatPerMass, right.HeatPerMass) &&
+        left.BurnedIntoMaterialIndex == right.BurnedIntoMaterialIndex &&
+        Same(left.FlameSpreadRate, right.FlameSpreadRate) &&
+        Same(left.MinimumLifetime, right.MinimumLifetime) &&
+        Same(left.MaximumLifetime, right.MaximumLifetime) &&
+        left.DecayIntoMaterialIndex == right.DecayIntoMaterialIndex;
 
     private static Color ParseColor(string value)
     {

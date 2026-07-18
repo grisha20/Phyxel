@@ -35,6 +35,9 @@ public static class AcceptanceRegressionVerifier
         TemperatureProbeAcceptanceTrace temperatureProbeTrace,
         ThermalGpuTimingStatistics thermalGpuTiming,
         ThermalGpuTimingStatistics phaseGpuTiming,
+        ThermalGpuTimingStatistics combustionGpuTiming,
+        ulong combustionDispatches,
+        ulong combustionSummaryReadbacks,
         ulong phaseDispatches,
         ulong phaseSummaryReadbacks,
         ulong phaseFallbackWakeUps,
@@ -185,6 +188,13 @@ public static class AcceptanceRegressionVerifier
                 phaseSummary,
                 phasePresentationIsCurrent,
                 out report),
+            AcceptanceScenarioMode.CombustionChain => ValidateCombustionChain(
+                snapshot,
+                materialRegistry,
+                combustionGpuTiming,
+                combustionDispatches,
+                combustionSummaryReadbacks,
+                out report),
             AcceptanceScenarioMode.PhaseThresholds or
             AcceptanceScenarioMode.PhaseHysteresis or
             AcceptanceScenarioMode.PhaseSingleTransition or
@@ -222,6 +232,78 @@ public static class AcceptanceRegressionVerifier
                 out report),
             _ => Fail(out report)
         };
+    }
+
+    private static bool ValidateCombustionChain(
+        SimulationWorldSnapshot snapshot,
+        MaterialRegistry registry,
+        ThermalGpuTimingStatistics timing,
+        ulong dispatches,
+        ulong summaryReadbacks,
+        out string report)
+    {
+        uint wood = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Wood);
+        uint coal = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal);
+        uint fire = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire);
+        uint smoke = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke);
+        int woodCount = 0;
+        int coalCount = 0;
+        int partiallyBurnedWood = 0;
+        int flameCount = 0;
+        int smokeCount = 0;
+        int invalidFlameLifetime = 0;
+        int hotWoodCount = 0;
+        float minimumWoodMass = float.PositiveInfinity;
+        float maximumWoodTemperature = float.NegativeInfinity;
+        foreach (GridCell cell in Cells(snapshot))
+        {
+            if (cell.IsActive == 0)
+            {
+                continue;
+            }
+            if (cell.MaterialIndex == wood)
+            {
+                woodCount++;
+                minimumWoodMass = Math.Min(minimumWoodMass, cell.Mass);
+                maximumWoodTemperature = Math.Max(maximumWoodTemperature, cell.Temperature);
+                if (cell.Temperature > registry[CoreMaterialIds.Wood].Properties.IgnitionTemperature)
+                {
+                    hotWoodCount++;
+                }
+                if (cell.Mass < registry[CoreMaterialIds.Wood].Properties.Density)
+                {
+                    partiallyBurnedWood++;
+                }
+            }
+            else if (cell.MaterialIndex == coal)
+            {
+                coalCount++;
+            }
+            else if (cell.MaterialIndex == fire)
+            {
+                flameCount++;
+                if (cell.Lifetime <= 0 ||
+                    cell.Lifetime > registry[CoreMaterialIds.Fire].Properties.MaximumLifetime)
+                {
+                    invalidFlameLifetime++;
+                }
+            }
+            else if (cell.MaterialIndex == smoke)
+            {
+                smokeCount++;
+            }
+        }
+        bool passed = coalCount > 0 && partiallyBurnedWood > 100 &&
+            flameCount > 0 && smokeCount > 0 && invalidFlameLifetime == 0 &&
+            dispatches > 0 && timing.Samples > 0;
+        report = $"PHYXEL_COMBUSTION_ACCEPTANCE coal={coalCount} wood={woodCount} " +
+            $"partialWood={partiallyBurnedWood} minimumWoodMass={minimumWoodMass:0.0000} " +
+            $"hotWood={hotWoodCount} maxWoodTemp={maximumWoodTemperature:0.0} " +
+            $"flame={flameCount} smoke={smokeCount} invalidFlameLifetime={invalidFlameLifetime} " +
+            $"dispatches={dispatches} summaryReadbacks={summaryReadbacks} " +
+            $"gpuMs={timing.AverageMilliseconds:0.0000}/{timing.MinimumMilliseconds:0.0000}/" +
+            $"{timing.MaximumMilliseconds:0.0000} samples={timing.Samples}";
+        return passed;
     }
 
     private static bool ValidatePhaseDispatchSmoke(

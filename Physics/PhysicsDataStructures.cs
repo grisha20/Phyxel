@@ -14,6 +14,7 @@ public struct GridCell
     public uint BodyId;
     public uint RestFrames;
     public float Temperature;
+    public float Lifetime;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -35,6 +36,14 @@ public struct MaterialProperties
     public uint TransitionBelowMaterialIndex;
     public float TransitionAboveTemperature;
     public uint TransitionAboveMaterialIndex;
+    public float IgnitionTemperature;
+    public float BurnRate;
+    public float HeatPerMass;
+    public uint BurnedIntoMaterialIndex;
+    public float FlameSpreadRate;
+    public float MinimumLifetime;
+    public float MaximumLifetime;
+    public uint DecayIntoMaterialIndex;
 }
 
 public enum BrushCommandMode : uint
@@ -95,6 +104,51 @@ public struct PhaseTransitionConstants
     public uint Height;
     public uint MaterialCount;
     public uint Reserved;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct CombustionConstants
+{
+    public float DeltaTime;
+    public uint Width;
+    public uint Height;
+    public uint MaterialCount;
+    public uint TickIndex;
+    public uint Reserved0;
+    public uint Reserved1;
+    public uint Reserved2;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct MaterialEmissionProperties
+{
+    public uint SmokeIntoMaterialIndex;
+    public float SmokeRate;
+    public uint GasIntoMaterialIndex;
+    public float GasRate;
+    public uint FlameIntoMaterialIndex;
+    public float FlameRate;
+    public uint Reserved0;
+    public uint Reserved1;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct EmissionRequest
+{
+    public uint DestinationIndex;
+    public uint MaterialIndex;
+    public float Mass;
+    public float Temperature;
+    public uint SourceIndex;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct EmissionConstants
+{
+    public uint Width;
+    public uint Height;
+    public uint MaterialCount;
+    public uint RequestCount;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

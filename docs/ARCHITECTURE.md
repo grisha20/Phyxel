@@ -187,3 +187,7 @@ Cellular и solid-проходы используют несколько proposa
 - pack manifest, dependency resolver и hub.
 
 При проектировании фазовых переходов нужно отдельно решить порядок относительно cellular/thermal passes, сохранение энергии при смене материала и поведение движущейся клетки. Добавлять проверки `core:water` или других конкретных ID в HLSL нельзя.
+> **Current fire extension:** `GridCell` includes `Lifetime` at offset 36 and is 40 bytes in save format v6. The v5 36-byte cell remains a decoded legacy format. `core:fire` is a selectable gas material; flame lifetime and decay are data-driven through `MaterialProperties`.
+# Актуальное расширение fire
+
+Некоторые разделы ниже описывают исторический baseline и намеренно говорят о нереализованных phase/reaction системах. Для текущего рабочего дерева эти утверждения superseded: phase/thermal passes уже действуют, а fire extension использует `GridCell.Lifetime` (40-byte current cell, save v6), selectable `core:fire`, data-driven lifecycle и universal combustion/emission passes. v3/v4/v5 остаются форматами загрузки.

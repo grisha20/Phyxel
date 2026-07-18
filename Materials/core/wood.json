@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "core:wood",
+  "name": { "ru": "Wood", "en": "Wood" },
+  "kind": "solid",
+  "color": "#8B5A2B",
+  "physics": { "density": 0.8, "friction": 0.65, "flowRate": 0.0 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.65, "heatCapacity": 1.0 },
+  "combustion": {
+    "ignitionTemperature": 300.0,
+    "burnRate": 0.05,
+    "heatPerMass": 1800.0,
+    "burnedInto": "core:coal",
+    "spreadRate": 3.0
+  },
+  "emissions": {
+    "smokeInto": "core:smoke",
+    "smokeRate": 0.15,
+    "gasInto": "core:co2",
+    "gasRate": 0.10,
+    "flameInto": "core:fire",
+    "flameRate": 8.0
+  },
+  "ui": { "order": 80, "hidden": false }
+}

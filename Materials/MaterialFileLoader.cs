@@ -22,6 +22,9 @@ internal static partial class MaterialFileLoader
         public string? Color { get; set; }
         public MaterialPhysicsDocument? Physics { get; set; }
         public MaterialThermalDocument? Thermal { get; set; }
+        public JsonElement Combustion { get; set; }
+        public JsonElement Emissions { get; set; }
+        public JsonElement Lifecycle { get; set; }
         public MaterialUiDocument? Ui { get; set; }
 
         [JsonExtensionData]
@@ -273,9 +276,38 @@ internal static partial class MaterialFileLoader
             kind);
 
         MaterialFlags flags = ParseFlags(document.Flags, kind);
+        MaterialCombustionDefinition? combustion = ParseCombustion(
+            document.Combustion,
+            id,
+            kind);
+        MaterialEmissionDefinition? emissions = ParseEmissions(document.Emissions, id, combustion);
+        MaterialLifecycleDefinition? lifecycle = ParseLifecycle(document.Lifecycle, id, kind);
+        if (combustion is not null && (flags & MaterialFlags.MovableSolid) != 0)
+        {
+            throw new InvalidDataException(
+                $"Горение материала '{id}' с flag 'movable-solid' пока не поддерживается.");
+        }
+        if (combustion is not null && transitions is not null)
+        {
+            throw new InvalidDataException(
+                $"Материал '{id}' не может одновременно иметь combustion и thermal.transitions в schema combustion v1.");
+        }
+        if (combustion is not null && physics.Density <= 0)
+        {
+            throw new InvalidDataException(
+                $"Combustible material '{id}' must have density greater than 0.");
+        }
         if ((flags & MaterialFlags.MovableSolid) != 0 && physics.Density <= 0)
         {
             throw new InvalidDataException("Материал с flag 'movable-solid' должен иметь density больше 0.");
+        }
+        if ((flags & MaterialFlags.Flame) != 0 && kind != MaterialSimulationKind.Gas)
+        {
+            throw new InvalidDataException("Flag 'flame' is allowed only for kind 'gas'.");
+        }
+        if ((flags & MaterialFlags.Flame) != 0 && lifecycle is null)
+        {
+            throw new InvalidDataException("A material with flag 'flame' requires lifecycle.");
         }
         string name = ParseName(document.Name, id);
         MaterialUiDocument ui = document.Ui ?? new MaterialUiDocument();
@@ -298,8 +330,305 @@ internal static partial class MaterialFileLoader
             ui.Hidden)
         {
             PhaseTransitions = transitions,
+            Combustion = combustion,
+            Emissions = emissions,
+            Lifecycle = lifecycle,
             SourcePath = path
         };
+    }
+
+    private static MaterialCombustionDefinition? ParseCombustion(
+        JsonElement value,
+        string sourceId,
+        MaterialSimulationKind sourceKind)
+    {
+        if (value.ValueKind == JsonValueKind.Undefined)
+        {
+            return null;
+        }
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("combustion должен быть объектом.");
+        }
+        if (sourceKind != MaterialSimulationKind.Solid)
+        {
+            throw new InvalidDataException(
+                $"Материал '{sourceId}' с kind '{sourceKind.ToString().ToLowerInvariant()}' не может быть source combustion v1; требуется fixed solid.");
+        }
+
+        JsonElement ignitionElement = default;
+        JsonElement burnRateElement = default;
+        JsonElement heatPerMassElement = default;
+        JsonElement burnedIntoElement = default;
+        JsonElement spreadRateElement = default;
+        HashSet<string> fields = new(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            if (!fields.Add(property.Name))
+            {
+                throw new InvalidDataException(
+                    $"Дублирующее поле combustion '{property.Name}'.");
+            }
+
+            if (property.Name.Equals("ignitionTemperature", StringComparison.OrdinalIgnoreCase))
+            {
+                ignitionElement = property.Value;
+            }
+            else if (property.Name.Equals("burnRate", StringComparison.OrdinalIgnoreCase))
+            {
+                burnRateElement = property.Value;
+            }
+            else if (property.Name.Equals("heatPerMass", StringComparison.OrdinalIgnoreCase))
+            {
+                heatPerMassElement = property.Value;
+            }
+            else if (property.Name.Equals("burnedInto", StringComparison.OrdinalIgnoreCase))
+            {
+                burnedIntoElement = property.Value;
+            }
+            else if (property.Name.Equals("spreadRate", StringComparison.OrdinalIgnoreCase))
+            {
+                spreadRateElement = property.Value;
+            }
+            else
+            {
+                throw new InvalidDataException(
+                    $"Неизвестное поле combustion '{property.Name}'.");
+            }
+        }
+
+        if (ignitionElement.ValueKind == JsonValueKind.Undefined)
+        {
+            throw new InvalidDataException("Поле combustion.ignitionTemperature обязательно.");
+        }
+        if (burnRateElement.ValueKind == JsonValueKind.Undefined)
+        {
+            throw new InvalidDataException("Поле combustion.burnRate обязательно.");
+        }
+        if (heatPerMassElement.ValueKind == JsonValueKind.Undefined)
+        {
+            throw new InvalidDataException("Поле combustion.heatPerMass обязательно.");
+        }
+        if (burnedIntoElement.ValueKind == JsonValueKind.Undefined)
+        {
+            throw new InvalidDataException("Поле combustion.burnedInto обязательно.");
+        }
+
+        if (ignitionElement.ValueKind != JsonValueKind.Number ||
+            !ignitionElement.TryGetSingle(out float ignitionTemperature) ||
+            !float.IsFinite(ignitionTemperature) ||
+            ignitionTemperature < MaterialRegistry.MinimumInitialTemperature ||
+            ignitionTemperature >= MaterialRegistry.MaximumInitialTemperature)
+        {
+            throw new InvalidDataException(
+                $"combustion.ignitionTemperature должна быть конечным числом от {MaterialRegistry.MinimumInitialTemperature} включительно до {MaterialRegistry.MaximumInitialTemperature} исключительно.");
+        }
+        if (burnRateElement.ValueKind != JsonValueKind.Number ||
+            !burnRateElement.TryGetSingle(out float burnRate) ||
+            !float.IsFinite(burnRate) ||
+            burnRate <= 0 ||
+            burnRate > MaterialRegistry.MaximumCombustionBurnRate)
+        {
+            throw new InvalidDataException(
+                $"combustion.burnRate должна быть конечным числом больше 0 и не больше {MaterialRegistry.MaximumCombustionBurnRate}.");
+        }
+        if (heatPerMassElement.ValueKind != JsonValueKind.Number ||
+            !heatPerMassElement.TryGetSingle(out float heatPerMass) ||
+            !float.IsFinite(heatPerMass) ||
+            heatPerMass <= 0 ||
+            heatPerMass > MaterialRegistry.MaximumCombustionHeatPerMass)
+        {
+            throw new InvalidDataException(
+                $"combustion.heatPerMass должна быть конечным числом больше 0 и не больше {MaterialRegistry.MaximumCombustionHeatPerMass}.");
+        }
+        if (burnedIntoElement.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(burnedIntoElement.GetString()))
+        {
+            throw new InvalidDataException("combustion.burnedInto должен быть строковым material ID.");
+        }
+
+        string burnedIntoId = MaterialRegistry.NormalizeId(burnedIntoElement.GetString()!);
+        if (!MaterialIdPattern().IsMatch(burnedIntoId))
+        {
+            throw new InvalidDataException(
+                $"combustion.burnedInto '{burnedIntoElement.GetString()}' должен иметь формат namespace:name.");
+        }
+        if (burnedIntoId == sourceId)
+        {
+            throw new InvalidDataException(
+                $"Материал '{sourceId}' не может сгорать сам в себя (combustion.burnedInto).");
+        }
+
+        float spreadRate = 0;
+        if (spreadRateElement.ValueKind != JsonValueKind.Undefined &&
+            (spreadRateElement.ValueKind != JsonValueKind.Number ||
+             !spreadRateElement.TryGetSingle(out spreadRate) ||
+             !float.IsFinite(spreadRate) || spreadRate < 0 ||
+             spreadRate > MaterialRegistry.MaximumFlameSpreadRate))
+        {
+            throw new InvalidDataException(
+                $"combustion.spreadRate must be a finite number from 0 to {MaterialRegistry.MaximumFlameSpreadRate}.");
+        }
+
+        return new MaterialCombustionDefinition(
+            ignitionTemperature,
+            burnRate,
+            heatPerMass,
+            burnedIntoId,
+            spreadRate);
+    }
+
+    private static MaterialEmissionDefinition? ParseEmissions(
+        JsonElement value,
+        string sourceId,
+        MaterialCombustionDefinition? combustion)
+    {
+        if (value.ValueKind == JsonValueKind.Undefined)
+        {
+            return null;
+        }
+        if (combustion is null)
+        {
+            throw new InvalidDataException("emissions требует combustion.");
+        }
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("emissions должна быть объектом.");
+        }
+
+        JsonElement smokeInto = default;
+        JsonElement smokeRate = default;
+        JsonElement gasInto = default;
+        JsonElement gasRate = default;
+        JsonElement flameInto = default;
+        JsonElement flameRate = default;
+        HashSet<string> fields = new(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            if (!fields.Add(property.Name))
+            {
+                throw new InvalidDataException($"Дублирующееся поле emissions '{property.Name}'.");
+            }
+            if (property.Name.Equals("smokeInto", StringComparison.OrdinalIgnoreCase)) smokeInto = property.Value;
+            else if (property.Name.Equals("smokeRate", StringComparison.OrdinalIgnoreCase)) smokeRate = property.Value;
+            else if (property.Name.Equals("gasInto", StringComparison.OrdinalIgnoreCase)) gasInto = property.Value;
+            else if (property.Name.Equals("gasRate", StringComparison.OrdinalIgnoreCase)) gasRate = property.Value;
+            else if (property.Name.Equals("flameInto", StringComparison.OrdinalIgnoreCase)) flameInto = property.Value;
+            else if (property.Name.Equals("flameRate", StringComparison.OrdinalIgnoreCase)) flameRate = property.Value;
+            else throw new InvalidDataException($"Неизвестное поле emissions '{property.Name}'.");
+        }
+
+        string smokeId = ParseEmissionTarget(smokeInto, "smokeInto", sourceId);
+        string gasId = ParseEmissionTarget(gasInto, "gasInto", sourceId);
+        float smokeValue = ParseEmissionRate(smokeRate, "smokeRate");
+        float gasValue = ParseEmissionRate(gasRate, "gasRate");
+        bool hasFlameTarget = flameInto.ValueKind != JsonValueKind.Undefined;
+        bool hasFlameRate = flameRate.ValueKind != JsonValueKind.Undefined;
+        if (hasFlameTarget != hasFlameRate)
+        {
+            throw new InvalidDataException(
+                "emissions.flameInto and emissions.flameRate must be specified together.");
+        }
+        string? flameId = hasFlameTarget
+            ? ParseEmissionTarget(flameInto, "flameInto", sourceId)
+            : null;
+        float flameValue = hasFlameRate ? ParseEmissionRate(flameRate, "flameRate") : 0;
+        return new MaterialEmissionDefinition(
+            smokeId,
+            smokeValue,
+            gasId,
+            gasValue,
+            flameId,
+            flameValue);
+    }
+
+    private static MaterialLifecycleDefinition? ParseLifecycle(
+        JsonElement value,
+        string sourceId,
+        MaterialSimulationKind sourceKind)
+    {
+        if (value.ValueKind == JsonValueKind.Undefined)
+        {
+            return null;
+        }
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("lifecycle must be an object.");
+        }
+        if (sourceKind != MaterialSimulationKind.Gas)
+        {
+            throw new InvalidDataException($"Material '{sourceId}' lifecycle currently requires kind 'gas'.");
+        }
+
+        JsonElement minimumElement = default;
+        JsonElement maximumElement = default;
+        JsonElement decayIntoElement = default;
+        HashSet<string> fields = new(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            if (!fields.Add(property.Name))
+            {
+                throw new InvalidDataException($"Duplicate lifecycle field '{property.Name}'.");
+            }
+            if (property.Name.Equals("minimum", StringComparison.OrdinalIgnoreCase)) minimumElement = property.Value;
+            else if (property.Name.Equals("maximum", StringComparison.OrdinalIgnoreCase)) maximumElement = property.Value;
+            else if (property.Name.Equals("decayInto", StringComparison.OrdinalIgnoreCase)) decayIntoElement = property.Value;
+            else throw new InvalidDataException($"Unknown lifecycle field '{property.Name}'.");
+        }
+
+        float minimum = ParseLifetime(minimumElement, "minimum");
+        float maximum = ParseLifetime(maximumElement, "maximum");
+        if (minimum > maximum)
+        {
+            throw new InvalidDataException("lifecycle.minimum must not exceed lifecycle.maximum.");
+        }
+        if (decayIntoElement.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(decayIntoElement.GetString()))
+        {
+            throw new InvalidDataException("lifecycle.decayInto must be a material ID.");
+        }
+        string decayIntoId = MaterialRegistry.NormalizeId(decayIntoElement.GetString()!);
+        if (!MaterialIdPattern().IsMatch(decayIntoId) || decayIntoId == sourceId)
+        {
+            throw new InvalidDataException($"lifecycle.decayInto '{decayIntoElement.GetString()}' is invalid.");
+        }
+        return new MaterialLifecycleDefinition(minimum, maximum, decayIntoId);
+    }
+
+    private static float ParseLifetime(JsonElement value, string field)
+    {
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetSingle(out float lifetime) ||
+            !float.IsFinite(lifetime) || lifetime <= 0 || lifetime > MaterialRegistry.MaximumLifetime)
+        {
+            throw new InvalidDataException(
+                $"lifecycle.{field} must be a finite number greater than 0 and at most {MaterialRegistry.MaximumLifetime}.");
+        }
+        return lifetime;
+    }
+
+    private static string ParseEmissionTarget(JsonElement value, string field, string sourceId)
+    {
+        if (value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
+        {
+            throw new InvalidDataException($"emissions.{field} должен быть строковым material ID.");
+        }
+        string id = MaterialRegistry.NormalizeId(value.GetString()!);
+        if (!MaterialIdPattern().IsMatch(id) || id == sourceId)
+        {
+            throw new InvalidDataException($"emissions.{field} '{value.GetString()}' имеет недопустимый target ID.");
+        }
+        return id;
+    }
+
+    private static float ParseEmissionRate(JsonElement value, string field)
+    {
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetSingle(out float rate) ||
+            !float.IsFinite(rate) || rate <= 0 || rate > MaterialRegistry.MaximumCombustionBurnRate)
+        {
+            throw new InvalidDataException(
+                $"emissions.{field} должна быть конечным числом больше 0 и не больше {MaterialRegistry.MaximumCombustionBurnRate}.");
+        }
+        return rate;
     }
 
     private static MaterialTransitionDefinitions? ParseTransitions(
@@ -444,6 +773,7 @@ internal static partial class MaterialFileLoader
             MaterialFlags flag = value.Trim().ToLowerInvariant() switch
             {
                 "movable-solid" => MaterialFlags.MovableSolid,
+                "flame" => MaterialFlags.Flame,
                 _ => throw new InvalidDataException($"Неизвестный flag '{value}'.")
             };
             if ((flags & flag) != 0)

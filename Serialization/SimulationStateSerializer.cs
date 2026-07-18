@@ -54,7 +54,7 @@ public sealed class SimulationStateSerializer
     private const uint WorldFileMagic = 0x5058594C;
     private const int LegacyWorldHeaderSize = 20;
     private const int CurrentWorldHeaderSize = 24;
-    private const int CurrentVersion = 5;
+    private const int CurrentVersion = 6;
     private const string RemovedGoldSandId = "core:gold_sand";
     private const string RenamedConcreteId = "core:concrete";
     private readonly JsonSerializerOptions options = new() { WriteIndented = true };
@@ -194,7 +194,7 @@ public sealed class SimulationStateSerializer
                 warnings,
                 options),
             4 => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, true),
-            CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
+            5 or CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
             _ => null
         };
     }
@@ -512,12 +512,13 @@ public sealed class SimulationStateSerializer
 
         uint magic = BinaryPrimitives.ReadUInt32LittleEndian(prefix.AsSpan(0, 4));
         int version = BinaryPrimitives.ReadInt32LittleEndian(prefix.AsSpan(4, 4));
-        if (magic != WorldFileMagic || version is not (3 or 4 or CurrentVersion))
+        if (magic != WorldFileMagic || version is not (3 or 4 or 5 or CurrentVersion))
         {
             throw new InvalidDataException("Формат снимка мира не поддерживается.");
         }
 
-        int headerSize = version == CurrentVersion ? CurrentWorldHeaderSize : LegacyWorldHeaderSize;
+        bool extendedHeader = version >= 5;
+        int headerSize = extendedHeader ? CurrentWorldHeaderSize : LegacyWorldHeaderSize;
         byte[] remainder = new byte[headerSize - prefix.Length];
         try
         {
@@ -530,11 +531,11 @@ public sealed class SimulationStateSerializer
 
         int width = BinaryPrimitives.ReadInt32LittleEndian(remainder.AsSpan(0, 4));
         int height = BinaryPrimitives.ReadInt32LittleEndian(remainder.AsSpan(4, 4));
-        int storedCellStride = version == CurrentVersion
+        int storedCellStride = extendedHeader
             ? BinaryPrimitives.ReadInt32LittleEndian(remainder.AsSpan(8, 4))
             : WorldCellCodec.LegacyCellStride;
         int length = BinaryPrimitives.ReadInt32LittleEndian(
-            remainder.AsSpan(version == CurrentVersion ? 12 : 8, 4));
+            remainder.AsSpan(extendedHeader ? 12 : 8, 4));
         WorldCellCodec.ValidateStoredWorld(version, width, height, storedCellStride, length);
 
         long expectedFileLength = checked((long)headerSize + length);

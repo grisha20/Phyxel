@@ -165,6 +165,8 @@ internal static class CorePhaseAcceptanceVerifier
         MaterialMetrics waterMetrics = Measure(moved, water);
         MaterialMetrics steamMetrics = Measure(moved, steam);
         MaterialMetrics gasMetrics = Measure(moved, gas);
+        Console.WriteLine(
+            $"PHYXEL_CORE_MOTION steam={steamMetrics} gas={gasMetrics}");
         Require(iceMetrics.Cells == 64 && Math.Abs(iceMetrics.Mass - 64) <= 0.001 &&
             iceMetrics.MinimumX == 70 && iceMetrics.MaximumX == 85 &&
             iceMetrics.MinimumY == 160 && iceMetrics.MaximumY == 163,
@@ -174,6 +176,9 @@ internal static class CorePhaseAcceptanceVerifier
             $"melted/condensed water did not fall or conserve mass={waterMetrics}", errors);
         Require(steamMetrics.Cells > 0 && steamMetrics.Mass >= 60 && steamMetrics.AverageY < 178,
             $"boiled steam did not rise or lost excessive mass={steamMetrics}", errors);
+        Require(steamMetrics.RestingCells * 4 < steamMetrics.Cells * 3 &&
+            steamMetrics.MaximumX - steamMetrics.MinimumX >= 16,
+            $"boiled steam stopped diffusing and became a frozen column={steamMetrics}", errors);
         Require(gasMetrics.Cells > 0 && gasMetrics.Mass >= 60 && gasMetrics.AverageY < 178,
             $"core:gas beside steam did not remain a separate moving gas={gasMetrics}", errors);
         Require(steam != gas, "core:steam and core:gas share a runtime index", errors);
@@ -347,6 +352,7 @@ internal static class CorePhaseAcceptanceVerifier
     private static MaterialMetrics Measure(SimulationWorldSnapshot snapshot, uint material)
     {
         int count = 0;
+        int resting = 0;
         double mass = 0;
         double weightedY = 0;
         int minimumX = snapshot.Width;
@@ -364,6 +370,10 @@ internal static class CorePhaseAcceptanceVerifier
                     continue;
                 }
                 count++;
+                if (cell.RestFrames >= 60)
+                {
+                    resting++;
+                }
                 mass += cell.Mass;
                 weightedY += y * cell.Mass;
                 minimumX = Math.Min(minimumX, x);
@@ -372,7 +382,7 @@ internal static class CorePhaseAcceptanceVerifier
                 maximumY = Math.Max(maximumY, y);
             }
         }
-        return new MaterialMetrics(count, mass, mass > 0 ? weightedY / mass : 0,
+        return new MaterialMetrics(count, resting, mass, mass > 0 ? weightedY / mass : 0,
             minimumX, maximumX, minimumY, maximumY);
     }
 
@@ -440,6 +450,7 @@ internal static class CorePhaseAcceptanceVerifier
 
     private readonly record struct MaterialMetrics(
         int Cells,
+        int RestingCells,
         double Mass,
         double AverageY,
         int MinimumX,

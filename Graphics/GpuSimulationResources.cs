@@ -26,11 +26,18 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuBufferPair<SimulationStatistics> Statistics { get; init; }
     public required GpuUploadBuffer<BrushDrawCommand> Commands { get; init; }
     public required GpuUploadBuffer<MaterialProperties> Materials { get; init; }
+    public required GpuUploadBuffer<MaterialEmissionProperties> Emissions { get; init; }
     public required Buffer FrameConstants { get; init; }
     public required Buffer ThermalConstants { get; init; }
     public required Buffer PhaseConstants { get; init; }
     public required GpuStructuredBuffer<uint> PhaseSummary { get; init; }
     public required GpuPhaseSummaryReadbackSlot[] PhaseSummaryReadbackSlots { get; init; }
+    public required Buffer CombustionConstants { get; init; }
+    public required GpuStructuredBuffer<uint> CombustionSummary { get; init; }
+    public required GpuStructuredBuffer<uint> EmissionClaims { get; init; }
+    public required GpuStructuredBuffer<EmissionRequest> EmissionRequests { get; init; }
+    public required Buffer EmissionConstants { get; init; }
+    public required GpuPhaseSummaryReadbackSlot[] CombustionSummaryReadbackSlots { get; init; }
     public required Buffer TemperatureProbeConstants { get; init; }
     public required GpuStructuredBuffer<TemperatureProbeResult> TemperatureProbeResult { get; init; }
     public required Buffer TemperatureProbeStaging { get; init; }
@@ -41,6 +48,9 @@ public sealed class GpuSimulationResources : IDisposable
     public required Query PhaseTimestampDisjointQuery { get; init; }
     public required Query PhaseTimestampStartQuery { get; init; }
     public required Query PhaseTimestampEndQuery { get; init; }
+    public required Query CombustionTimestampDisjointQuery { get; init; }
+    public required Query CombustionTimestampStartQuery { get; init; }
+    public required Query CombustionTimestampEndQuery { get; init; }
     public required Query ProbeTimestampDisjointQuery { get; init; }
     public required Query ProbeTimestampStartQuery { get; init; }
     public required Query ProbeTimestampEndQuery { get; init; }
@@ -69,6 +79,9 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? CompositionShader { get; init; }
     public ComputeShader? ThermalDiffusionShader { get; init; }
     public ComputeShader? PhaseTransitionShader { get; init; }
+    public ComputeShader? CombustionShader { get; init; }
+    public ComputeShader? EmissionResolveShader { get; init; }
+    public ComputeShader? TransientLifecycleShader { get; init; }
     public ComputeShader? TemperatureProbeShader { get; init; }
 
     public void Dispose()
@@ -79,6 +92,9 @@ public sealed class GpuSimulationResources : IDisposable
         CompositionShader?.Dispose();
         TemperatureProbeShader?.Dispose();
         PhaseTransitionShader?.Dispose();
+        CombustionShader?.Dispose();
+        EmissionResolveShader?.Dispose();
+        TransientLifecycleShader?.Dispose();
         ThermalDiffusionShader?.Dispose();
         SolidDisplacementApplyShader?.Dispose();
         SolidMoveShader?.Dispose();
@@ -108,6 +124,9 @@ public sealed class GpuSimulationResources : IDisposable
         PhaseTimestampEndQuery.Dispose();
         PhaseTimestampStartQuery.Dispose();
         PhaseTimestampDisjointQuery.Dispose();
+        CombustionTimestampEndQuery.Dispose();
+        CombustionTimestampStartQuery.Dispose();
+        CombustionTimestampDisjointQuery.Dispose();
         ProbeTimestampEndQuery.Dispose();
         ProbeTimestampStartQuery.Dispose();
         ProbeTimestampDisjointQuery.Dispose();
@@ -121,7 +140,17 @@ public sealed class GpuSimulationResources : IDisposable
         }
         PhaseSummary.Dispose();
         PhaseConstants.Dispose();
+        foreach (GpuPhaseSummaryReadbackSlot slot in CombustionSummaryReadbackSlots)
+        {
+            slot.Dispose();
+        }
+        CombustionSummary.Dispose();
+        EmissionRequests.Dispose();
+        EmissionClaims.Dispose();
+        EmissionConstants.Dispose();
+        CombustionConstants.Dispose();
         Materials.Dispose();
+        Emissions.Dispose();
         Commands.Dispose();
         Statistics.Dispose();
         WaterPressureRouteScratch.Dispose();

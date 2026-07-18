@@ -13,7 +13,7 @@ StructuredBuffer<MaterialProperties> Materials : register(t1);
 RWStructuredBuffer<GridCell> DestinationGrid : register(u0);
 
 static const float MinimumThermalMass = 0.0001;
-static const float MaximumExchangeFraction = 0.25;
+static const float MaximumExchangeFraction = 0.50;
 
 float EffectiveCapacity(GridCell cell)
 {

@@ -101,6 +101,7 @@ public static class PhaseTransitionRuntime
         cell.RestFrames = targetKind == MaterialSimulationKind.Solid && !targetMovableSolid
             ? 2u
             : 0u;
+        cell.Lifetime = target.MinimumLifetime;
         return cell;
     }
 

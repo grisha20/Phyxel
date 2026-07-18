@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "core:co2",
+  "name": { "ru": "CO2", "en": "CO2" },
+  "kind": "gas",
+  "color": "#B5B5B580",
+  "physics": { "density": 0.06, "friction": 0.0, "flowRate": 0.8 },
+  "thermal": { "initialTemperature": 120.0, "conductivity": 0.06, "heatCapacity": 0.85 },
+  "ui": { "order": 101, "hidden": true }
+}

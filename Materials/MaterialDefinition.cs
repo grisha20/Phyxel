@@ -19,7 +19,8 @@ public enum MaterialSimulationKind : uint
 public enum MaterialFlags : uint
 {
     None = 0,
-    MovableSolid = 1u << 0
+    MovableSolid = 1u << 0,
+    Flame = 1u << 1
 }
 
 public static class CoreMaterialIds
@@ -34,6 +35,11 @@ public static class CoreMaterialIds
     public const string Eraser = "core:eraser";
     public const string Gas = "core:gas";
     public const string Fixture = "core:fixture";
+    public const string Wood = "core:wood";
+    public const string Coal = "core:coal";
+    public const string Smoke = "core:smoke";
+    public const string Co2 = "core:co2";
+    public const string Fire = "core:fire";
     public static IReadOnlyList<string> Required { get; } =
     [
         Empty,
@@ -45,7 +51,12 @@ public static class CoreMaterialIds
         Stone,
         Eraser,
         Gas,
-        Fixture
+        Fixture,
+        Wood,
+        Coal,
+        Smoke,
+        Co2,
+        Fire
     ];
 }
 
@@ -54,6 +65,26 @@ public sealed record MaterialTransitionRule(float Temperature, string IntoId);
 public sealed record MaterialTransitionDefinitions(
     MaterialTransitionRule? Below,
     MaterialTransitionRule? Above);
+
+public sealed record MaterialCombustionDefinition(
+    float IgnitionTemperature,
+    float BurnRate,
+    float HeatPerMass,
+    string BurnedIntoId,
+    float FlameSpreadRate);
+
+public sealed record MaterialEmissionDefinition(
+    string SmokeIntoId,
+    float SmokeRate,
+    string GasIntoId,
+    float GasRate,
+    string? FlameIntoId,
+    float FlameRate);
+
+public sealed record MaterialLifecycleDefinition(
+    float MinimumLifetime,
+    float MaximumLifetime,
+    string DecayIntoId);
 
 public sealed record MaterialDefinition(
     string Id,
@@ -65,6 +96,9 @@ public sealed record MaterialDefinition(
     bool Hidden = false)
 {
     public MaterialTransitionDefinitions? PhaseTransitions { get; init; }
+    public MaterialCombustionDefinition? Combustion { get; init; }
+    public MaterialEmissionDefinition? Emissions { get; init; }
+    public MaterialLifecycleDefinition? Lifecycle { get; init; }
     internal string SourcePath { get; init; } = string.Empty;
     internal bool IsBundled { get; init; }
 }

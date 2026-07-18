@@ -66,7 +66,8 @@ public enum AcceptanceScenarioMode
     WaterIceSteam,
     WaterIceSteamMotion,
     WaterIceSteamPause,
-    WaterIceSteamV5RoundTrip
+    WaterIceSteamV5RoundTrip,
+    CombustionChain
 }
 
 public static class AcceptanceRegressionScenario
@@ -121,6 +122,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.ThermalVacuum or
             AcceptanceScenarioMode.ThermalGas or
             AcceptanceScenarioMode.TemperatureProbeGpu => [],
+            AcceptanceScenarioMode.CombustionChain => CreateCombustionChain(frame),
             AcceptanceScenarioMode.PhaseDispatchSmoke => [],
             AcceptanceScenarioMode.PhaseThresholds or
             AcceptanceScenarioMode.PhaseHysteresis or
@@ -147,6 +149,24 @@ public static class AcceptanceRegressionScenario
                 PhaseAcceptanceScenario.CreateCommands(mode, frame, materials),
             _ => []
         };
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateCombustionChain(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            commands.AddRange(AddFill(150, 90, 230, 150, 7, 5, materials.Wood, 18001));
+            commands.AddRange(AddFill(250, 90, 330, 150, 7, 5, materials.Wood, 18002));
+            return commands;
+        }
+        if (frame == 1)
+        {
+            // The brush overlaps the upper surface: empty pixels become real
+            // FIRE particles, while combustible solid pixels ignite in place.
+            return [Create(190, 88, 5, materials.Fire, (uint)BrushCommandMode.Material, 0)];
+        }
+        return [];
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateTemperatureBrush(uint frame)
