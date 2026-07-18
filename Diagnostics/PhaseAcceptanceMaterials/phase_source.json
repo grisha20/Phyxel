@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "acceptance:phase_source",
+  "name": "Phase Source",
+  "kind": "liquid",
+  "color": "#D05030",
+  "physics": { "density": 1.0, "friction": 0.025, "flowRate": 0.92 },
+  "thermal": {
+    "initialTemperature": 150.0,
+    "conductivity": 0.0,
+    "heatCapacity": 1.0,
+    "transitions": {
+      "above": { "temperature": 50.0, "into": "acceptance:phase_target" }
+    }
+  },
+  "ui": { "order": 1200, "hidden": true }
+}

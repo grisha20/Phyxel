@@ -43,7 +43,8 @@ public enum AcceptanceScenarioMode
     ThermalInsulator,
     ThermalVacuum,
     ThermalGas,
-    TemperatureProbeGpu
+    TemperatureProbeGpu,
+    PhaseDispatchSmoke
 }
 
 public static class AcceptanceRegressionScenario
@@ -98,6 +99,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.ThermalVacuum or
             AcceptanceScenarioMode.ThermalGas or
             AcceptanceScenarioMode.TemperatureProbeGpu => [],
+            AcceptanceScenarioMode.PhaseDispatchSmoke => [],
             _ => []
         };
     }

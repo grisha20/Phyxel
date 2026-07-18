@@ -85,12 +85,22 @@ public sealed class MaterialRegistry
             .AsReadOnly();
         byId = definitions.ToDictionary(material => material.Id, StringComparer.Ordinal);
         RegistryHasPhaseTransitions = definitions.Any(material => material.PhaseTransitions is not null);
+        PhaseTransitionGraphFlags = definitions
+            .Where(material => material.PhaseTransitions is not null)
+            .Aggregate(
+                PhaseTransitionSummaryFlags.None,
+                (flags, source) => flags | EnumerateResolvedTargets(source, byId)
+                    .Aggregate(
+                        PhaseTransitionSummaryFlags.None,
+                        (targetFlags, target) => targetFlags |
+                            PhaseTransitionRuntime.GetSummaryFlags(source.Properties, target.Properties)));
     }
 
     public IReadOnlyList<MaterialDefinition> Materials => materials;
     public IReadOnlyList<MaterialDefinition> SelectableMaterials => selectableMaterials;
     public int Count => materials.Count;
     public bool RegistryHasPhaseTransitions { get; }
+    public PhaseTransitionSummaryFlags PhaseTransitionGraphFlags { get; }
 
     public MaterialDefinition this[ushort runtimeIndex] => materials[runtimeIndex];
     public MaterialDefinition this[uint runtimeIndex] => materials[checked((int)runtimeIndex)];
@@ -292,6 +302,16 @@ public sealed class MaterialRegistry
         if (source.PhaseTransitions?.Above is { } above)
         {
             yield return ("above", above);
+        }
+    }
+
+    private static IEnumerable<MaterialDefinition> EnumerateResolvedTargets(
+        MaterialDefinition source,
+        IReadOnlyDictionary<string, MaterialDefinition> definitions)
+    {
+        foreach ((_, MaterialTransitionRule rule) in EnumerateTransitionRules(source))
+        {
+            yield return definitions[rule.IntoId];
         }
     }
 

@@ -59,6 +59,7 @@ Remove-Item -LiteralPath "$env:LOCALAPPDATA/Phyxel/ShaderCache" -Recurse -Force 
 - `CellularAutomataSolver.hlsl`;
 - `SolidBodySolver.hlsl` и `SolidComponents.hlsl`;
 - `ThermalDiffusion.hlsl`;
+- `PhaseTransitions.hlsl`;
 - `TemperatureProbe.hlsl`;
 - `RenderComposition.hlsl`.
 
@@ -107,6 +108,16 @@ Remove-Item Env:PHYXEL_VERIFY_THERMAL_DIFFUSION
 ```
 
 Проверяет fixed-step scheduler, энергетику, перенос температуры, gas merge, probe и команды температурной кисти без зависимости от интерактивного UI.
+
+### Phase-transition runtime
+
+```powershell
+$env:PHYXEL_VERIFY_PHASE_RUNTIME = '1'
+./bin/Debug/net8.0-windows/Phyxel.exe
+Remove-Item Env:PHYXEL_VERIFY_PHASE_RUNTIME
+```
+
+Проверяет layout phase constants/summary, строгие предикаты и below-first priority, CPU-нормализацию всех kind-пар, summary-флаги, Pause/catch-up dispatch policy и одноразовый fallback wake-up.
 
 Успешный verifier обязан вернуть exit code 0. После аварийного прерывания очистите установленную env-переменную вручную, чтобы следующий обычный запуск не повторил verifier.
 
@@ -157,6 +168,7 @@ Remove-Item Env:PHYXEL_ARTIFACT_DIR
 - external kinds: `external_granular`, `external_liquid`, `external_gas`, `external_solids`;
 - thermal: `thermal_uniform`, `thermal_contact`, `thermal_capacity`, `conductivity_compare`, `thermal_insulator`, `thermal_vacuum`, `thermal_gas`, `temperature_probe_gpu`;
 - temperature tool: `temperature_brush`, `temperature_tool`.
+- phase runtime: `phase_dispatch_smoke` с `PHYXEL_MATERIALS_PATH=Diagnostics/PhaseAcceptanceMaterials`.
 
 Для изменения общей GPU-структуры или pass order прогоните все группы. Acceptance-артефакты создаются только локально и не должны попадать в коммит.
 

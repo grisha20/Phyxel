@@ -60,6 +60,7 @@ public sealed class AcceptanceRegressionHarness
             "thermal_vacuum" => AcceptanceScenarioMode.ThermalVacuum,
             "thermal_gas" => AcceptanceScenarioMode.ThermalGas,
             "temperature_probe_gpu" or "thermal_probe" => AcceptanceScenarioMode.TemperatureProbeGpu,
+            "phase_dispatch_smoke" => AcceptanceScenarioMode.PhaseDispatchSmoke,
             _ => AcceptanceScenarioMode.None
         };
     }
@@ -117,6 +118,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.ThermalContact => 500,
                 AcceptanceScenarioMode.ThermalCapacity => 1300,
                 AcceptanceScenarioMode.TemperatureProbeGpu => 240,
+                AcceptanceScenarioMode.PhaseDispatchSmoke => 240,
                 AcceptanceScenarioMode.ThermalUniform or
                 AcceptanceScenarioMode.ThermalConductivityCompare or
                 AcceptanceScenarioMode.ThermalFast or
@@ -341,7 +343,12 @@ public sealed class AcceptanceRegressionHarness
         ulong thermalTicks,
         TemperatureProbeResult? temperatureProbe,
         ThermalGpuTimingStatistics thermalGpuTiming,
+        ThermalGpuTimingStatistics phaseGpuTiming,
         ThermalGpuTimingStatistics probeGpuTiming,
+        ulong phaseDispatches,
+        int maximumPhaseDispatchesPerFrame,
+        PhaseTransitionSummaryFlags phaseSummary,
+        bool phasePresentationIsCurrent,
         out string report)
     {
         bool passed = AcceptanceRegressionVerifier.Validate(
@@ -354,6 +361,11 @@ public sealed class AcceptanceRegressionHarness
             temperatureProbe,
             thermalCheckpoints,
             temperatureProbeTrace,
+            phaseGpuTiming,
+            phaseDispatches,
+            maximumPhaseDispatchesPerFrame,
+            phaseSummary,
+            phasePresentationIsCurrent,
             ArtifactDirectory,
             out report);
         report += Environment.NewLine +
@@ -361,6 +373,10 @@ public sealed class AcceptanceRegressionHarness
             $"thermalGpuMs={thermalGpuTiming.AverageMilliseconds:0.0000}/" +
             $"{thermalGpuTiming.MinimumMilliseconds:0.0000}/" +
             $"{thermalGpuTiming.MaximumMilliseconds:0.0000} samples={thermalGpuTiming.Samples} " +
+            $"phaseGpuMs={phaseGpuTiming.AverageMilliseconds:0.0000}/" +
+            $"{phaseGpuTiming.MinimumMilliseconds:0.0000}/" +
+            $"{phaseGpuTiming.MaximumMilliseconds:0.0000} phaseSamples={phaseGpuTiming.Samples} " +
+            $"phaseDispatches={phaseDispatches} phaseMaxPerFrame={maximumPhaseDispatchesPerFrame} " +
             $"probeGpuMs={probeGpuTiming.AverageMilliseconds:0.0000}/" +
             $"{probeGpuTiming.MinimumMilliseconds:0.0000}/" +
             $"{probeGpuTiming.MaximumMilliseconds:0.0000} probeSamples={probeGpuTiming.Samples}";

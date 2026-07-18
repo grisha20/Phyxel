@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "acceptance:phase_target",
+  "name": "Phase Target",
+  "kind": "solid",
+  "color": "#50C080",
+  "physics": { "density": 3.0, "friction": 0.8, "flowRate": 0.0 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.0, "heatCapacity": 1.0 },
+  "ui": { "order": 1201, "hidden": true }
+}

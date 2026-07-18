@@ -320,7 +320,12 @@ public sealed class PhyxelGame : Game
                     dispatchCoordinator?.ThermalTicks ?? 0,
                     temperatureProbe.Latest,
                     dispatchCoordinator?.ThermalGpuTiming ?? default,
+                    dispatchCoordinator?.PhaseGpuTiming ?? default,
                     temperatureProbe.GpuTiming,
+                    dispatchCoordinator?.PhaseDispatches ?? 0,
+                    dispatchCoordinator?.MaximumPhaseDispatchesPerFrame ?? 0,
+                    dispatchCoordinator?.LastPhaseSummary ?? PhaseTransitionSummaryFlags.None,
+                    dispatchCoordinator?.PhasePresentationIsCurrent ?? false,
                     out _);
                 Environment.ExitCode = passed ? 0 : 1;
                 acceptanceSuccess = true;

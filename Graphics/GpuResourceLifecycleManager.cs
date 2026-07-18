@@ -132,6 +132,21 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             StructureByteStride = 0
         });
         Buffer thermalConstants = CreateConstantBuffer<ThermalSimulationConstants>();
+        Buffer phaseConstants = CreateConstantBuffer<PhaseTransitionConstants>();
+        GpuStructuredBuffer<uint> phaseSummary = new(Device, 1);
+        GpuPhaseSummaryReadbackSlot[] phaseSummaryReadbackSlots = new GpuPhaseSummaryReadbackSlot[3];
+        for (int index = 0; index < phaseSummaryReadbackSlots.Length; index++)
+        {
+            phaseSummaryReadbackSlots[index] = new GpuPhaseSummaryReadbackSlot
+            {
+                Staging = CreateReadStagingBuffer(sizeof(uint)),
+                Query = new Query(Device, new QueryDescription
+                {
+                    Type = QueryType.Event,
+                    Flags = QueryFlags.None
+                })
+            };
+        }
         Buffer temperatureProbeConstants = CreateConstantBuffer<TemperatureProbeConstants>();
         GpuStructuredBuffer<TemperatureProbeResult> temperatureProbeResult = new(Device, 1);
         Buffer temperatureProbeStaging = CreateReadStagingBuffer(Marshal.SizeOf<TemperatureProbeResult>());
@@ -151,6 +166,21 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Flags = QueryFlags.None
         });
         Query thermalTimestampEndQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Timestamp,
+            Flags = QueryFlags.None
+        });
+        Query phaseTimestampDisjointQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.TimestampDisjoint,
+            Flags = QueryFlags.None
+        });
+        Query phaseTimestampStartQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Timestamp,
+            Flags = QueryFlags.None
+        });
+        Query phaseTimestampEndQuery = new(Device, new QueryDescription
         {
             Type = QueryType.Timestamp,
             Flags = QueryFlags.None
@@ -231,6 +261,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Materials = materials,
             FrameConstants = constants,
             ThermalConstants = thermalConstants,
+            PhaseConstants = phaseConstants,
+            PhaseSummary = phaseSummary,
+            PhaseSummaryReadbackSlots = phaseSummaryReadbackSlots,
             TemperatureProbeConstants = temperatureProbeConstants,
             TemperatureProbeResult = temperatureProbeResult,
             TemperatureProbeStaging = temperatureProbeStaging,
@@ -238,6 +271,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ThermalTimestampDisjointQuery = thermalTimestampDisjointQuery,
             ThermalTimestampStartQuery = thermalTimestampStartQuery,
             ThermalTimestampEndQuery = thermalTimestampEndQuery,
+            PhaseTimestampDisjointQuery = phaseTimestampDisjointQuery,
+            PhaseTimestampStartQuery = phaseTimestampStartQuery,
+            PhaseTimestampEndQuery = phaseTimestampEndQuery,
             ProbeTimestampDisjointQuery = probeTimestampDisjointQuery,
             ProbeTimestampStartQuery = probeTimestampStartQuery,
             ProbeTimestampEndQuery = probeTimestampEndQuery,
@@ -261,6 +297,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SolidDisplacementApplyShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "ApplyHullWaterDisplacement") : null,
             CompositionShader = allocateSimulation ? CompileShader("RenderComposition.hlsl") : null,
             ThermalDiffusionShader = allocateSimulation ? CompileShader("ThermalDiffusion.hlsl") : null,
+            PhaseTransitionShader = allocateSimulation ? CompileShader("PhaseTransitions.hlsl") : null,
             TemperatureProbeShader = allocateSimulation ? CompileShader("TemperatureProbe.hlsl") : null
         };
     }

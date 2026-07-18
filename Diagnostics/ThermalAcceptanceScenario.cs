@@ -27,7 +27,8 @@ internal static class ThermalAcceptanceScenario
             AcceptanceScenarioMode.ThermalVacuum or
             AcceptanceScenarioMode.ThermalGas or
             AcceptanceScenarioMode.TemperatureTool or
-            AcceptanceScenarioMode.TemperatureProbeGpu))
+            AcceptanceScenarioMode.TemperatureProbeGpu or
+            AcceptanceScenarioMode.PhaseDispatchSmoke))
         {
             return null;
         }
@@ -87,8 +88,42 @@ internal static class ThermalAcceptanceScenario
             case AcceptanceScenarioMode.TemperatureProbeGpu:
                 CreateTemperatureProbeFixture(cells, width, height, materials);
                 break;
+            case AcceptanceScenarioMode.PhaseDispatchSmoke:
+                CreatePhaseDispatchFixture(cells, width, height, materials);
+                break;
         }
         return new SimulationWorldSnapshot(width, height, bytes);
+    }
+
+    private static void CreatePhaseDispatchFixture(
+        Span<GridCell> cells,
+        int width,
+        int height,
+        MaterialRegistry materials)
+    {
+        if (width < 260 || height < 180)
+        {
+            throw new InvalidOperationException("Phase dispatch acceptance requires at least 260x180 cells.");
+        }
+        uint source = materials.GetRequiredRuntimeIndex("acceptance:phase_source");
+        for (int y = 120; y < 136; y++)
+        {
+            for (int x = 220; x < 236; x++)
+            {
+                cells[y * width + x] = new GridCell
+                {
+                    MaterialIndex = source,
+                    Mass = 2,
+                    VelocityX = 7,
+                    VelocityY = -3,
+                    Pressure = 9,
+                    IsActive = 1,
+                    BodyId = 123,
+                    RestFrames = 17,
+                    Temperature = 150
+                };
+            }
+        }
     }
 
     private static void FillContact(

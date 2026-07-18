@@ -89,6 +89,15 @@ public struct ThermalSimulationConstants
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct PhaseTransitionConstants
+{
+    public uint Width;
+    public uint Height;
+    public uint MaterialCount;
+    public uint Reserved;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct TemperatureProbeConstants
 {
     public uint X;

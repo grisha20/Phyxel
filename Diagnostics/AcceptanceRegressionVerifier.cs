@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using Phyxel.Graphics;
 using Phyxel.Materials;
 using Phyxel.Physics;
 using Phyxel.Serialization;
@@ -32,6 +33,11 @@ public static class AcceptanceRegressionVerifier
         TemperatureProbeResult? temperatureProbe,
         IReadOnlyList<ThermalAcceptanceCheckpoint> thermalCheckpoints,
         TemperatureProbeAcceptanceTrace temperatureProbeTrace,
+        ThermalGpuTimingStatistics phaseGpuTiming,
+        ulong phaseDispatches,
+        int maximumPhaseDispatchesPerFrame,
+        PhaseTransitionSummaryFlags phaseSummary,
+        bool phasePresentationIsCurrent,
         string artifactDirectory,
         out string report)
     {
@@ -165,8 +171,63 @@ public static class AcceptanceRegressionVerifier
                 thermalCheckpoints,
                 temperatureProbeTrace,
                 out report),
+            AcceptanceScenarioMode.PhaseDispatchSmoke => ValidatePhaseDispatchSmoke(
+                snapshot,
+                materialRegistry,
+                phaseGpuTiming,
+                phaseDispatches,
+                maximumPhaseDispatchesPerFrame,
+                phaseSummary,
+                phasePresentationIsCurrent,
+                out report),
             _ => Fail(out report)
         };
+    }
+
+    private static bool ValidatePhaseDispatchSmoke(
+        SimulationWorldSnapshot snapshot,
+        MaterialRegistry registry,
+        ThermalGpuTimingStatistics timing,
+        ulong dispatches,
+        int maximumDispatchesPerFrame,
+        PhaseTransitionSummaryFlags summary,
+        bool presentationIsCurrent,
+        out string report)
+    {
+        uint source = registry.GetRequiredRuntimeIndex("acceptance:phase_source");
+        uint target = registry.GetRequiredRuntimeIndex("acceptance:phase_target");
+        int sourceCount = 0;
+        int targetCount = 0;
+        int normalizedCount = 0;
+        foreach (GridCell cell in Cells(snapshot))
+        {
+            sourceCount += cell.IsActive != 0 && cell.MaterialIndex == source ? 1 : 0;
+            if (cell.IsActive == 0 || cell.MaterialIndex != target)
+            {
+                continue;
+            }
+            targetCount++;
+            if (cell.Mass == 2 && cell.Temperature == 150 &&
+                cell.VelocityX == 0 && cell.VelocityY == 0 && cell.Pressure == 0 &&
+                cell.BodyId == 0 && cell.RestFrames == 2)
+            {
+                normalizedCount++;
+            }
+        }
+        PhaseTransitionSummaryFlags expected = PhaseTransitionSummaryFlags.PhaseOccurred |
+            PhaseTransitionSummaryFlags.TouchesLiquid |
+            PhaseTransitionSummaryFlags.TouchesSolid;
+        bool passed = sourceCount == 0 && targetCount == 256 && normalizedCount == targetCount &&
+            dispatches >= 40 && maximumDispatchesPerFrame == 1 &&
+            (summary & expected) == expected && timing.Samples > 0 && presentationIsCurrent;
+        report = passed
+            ? $"PHASE_DISPATCH_SMOKE_OK target={targetCount} dispatches={dispatches} " +
+                $"summary=0x{(uint)summary:X} timingSamples={timing.Samples} compositionCurrent=true"
+            : $"PHASE_DISPATCH_SMOKE_FAILED source={sourceCount} target={targetCount} " +
+                $"normalized={normalizedCount} dispatches={dispatches} maxPerFrame={maximumDispatchesPerFrame} " +
+                $"summary=0x{(uint)summary:X} timingSamples={timing.Samples} " +
+                $"compositionCurrent={presentationIsCurrent}";
+        return passed;
     }
 
     private static bool ValidateTemperatureBrush(

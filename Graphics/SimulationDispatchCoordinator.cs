@@ -1,7 +1,9 @@
 using System;
+using System.Runtime.InteropServices;
 using Phyxel.Core;
 using Phyxel.Materials;
 using Phyxel.Physics;
+using SharpDX;
 using SharpDX.Direct3D11;
 using SharpDX.Mathematics.Interop;
 
@@ -106,6 +108,19 @@ public sealed class SimulationDispatchCoordinator
     private double thermalTimingTotalMilliseconds;
     private double thermalTimingMinimumMilliseconds = double.PositiveInfinity;
     private double thermalTimingMaximumMilliseconds;
+    private readonly PhaseTransitionWakeUpGate phaseWakeUpGate = new();
+    private ulong phaseReadbackGeneration;
+    private bool phaseFallbackApplied;
+    private bool phaseTimingPending;
+    private int phaseTimingSamples;
+    private double phaseTimingTotalMilliseconds;
+    private double phaseTimingMinimumMilliseconds = double.PositiveInfinity;
+    private double phaseTimingMaximumMilliseconds;
+    private ulong phaseDispatches;
+    private int maximumPhaseDispatchesPerFrame;
+    private PhaseTransitionSummaryFlags lastPhaseSummary;
+    private uint lastPhaseDispatchFrame;
+    private uint lastCompositionFrame;
     private int settledObservations;
     private int hydraulicWarmupFrames;
     private int fastSettleFrames;
@@ -176,6 +191,15 @@ public sealed class SimulationDispatchCoordinator
         thermalTimingSamples == 0 ? 0 : thermalTimingTotalMilliseconds / thermalTimingSamples,
         thermalTimingSamples == 0 ? 0 : thermalTimingMinimumMilliseconds,
         thermalTimingMaximumMilliseconds);
+    public ThermalGpuTimingStatistics PhaseGpuTiming => new(
+        phaseTimingSamples,
+        phaseTimingSamples == 0 ? 0 : phaseTimingTotalMilliseconds / phaseTimingSamples,
+        phaseTimingSamples == 0 ? 0 : phaseTimingMinimumMilliseconds,
+        phaseTimingMaximumMilliseconds);
+    public ulong PhaseDispatches => phaseDispatches;
+    public int MaximumPhaseDispatchesPerFrame => maximumPhaseDispatchesPerFrame;
+    public PhaseTransitionSummaryFlags LastPhaseSummary => lastPhaseSummary;
+    public bool PhasePresentationIsCurrent => phaseDispatches == 0 || lastCompositionFrame >= lastPhaseDispatchFrame;
 
     public void SetSolidGravityEnabled(bool enabled)
     {
@@ -242,6 +266,10 @@ public sealed class SimulationDispatchCoordinator
             boundResources = resources;
             ResetActivity(resources.IsSimulationAllocated);
         }
+
+        PollPhaseSummary(resources);
+        PollPhaseTiming(resources);
+        ApplyPendingPhaseFallback(resources);
 
         if (settings.HydraulicPressure != previousHydraulicPressure)
         {
@@ -397,10 +425,29 @@ public sealed class SimulationDispatchCoordinator
             DispatchThermalDiffusion(resources, measure);
         }
 
+        int phaseDispatchCount = PhaseTransitionDispatchPolicy.GetDispatchCount(
+            materialRegistry.RegistryHasPhaseTransitions,
+            resources.IsSimulationAllocated,
+            thermalActive,
+            settings.Paused,
+            thermalTicks);
+        if (phaseDispatchCount != 0)
+        {
+            bool measure = phaseDispatches >= 40 && !phaseTimingPending;
+            DispatchPhaseTransitions(resources, measure);
+            phaseDispatches++;
+            maximumPhaseDispatchesPerFrame = Math.Max(maximumPhaseDispatchesPerFrame, phaseDispatchCount);
+            lastPhaseDispatchFrame = frameIndex;
+            presentationDirty = true;
+            RequestPhaseFallback();
+            ApplyPendingPhaseFallback(resources);
+        }
+
         constants.SolidGravity = settings.SolidGravity ? 1u : 0u;
         if (presentationDirty && resources.IsSimulationAllocated)
         {
             DispatchComposition(resources, ref constants);
+            lastCompositionFrame = frameIndex;
             presentationDirty = false;
         }
         frameIndex++;
@@ -428,6 +475,7 @@ public sealed class SimulationDispatchCoordinator
         thermalActive = containsMatter;
         thermalScheduler.Reset();
         ResetThermalTiming();
+        ResetPhaseRuntime();
         cellularMatter = containsMatter;
         fluidMatter = containsMatter;
         liquidMatter = containsMatter;
@@ -1040,6 +1088,7 @@ public sealed class SimulationDispatchCoordinator
             thermalScheduler.Reset();
             ResetThermalTiming();
         }
+        ResetPhaseRuntime();
         ResetActiveRegion();
     }
 
@@ -1122,6 +1171,224 @@ public sealed class SimulationDispatchCoordinator
         thermalTimingTotalMilliseconds = 0;
         thermalTimingMinimumMilliseconds = double.PositiveInfinity;
         thermalTimingMaximumMilliseconds = 0;
+    }
+
+    private void DispatchPhaseTransitions(GpuSimulationResources resources, bool measure)
+    {
+        PhaseTransitionConstants constants = new()
+        {
+            Width = (uint)resources.Width,
+            Height = (uint)resources.Height,
+            MaterialCount = (uint)materialRegistry.Count
+        };
+        DeviceContext context = resources.Context;
+        context.ClearUnorderedAccessView(resources.PhaseSummary.UnorderedView, new RawInt4(0, 0, 0, 0));
+        if (measure)
+        {
+            context.Begin(resources.PhaseTimestampDisjointQuery);
+            context.End(resources.PhaseTimestampStartQuery);
+        }
+        context.UpdateSubresource(ref constants, resources.PhaseConstants);
+        context.ComputeShader.Set(resources.PhaseTransitionShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.PhaseConstants);
+        context.ComputeShader.SetShaderResource(0, resources.Materials.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Grid.ReadUnorderedView,
+            resources.PhaseSummary.UnorderedView);
+        context.Dispatch(
+            DivideRoundUp(resources.Width, 16),
+            DivideRoundUp(resources.Height, 16),
+            1);
+        if (measure)
+        {
+            context.End(resources.PhaseTimestampEndQuery);
+            context.End(resources.PhaseTimestampDisjointQuery);
+            phaseTimingPending = true;
+        }
+        Unbind(context, 1, 2);
+
+        GpuPhaseSummaryReadbackSlot? slot = null;
+        foreach (GpuPhaseSummaryReadbackSlot candidate in resources.PhaseSummaryReadbackSlots)
+        {
+            if (!candidate.Pending)
+            {
+                slot = candidate;
+                break;
+            }
+        }
+        if (slot is null)
+        {
+            RequestPhaseFallback();
+            return;
+        }
+        context.CopyResource(resources.PhaseSummary.Buffer, slot.Staging);
+        context.End(slot.Query);
+        slot.Pending = true;
+        slot.Generation = phaseReadbackGeneration;
+    }
+
+    private void PollPhaseSummary(GpuSimulationResources resources)
+    {
+        DeviceContext context = resources.Context;
+        foreach (GpuPhaseSummaryReadbackSlot slot in resources.PhaseSummaryReadbackSlots)
+        {
+            if (!slot.Pending ||
+                !context.GetData(slot.Query, AsynchronousFlags.DoNotFlush, out RawBool complete) ||
+                !complete)
+            {
+                continue;
+            }
+            DataBox mapping = context.MapSubresource(slot.Staging, 0, MapMode.Read, MapFlags.None);
+            uint rawFlags = unchecked((uint)Marshal.ReadInt32(mapping.DataPointer));
+            context.UnmapSubresource(slot.Staging, 0);
+            slot.Pending = false;
+            if (slot.Generation != phaseReadbackGeneration)
+            {
+                continue;
+            }
+            PhaseTransitionSummaryFlags flags = (PhaseTransitionSummaryFlags)rawFlags;
+            if ((flags & PhaseTransitionSummaryFlags.PhaseOccurred) != 0)
+            {
+                lastPhaseSummary = flags;
+                ApplyPhaseSummary(resources, flags);
+            }
+        }
+    }
+
+    private void PollPhaseTiming(GpuSimulationResources resources)
+    {
+        if (!phaseTimingPending)
+        {
+            return;
+        }
+        DeviceContext context = resources.Context;
+        bool disjointReady = context.GetData(
+            resources.PhaseTimestampDisjointQuery,
+            AsynchronousFlags.DoNotFlush,
+            out QueryDataTimestampDisjoint disjoint);
+        bool startReady = context.GetData(
+            resources.PhaseTimestampStartQuery,
+            AsynchronousFlags.DoNotFlush,
+            out long start);
+        bool endReady = context.GetData(
+            resources.PhaseTimestampEndQuery,
+            AsynchronousFlags.DoNotFlush,
+            out long end);
+        if (!disjointReady || !startReady || !endReady)
+        {
+            return;
+        }
+        phaseTimingPending = false;
+        if (disjoint.Disjoint || disjoint.Frequency <= 0 || end < start)
+        {
+            return;
+        }
+        double milliseconds = (end - start) * 1000d / disjoint.Frequency;
+        phaseTimingSamples++;
+        phaseTimingTotalMilliseconds += milliseconds;
+        phaseTimingMinimumMilliseconds = Math.Min(phaseTimingMinimumMilliseconds, milliseconds);
+        phaseTimingMaximumMilliseconds = Math.Max(phaseTimingMaximumMilliseconds, milliseconds);
+    }
+
+    private void RequestPhaseFallback()
+    {
+        if (!phaseFallbackApplied)
+        {
+            phaseWakeUpGate.Request();
+        }
+    }
+
+    private void ApplyPendingPhaseFallback(GpuSimulationResources resources)
+    {
+        if (!phaseWakeUpGate.Consume())
+        {
+            return;
+        }
+        phaseFallbackApplied = true;
+        ApplyPhaseSummary(resources, materialRegistry.PhaseTransitionGraphFlags);
+    }
+
+    private void ApplyPhaseSummary(
+        GpuSimulationResources resources,
+        PhaseTransitionSummaryFlags flags)
+    {
+        if ((flags & PhaseTransitionSummaryFlags.PhaseOccurred) == 0)
+        {
+            return;
+        }
+        presentationDirty = true;
+        cellMaterialsDirty = true;
+        finalizeCellularRest = false;
+        settledObservations = 0;
+        thermalActive = true;
+
+        if ((flags & PhaseTransitionSummaryFlags.TargetCellular) != 0)
+        {
+            cellularMatter = true;
+            cellularSleeping = false;
+            ActivateFullRegion(resources);
+        }
+        if ((flags & PhaseTransitionSummaryFlags.TargetLiquid) != 0)
+        {
+            fluidMatter = true;
+            liquidMatter = true;
+        }
+        if ((flags & PhaseTransitionSummaryFlags.TargetGas) != 0)
+        {
+            fluidMatter = true;
+            gasMatter = true;
+        }
+        if ((flags & PhaseTransitionSummaryFlags.TouchesLiquid) != 0)
+        {
+            waterPressureRoutesDirty = true;
+            hydraulicWarmupFrames = previousHydraulicPressure ? 128 : 0;
+            fastSettleFrames = previousHydraulicPressure ? 0 : 300;
+            fastMaximumAwakeFrames = previousHydraulicPressure ? 0 : 3600;
+            ActivateFullRegion(resources);
+        }
+        if ((flags & PhaseTransitionSummaryFlags.TouchesSolid) != 0)
+        {
+            solidMatter = true;
+            solidSleeping = false;
+            topologyDirty = true;
+            solidMotionNeedsCellular = true;
+            ActivateFullRegion(resources);
+        }
+        if ((flags & PhaseTransitionSummaryFlags.TargetMovableSolid) != 0)
+        {
+            topologyDirty = true;
+        }
+    }
+
+    private void ActivateFullRegion(GpuSimulationResources resources)
+    {
+        if (!resources.IsSimulationAllocated)
+        {
+            return;
+        }
+        activeMinX = 0;
+        activeMinY = 0;
+        activeMaxX = resources.Width - 1;
+        activeMaxY = resources.Height - 1;
+        activeRegionValid = true;
+    }
+
+    private void ResetPhaseRuntime()
+    {
+        phaseReadbackGeneration++;
+        phaseWakeUpGate.Reset();
+        phaseFallbackApplied = false;
+        phaseTimingPending = false;
+        phaseTimingSamples = 0;
+        phaseTimingTotalMilliseconds = 0;
+        phaseTimingMinimumMilliseconds = double.PositiveInfinity;
+        phaseTimingMaximumMilliseconds = 0;
+        phaseDispatches = 0;
+        maximumPhaseDispatchesPerFrame = 0;
+        lastPhaseSummary = PhaseTransitionSummaryFlags.None;
+        lastPhaseDispatchFrame = 0;
+        lastCompositionFrame = 0;
     }
 
     private static bool ContainsMaterialCommand(ReadOnlySpan<BrushDrawCommand> commands)

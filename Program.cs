@@ -28,6 +28,11 @@ public static class Program
             Environment.ExitCode = PhaseTransitionMaterialRegressionVerifier.Run();
             return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_PHASE_RUNTIME") == "1")
+        {
+            Environment.ExitCode = PhaseTransitionRuntimeRegressionVerifier.Run();
+            return;
+        }
 
         using PhyxelGame game = new();
         game.Run();

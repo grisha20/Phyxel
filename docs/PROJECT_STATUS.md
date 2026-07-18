@@ -3,15 +3,15 @@
 > [!IMPORTANT]
 > ## CURRENT HANDOFF
 >
-> - **Last completed commit:** `Add phase transition material schema` (текущий коммит; SHA указывается в handoff после создания).
-> - **Last completed functional commit:** `4d4eb7c Add interactive temperature brush`.
-> - **Just completed:** phase-transition JSON schema v1, строгая локальная/registry validation, interval-based cycle validation и 64-байтный GPU layout `MaterialProperties`.
-> - **Current project state:** базовая универсальная температура завершена; data/registry/layout-слой фазовых переходов готов, но phase compute shader и фактическая смена материала ещё отсутствуют.
-> - **Current task:** реализация общего GPU phase pass.
-> - **Next planned engine task:** `PhaseTransitions.hlsl`, dispatch, консервативный wake-up и GPU timestamps; без добавления ice/steam в тот же коммит.
+> - **Last completed commit:** `Run universal phase transition GPU pass` (текущий коммит; SHA указывается в handoff после создания).
+> - **Last completed functional commit:** `Run universal phase transition GPU pass` (текущий коммит).
+> - **Just completed:** общий in-place GPU phase pass, строгая нормализация клетки, асинхронный summary ring, консервативный одноразовый wake-up и отдельные GPU timestamps.
+> - **Current project state:** базовая универсальная температура и общий runtime фазовых переходов готовы; пользовательские ice/steam и расширенная матрица phase acceptance ещё не добавлены.
+> - **Current task:** финальная regression-проверка и фиксация общего GPU phase pass.
+> - **Next planned engine task:** отдельный расширенный phase GPU acceptance; core ice/water/steam — только следующим самостоятельным этапом.
 > - **Do not start yet:** огонь, взрывы, коррозию, пакеты и hub одновременно.
 > - **Blocking issues:** известных блокеров нет. Есть отдельный технический долг в OOM-fallback масштаба, описанный ниже.
-> - **Tests last run:** Debug build (0 ошибок/предупреждений), cold shader compilation, world/thermal/phase CPU verifiers, загрузка core и external granular, полный существующий thermal GPU acceptance.
+> - **Tests last run:** Debug build (0 ошибок/предупреждений), cold compilation 15 shader entry points, world/thermal/phase CPU verifiers, `phase_dispatch_smoke`, thermal/cellular/granular/solid/hydraulic GPU acceptance и v5 round-trip. Старый `hydro` сохраняет независимый flaky early-image threshold; финальные уровни/утечки и запуск без phase-реестра подтверждены.
 > - **Documentation update rule:** после каждой завершённой крупной задачи обновлять этот блок.
 >
 > После каждой крупной задачи также обновляются соответствующие разделы статуса.
@@ -45,7 +45,9 @@
 - `core:gold_sand` удалён и при загрузке v4 мигрирует в `core:sand`; `core:concrete` переименован и мигрирует в `core:stone`.
 - Реестр ограничен 256 материалами. Некорректный core JSON прерывает запуск; некорректный внешний файл пропускается с `PHYXEL_MATERIAL_ERROR`.
 - Необязательные `thermal.transitions.below/above` хранят string target IDs, после стабилизации реестра разрешаются в текущие runtime-индексы и попадают в 64-байтную GPU-таблицу материалов.
-- Registry отбрасывает невалидные внешние ссылки до устойчивого набора и запрещает мгновенные температурные циклы; фактического phase GPU pass пока нет.
+- Registry отбрасывает невалидные внешние ссылки до устойчивого набора и запрещает мгновенные температурные циклы.
+- `PhaseTransitions.hlsl` выполняет не более одного перехода клетки после thermal-пачки, сохраняет массу/температуру и нормализует velocity, pressure, body/rest state по source/target kind.
+- CPU получает OR-summary через три staging/query slot без `Flush`; coordinator немедленно обновляет композицию и асинхронно будит нужные cellular/solid/hydraulic подсистемы.
 
 ### Физика
 
