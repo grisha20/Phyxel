@@ -68,7 +68,8 @@ public enum AcceptanceScenarioMode
     WaterIceSteamPause,
     WaterIceSteamV5RoundTrip,
     CombustionChain,
-    CombustionQuench
+    CombustionQuench,
+    SteamSelfCooling
 }
 
 public static class AcceptanceRegressionScenario
@@ -125,6 +126,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.TemperatureProbeGpu => [],
             AcceptanceScenarioMode.CombustionChain => CreateCombustionChain(frame),
             AcceptanceScenarioMode.CombustionQuench => CreateCombustionQuench(frame),
+            AcceptanceScenarioMode.SteamSelfCooling => [],
             AcceptanceScenarioMode.PhaseDispatchSmoke => [],
             AcceptanceScenarioMode.PhaseThresholds or
             AcceptanceScenarioMode.PhaseHysteresis or

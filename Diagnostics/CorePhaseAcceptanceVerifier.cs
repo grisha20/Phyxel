@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using Phyxel.Graphics;
 using Phyxel.Materials;
 using Phyxel.Physics;
 using Phyxel.Serialization;
@@ -331,22 +332,49 @@ internal static class CorePhaseAcceptanceVerifier
         List<string> errors)
     {
         uint target = materials.GetRequiredRuntimeIndex(targetId);
+        MaterialProperties sourceProperties = materials[source.MaterialIndex].Properties;
+        GridCell sourceAtPhasePass = source;
+        bool hasAmbientCooling = sourceProperties.AmbientCoolingRate > 0;
+        if (hasAmbientCooling)
+        {
+            float factor = 1 - MathF.Exp(
+                -sourceProperties.AmbientCoolingRate * SimulationDispatchCoordinator.FixedThermalStep);
+            sourceAtPhasePass.Temperature +=
+                (sourceProperties.AmbientTemperature - sourceAtPhasePass.Temperature) * factor;
+        }
         GridCell expected = PhaseTransitionRuntime.Normalize(
-            source,
-            materials[source.MaterialIndex].Properties,
+            sourceAtPhasePass,
+            sourceProperties,
             materials[target].Properties,
             target);
-        Require(CellEquals(expected, actual),
+        bool fieldsMatch = hasAmbientCooling
+            ? CellEqualsExceptTemperature(expected, actual) &&
+                Math.Abs(expected.Temperature - actual.Temperature) <= 0.001f
+            : CellEquals(expected, actual);
+        Require(fieldsMatch,
             $"{label} fields expected={Describe(expected)} actual={Describe(actual)}", errors);
-        bool latentBoil = materials[source.MaterialIndex].Properties.TransitionAboveLatentHeat > 0 &&
+        bool latentBoil = sourceProperties.TransitionAboveLatentHeat > 0 &&
             materials[target].Properties.SimulationKind == (uint)MaterialSimulationKind.Gas;
         Require(SameBits(source.Mass, actual.Mass) &&
             (latentBoil
                 ? SameBits(actual.Temperature,
-                    materials[source.MaterialIndex].Properties.TransitionAboveTemperature)
-                : SameBits(source.Temperature, actual.Temperature)),
+                    sourceProperties.TransitionAboveTemperature)
+                : hasAmbientCooling
+                    ? Math.Abs(sourceAtPhasePass.Temperature - actual.Temperature) <= 0.001f
+                    : SameBits(source.Temperature, actual.Temperature)),
             $"{label} did not preserve Mass/Temperature", errors);
     }
+
+    private static bool CellEqualsExceptTemperature(GridCell left, GridCell right) =>
+        left.MaterialIndex == right.MaterialIndex &&
+        SameBits(left.Mass, right.Mass) &&
+        SameBits(left.VelocityX, right.VelocityX) &&
+        SameBits(left.VelocityY, right.VelocityY) &&
+        SameBits(left.Pressure, right.Pressure) &&
+        left.IsActive == right.IsActive &&
+        left.BodyId == right.BodyId &&
+        left.RestFrames == right.RestFrames &&
+        SameBits(left.Lifetime, right.Lifetime);
 
     private static SimulationWorldSnapshot Initial(
         AcceptanceScenarioMode mode,

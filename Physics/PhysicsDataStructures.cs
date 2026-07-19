@@ -46,6 +46,8 @@ public struct MaterialProperties
     public uint DecayIntoMaterialIndex;
     public float MaximumCombustionTemperature;
     public float TransitionAboveLatentHeat;
+    public float AmbientTemperature;
+    public float AmbientCoolingRate;
 }
 
 public enum BrushCommandMode : uint

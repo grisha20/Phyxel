@@ -33,6 +33,7 @@ internal static class ThermalAcceptanceScenario
             AcceptanceScenarioMode.ThermalGas or
             AcceptanceScenarioMode.TemperatureTool or
             AcceptanceScenarioMode.TemperatureProbeGpu or
+            AcceptanceScenarioMode.SteamSelfCooling or
             AcceptanceScenarioMode.PhaseDispatchSmoke))
         {
             return null;
@@ -92,6 +93,10 @@ internal static class ThermalAcceptanceScenario
                 break;
             case AcceptanceScenarioMode.TemperatureProbeGpu:
                 CreateTemperatureProbeFixture(cells, width, height, materials);
+                break;
+            case AcceptanceScenarioMode.SteamSelfCooling:
+                Fill(cells, width, 236, 180, 243, 187,
+                    materials.GetRequiredRuntimeIndex(CoreMaterialIds.Steam), 105, 1);
                 break;
             case AcceptanceScenarioMode.PhaseDispatchSmoke:
                 CreatePhaseDispatchFixture(cells, width, height, materials);

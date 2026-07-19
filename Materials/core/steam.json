@@ -16,6 +16,10 @@
     "initialTemperature": 105.0,
     "conductivity": 0.04,
     "heatCapacity": 2.08,
+    "ambientCooling": {
+      "temperature": 20.0,
+      "rate": 0.04
+    },
     "transitions": {
       "below": {
         "temperature": 95.0,

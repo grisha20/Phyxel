@@ -40,6 +40,8 @@ struct MaterialProperties
     uint DecayIntoMaterialIndex;
     float MaximumCombustionTemperature;
     float TransitionAboveLatentHeat;
+    float AmbientTemperature;
+    float AmbientCoolingRate;
 };
 
 struct MaterialEmissionProperties

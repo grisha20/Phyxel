@@ -169,6 +169,7 @@ public static class AcceptanceRegressionVerifier
             AcceptanceScenarioMode.ThermalInsulator or
             AcceptanceScenarioMode.ThermalVacuum or
             AcceptanceScenarioMode.ThermalGas or
+            AcceptanceScenarioMode.SteamSelfCooling or
             AcceptanceScenarioMode.TemperatureProbeGpu => ThermalAcceptanceVerifier.Validate(
                 mode,
                 materialRegistry,

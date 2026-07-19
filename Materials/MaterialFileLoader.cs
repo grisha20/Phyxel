@@ -44,6 +44,7 @@ internal static partial class MaterialFileLoader
         public float Conductivity { get; set; } = MaterialRegistry.DefaultThermalConductivity;
         public float HeatCapacity { get; set; } = MaterialRegistry.DefaultHeatCapacity;
         public JsonElement Transitions { get; set; }
+        public JsonElement AmbientCooling { get; set; }
 
         [JsonExtensionData]
         public Dictionary<string, JsonElement>? UnknownFields { get; set; }
@@ -274,6 +275,8 @@ internal static partial class MaterialFileLoader
             thermal.Transitions,
             id,
             kind);
+        (float ambientTemperature, float ambientCoolingRate) = ParseAmbientCooling(
+            thermal.AmbientCooling);
 
         MaterialFlags flags = ParseFlags(document.Flags, kind);
         MaterialCombustionDefinition? combustion = ParseCombustion(
@@ -325,6 +328,8 @@ internal static partial class MaterialFileLoader
                 thermal.InitialTemperature,
                 thermal.Conductivity,
                 thermal.HeatCapacity,
+                ambientTemperature,
+                ambientCoolingRate,
                 color),
             ui.Order,
             ui.Hidden)
@@ -335,6 +340,63 @@ internal static partial class MaterialFileLoader
             Lifecycle = lifecycle,
             SourcePath = path
         };
+    }
+
+    private static (float Temperature, float Rate) ParseAmbientCooling(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Undefined)
+        {
+            return (0, 0);
+        }
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("thermal.ambientCooling должен быть объектом.");
+        }
+
+        JsonElement temperatureElement = default;
+        JsonElement rateElement = default;
+        HashSet<string> fields = new(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            if (!fields.Add(property.Name))
+            {
+                throw new InvalidDataException(
+                    $"Дублирующее поле thermal.ambientCooling '{property.Name}'.");
+            }
+            if (property.Name.Equals("temperature", StringComparison.OrdinalIgnoreCase))
+            {
+                temperatureElement = property.Value;
+            }
+            else if (property.Name.Equals("rate", StringComparison.OrdinalIgnoreCase))
+            {
+                rateElement = property.Value;
+            }
+            else
+            {
+                throw new InvalidDataException(
+                    $"Неизвестное поле thermal.ambientCooling '{property.Name}'.");
+            }
+        }
+
+        if (temperatureElement.ValueKind != JsonValueKind.Number ||
+            !temperatureElement.TryGetSingle(out float temperature) ||
+            !float.IsFinite(temperature) ||
+            temperature < MaterialRegistry.MinimumInitialTemperature ||
+            temperature > MaterialRegistry.MaximumInitialTemperature)
+        {
+            throw new InvalidDataException(
+                $"thermal.ambientCooling.temperature должна быть конечным числом от " +
+                $"{MaterialRegistry.MinimumInitialTemperature} до {MaterialRegistry.MaximumInitialTemperature}.");
+        }
+        if (rateElement.ValueKind != JsonValueKind.Number ||
+            !rateElement.TryGetSingle(out float rate) ||
+            !float.IsFinite(rate) || rate <= 0 || rate > MaterialRegistry.MaximumAmbientCoolingRate)
+        {
+            throw new InvalidDataException(
+                $"thermal.ambientCooling.rate должна быть конечным числом больше 0 и не больше " +
+                $"{MaterialRegistry.MaximumAmbientCoolingRate}.");
+        }
+        return (temperature, rate);
     }
 
     private static MaterialCombustionDefinition? ParseCombustion(

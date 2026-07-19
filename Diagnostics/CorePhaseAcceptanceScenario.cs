@@ -92,7 +92,11 @@ internal static class CorePhaseAcceptanceScenario
         Set(cells, width, 180, 130, materials, CoreMaterialIds.Water, 20, 1);
         Set(cells, width, 200, 130, materials, CoreMaterialIds.Water, 0, 1.125f);
         Set(cells, width, 220, 130, materials, CoreMaterialIds.Ice, 2, 1.25f, restFrames: 2);
-        Set(cells, width, 240, 130, materials, CoreMaterialIds.Steam, 95, 1.375f);
+        // Steam at the exact condensation threshold now cools below it before
+        // the phase pass. Keep this cell above the threshold so the chain still
+        // covers a stable steam state; generic phase acceptance owns exact
+        // threshold and hysteresis coverage with non-ambient materials.
+        Set(cells, width, 240, 130, materials, CoreMaterialIds.Steam, 96, 1.375f);
         Set(cells, width, 260, 130, materials, CoreMaterialIds.Water, 100, 1.5f);
 
         Set(cells, width, 180, 160, materials, CoreMaterialIds.Water, -10, 1.625f,
@@ -108,7 +112,7 @@ internal static class CorePhaseAcceptanceScenario
 
         foreach ((int X, int Y, float Temperature) in new[]
         {
-            (180, 130, 20f), (200, 130, 0f), (220, 130, 2f), (240, 130, 95f),
+            (180, 130, 20f), (200, 130, 0f), (220, 130, 2f), (240, 130, 96f),
             (260, 130, 100f), (180, 160, -10f), (200, 160, 10f),
             (220, 160, 110f), (240, 160, 80f), (260, 160, 110f)
         })

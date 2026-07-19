@@ -46,8 +46,8 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             100f, 0.9f, 0f, "#525B63", 20f, 0.25f, 0.84f),
         new(CoreMaterialIds.Wood, MaterialSimulationKind.Solid, MaterialFlags.None,
             0.8f, 0.65f, 0f, "#8B5A2B", 20f, 0.65f, 1.0f),
-        new(CoreMaterialIds.Coal, MaterialSimulationKind.Solid, MaterialFlags.None,
-            0.2f, 0.8f, 0f, "#292929", 20f, 0.78f, 1.0f),
+        new(CoreMaterialIds.Coal, MaterialSimulationKind.Granular, MaterialFlags.None,
+            0.2f, 0.6f, 0.35f, "#292929", 20f, 0.78f, 1.0f),
         new(CoreMaterialIds.Smoke, MaterialSimulationKind.Gas, MaterialFlags.None,
             0.04f, 0f, 1f, "#777777B0", 120f, 0.08f, 1f),
         new(CoreMaterialIds.Co2, MaterialSimulationKind.Gas, MaterialFlags.None,
@@ -75,7 +75,11 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static async Task RunAsync()
     {
-        Require(Marshal.SizeOf<MaterialProperties>() == 104, "MaterialProperties must be 104 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == 112, "MaterialProperties must be 112 bytes.");
+        Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.AmbientTemperature)).ToInt32() == 104,
+            "AmbientTemperature offset must be 104.");
+        Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.AmbientCoolingRate)).ToInt32() == 108,
+            "AmbientCoolingRate offset must be 108.");
         string directory = Path.Combine(
             Path.GetTempPath(),
             $"phyxel-thermal-materials-{Guid.NewGuid():N}");
@@ -135,6 +139,11 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
                 $"{expected.Id} conductivity is incorrect.");
             Require(Same(properties.HeatCapacity, expected.HeatCapacity),
                 $"{expected.Id} heatCapacity is incorrect.");
+            float expectedAmbientTemperature = expected.Id == CoreMaterialIds.Steam ? 20f : 0f;
+            float expectedAmbientRate = expected.Id == CoreMaterialIds.Steam ? 0.04f : 0f;
+            Require(Same(properties.AmbientTemperature, expectedAmbientTemperature) &&
+                Same(properties.AmbientCoolingRate, expectedAmbientRate),
+                $"{expected.Id} ambient cooling is incorrect.");
             VerifyCoreTransitions(registry, expected.Id, properties);
         }
         MaterialDefinition water = registry[CoreMaterialIds.Water];
@@ -205,11 +214,15 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             "External material without thermal did not receive default conductivity.");
         Require(Same(legacy.HeatCapacity, MaterialRegistry.DefaultHeatCapacity),
             "External material without thermal did not receive default heatCapacity.");
+        Require(Same(legacy.AmbientTemperature, 0) && Same(legacy.AmbientCoolingRate, 0),
+            "External material without ambientCooling changed thermal behavior.");
 
         MaterialProperties custom = registry["test:custom_thermal"].Properties;
         Require(Same(custom.InitialTemperature, -125.5f), "Custom initialTemperature was not loaded.");
         Require(Same(custom.ThermalConductivity, 0.72f), "Custom conductivity was not loaded.");
         Require(Same(custom.HeatCapacity, 8.25f), "Custom heatCapacity was not loaded.");
+        Require(Same(custom.AmbientTemperature, -10f) && Same(custom.AmbientCoolingRate, 2.5f),
+            "Custom ambientCooling was not loaded.");
 
         MaterialProperties minimums = registry["test:thermal_minimums"].Properties;
         Require(Same(minimums.InitialTemperature, MaterialRegistry.MinimumInitialTemperature),
@@ -230,7 +243,10 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         [
             "test:nan", "test:infinity", "test:temperature_low", "test:temperature_high",
             "test:conductivity_low", "test:conductivity_high", "test:heat_capacity_zero",
-            "test:heat_capacity_low", "test:heat_capacity_high", "test:unknown_thermal"
+            "test:heat_capacity_low", "test:heat_capacity_high", "test:unknown_thermal",
+            "test:ambient_not_object", "test:ambient_missing_temperature",
+            "test:ambient_missing_rate", "test:ambient_rate_zero", "test:ambient_rate_high",
+            "test:ambient_temperature_low", "test:ambient_unknown"
         ];
         foreach (string id in invalidIds)
         {
@@ -280,7 +296,8 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             ["granular.json"] = CreateMaterialJson("test:granular", null),
             ["custom.json"] = CreateMaterialJson(
                 "test:custom_thermal",
-                "{ \"initialTemperature\": -125.5, \"conductivity\": 0.72, \"heatCapacity\": 8.25 }"),
+                "{ \"initialTemperature\": -125.5, \"conductivity\": 0.72, \"heatCapacity\": 8.25, " +
+                "\"ambientCooling\": { \"temperature\": -10.0, \"rate\": 2.5 } }"),
             ["minimums.json"] = CreateMaterialJson(
                 "test:thermal_minimums",
                 "{ \"initialTemperature\": -273.15, \"conductivity\": 0.0, \"heatCapacity\": 0.01 }"),
@@ -316,13 +333,32 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
                 "{ \"initialTemperature\": 20.0, \"conductivity\": 0.15, \"heatCapacity\": 100.01 }"),
             ["unknown.json"] = CreateMaterialJson(
                 "test:unknown_thermal",
-                "{ \"initialTemperature\": 20.0, \"conductivity\": 0.15, \"heatCapacity\": 1.0, \"conductivty\": 0.2 }")
+                "{ \"initialTemperature\": 20.0, \"conductivity\": 0.15, \"heatCapacity\": 1.0, \"conductivty\": 0.2 }"),
+            ["ambient-not-object.json"] = CreateMaterialJson(
+                "test:ambient_not_object", ThermalWithAmbient("[]")),
+            ["ambient-missing-temperature.json"] = CreateMaterialJson(
+                "test:ambient_missing_temperature", ThermalWithAmbient("{ \"rate\": 1.0 }")),
+            ["ambient-missing-rate.json"] = CreateMaterialJson(
+                "test:ambient_missing_rate", ThermalWithAmbient("{ \"temperature\": 20.0 }")),
+            ["ambient-rate-zero.json"] = CreateMaterialJson(
+                "test:ambient_rate_zero", ThermalWithAmbient("{ \"temperature\": 20.0, \"rate\": 0.0 }")),
+            ["ambient-rate-high.json"] = CreateMaterialJson(
+                "test:ambient_rate_high", ThermalWithAmbient("{ \"temperature\": 20.0, \"rate\": 100.01 }")),
+            ["ambient-temperature-low.json"] = CreateMaterialJson(
+                "test:ambient_temperature_low", ThermalWithAmbient("{ \"temperature\": -273.16, \"rate\": 1.0 }")),
+            ["ambient-unknown.json"] = CreateMaterialJson(
+                "test:ambient_unknown", ThermalWithAmbient(
+                    "{ \"temperature\": 20.0, \"rate\": 1.0, \"typo\": 1 }"))
         };
         foreach ((string fileName, string? contents) in materials)
         {
             await File.WriteAllTextAsync(Path.Combine(directory, fileName), contents);
         }
     }
+
+    private static string ThermalWithAmbient(string ambient) =>
+        $"{{ \"initialTemperature\": 20.0, \"conductivity\": 0.15, " +
+        $"\"heatCapacity\": 1.0, \"ambientCooling\": {ambient} }}";
 
     private static string CreateMaterialJson(string id, string? thermal)
     {
@@ -369,7 +405,9 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         Same(left.MaximumLifetime, right.MaximumLifetime) &&
         left.DecayIntoMaterialIndex == right.DecayIntoMaterialIndex &&
         Same(left.MaximumCombustionTemperature, right.MaximumCombustionTemperature) &&
-        Same(left.TransitionAboveLatentHeat, right.TransitionAboveLatentHeat);
+        Same(left.TransitionAboveLatentHeat, right.TransitionAboveLatentHeat) &&
+        Same(left.AmbientTemperature, right.AmbientTemperature) &&
+        Same(left.AmbientCoolingRate, right.AmbientCoolingRate);
 
     private static Color ParseColor(string value)
     {

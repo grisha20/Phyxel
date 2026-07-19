@@ -25,6 +25,7 @@ public sealed class MaterialRegistry
     public const float MaximumCombustionHeatPerMass = 1_000_000f;
     public const float MaximumFlameSpreadRate = 100f;
     public const float MaximumLifetime = 3600f;
+    public const float MaximumAmbientCoolingRate = 100f;
 
     private readonly ReadOnlyCollection<MaterialDefinition> materials;
     private readonly ReadOnlyCollection<MaterialDefinition> selectableMaterials;
@@ -567,6 +568,8 @@ public sealed class MaterialRegistry
         float initialTemperature,
         float thermalConductivity,
         float heatCapacity,
+        float ambientTemperature,
+        float ambientCoolingRate,
         Color color)
     {
         return new MaterialProperties
@@ -583,6 +586,8 @@ public sealed class MaterialRegistry
             InitialTemperature = initialTemperature,
             ThermalConductivity = thermalConductivity,
             HeatCapacity = heatCapacity,
+            AmbientTemperature = ambientTemperature,
+            AmbientCoolingRate = ambientCoolingRate,
             TransitionBelowMaterialIndex = uint.MaxValue,
             TransitionAboveMaterialIndex = uint.MaxValue,
             BurnedIntoMaterialIndex = uint.MaxValue,

@@ -13,6 +13,7 @@ namespace Phyxel.Diagnostics;
 public sealed class AcceptanceRegressionHarness
 {
     private static readonly ulong[] ThermalContactCheckpointTicks = [20, 40, 60, 80];
+    private static readonly ulong[] SteamCoolingCheckpointTicks = [0, 1, 20, 40, 60, 80];
     private MaterialRegistry? materialRegistry;
     private readonly List<ThermalAcceptanceCheckpoint> thermalCheckpoints = [];
     private readonly TemperatureProbeAcceptanceTrace temperatureProbeTrace = new();
@@ -86,6 +87,7 @@ public sealed class AcceptanceRegressionHarness
             "water_ice_steam_v5_roundtrip" => AcceptanceScenarioMode.WaterIceSteamV5RoundTrip,
             "combustion" or "combustion_chain" => AcceptanceScenarioMode.CombustionChain,
             "combustion_quench" or "water_quench" => AcceptanceScenarioMode.CombustionQuench,
+            "steam_self_cooling" => AcceptanceScenarioMode.SteamSelfCooling,
             _ => AcceptanceScenarioMode.None
         };
         phaseAcceptance = new PhaseAcceptanceController(Mode);
@@ -163,6 +165,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.TemperatureProbeGpu => 240,
                 AcceptanceScenarioMode.CombustionChain => 1800,
                 AcceptanceScenarioMode.CombustionQuench => 900,
+                AcceptanceScenarioMode.SteamSelfCooling => uint.MaxValue,
                 AcceptanceScenarioMode.PhaseDispatchSmoke => 240,
                 AcceptanceScenarioMode.ThermalUniform or
                 AcceptanceScenarioMode.ThermalConductivityCompare or
@@ -269,6 +272,22 @@ public sealed class AcceptanceRegressionHarness
             }
             return ready;
         }
+        if (Mode == AcceptanceScenarioMode.SteamSelfCooling)
+        {
+            if (thermalCheckpoints.Count >= SteamCoolingCheckpointTicks.Length)
+            {
+                return false;
+            }
+            ulong steamTarget = SteamCoolingCheckpointTicks[thermalCheckpoints.Count];
+            bool ready = steamTarget == 0
+                ? frame >= 10 && dispatchCoordinator.ThermalTicks == 0
+                : dispatchCoordinator.ThermalTicks >= steamTarget;
+            if (ready)
+            {
+                checkpointTick = dispatchCoordinator.ThermalTicks;
+            }
+            return ready;
+        }
         if (Mode != AcceptanceScenarioMode.ThermalContact ||
             thermalCheckpoints.Count >= ThermalContactCheckpointTicks.Length) return false;
         ulong target = ThermalContactCheckpointTicks[thermalCheckpoints.Count];
@@ -298,7 +317,10 @@ public sealed class AcceptanceRegressionHarness
         phaseAcceptance.AdjustElapsedSeconds(elapsedSeconds);
 
     public bool CanBeginFinalCapture(uint frame, SimulationDispatchCoordinator dispatchCoordinator) =>
-        phaseAcceptance.IsPhaseMode
+        Mode == AcceptanceScenarioMode.SteamSelfCooling
+            ? thermalCheckpoints.Count >= SteamCoolingCheckpointTicks.Length &&
+                dispatchCoordinator.ThermalTicks >= SteamCoolingCheckpointTicks[^1]
+            : phaseAcceptance.IsPhaseMode
             ? phaseAcceptance.CanBeginFinalCapture(frame, dispatchCoordinator)
             : frame >= CaptureFrame;
 
@@ -343,6 +365,10 @@ public sealed class AcceptanceRegressionHarness
         if (Mode == AcceptanceScenarioMode.TemperatureTool)
         {
             settings.Paused = frame < 20;
+        }
+        else if (Mode == AcceptanceScenarioMode.SteamSelfCooling)
+        {
+            settings.Paused = frame < 30;
         }
     }
 

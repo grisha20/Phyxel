@@ -55,6 +55,10 @@ internal static class ThermalAcceptanceVerifier
         {
             return ValidateTemperatureProbe(materials, probeTrace, out report);
         }
+        if (mode == AcceptanceScenarioMode.SteamSelfCooling)
+        {
+            return ValidateSteamSelfCooling(materials, snapshot, checkpoints, out report);
+        }
 
         SimulationWorldSnapshot initial = ThermalAcceptanceScenario.Create(
             mode,
@@ -257,6 +261,85 @@ internal static class ThermalAcceptanceVerifier
             $"preservedFields={preservedFields} energyError={energyError:P5} " +
             $"roundTrip={roundTrip} clearedEmpty={final.Grid.Length == 0}";
         return passed;
+    }
+
+    private static bool ValidateSteamSelfCooling(
+        MaterialRegistry materials,
+        SimulationWorldSnapshot final,
+        IReadOnlyList<ThermalAcceptanceCheckpoint> checkpoints,
+        out string report)
+    {
+        const double massTolerance = 0.0005;
+        uint steam = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
+        uint water = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
+        SimulationWorldSnapshot initial = ThermalAcceptanceScenario.Create(
+            AcceptanceScenarioMode.SteamSelfCooling,
+            final.Width,
+            final.Height,
+            materials) ?? throw new InvalidOperationException("Steam cooling fixture is missing.");
+        bool valid = checkpoints.Count == 6;
+        StringBuilder stages = new();
+        double initialMass = PhaseFamilyMetrics(initial, steam, water).Mass;
+        double previousTemperature = 105;
+        ulong previousTick = 0;
+        for (int index = 0; index < checkpoints.Count; index++)
+        {
+            ThermalAcceptanceCheckpoint checkpoint = checkpoints[index];
+            (double mass, double temperature, int steamCells, int waterCells) =
+                PhaseFamilyMetrics(checkpoint.Snapshot, steam, water);
+            bool paused = index == 0;
+            valid &= RelativeError(initialMass, mass) <= massTolerance &&
+                (paused
+                    ? checkpoint.ThermalTicks == 0 &&
+                        checkpoint.Snapshot.Grid.AsSpan().SequenceEqual(initial.Grid)
+                    : checkpoint.ThermalTicks > previousTick &&
+                        temperature < previousTemperature && temperature > 20);
+            if (index is >= 1 and <= 4)
+            {
+                valid &= steamCells > 0 && waterCells == 0;
+            }
+            if (index == 5)
+            {
+                valid &= checkpoint.ThermalTicks is >= 80 and <= 81 &&
+                    waterCells > 0 && steamCells == 0 && temperature < 95;
+            }
+            if (stages.Length > 0) stages.Append(';');
+            stages.Append($"{checkpoint.Frame}/{checkpoint.ThermalTicks}:" +
+                $"{temperature:0.000}/{mass:0.000}/{steamCells}/{waterCells}");
+            previousTemperature = temperature;
+            previousTick = checkpoint.ThermalTicks;
+        }
+        (double finalMass, double finalTemperature, int finalSteam, int finalWater) =
+            PhaseFamilyMetrics(final, steam, water);
+        valid &= RelativeError(initialMass, finalMass) <= massTolerance &&
+            finalTemperature <= previousTemperature + 1e-5 && finalWater > 0 && finalSteam == 0;
+        report = $"PHYXEL_STEAM_SELF_COOLING initialMass={initialMass:0.000} " +
+            $"finalMass={finalMass:0.000} finalTemperature={finalTemperature:0.000} " +
+            $"externalAmbientLoss=true neighbourExchange=false stages={stages}";
+        return valid;
+    }
+
+    private static (double Mass, double Temperature, int SteamCells, int WaterCells) PhaseFamilyMetrics(
+        SimulationWorldSnapshot snapshot,
+        uint steam,
+        uint water)
+    {
+        double mass = 0;
+        double weightedTemperature = 0;
+        int steamCells = 0;
+        int waterCells = 0;
+        foreach (GridCell cell in MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid))
+        {
+            if (cell.IsActive == 0 || (cell.MaterialIndex != steam && cell.MaterialIndex != water))
+            {
+                continue;
+            }
+            mass += cell.Mass;
+            weightedTemperature += cell.Mass * cell.Temperature;
+            if (cell.MaterialIndex == steam) steamCells++;
+            else waterCells++;
+        }
+        return (mass, weightedTemperature / Math.Max(mass, 1e-9), steamCells, waterCells);
     }
 
     private static bool SameExceptTemperature(GridCell first, GridCell second) =>

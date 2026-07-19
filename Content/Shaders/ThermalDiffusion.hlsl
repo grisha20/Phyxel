@@ -84,5 +84,12 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     cell.Temperature += heatFlow / capacity;
+    MaterialProperties material = Materials[cell.MaterialIndex];
+    if (material.AmbientCoolingRate > 0)
+    {
+        float ambientFactor = 1.0 - exp(-material.AmbientCoolingRate * ThermalDeltaTime);
+        cell.Temperature +=
+            (material.AmbientTemperature - cell.Temperature) * saturate(ambientFactor);
+    }
     DestinationGrid[index] = cell;
 }
