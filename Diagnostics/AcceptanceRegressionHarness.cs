@@ -88,6 +88,7 @@ public sealed class AcceptanceRegressionHarness
             "combustion" or "combustion_chain" => AcceptanceScenarioMode.CombustionChain,
             "combustion_quench" or "water_quench" => AcceptanceScenarioMode.CombustionQuench,
             "steam_self_cooling" => AcceptanceScenarioMode.SteamSelfCooling,
+            "brush_empty_only" => AcceptanceScenarioMode.BrushEmptyOnly,
             _ => AcceptanceScenarioMode.None
         };
         phaseAcceptance = new PhaseAcceptanceController(Mode);
@@ -163,9 +164,13 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.ThermalContact => 700,
                 AcceptanceScenarioMode.ThermalCapacity => 1300,
                 AcceptanceScenarioMode.TemperatureProbeGpu => 240,
-                AcceptanceScenarioMode.CombustionChain => 1800,
+                // Brush commands are serialized and the fixture is now dense
+                // and deterministic. Capture while combustion is active rather
+                // than after all transient flame/smoke has naturally expired.
+                AcceptanceScenarioMode.CombustionChain => 900,
                 AcceptanceScenarioMode.CombustionQuench => 900,
                 AcceptanceScenarioMode.SteamSelfCooling => uint.MaxValue,
+                AcceptanceScenarioMode.BrushEmptyOnly => 7,
                 AcceptanceScenarioMode.PhaseDispatchSmoke => 240,
                 AcceptanceScenarioMode.ThermalUniform or
                 AcceptanceScenarioMode.ThermalConductivityCompare or
@@ -186,7 +191,8 @@ public sealed class AcceptanceRegressionHarness
     public SimulationWorldSnapshot? CreateInitialWorld(int width, int height) =>
         materialRegistry is null
             ? null
-            : ThermalAcceptanceScenario.Create(Mode, width, height, materialRegistry);
+            : ThermalAcceptanceScenario.Create(Mode, width, height, materialRegistry) ??
+                BrushEmptyOnlyAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry);
 
     public Point? GetProbeCoordinate(uint frame) => Mode switch
     {
@@ -369,6 +375,10 @@ public sealed class AcceptanceRegressionHarness
         else if (Mode == AcceptanceScenarioMode.SteamSelfCooling)
         {
             settings.Paused = frame < 30;
+        }
+        else if (Mode == AcceptanceScenarioMode.BrushEmptyOnly)
+        {
+            settings.Paused = true;
         }
     }
 

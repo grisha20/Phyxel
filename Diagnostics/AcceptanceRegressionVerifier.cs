@@ -202,6 +202,10 @@ public static class AcceptanceRegressionVerifier
                 combustionGpuTiming,
                 combustionDispatches,
                 out report),
+            AcceptanceScenarioMode.BrushEmptyOnly => BrushEmptyOnlyAcceptanceVerifier.Validate(
+                snapshot,
+                materialRegistry,
+                out report),
             AcceptanceScenarioMode.PhaseThresholds or
             AcceptanceScenarioMode.PhaseHysteresis or
             AcceptanceScenarioMode.PhaseSingleTransition or

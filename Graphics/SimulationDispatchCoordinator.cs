@@ -332,8 +332,7 @@ public sealed class SimulationDispatchCoordinator
         SimulationFrameConstants constants = CreateConstants(settings, commands);
         if (commands.Length > 0 && resources.IsSimulationAllocated)
         {
-            resources.Commands.Upload(resources.Context, commands);
-            DispatchBrush(resources, ref constants);
+            DispatchBrush(resources, commands, ref constants);
             cellMaterialsDirty |= ContainsGridTopologyCommand(commands);
             RegisterActivity(
                 commands,
@@ -649,17 +648,28 @@ public sealed class SimulationDispatchCoordinator
         }
     }
 
-    private void DispatchBrush(GpuSimulationResources resources, ref SimulationFrameConstants constants)
+    private void DispatchBrush(
+        GpuSimulationResources resources,
+        ReadOnlySpan<BrushDrawCommand> commands,
+        ref SimulationFrameConstants constants)
     {
         DeviceContext context = resources.Context;
-        UpdateConstants(context, resources, ref constants);
-        context.ComputeShader.Set(resources.BrushShader);
-        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResources(0, resources.Commands.View, resources.Materials.View);
-        context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.ReadUnorderedView);
-        int diameter = Math.Max(1, (int)constants.MaximumBrushDiameter);
-        context.Dispatch(DivideRoundUp(diameter, 16), DivideRoundUp(diameter, 16), (int)constants.CommandCount);
-        Unbind(context, 2, 1);
+        for (int commandIndex = 0; commandIndex < commands.Length; commandIndex++)
+        {
+            ReadOnlySpan<BrushDrawCommand> command = commands.Slice(commandIndex, 1);
+            resources.Commands.Upload(context, command);
+            constants.CommandCount = 1;
+            constants.MaximumBrushDiameter =
+                (uint)(MathF.Ceiling(command[0].Radius) * 2 + 1);
+            UpdateConstants(context, resources, ref constants);
+            context.ComputeShader.Set(resources.BrushShader);
+            context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+            context.ComputeShader.SetShaderResources(0, resources.Commands.View, resources.Materials.View);
+            context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.ReadUnorderedView);
+            int diameter = Math.Max(1, (int)constants.MaximumBrushDiameter);
+            context.Dispatch(DivideRoundUp(diameter, 16), DivideRoundUp(diameter, 16), 1);
+            Unbind(context, 2, 1);
+        }
     }
 
     private void DispatchComponentLabeling(

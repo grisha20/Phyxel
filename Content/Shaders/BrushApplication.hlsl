@@ -61,18 +61,17 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         return;
     }
-    if (IsCellularMaterial(material.SimulationKind) && existing.IsActive != 0 &&
-        Materials[existing.MaterialIndex].SimulationKind == SimulationKindSolid)
+    if (existing.IsActive != 0)
     {
         if ((material.Flags & MaterialFlagFlame) != 0)
         {
             MaterialProperties existingMaterial = Materials[existing.MaterialIndex];
-            if (existingMaterial.BurnedIntoMaterialIndex != 0xffffffffu &&
+            if (existingMaterial.SimulationKind == SimulationKindSolid &&
+                existingMaterial.BurnedIntoMaterialIndex != 0xffffffffu &&
                 existingMaterial.FlameSpreadRate > 0)
             {
-                // The FIRE brush ignites a combustible solid in place. Empty
-                // brush pixels still become physical flame particles, while
-                // the solid itself is never replaced by a circular gas hole.
+                // Flame tools ignite combustible solids in place. Every other
+                // material command is strictly empty-only.
                 existing.Temperature = max(
                     existing.Temperature,
                     existingMaterial.IgnitionTemperature + 1.0);
