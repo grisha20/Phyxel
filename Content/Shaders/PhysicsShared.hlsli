@@ -42,6 +42,8 @@ struct MaterialProperties
     float TransitionAboveLatentHeat;
     float AmbientTemperature;
     float AmbientCoolingRate;
+    uint ContactLiquidIntoMaterialIndex;
+    float ContactLiquidRatePerSecond;
 };
 
 struct MaterialEmissionProperties

@@ -339,6 +339,24 @@ bool GranularCanMoveTo(
 
     return !diagonal || SandSupported(source);
 }
+
+bool GranularCanSpreadThroughLiquidSide(
+    uint2 coordinate,
+    uint granularMaterial,
+    uint liquidMaterial)
+{
+    if (CellKindFromMaterial(granularMaterial) != SimulationKindGranular ||
+        CellKindFromMaterial(liquidMaterial) != SimulationKindLiquid ||
+        CellRankFromMaterial(granularMaterial) >= CellRankFromMaterial(liquidMaterial))
+    {
+        return false;
+    }
+    bool stackedAbove = coordinate.y > 0 &&
+        CellMaterials[FlattenCoordinate(coordinate - uint2(0, 1))] == granularMaterial;
+    bool stackedBelow = coordinate.y + 1 < Height &&
+        CellMaterials[FlattenCoordinate(coordinate + uint2(0, 1))] == granularMaterial;
+    return stackedAbove || stackedBelow;
+}
 #define MaxSolidDistance 8
 
 uint SolidDistanceBelow(uint2 coordinate)
@@ -982,6 +1000,19 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
     uint rightKind = CellKindFromMaterial(rightMaterial);
     if (leftKind == 2 || rightKind == 2)
     {
+        return;
+    }
+    if (leftKind == SimulationKindGranular && rightKind == SimulationKindLiquid &&
+        GranularCanSpreadThroughLiquidSide(leftCoordinate, leftMaterial, rightMaterial))
+    {
+        ExchangeGranularWithLiquid(leftIndex, rightIndex, 24, 0);
+        return;
+    }
+    if (rightKind == SimulationKindGranular && leftKind == SimulationKindLiquid &&
+        GranularCanSpreadThroughLiquidSide(
+            leftCoordinate + uint2(1, 0), rightMaterial, leftMaterial))
+    {
+        ExchangeGranularWithLiquid(rightIndex, leftIndex, -24, 0);
         return;
     }
     if (leftKind == 1 && SandCanRoll(
@@ -2140,6 +2171,20 @@ bool CanMoveSand(uint2 coordinate, GridCell cell)
                     return true;
                 }
             }
+        }
+    }
+    for (int direction = -1; direction <= 1; direction += 2)
+    {
+        int x = int(coordinate.x) + direction;
+        if (x < 0 || x >= int(Width))
+        {
+            continue;
+        }
+        uint sideMaterial = CellMaterials[FlattenCoordinate(uint2(x, coordinate.y))];
+        if (GranularCanSpreadThroughLiquidSide(
+            coordinate, cell.MaterialIndex, sideMaterial))
+        {
+            return true;
         }
     }
     return false;

@@ -37,6 +37,8 @@ public static class CoreMaterialIds
     public const string Fixture = "core:fixture";
     public const string Wood = "core:wood";
     public const string Coal = "core:coal";
+    public const string WetCharcoal = "core:wet_charcoal";
+    public const string StoneCoal = "core:stone_coal";
     public const string Smoke = "core:smoke";
     public const string Co2 = "core:co2";
     public const string Fire = "core:fire";
@@ -54,6 +56,8 @@ public static class CoreMaterialIds
         Fixture,
         Wood,
         Coal,
+        WetCharcoal,
+        StoneCoal,
         Smoke,
         Co2,
         Fire
@@ -87,6 +91,10 @@ public sealed record MaterialLifecycleDefinition(
     float MaximumLifetime,
     string DecayIntoId);
 
+public sealed record MaterialLiquidContactTransitionDefinition(
+    string IntoId,
+    float RatePerSecond);
+
 public sealed record MaterialDefinition(
     string Id,
     ushort RuntimeIndex,
@@ -100,6 +108,7 @@ public sealed record MaterialDefinition(
     public MaterialCombustionDefinition? Combustion { get; init; }
     public MaterialEmissionDefinition? Emissions { get; init; }
     public MaterialLifecycleDefinition? Lifecycle { get; init; }
+    public MaterialLiquidContactTransitionDefinition? LiquidContactTransition { get; init; }
     internal string SourcePath { get; init; } = string.Empty;
     internal bool IsBundled { get; init; }
 }

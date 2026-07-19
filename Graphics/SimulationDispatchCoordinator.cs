@@ -110,6 +110,12 @@ public sealed class SimulationDispatchCoordinator
     private double thermalTimingTotalMilliseconds;
     private double thermalTimingMinimumMilliseconds = double.PositiveInfinity;
     private double thermalTimingMaximumMilliseconds;
+    private bool contactTransitionPotential;
+    private bool contactTimingPending;
+    private int contactTimingSamples;
+    private double contactTimingTotalMilliseconds;
+    private double contactTimingMinimumMilliseconds = double.PositiveInfinity;
+    private double contactTimingMaximumMilliseconds;
     private readonly PhaseTransitionWakeUpGate phaseWakeUpGate = new();
     private ulong phaseReadbackGeneration;
     private ulong phaseFallbackWakeUps;
@@ -205,6 +211,11 @@ public sealed class SimulationDispatchCoordinator
         thermalTimingSamples == 0 ? 0 : thermalTimingTotalMilliseconds / thermalTimingSamples,
         thermalTimingSamples == 0 ? 0 : thermalTimingMinimumMilliseconds,
         thermalTimingMaximumMilliseconds);
+    public ThermalGpuTimingStatistics ContactTransitionGpuTiming => new(
+        contactTimingSamples,
+        contactTimingSamples == 0 ? 0 : contactTimingTotalMilliseconds / contactTimingSamples,
+        contactTimingSamples == 0 ? 0 : contactTimingMinimumMilliseconds,
+        contactTimingMaximumMilliseconds);
     public ThermalGpuTimingStatistics PhaseGpuTiming => new(
         phaseTimingSamples,
         phaseTimingSamples == 0 ? 0 : phaseTimingTotalMilliseconds / phaseTimingSamples,
@@ -474,6 +485,7 @@ public sealed class SimulationDispatchCoordinator
         }
 
         PollThermalTiming(resources);
+        PollContactTiming(resources);
         int thermalTicks = thermalScheduler.Advance(
             elapsedSeconds,
             settings.Paused,
@@ -483,6 +495,22 @@ public sealed class SimulationDispatchCoordinator
         {
             bool measure = thermalScheduler.TotalTicks >= 40 && !thermalTimingPending;
             DispatchThermalDiffusion(resources, measure);
+            if (materialRegistry.RegistryHasContactTransitions && contactTransitionPotential)
+            {
+                uint tickIndex = unchecked((uint)(thermalScheduler.TotalTicks -
+                    (ulong)thermalTicks + (ulong)tick + 1));
+                bool measureContact = thermalScheduler.TotalTicks >= 40 && !contactTimingPending;
+                DispatchContactTransitions(resources, tickIndex, measureContact);
+                // A transition resets RestFrames on the GPU. Conservatively
+                // schedule a cellular step after each fixed contact tick; this
+                // avoids a blocking summary readback while keeping the 20 Hz
+                // contact model independent of rendered FPS.
+                cellularMatter = true;
+                fluidMatter = true;
+                cellularSleeping = false;
+                finalizeCellularRest = false;
+                presentationDirty = true;
+            }
         }
 
         int combustionDispatchCount = CombustionDispatchPolicy.GetDispatchCount(
@@ -547,6 +575,7 @@ public sealed class SimulationDispatchCoordinator
     public void RestoreWorldActivity(
         GpuSimulationResources resources,
         bool containsMatter,
+        bool containsContactTransitionSource,
         bool hydraulicPressure)
     {
         resources.Context.ClearUnorderedAccessView(
@@ -555,8 +584,10 @@ public sealed class SimulationDispatchCoordinator
         boundResources = resources;
         worldHasMatter = containsMatter;
         thermalActive = containsMatter;
+        contactTransitionPotential = containsContactTransitionSource;
         thermalScheduler.Reset();
         ResetThermalTiming();
+        ResetContactTiming();
         ResetPhaseRuntime();
         ResetCombustionRuntime();
         cellularMatter = containsMatter;
@@ -1138,6 +1169,8 @@ public sealed class SimulationDispatchCoordinator
             thermalActive = true;
             MaterialSimulationKind kind = (MaterialSimulationKind)materialRegistry[command.MaterialIndex]
                 .Properties.SimulationKind;
+            contactTransitionPotential |=
+                materialRegistry[command.MaterialIndex].LiquidContactTransition is not null;
             if (kind == MaterialSimulationKind.Solid)
             {
                 solidMatter = true;
@@ -1177,11 +1210,13 @@ public sealed class SimulationDispatchCoordinator
         fastSettleFrames = 0;
         fastMaximumAwakeFrames = 0;
         cellMaterialsDirty = false;
+        contactTransitionPotential = false;
         if (resetThermal)
         {
             thermalActive = false;
             thermalScheduler.Reset();
             ResetThermalTiming();
+            ResetContactTiming();
         }
         ResetPhaseRuntime();
         ResetCombustionRuntime();
@@ -1267,6 +1302,89 @@ public sealed class SimulationDispatchCoordinator
         thermalTimingTotalMilliseconds = 0;
         thermalTimingMinimumMilliseconds = double.PositiveInfinity;
         thermalTimingMaximumMilliseconds = 0;
+    }
+
+    private void DispatchContactTransitions(
+        GpuSimulationResources resources,
+        uint tickIndex,
+        bool measure)
+    {
+        ContactTransitionConstants constants = new()
+        {
+            DeltaTime = FixedThermalStep,
+            Width = (uint)resources.Width,
+            Height = (uint)resources.Height,
+            TickIndex = tickIndex
+        };
+        DeviceContext context = resources.Context;
+        if (measure)
+        {
+            context.Begin(resources.ContactTimestampDisjointQuery);
+            context.End(resources.ContactTimestampStartQuery);
+        }
+        context.UpdateSubresource(ref constants, resources.ContactTransitionConstants);
+        context.ComputeShader.Set(resources.ContactTransitionShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.ContactTransitionConstants);
+        context.ComputeShader.SetShaderResource(0, resources.Materials.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Grid.ReadUnorderedView,
+            resources.CellMaterials.UnorderedView);
+        context.Dispatch(
+            DivideRoundUp(resources.Width, 16),
+            DivideRoundUp(resources.Height, 16),
+            1);
+        if (measure)
+        {
+            context.End(resources.ContactTimestampEndQuery);
+            context.End(resources.ContactTimestampDisjointQuery);
+            contactTimingPending = true;
+        }
+        Unbind(context, 1, 2);
+    }
+
+    private void PollContactTiming(GpuSimulationResources resources)
+    {
+        if (!contactTimingPending)
+        {
+            return;
+        }
+        DeviceContext context = resources.Context;
+        bool disjointReady = context.GetData(
+            resources.ContactTimestampDisjointQuery,
+            AsynchronousFlags.DoNotFlush,
+            out QueryDataTimestampDisjoint disjoint);
+        bool startReady = context.GetData(
+            resources.ContactTimestampStartQuery,
+            AsynchronousFlags.DoNotFlush,
+            out long start);
+        bool endReady = context.GetData(
+            resources.ContactTimestampEndQuery,
+            AsynchronousFlags.DoNotFlush,
+            out long end);
+        if (!disjointReady || !startReady || !endReady)
+        {
+            return;
+        }
+        contactTimingPending = false;
+        if (disjoint.Disjoint || disjoint.Frequency <= 0 || end < start)
+        {
+            return;
+        }
+        double milliseconds = (end - start) * 1000d / disjoint.Frequency;
+        contactTimingSamples++;
+        contactTimingTotalMilliseconds += milliseconds;
+        contactTimingMinimumMilliseconds = Math.Min(contactTimingMinimumMilliseconds, milliseconds);
+        contactTimingMaximumMilliseconds = Math.Max(contactTimingMaximumMilliseconds, milliseconds);
+    }
+
+    private void ResetContactTiming()
+    {
+        contactTimingPending = false;
+        contactTimingSamples = 0;
+        contactTimingTotalMilliseconds = 0;
+        contactTimingMinimumMilliseconds = double.PositiveInfinity;
+        contactTimingMaximumMilliseconds = 0;
     }
 
     private void DispatchCombustion(
@@ -1449,6 +1567,7 @@ public sealed class SimulationDispatchCoordinator
             {
                 presentationDirty = true;
                 thermalActive = true;
+                contactTransitionPotential |= materialRegistry.RegistryHasContactTransitions;
                 if ((lastCombustionSummary & CombustionSummaryFlags.TargetCellular) != 0)
                 {
                     cellularMatter = true;
@@ -1669,6 +1788,7 @@ public sealed class SimulationDispatchCoordinator
         finalizeCellularRest = false;
         settledObservations = 0;
         thermalActive = true;
+        contactTransitionPotential |= materialRegistry.RegistryHasContactTransitions;
 
         if ((flags & PhaseTransitionSummaryFlags.TargetCellular) != 0)
         {

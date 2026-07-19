@@ -25,6 +25,7 @@ internal static partial class MaterialFileLoader
         public JsonElement Combustion { get; set; }
         public JsonElement Emissions { get; set; }
         public JsonElement Lifecycle { get; set; }
+        public JsonElement ContactTransitions { get; set; }
         public MaterialUiDocument? Ui { get; set; }
 
         [JsonExtensionData]
@@ -285,6 +286,8 @@ internal static partial class MaterialFileLoader
             kind);
         MaterialEmissionDefinition? emissions = ParseEmissions(document.Emissions, id, combustion);
         MaterialLifecycleDefinition? lifecycle = ParseLifecycle(document.Lifecycle, id, kind);
+        MaterialLiquidContactTransitionDefinition? liquidContactTransition =
+            ParseContactTransitions(document.ContactTransitions, id, kind);
         if (combustion is not null && (flags & MaterialFlags.MovableSolid) != 0)
         {
             throw new InvalidDataException(
@@ -338,8 +341,97 @@ internal static partial class MaterialFileLoader
             Combustion = combustion,
             Emissions = emissions,
             Lifecycle = lifecycle,
+            LiquidContactTransition = liquidContactTransition,
             SourcePath = path
         };
+    }
+
+    private static MaterialLiquidContactTransitionDefinition? ParseContactTransitions(
+        JsonElement value,
+        string sourceId,
+        MaterialSimulationKind sourceKind)
+    {
+        if (value.ValueKind == JsonValueKind.Undefined)
+        {
+            return null;
+        }
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("contactTransitions must be an object.");
+        }
+        if (sourceKind != MaterialSimulationKind.Granular)
+        {
+            throw new InvalidDataException(
+                $"Material '{sourceId}' with contactTransitions must have kind 'granular'.");
+        }
+
+        JsonElement liquidElement = default;
+        HashSet<string> rootFields = new(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            if (!rootFields.Add(property.Name))
+            {
+                throw new InvalidDataException(
+                    $"Duplicate contactTransitions field '{property.Name}'.");
+            }
+            if (!property.Name.Equals("liquid", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    $"Unknown contactTransitions field '{property.Name}'.");
+            }
+            liquidElement = property.Value;
+        }
+        if (liquidElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("contactTransitions.liquid must be an object.");
+        }
+
+        JsonElement intoElement = default;
+        JsonElement rateElement = default;
+        HashSet<string> liquidFields = new(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonProperty property in liquidElement.EnumerateObject())
+        {
+            if (!liquidFields.Add(property.Name))
+            {
+                throw new InvalidDataException(
+                    $"Duplicate contactTransitions.liquid field '{property.Name}'.");
+            }
+            if (property.Name.Equals("into", StringComparison.OrdinalIgnoreCase))
+            {
+                intoElement = property.Value;
+            }
+            else if (property.Name.Equals("ratePerSecond", StringComparison.OrdinalIgnoreCase))
+            {
+                rateElement = property.Value;
+            }
+            else
+            {
+                throw new InvalidDataException(
+                    $"Unknown contactTransitions.liquid field '{property.Name}'.");
+            }
+        }
+
+        if (intoElement.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(intoElement.GetString()))
+        {
+            throw new InvalidDataException("contactTransitions.liquid.into is required.");
+        }
+        string intoId = MaterialRegistry.NormalizeId(intoElement.GetString()!);
+        if (!MaterialIdPattern().IsMatch(intoId))
+        {
+            throw new InvalidDataException(
+                $"contactTransitions.liquid.into '{intoElement.GetString()}' is not a valid material ID.");
+        }
+        if (rateElement.ValueKind != JsonValueKind.Number ||
+            !rateElement.TryGetSingle(out float rate) ||
+            !float.IsFinite(rate) || rate <= 0 ||
+            rate > MaterialRegistry.MaximumContactTransitionRate)
+        {
+            throw new InvalidDataException(
+                $"contactTransitions.liquid.ratePerSecond must be finite, greater than 0, and at most " +
+                $"{MaterialRegistry.MaximumContactTransitionRate}.");
+        }
+        return new MaterialLiquidContactTransitionDefinition(intoId, rate);
     }
 
     private static (float Temperature, float Rate) ParseAmbientCooling(JsonElement value)

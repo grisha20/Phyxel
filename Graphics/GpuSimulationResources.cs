@@ -29,6 +29,7 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuUploadBuffer<MaterialEmissionProperties> Emissions { get; init; }
     public required Buffer FrameConstants { get; init; }
     public required Buffer ThermalConstants { get; init; }
+    public required Buffer ContactTransitionConstants { get; init; }
     public required Buffer PhaseConstants { get; init; }
     public required GpuStructuredBuffer<uint> PhaseSummary { get; init; }
     public required GpuPhaseSummaryReadbackSlot[] PhaseSummaryReadbackSlots { get; init; }
@@ -45,6 +46,9 @@ public sealed class GpuSimulationResources : IDisposable
     public required Query ThermalTimestampDisjointQuery { get; init; }
     public required Query ThermalTimestampStartQuery { get; init; }
     public required Query ThermalTimestampEndQuery { get; init; }
+    public required Query ContactTimestampDisjointQuery { get; init; }
+    public required Query ContactTimestampStartQuery { get; init; }
+    public required Query ContactTimestampEndQuery { get; init; }
     public required Query PhaseTimestampDisjointQuery { get; init; }
     public required Query PhaseTimestampStartQuery { get; init; }
     public required Query PhaseTimestampEndQuery { get; init; }
@@ -80,6 +84,7 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? SolidDisplacementApplyShader { get; init; }
     public ComputeShader? CompositionShader { get; init; }
     public ComputeShader? ThermalDiffusionShader { get; init; }
+    public ComputeShader? ContactTransitionShader { get; init; }
     public ComputeShader? PhaseTransitionShader { get; init; }
     public ComputeShader? CombustionShader { get; init; }
     public ComputeShader? EmissionResolveShader { get; init; }
@@ -98,6 +103,7 @@ public sealed class GpuSimulationResources : IDisposable
         EmissionResolveShader?.Dispose();
         TransientLifecycleShader?.Dispose();
         ThermalDiffusionShader?.Dispose();
+        ContactTransitionShader?.Dispose();
         SolidDisplacementApplyShader?.Dispose();
         SolidMoveShader?.Dispose();
         SolidDisplacementPlanShader?.Dispose();
@@ -125,6 +131,9 @@ public sealed class GpuSimulationResources : IDisposable
         ThermalTimestampEndQuery.Dispose();
         ThermalTimestampStartQuery.Dispose();
         ThermalTimestampDisjointQuery.Dispose();
+        ContactTimestampEndQuery.Dispose();
+        ContactTimestampStartQuery.Dispose();
+        ContactTimestampDisjointQuery.Dispose();
         PhaseTimestampEndQuery.Dispose();
         PhaseTimestampStartQuery.Dispose();
         PhaseTimestampDisjointQuery.Dispose();
@@ -138,6 +147,7 @@ public sealed class GpuSimulationResources : IDisposable
         TemperatureProbeResult.Dispose();
         TemperatureProbeConstants.Dispose();
         ThermalConstants.Dispose();
+        ContactTransitionConstants.Dispose();
         foreach (GpuPhaseSummaryReadbackSlot slot in PhaseSummaryReadbackSlots)
         {
             slot.Dispose();

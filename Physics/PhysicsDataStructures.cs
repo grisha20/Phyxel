@@ -48,6 +48,8 @@ public struct MaterialProperties
     public float TransitionAboveLatentHeat;
     public float AmbientTemperature;
     public float AmbientCoolingRate;
+    public uint ContactLiquidIntoMaterialIndex;
+    public float ContactLiquidRatePerSecond;
 }
 
 public enum BrushCommandMode : uint
@@ -99,6 +101,15 @@ public struct ThermalSimulationConstants
     public float ExchangeRate;
     public uint Width;
     public uint Height;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ContactTransitionConstants
+{
+    public float DeltaTime;
+    public uint Width;
+    public uint Height;
+    public uint TickIndex;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

@@ -117,6 +117,9 @@ public sealed class PhyxelGame : Game
             dispatchCoordinator.RestoreWorldActivity(
                 currentResources,
                 !acceptance.InitialWorldStartsDormant,
+                SimulationStateSerializer.ContainsContactTransitionSource(
+                    initialAcceptanceWorld,
+                    materialRegistry),
                 settings.HydraulicPressure);
         }
         if (acceptance.RequiresSavedScene)
@@ -334,6 +337,7 @@ public sealed class PhyxelGame : Game
                     dispatchCoordinator?.ThermalTicks ?? 0,
                     temperatureProbe.Latest,
                     dispatchCoordinator?.ThermalGpuTiming ?? default,
+                    dispatchCoordinator?.ContactTransitionGpuTiming ?? default,
                     dispatchCoordinator?.PhaseGpuTiming ?? default,
                     dispatchCoordinator?.CombustionGpuTiming ?? default,
                     dispatchCoordinator?.CombustionDispatches ?? 0,
@@ -385,7 +389,7 @@ public sealed class PhyxelGame : Game
             temperatureProbe.Reset();
             SimulationStateSerializer.Apply(loaded.State, settings);
             userInterface.SelectedMaterial = loaded.State.SelectedMaterial;
-            if (loaded.World is not null && resourceManager is not null)
+            if (loaded.World is not null && resourceManager is not null && materialRegistry is not null)
             {
                 bool containsMatter = SimulationStateSerializer.ContainsMatter(loaded.World);
                 currentResources = resourceManager.CreateOrResize(settings, containsMatter);
@@ -393,6 +397,9 @@ public sealed class PhyxelGame : Game
                 dispatchCoordinator?.RestoreWorldActivity(
                     currentResources,
                     containsMatter,
+                    SimulationStateSerializer.ContainsContactTransitionSource(
+                        loaded.World,
+                        materialRegistry),
                     settings.HydraulicPressure);
                 if (acceptance.IsPhaseRoundTripLoading)
                 {

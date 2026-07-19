@@ -1,10 +1,16 @@
 {
   "schema": 1,
   "id": "core:coal",
-  "name": { "ru": "Coal", "en": "Coal" },
+  "name": { "ru": "Древесный уголь", "en": "Charcoal" },
   "kind": "granular",
   "color": "#292929",
   "physics": { "density": 0.2, "friction": 0.6, "flowRate": 0.35 },
   "thermal": { "initialTemperature": 20.0, "conductivity": 0.78, "heatCapacity": 1.0 },
+  "contactTransitions": {
+    "liquid": {
+      "into": "core:wet_charcoal",
+      "ratePerSecond": 0.35
+    }
+  },
   "ui": { "order": 90, "hidden": false }
 }

@@ -48,6 +48,10 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             0.8f, 0.65f, 0f, "#8B5A2B", 20f, 0.65f, 1.0f),
         new(CoreMaterialIds.Coal, MaterialSimulationKind.Granular, MaterialFlags.None,
             0.2f, 0.6f, 0.35f, "#292929", 20f, 0.78f, 1.0f),
+        new(CoreMaterialIds.WetCharcoal, MaterialSimulationKind.Granular, MaterialFlags.None,
+            1.15f, 0.62f, 0.32f, "#202020", 20f, 0.78f, 1.0f),
+        new(CoreMaterialIds.StoneCoal, MaterialSimulationKind.Granular, MaterialFlags.None,
+            1.4f, 0.65f, 0.3f, "#171717", 20f, 0.85f, 0.75f),
         new(CoreMaterialIds.Smoke, MaterialSimulationKind.Gas, MaterialFlags.None,
             0.04f, 0f, 1f, "#777777B0", 120f, 0.08f, 1f),
         new(CoreMaterialIds.Co2, MaterialSimulationKind.Gas, MaterialFlags.None,
@@ -75,11 +79,25 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static async Task RunAsync()
     {
-        Require(Marshal.SizeOf<MaterialProperties>() == 112, "MaterialProperties must be 112 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == 120, "MaterialProperties must be 120 bytes.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.AmbientTemperature)).ToInt32() == 104,
             "AmbientTemperature offset must be 104.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.AmbientCoolingRate)).ToInt32() == 108,
             "AmbientCoolingRate offset must be 108.");
+        Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.ContactLiquidIntoMaterialIndex)).ToInt32() == 112,
+            "ContactLiquidIntoMaterialIndex offset must be 112.");
+        Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.ContactLiquidRatePerSecond)).ToInt32() == 116,
+            "ContactLiquidRatePerSecond offset must be 116.");
+        Require(Marshal.SizeOf<ContactTransitionConstants>() == 16,
+            "ContactTransitionConstants must be 16 bytes.");
+        string contactShader = File.ReadAllText(Path.Combine(
+            AppContext.BaseDirectory, "Content", "Shaders", "ContactTransitions.hlsl"));
+        Require(contactShader.Contains(
+                "1.0 - exp(-source.ContactLiquidRatePerSecond * ContactDeltaTime)",
+                StringComparison.Ordinal) &&
+            contactShader.Contains("ContactTickIndex", StringComparison.Ordinal) &&
+            !contactShader.Contains("core:", StringComparison.Ordinal),
+            "Contact transition shader is not fixed-step and material-neutral.");
         string directory = Path.Combine(
             Path.GetTempPath(),
             $"phyxel-thermal-materials-{Guid.NewGuid():N}");
@@ -115,7 +133,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static void VerifyCoreMaterials(MaterialRegistry registry)
     {
-        Require(ExpectedCoreMaterials.Length == 15, "Expected bundled core material count changed.");
+        Require(ExpectedCoreMaterials.Length == 17, "Expected bundled core material count changed.");
         foreach (ExpectedMaterial expected in ExpectedCoreMaterials)
         {
             MaterialDefinition actual = registry[expected.Id];
@@ -144,6 +162,19 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             Require(Same(properties.AmbientTemperature, expectedAmbientTemperature) &&
                 Same(properties.AmbientCoolingRate, expectedAmbientRate),
                 $"{expected.Id} ambient cooling is incorrect.");
+            if (expected.Id == CoreMaterialIds.Coal)
+            {
+                Require(properties.ContactLiquidIntoMaterialIndex ==
+                    registry[CoreMaterialIds.WetCharcoal].RuntimeIndex &&
+                    Same(properties.ContactLiquidRatePerSecond, 0.35f),
+                    "core:coal liquid contact transition is incorrect.");
+            }
+            else
+            {
+                Require(properties.ContactLiquidIntoMaterialIndex == uint.MaxValue &&
+                    Same(properties.ContactLiquidRatePerSecond, 0),
+                    $"{expected.Id} unexpectedly has a liquid contact transition.");
+            }
             VerifyCoreTransitions(registry, expected.Id, properties);
         }
         MaterialDefinition water = registry[CoreMaterialIds.Water];
@@ -155,6 +186,12 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             "Water/Ice/Steam must be visible in the material menu.");
         Require(water.Name == "Вода" && ice.Name == "Лёд" && steam.Name == "Пар",
             "Water/Ice/Steam Russian names changed.");
+        Require(registry[CoreMaterialIds.Coal].Name == "Древесный уголь" &&
+            registry[CoreMaterialIds.StoneCoal].Name == "Каменный уголь" &&
+            registry[CoreMaterialIds.WetCharcoal].Hidden,
+            "Charcoal names or wet-charcoal visibility are incorrect.");
+        Require(registry.RegistryHasContactTransitions,
+            "Core charcoal did not enable contact-transition registry metadata.");
         string[] visibleIds = registry.SelectableMaterials.Select(material => material.Id).ToArray();
         int waterPosition = Array.IndexOf(visibleIds, CoreMaterialIds.Water);
         Require(waterPosition >= 0 && waterPosition + 2 < visibleIds.Length &&
@@ -216,6 +253,9 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             "External material without thermal did not receive default heatCapacity.");
         Require(Same(legacy.AmbientTemperature, 0) && Same(legacy.AmbientCoolingRate, 0),
             "External material without ambientCooling changed thermal behavior.");
+        Require(legacy.ContactLiquidIntoMaterialIndex == uint.MaxValue &&
+            Same(legacy.ContactLiquidRatePerSecond, 0),
+            "External material without contactTransitions changed behavior.");
 
         MaterialProperties custom = registry["test:custom_thermal"].Properties;
         Require(Same(custom.InitialTemperature, -125.5f), "Custom initialTemperature was not loaded.");
@@ -223,6 +263,11 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         Require(Same(custom.HeatCapacity, 8.25f), "Custom heatCapacity was not loaded.");
         Require(Same(custom.AmbientTemperature, -10f) && Same(custom.AmbientCoolingRate, 2.5f),
             "Custom ambientCooling was not loaded.");
+
+        MaterialProperties contact = registry["test:contact_source"].Properties;
+        Require(contact.ContactLiquidIntoMaterialIndex == registry["test:contact_target"].RuntimeIndex &&
+            Same(contact.ContactLiquidRatePerSecond, 0.75f),
+            "Valid external liquid contact transition was not resolved into the GPU table.");
 
         MaterialProperties minimums = registry["test:thermal_minimums"].Properties;
         Require(Same(minimums.InitialTemperature, MaterialRegistry.MinimumInitialTemperature),
@@ -246,7 +291,12 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             "test:heat_capacity_low", "test:heat_capacity_high", "test:unknown_thermal",
             "test:ambient_not_object", "test:ambient_missing_temperature",
             "test:ambient_missing_rate", "test:ambient_rate_zero", "test:ambient_rate_high",
-            "test:ambient_temperature_low", "test:ambient_unknown"
+            "test:ambient_temperature_low", "test:ambient_unknown",
+            "test:contact_not_object", "test:contact_unknown", "test:contact_missing_liquid",
+            "test:contact_liquid_not_object", "test:contact_missing_into", "test:contact_missing_rate",
+            "test:contact_rate_zero", "test:contact_rate_high", "test:contact_rate_nan",
+            "test:contact_unknown_liquid", "test:contact_self", "test:contact_missing_target",
+            "test:contact_wrong_target_kind", "test:contact_wrong_source_kind"
         ];
         foreach (string id in invalidIds)
         {
@@ -278,15 +328,47 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             CreateMaterialJson(
                 "core:invalid",
                 "{ \"initialTemperature\": 20.0, \"conductivity\": 0.15, \"heatCapacity\": 1.0, \"typo\": 2.0 }"));
+        bool thermalRejected = false;
         try
         {
             MaterialFileLoader.LoadCore(coreDirectory, MaterialRegistry.MaximumMaterials);
         }
         catch (InvalidDataException)
         {
+            thermalRejected = true;
+        }
+        if (!thermalRejected)
+        {
+            throw new InvalidOperationException("Invalid core thermal data did not stop loading.");
+        }
+
+        string contactCore = Path.Combine(parentDirectory, "invalid-contact-core");
+        string emptyExternal = Path.Combine(parentDirectory, "invalid-contact-external");
+        Directory.CreateDirectory(contactCore);
+        Directory.CreateDirectory(emptyExternal);
+        string bundledCore = MaterialRegistry.ResolveCoreDirectory();
+        foreach (string source in Directory.EnumerateFiles(bundledCore, "*.json", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(bundledCore, source);
+            string destination = Path.Combine(contactCore, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(source, destination);
+        }
+        string coalPath = Path.Combine(contactCore, "coal.json");
+        string coalJson = await File.ReadAllTextAsync(coalPath);
+        await File.WriteAllTextAsync(
+            coalPath,
+            coalJson.Replace(CoreMaterialIds.WetCharcoal, "core:missing_wet_charcoal", StringComparison.Ordinal));
+        try
+        {
+            _ = new MaterialRegistry(contactCore, emptyExternal);
+        }
+        catch (InvalidDataException exception) when (
+            exception.Message.Contains("Invalid core contact transition", StringComparison.Ordinal))
+        {
             return;
         }
-        throw new InvalidOperationException("Invalid core thermal data did not stop loading.");
+        throw new InvalidOperationException("Invalid core contact target did not stop registry loading.");
     }
 
     private static async Task WriteExternalMaterialsAsync(string directory)
@@ -348,7 +430,52 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
                 "test:ambient_temperature_low", ThermalWithAmbient("{ \"temperature\": -273.16, \"rate\": 1.0 }")),
             ["ambient-unknown.json"] = CreateMaterialJson(
                 "test:ambient_unknown", ThermalWithAmbient(
-                    "{ \"temperature\": 20.0, \"rate\": 1.0, \"typo\": 1 }"))
+                    "{ \"temperature\": 20.0, \"rate\": 1.0, \"typo\": 1 }")),
+            ["contact-target.json"] = CreateContactMaterialJson(
+                "test:contact_target", "granular", null),
+            ["contact-solid-target.json"] = CreateContactMaterialJson(
+                "test:contact_solid_target", "solid", null),
+            ["contact-source.json"] = CreateContactMaterialJson(
+                "test:contact_source", "granular",
+                "{ \"liquid\": { \"into\": \" TEST:CONTACT_TARGET \", \"ratePerSecond\": 0.75 } }"),
+            ["contact-not-object.json"] = CreateContactMaterialJson(
+                "test:contact_not_object", "granular", "[]"),
+            ["contact-unknown.json"] = CreateContactMaterialJson(
+                "test:contact_unknown", "granular", "{ \"gas\": {} }"),
+            ["contact-missing-liquid.json"] = CreateContactMaterialJson(
+                "test:contact_missing_liquid", "granular", "{}"),
+            ["contact-liquid-not-object.json"] = CreateContactMaterialJson(
+                "test:contact_liquid_not_object", "granular", "{ \"liquid\": [] }"),
+            ["contact-missing-into.json"] = CreateContactMaterialJson(
+                "test:contact_missing_into", "granular",
+                "{ \"liquid\": { \"ratePerSecond\": 1.0 } }"),
+            ["contact-missing-rate.json"] = CreateContactMaterialJson(
+                "test:contact_missing_rate", "granular",
+                "{ \"liquid\": { \"into\": \"test:contact_target\" } }"),
+            ["contact-rate-zero.json"] = CreateContactMaterialJson(
+                "test:contact_rate_zero", "granular",
+                "{ \"liquid\": { \"into\": \"test:contact_target\", \"ratePerSecond\": 0.0 } }"),
+            ["contact-rate-high.json"] = CreateContactMaterialJson(
+                "test:contact_rate_high", "granular",
+                "{ \"liquid\": { \"into\": \"test:contact_target\", \"ratePerSecond\": 100.01 } }"),
+            ["contact-rate-nan.json"] = CreateContactMaterialJson(
+                "test:contact_rate_nan", "granular",
+                "{ \"liquid\": { \"into\": \"test:contact_target\", \"ratePerSecond\": NaN } }"),
+            ["contact-unknown-liquid.json"] = CreateContactMaterialJson(
+                "test:contact_unknown_liquid", "granular",
+                "{ \"liquid\": { \"into\": \"test:contact_target\", \"ratePerSecond\": 1.0, \"typo\": 1 } }"),
+            ["contact-self.json"] = CreateContactMaterialJson(
+                "test:contact_self", "granular",
+                "{ \"liquid\": { \"into\": \"test:contact_self\", \"ratePerSecond\": 1.0 } }"),
+            ["contact-missing-target.json"] = CreateContactMaterialJson(
+                "test:contact_missing_target", "granular",
+                "{ \"liquid\": { \"into\": \"test:not_present\", \"ratePerSecond\": 1.0 } }"),
+            ["contact-wrong-target-kind.json"] = CreateContactMaterialJson(
+                "test:contact_wrong_target_kind", "granular",
+                "{ \"liquid\": { \"into\": \"test:contact_solid_target\", \"ratePerSecond\": 1.0 } }"),
+            ["contact-wrong-source-kind.json"] = CreateContactMaterialJson(
+                "test:contact_wrong_source_kind", "solid",
+                "{ \"liquid\": { \"into\": \"test:contact_target\", \"ratePerSecond\": 1.0 } }")
         };
         foreach ((string fileName, string? contents) in materials)
         {
@@ -359,6 +486,27 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
     private static string ThermalWithAmbient(string ambient) =>
         $"{{ \"initialTemperature\": 20.0, \"conductivity\": 0.15, " +
         $"\"heatCapacity\": 1.0, \"ambientCooling\": {ambient} }}";
+
+    private static string CreateContactMaterialJson(
+        string id,
+        string kind,
+        string? contactTransitions)
+    {
+        string contactProperty = contactTransitions is null
+            ? string.Empty
+            : $",\n  \"contactTransitions\": {contactTransitions}";
+        return $$"""
+            {
+              "schema": 1,
+              "id": "{{id}}",
+              "name": "Contact Test",
+              "kind": "{{kind}}",
+              "color": "#12345678",
+              "physics": { "density": 1.0, "friction": 0.4, "flowRate": 0.2 }
+              {{contactProperty}}
+            }
+            """;
+    }
 
     private static string CreateMaterialJson(string id, string? thermal)
     {
@@ -407,7 +555,9 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         Same(left.MaximumCombustionTemperature, right.MaximumCombustionTemperature) &&
         Same(left.TransitionAboveLatentHeat, right.TransitionAboveLatentHeat) &&
         Same(left.AmbientTemperature, right.AmbientTemperature) &&
-        Same(left.AmbientCoolingRate, right.AmbientCoolingRate);
+        Same(left.AmbientCoolingRate, right.AmbientCoolingRate) &&
+        left.ContactLiquidIntoMaterialIndex == right.ContactLiquidIntoMaterialIndex &&
+        Same(left.ContactLiquidRatePerSecond, right.ContactLiquidRatePerSecond);
 
     private static Color ParseColor(string value)
     {

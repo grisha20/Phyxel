@@ -70,7 +70,8 @@ public enum AcceptanceScenarioMode
     CombustionChain,
     CombustionQuench,
     SteamSelfCooling,
-    BrushEmptyOnly
+    BrushEmptyOnly,
+    CoalTypes
 }
 
 public static class AcceptanceRegressionScenario
@@ -129,6 +130,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.CombustionQuench => CreateCombustionQuench(frame),
             AcceptanceScenarioMode.SteamSelfCooling => [],
             AcceptanceScenarioMode.BrushEmptyOnly => BrushEmptyOnlyAcceptanceScenario.CreateCommands(frame, materials),
+            AcceptanceScenarioMode.CoalTypes => [],
             AcceptanceScenarioMode.PhaseDispatchSmoke => [],
             AcceptanceScenarioMode.PhaseThresholds or
             AcceptanceScenarioMode.PhaseHysteresis or

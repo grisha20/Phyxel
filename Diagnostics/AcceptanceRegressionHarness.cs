@@ -14,6 +14,7 @@ public sealed class AcceptanceRegressionHarness
 {
     private static readonly ulong[] ThermalContactCheckpointTicks = [20, 40, 60, 80];
     private static readonly ulong[] SteamCoolingCheckpointTicks = [0, 1, 20, 40, 60, 80];
+    private static readonly ulong[] CoalCheckpointTicks = [0, 20, 120, 240];
     private MaterialRegistry? materialRegistry;
     private readonly List<ThermalAcceptanceCheckpoint> thermalCheckpoints = [];
     private readonly TemperatureProbeAcceptanceTrace temperatureProbeTrace = new();
@@ -89,6 +90,7 @@ public sealed class AcceptanceRegressionHarness
             "combustion_quench" or "water_quench" => AcceptanceScenarioMode.CombustionQuench,
             "steam_self_cooling" => AcceptanceScenarioMode.SteamSelfCooling,
             "brush_empty_only" => AcceptanceScenarioMode.BrushEmptyOnly,
+            "coal_types" => AcceptanceScenarioMode.CoalTypes,
             _ => AcceptanceScenarioMode.None
         };
         phaseAcceptance = new PhaseAcceptanceController(Mode);
@@ -171,6 +173,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.CombustionQuench => 900,
                 AcceptanceScenarioMode.SteamSelfCooling => uint.MaxValue,
                 AcceptanceScenarioMode.BrushEmptyOnly => 7,
+                AcceptanceScenarioMode.CoalTypes => uint.MaxValue,
                 AcceptanceScenarioMode.PhaseDispatchSmoke => 240,
                 AcceptanceScenarioMode.ThermalUniform or
                 AcceptanceScenarioMode.ThermalConductivityCompare or
@@ -192,7 +195,8 @@ public sealed class AcceptanceRegressionHarness
         materialRegistry is null
             ? null
             : ThermalAcceptanceScenario.Create(Mode, width, height, materialRegistry) ??
-                BrushEmptyOnlyAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry);
+                BrushEmptyOnlyAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry) ??
+                CoalTypesAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry);
 
     public Point? GetProbeCoordinate(uint frame) => Mode switch
     {
@@ -294,6 +298,22 @@ public sealed class AcceptanceRegressionHarness
             }
             return ready;
         }
+        if (Mode == AcceptanceScenarioMode.CoalTypes)
+        {
+            if (thermalCheckpoints.Count >= CoalCheckpointTicks.Length)
+            {
+                return false;
+            }
+            ulong coalTarget = CoalCheckpointTicks[thermalCheckpoints.Count];
+            bool ready = coalTarget == 0
+                ? frame >= 10 && dispatchCoordinator.ThermalTicks == 0
+                : dispatchCoordinator.ThermalTicks >= coalTarget;
+            if (ready)
+            {
+                checkpointTick = dispatchCoordinator.ThermalTicks;
+            }
+            return ready;
+        }
         if (Mode != AcceptanceScenarioMode.ThermalContact ||
             thermalCheckpoints.Count >= ThermalContactCheckpointTicks.Length) return false;
         ulong target = ThermalContactCheckpointTicks[thermalCheckpoints.Count];
@@ -326,6 +346,9 @@ public sealed class AcceptanceRegressionHarness
         Mode == AcceptanceScenarioMode.SteamSelfCooling
             ? thermalCheckpoints.Count >= SteamCoolingCheckpointTicks.Length &&
                 dispatchCoordinator.ThermalTicks >= SteamCoolingCheckpointTicks[^1]
+            : Mode == AcceptanceScenarioMode.CoalTypes
+            ? thermalCheckpoints.Count >= CoalCheckpointTicks.Length &&
+                dispatchCoordinator.ThermalTicks >= CoalCheckpointTicks[^1]
             : phaseAcceptance.IsPhaseMode
             ? phaseAcceptance.CanBeginFinalCapture(frame, dispatchCoordinator)
             : frame >= CaptureFrame;
@@ -379,6 +402,10 @@ public sealed class AcceptanceRegressionHarness
         else if (Mode == AcceptanceScenarioMode.BrushEmptyOnly)
         {
             settings.Paused = true;
+        }
+        else if (Mode == AcceptanceScenarioMode.CoalTypes)
+        {
+            settings.Paused = frame < 30;
         }
     }
 
@@ -452,6 +479,7 @@ public sealed class AcceptanceRegressionHarness
         ulong thermalTicks,
         TemperatureProbeResult? temperatureProbe,
         ThermalGpuTimingStatistics thermalGpuTiming,
+        ThermalGpuTimingStatistics contactGpuTiming,
         ThermalGpuTimingStatistics phaseGpuTiming,
         ThermalGpuTimingStatistics combustionGpuTiming,
         ulong combustionDispatches,
@@ -494,6 +522,9 @@ public sealed class AcceptanceRegressionHarness
             $"thermalGpuMs={thermalGpuTiming.AverageMilliseconds:0.0000}/" +
             $"{thermalGpuTiming.MinimumMilliseconds:0.0000}/" +
             $"{thermalGpuTiming.MaximumMilliseconds:0.0000} samples={thermalGpuTiming.Samples} " +
+            $"contactGpuMs={contactGpuTiming.AverageMilliseconds:0.0000}/" +
+            $"{contactGpuTiming.MinimumMilliseconds:0.0000}/" +
+            $"{contactGpuTiming.MaximumMilliseconds:0.0000} contactSamples={contactGpuTiming.Samples} " +
             $"phaseGpuMs={phaseGpuTiming.AverageMilliseconds:0.0000}/" +
             $"{phaseGpuTiming.MinimumMilliseconds:0.0000}/" +
             $"{phaseGpuTiming.MaximumMilliseconds:0.0000} phaseSamples={phaseGpuTiming.Samples} " +

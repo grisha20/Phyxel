@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "core:stone_coal",
+  "name": { "ru": "Каменный уголь", "en": "Stone Coal" },
+  "kind": "granular",
+  "color": "#171717",
+  "physics": { "density": 1.4, "friction": 0.65, "flowRate": 0.3 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.85, "heatCapacity": 0.75 },
+  "ui": { "order": 91, "hidden": false }
+}

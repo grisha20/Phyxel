@@ -88,6 +88,7 @@ internal static class BrushEmptyOnlyAcceptanceScenario
                 materials.Fire,
                 materials.Wood,
                 materials.Coal,
+                materials.Resolve(CoreMaterialIds.StoneCoal),
                 materials.Stone
             ];
             List<BrushDrawCommand> commands = [];

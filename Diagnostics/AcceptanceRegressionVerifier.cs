@@ -206,6 +206,11 @@ public static class AcceptanceRegressionVerifier
                 snapshot,
                 materialRegistry,
                 out report),
+            AcceptanceScenarioMode.CoalTypes => CoalTypesAcceptanceVerifier.Validate(
+                snapshot,
+                materialRegistry,
+                thermalCheckpoints,
+                out report),
             AcceptanceScenarioMode.PhaseThresholds or
             AcceptanceScenarioMode.PhaseHysteresis or
             AcceptanceScenarioMode.PhaseSingleTransition or

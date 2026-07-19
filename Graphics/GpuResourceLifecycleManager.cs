@@ -135,6 +135,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             StructureByteStride = 0
         });
         Buffer thermalConstants = CreateConstantBuffer<ThermalSimulationConstants>();
+        Buffer contactTransitionConstants = CreateConstantBuffer<ContactTransitionConstants>();
         Buffer phaseConstants = CreateConstantBuffer<PhaseTransitionConstants>();
         GpuStructuredBuffer<uint> phaseSummary = new(Device, 1);
         GpuPhaseSummaryReadbackSlot[] phaseSummaryReadbackSlots = new GpuPhaseSummaryReadbackSlot[3];
@@ -187,6 +188,21 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Flags = QueryFlags.None
         });
         Query thermalTimestampEndQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Timestamp,
+            Flags = QueryFlags.None
+        });
+        Query contactTimestampDisjointQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.TimestampDisjoint,
+            Flags = QueryFlags.None
+        });
+        Query contactTimestampStartQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Timestamp,
+            Flags = QueryFlags.None
+        });
+        Query contactTimestampEndQuery = new(Device, new QueryDescription
         {
             Type = QueryType.Timestamp,
             Flags = QueryFlags.None
@@ -298,6 +314,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Emissions = emissions,
             FrameConstants = constants,
             ThermalConstants = thermalConstants,
+            ContactTransitionConstants = contactTransitionConstants,
             PhaseConstants = phaseConstants,
             PhaseSummary = phaseSummary,
             PhaseSummaryReadbackSlots = phaseSummaryReadbackSlots,
@@ -314,6 +331,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ThermalTimestampDisjointQuery = thermalTimestampDisjointQuery,
             ThermalTimestampStartQuery = thermalTimestampStartQuery,
             ThermalTimestampEndQuery = thermalTimestampEndQuery,
+            ContactTimestampDisjointQuery = contactTimestampDisjointQuery,
+            ContactTimestampStartQuery = contactTimestampStartQuery,
+            ContactTimestampEndQuery = contactTimestampEndQuery,
             PhaseTimestampDisjointQuery = phaseTimestampDisjointQuery,
             PhaseTimestampStartQuery = phaseTimestampStartQuery,
             PhaseTimestampEndQuery = phaseTimestampEndQuery,
@@ -345,6 +365,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SolidDisplacementApplyShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "ApplyHullWaterDisplacement") : null,
             CompositionShader = allocateSimulation ? CompileShader("RenderComposition.hlsl") : null,
             ThermalDiffusionShader = allocateSimulation ? CompileShader("ThermalDiffusion.hlsl") : null,
+            ContactTransitionShader = allocateSimulation ? CompileShader("ContactTransitions.hlsl") : null,
             PhaseTransitionShader = allocateSimulation ? CompileShader("PhaseTransitions.hlsl") : null,
             CombustionShader = allocateSimulation ? CompileShader("Combustion.hlsl") : null,
             EmissionResolveShader = allocateSimulation ? CompileShader("EmissionResolve.hlsl") : null,

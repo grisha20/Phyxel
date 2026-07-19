@@ -26,6 +26,7 @@ public sealed class MaterialRegistry
     public const float MaximumFlameSpreadRate = 100f;
     public const float MaximumLifetime = 3600f;
     public const float MaximumAmbientCoolingRate = 100f;
+    public const float MaximumContactTransitionRate = 100f;
 
     private readonly ReadOnlyCollection<MaterialDefinition> materials;
     private readonly ReadOnlyCollection<MaterialDefinition> selectableMaterials;
@@ -48,6 +49,7 @@ public sealed class MaterialRegistry
         ValidateCoreCombustion(coreDefinitions);
         ValidateCoreEmissions(coreDefinitions);
         ValidateCoreLifecycles(coreDefinitions);
+        ValidateCoreContactTransitions(coreDefinitions);
 
         HashSet<string> reservedIds = coreDefinitions
             .Select(material => material.Id)
@@ -95,6 +97,7 @@ public sealed class MaterialRegistry
         RegistryHasPhaseTransitions = definitions.Any(material => material.PhaseTransitions is not null);
         RegistryHasCombustibleMaterials = definitions.Any(material => material.Combustion is not null);
         RegistryHasTransientMaterials = definitions.Any(material => material.Lifecycle is not null);
+        RegistryHasContactTransitions = definitions.Any(material => material.LiquidContactTransition is not null);
         PhaseTransitionGraphFlags = definitions
             .Where(material => material.PhaseTransitions is not null)
             .Aggregate(
@@ -112,6 +115,7 @@ public sealed class MaterialRegistry
     public bool RegistryHasPhaseTransitions { get; }
     public bool RegistryHasCombustibleMaterials { get; }
     public bool RegistryHasTransientMaterials { get; }
+    public bool RegistryHasContactTransitions { get; }
     public PhaseTransitionSummaryFlags PhaseTransitionGraphFlags { get; }
 
     public MaterialDefinition this[ushort runtimeIndex] => materials[runtimeIndex];
@@ -263,6 +267,22 @@ public sealed class MaterialRegistry
         }
     }
 
+    private static void ValidateCoreContactTransitions(
+        IReadOnlyCollection<MaterialDefinition> coreDefinitions)
+    {
+        Dictionary<string, MaterialDefinition> coreById = coreDefinitions
+            .ToDictionary(material => material.Id, StringComparer.Ordinal);
+        foreach (MaterialDefinition source in coreDefinitions.OrderBy(material => material.Id, StringComparer.Ordinal))
+        {
+            string? error = FindContactTransitionReferenceError(source, coreById, requireBundledTarget: true);
+            if (error is not null)
+            {
+                throw new InvalidDataException(
+                    $"Invalid core contact transition in '{source.Id}' from '{source.SourcePath}': {error}");
+            }
+        }
+    }
+
     private static IReadOnlyList<MaterialDefinition> FilterExternalPhaseTransitions(
         IReadOnlyCollection<MaterialDefinition> coreDefinitions,
         IReadOnlyCollection<MaterialDefinition> externalDefinitions)
@@ -281,7 +301,8 @@ public sealed class MaterialRegistry
                     Error: FindPhaseTransitionReferenceError(source, available, requireBundledTarget: false) ??
                         FindCombustionReferenceError(source, available, requireBundledTarget: false) ??
                         FindEmissionReferenceError(source, available, requireBundledTarget: false) ??
-                        FindLifecycleReferenceError(source, available, requireBundledTarget: false)))
+                        FindLifecycleReferenceError(source, available, requireBundledTarget: false) ??
+                        FindContactTransitionReferenceError(source, available, requireBundledTarget: false)))
                 .Where(result => result.Error is not null)
                 .Select(result => (result.Source, result.Error!))
                 .ToList();
@@ -480,6 +501,35 @@ public sealed class MaterialRegistry
         return null;
     }
 
+    private static string? FindContactTransitionReferenceError(
+        MaterialDefinition source,
+        IReadOnlyDictionary<string, MaterialDefinition> available,
+        bool requireBundledTarget)
+    {
+        if (source.LiquidContactTransition is not { } transition)
+        {
+            return null;
+        }
+        if (!available.TryGetValue(transition.IntoId, out MaterialDefinition? target))
+        {
+            return $"liquid target '{transition.IntoId}' does not exist in the valid material set.";
+        }
+        if (requireBundledTarget && !target.IsBundled)
+        {
+            return $"liquid target '{transition.IntoId}' is not a bundled core material.";
+        }
+        if (target.Id == source.Id)
+        {
+            return $"liquid target cannot be the source material itself ('{source.Id}').";
+        }
+        if ((MaterialSimulationKind)source.Properties.SimulationKind != MaterialSimulationKind.Granular ||
+            (MaterialSimulationKind)target.Properties.SimulationKind != MaterialSimulationKind.Granular)
+        {
+            return "liquid contact source and target must both have kind 'granular'.";
+        }
+        return null;
+    }
+
     private static IEnumerable<(string Direction, MaterialTransitionRule Rule)> EnumerateTransitionRules(
         MaterialDefinition source)
     {
@@ -530,6 +580,10 @@ public sealed class MaterialRegistry
             : uint.MaxValue;
         properties.MaximumCombustionTemperature = source.Combustion?.MaximumTemperature ?? 0;
         properties.TransitionAboveLatentHeat = source.PhaseTransitions?.Above?.LatentHeat ?? 0;
+        properties.ContactLiquidIntoMaterialIndex = source.LiquidContactTransition is { } contact
+            ? indexedById[contact.IntoId].RuntimeIndex
+            : uint.MaxValue;
+        properties.ContactLiquidRatePerSecond = source.LiquidContactTransition?.RatePerSecond ?? 0;
         return properties;
     }
 
@@ -591,7 +645,8 @@ public sealed class MaterialRegistry
             TransitionBelowMaterialIndex = uint.MaxValue,
             TransitionAboveMaterialIndex = uint.MaxValue,
             BurnedIntoMaterialIndex = uint.MaxValue,
-            DecayIntoMaterialIndex = uint.MaxValue
+            DecayIntoMaterialIndex = uint.MaxValue,
+            ContactLiquidIntoMaterialIndex = uint.MaxValue
         };
     }
 }

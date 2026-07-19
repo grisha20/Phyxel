@@ -235,6 +235,22 @@ public sealed class SimulationStateSerializer
         return false;
     }
 
+    public static bool ContainsContactTransitionSource(
+        SimulationWorldSnapshot world,
+        MaterialRegistry materialRegistry)
+    {
+        ReadOnlySpan<GridCell> grid = MemoryMarshal.Cast<byte, GridCell>(world.Grid);
+        foreach (GridCell cell in grid)
+        {
+            if (cell.IsActive != 0 && cell.MaterialIndex < materialRegistry.Count &&
+                materialRegistry[cell.MaterialIndex].LiquidContactTransition is not null)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private LoadedSimulationScene LoadPaletteScene(
         byte[] sceneJson,
         SimulationWorldSnapshot? world,
