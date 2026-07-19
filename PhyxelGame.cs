@@ -338,6 +338,7 @@ public sealed class PhyxelGame : Game
                     temperatureProbe.Latest,
                     dispatchCoordinator?.ThermalGpuTiming ?? default,
                     dispatchCoordinator?.ContactTransitionGpuTiming ?? default,
+                    dispatchCoordinator?.GasRedistributionGpuTiming ?? default,
                     dispatchCoordinator?.PhaseGpuTiming ?? default,
                     dispatchCoordinator?.CombustionGpuTiming ?? default,
                     dispatchCoordinator?.CombustionDispatches ?? 0,

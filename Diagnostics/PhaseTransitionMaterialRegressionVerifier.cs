@@ -55,7 +55,7 @@ internal static class PhaseTransitionMaterialRegressionVerifier
         new(CoreMaterialIds.Smoke, MaterialSimulationKind.Gas, MaterialFlags.None,
             0.04f, 0, 1, "#777777B0", 120, 0.08f, 1),
         new(CoreMaterialIds.Co2, MaterialSimulationKind.Gas, MaterialFlags.None,
-            0.06f, 0, 0.8f, "#B5B5B580", 120, 0.06f, 0.85f),
+            0.12f, 0, 0.8f, "#B5B5B580", 120, 0.06f, 0.85f),
         new(CoreMaterialIds.Fire, MaterialSimulationKind.Gas, MaterialFlags.Flame,
             1.0f, 0, 1.4f, "#FF3A08E8", 650, 0.35f, 1.0f),
         new(CoreMaterialIds.Eraser, MaterialSimulationKind.Tool, MaterialFlags.None,

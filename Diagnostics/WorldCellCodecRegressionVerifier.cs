@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Phyxel.Core;
+using Phyxel.Graphics;
 using Phyxel.Materials;
 using Phyxel.Physics;
 using Phyxel.Serialization;
@@ -49,6 +50,7 @@ internal static class WorldCellCodecRegressionVerifier
 
             VerifyLayoutContracts();
             VerifyGasThermalMixingContract();
+            VerifyGasSchedulerContract();
             await VerifyV3Async(directory, serializer, materials);
             await VerifyV4MigrationsAsync(directory, serializer, materials);
             await VerifyV5RoundTripAsync(directory, serializer, materials);
@@ -101,25 +103,32 @@ internal static class WorldCellCodecRegressionVerifier
             AppContext.BaseDirectory,
             "Content",
             "Shaders",
-            "CellularAutomataSolver.hlsl");
+            "GasRedistribution.hlsl");
         string shader = File.ReadAllText(shaderPath);
-        int functionStart = shader.IndexOf("void RelaxGasPair(", StringComparison.Ordinal);
-        int functionEnd = shader.IndexOf("bool SandSupported(", functionStart, StringComparison.Ordinal);
-        Require(functionStart >= 0 && functionEnd > functionStart, "RelaxGasPair is missing.");
+        int functionStart = shader.IndexOf(
+            "void RedistributeSameGasOrEmpty(", StringComparison.Ordinal);
+        int functionEnd = shader.IndexOf(
+            "bool HorizontalPathAllowsGas(", functionStart, StringComparison.Ordinal);
+        Require(functionStart >= 0 && functionEnd > functionStart,
+            "RedistributeSameGasOrEmpty is missing.");
         string function = shader[functionStart..functionEnd];
         Require(
-            function.Contains("first.MaterialIndex != second.MaterialIndex", StringComparison.Ordinal),
-            "RelaxGasPair must not mix different gases.");
+            shader.Contains("first.MaterialIndex != second.MaterialIndex", StringComparison.Ordinal) &&
+            shader.Contains("firstDensity > secondDensity", StringComparison.Ordinal),
+            "Different gases are not kept distinct and sorted by density.");
         Require(
-            function.Contains("heatCapacity * firstMass", StringComparison.Ordinal) &&
-            function.Contains("heatCapacity * secondMass", StringComparison.Ordinal) &&
-            function.Contains("firstCapacity * first.Temperature", StringComparison.Ordinal) &&
-            function.Contains("secondCapacity * second.Temperature", StringComparison.Ordinal),
-            "RelaxGasPair does not calculate mass-weighted thermal energy.");
+            function.Contains("heatCapacity * firstMass * first.Temperature", StringComparison.Ordinal) &&
+            function.Contains("heatCapacity * secondMass * second.Temperature", StringComparison.Ordinal),
+            "Gas redistribution does not calculate mass-weighted thermal energy.");
         Require(
             function.Contains("resolvedFirst.Temperature = mixedTemperature", StringComparison.Ordinal) &&
             function.Contains("resolvedSecond.Temperature = mixedTemperature", StringComparison.Ordinal),
-            "RelaxGasPair does not assign the mixed temperature to both gas portions.");
+            "Gas redistribution does not assign mixed temperature to both portions.");
+        Require(
+            shader.Contains("(material.Flags & MaterialFlagFlame) == 0", StringComparison.Ordinal) &&
+            function.Contains("totalMass < GasMinimumRepresentableMass", StringComparison.Ordinal) &&
+            function.Contains("return;", StringComparison.Ordinal),
+            "Flame exclusion or sub-threshold mass preservation is missing.");
 
         const float heatCapacity = 1.5f;
         const float firstMass = 0.8f;
@@ -147,6 +156,39 @@ internal static class WorldCellCodecRegressionVerifier
         Require(
             splitTemperature == firstTemperature,
             "Splitting one gas cell must preserve its temperature.");
+    }
+
+    private static void VerifyGasSchedulerContract()
+    {
+        foreach ((int framesPerSecond, int frames) in new[]
+        {
+            (30, 30), (60, 60), (100, 100), (144, 144)
+        })
+        {
+            FixedStepGasScheduler scheduler = new();
+            int dispatches = 0;
+            for (int frame = 0; frame < frames; frame++)
+            {
+                dispatches += scheduler.Advance(1d / framesPerSecond, false, true);
+            }
+            Require(scheduler.TotalTicks == 60 && dispatches == 60,
+                $"Gas fixed-step schedule differs at {framesPerSecond} FPS: " +
+                $"ticks/dispatches={scheduler.TotalTicks}/{dispatches}.");
+        }
+
+        FixedStepGasScheduler paused = new();
+        Require(paused.Advance(0.01, false, true) == 0,
+            "Gas scheduler unexpectedly ticked before one fixed step.");
+        for (int frame = 0; frame < 120; frame++)
+        {
+            Require(paused.Advance(1d / 30d, true, true) == 0,
+                "Gas scheduler advanced while paused.");
+        }
+        Require(paused.Advance(0.007, false, true) == 1 && paused.TotalTicks == 1,
+            "Gas scheduler accumulated paused time or lost its pre-pause fraction.");
+        paused.Reset();
+        Require(paused.TotalTicks == 0,
+            "Gas scheduler Reset did not clear total ticks.");
     }
 
     private static async Task VerifyV3Async(

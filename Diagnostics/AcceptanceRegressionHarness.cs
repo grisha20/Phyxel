@@ -15,6 +15,9 @@ public sealed class AcceptanceRegressionHarness
     private static readonly ulong[] ThermalContactCheckpointTicks = [20, 40, 60, 80];
     private static readonly ulong[] SteamCoolingCheckpointTicks = [0, 1, 20, 40, 60, 80];
     private static readonly ulong[] CoalCheckpointTicks = [0, 20, 120, 240];
+    private static readonly ulong[] GasCheckpointTicks = [120];
+    private static readonly ulong[] SteamDistributionCheckpointTicks = [20, 40, 80, 200];
+    private const ulong SteamDistributionFinalTick = 400;
     private MaterialRegistry? materialRegistry;
     private readonly List<ThermalAcceptanceCheckpoint> thermalCheckpoints = [];
     private readonly TemperatureProbeAcceptanceTrace temperatureProbeTrace = new();
@@ -91,6 +94,8 @@ public sealed class AcceptanceRegressionHarness
             "steam_self_cooling" => AcceptanceScenarioMode.SteamSelfCooling,
             "brush_empty_only" => AcceptanceScenarioMode.BrushEmptyOnly,
             "coal_types" => AcceptanceScenarioMode.CoalTypes,
+            "gas_uniform_distribution" => AcceptanceScenarioMode.GasUniformDistribution,
+            "steam_distribution_and_cooling" => AcceptanceScenarioMode.SteamDistributionAndCooling,
             _ => AcceptanceScenarioMode.None
         };
         phaseAcceptance = new PhaseAcceptanceController(Mode);
@@ -174,6 +179,8 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.SteamSelfCooling => uint.MaxValue,
                 AcceptanceScenarioMode.BrushEmptyOnly => 7,
                 AcceptanceScenarioMode.CoalTypes => uint.MaxValue,
+                AcceptanceScenarioMode.GasUniformDistribution => 600,
+                AcceptanceScenarioMode.SteamDistributionAndCooling => uint.MaxValue,
                 AcceptanceScenarioMode.PhaseDispatchSmoke => 240,
                 AcceptanceScenarioMode.ThermalUniform or
                 AcceptanceScenarioMode.ThermalConductivityCompare or
@@ -196,7 +203,11 @@ public sealed class AcceptanceRegressionHarness
             ? null
             : ThermalAcceptanceScenario.Create(Mode, width, height, materialRegistry) ??
                 BrushEmptyOnlyAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry) ??
-                CoalTypesAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry);
+                CoalTypesAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry) ??
+                GasUniformDistributionAcceptanceScenario.CreateInitialWorld(
+                    Mode, width, height, materialRegistry) ??
+                SteamDistributionAndCoolingAcceptanceScenario.CreateInitialWorld(
+                    Mode, width, height, materialRegistry);
 
     public Point? GetProbeCoordinate(uint frame) => Mode switch
     {
@@ -314,6 +325,27 @@ public sealed class AcceptanceRegressionHarness
             }
             return ready;
         }
+        if (Mode == AcceptanceScenarioMode.GasUniformDistribution)
+        {
+            bool ready = thermalCheckpoints.Count < GasCheckpointTicks.Length &&
+                dispatchCoordinator.GasTicks >= GasCheckpointTicks[thermalCheckpoints.Count];
+            if (ready)
+            {
+                checkpointTick = dispatchCoordinator.GasTicks;
+            }
+            return ready;
+        }
+        if (Mode == AcceptanceScenarioMode.SteamDistributionAndCooling)
+        {
+            bool ready = thermalCheckpoints.Count < SteamDistributionCheckpointTicks.Length &&
+                dispatchCoordinator.ThermalTicks >=
+                    SteamDistributionCheckpointTicks[thermalCheckpoints.Count];
+            if (ready)
+            {
+                checkpointTick = dispatchCoordinator.ThermalTicks;
+            }
+            return ready;
+        }
         if (Mode != AcceptanceScenarioMode.ThermalContact ||
             thermalCheckpoints.Count >= ThermalContactCheckpointTicks.Length) return false;
         ulong target = ThermalContactCheckpointTicks[thermalCheckpoints.Count];
@@ -349,6 +381,12 @@ public sealed class AcceptanceRegressionHarness
             : Mode == AcceptanceScenarioMode.CoalTypes
             ? thermalCheckpoints.Count >= CoalCheckpointTicks.Length &&
                 dispatchCoordinator.ThermalTicks >= CoalCheckpointTicks[^1]
+            : Mode == AcceptanceScenarioMode.GasUniformDistribution
+            ? thermalCheckpoints.Count >= GasCheckpointTicks.Length &&
+                dispatchCoordinator.GasTicks >= 600
+            : Mode == AcceptanceScenarioMode.SteamDistributionAndCooling
+            ? thermalCheckpoints.Count >= SteamDistributionCheckpointTicks.Length &&
+                dispatchCoordinator.ThermalTicks >= SteamDistributionFinalTick
             : phaseAcceptance.IsPhaseMode
             ? phaseAcceptance.CanBeginFinalCapture(frame, dispatchCoordinator)
             : frame >= CaptureFrame;
@@ -480,6 +518,7 @@ public sealed class AcceptanceRegressionHarness
         TemperatureProbeResult? temperatureProbe,
         ThermalGpuTimingStatistics thermalGpuTiming,
         ThermalGpuTimingStatistics contactGpuTiming,
+        ThermalGpuTimingStatistics gasGpuTiming,
         ThermalGpuTimingStatistics phaseGpuTiming,
         ThermalGpuTimingStatistics combustionGpuTiming,
         ulong combustionDispatches,
@@ -525,6 +564,9 @@ public sealed class AcceptanceRegressionHarness
             $"contactGpuMs={contactGpuTiming.AverageMilliseconds:0.0000}/" +
             $"{contactGpuTiming.MinimumMilliseconds:0.0000}/" +
             $"{contactGpuTiming.MaximumMilliseconds:0.0000} contactSamples={contactGpuTiming.Samples} " +
+            $"gasGpuMs={gasGpuTiming.AverageMilliseconds:0.0000}/" +
+            $"{gasGpuTiming.MinimumMilliseconds:0.0000}/" +
+            $"{gasGpuTiming.MaximumMilliseconds:0.0000} gasSamples={gasGpuTiming.Samples} " +
             $"phaseGpuMs={phaseGpuTiming.AverageMilliseconds:0.0000}/" +
             $"{phaseGpuTiming.MinimumMilliseconds:0.0000}/" +
             $"{phaseGpuTiming.MaximumMilliseconds:0.0000} phaseSamples={phaseGpuTiming.Samples} " +

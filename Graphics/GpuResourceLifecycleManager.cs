@@ -207,6 +207,21 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Type = QueryType.Timestamp,
             Flags = QueryFlags.None
         });
+        Query gasTimestampDisjointQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.TimestampDisjoint,
+            Flags = QueryFlags.None
+        });
+        Query gasTimestampStartQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Timestamp,
+            Flags = QueryFlags.None
+        });
+        Query gasTimestampEndQuery = new(Device, new QueryDescription
+        {
+            Type = QueryType.Timestamp,
+            Flags = QueryFlags.None
+        });
         Query phaseTimestampDisjointQuery = new(Device, new QueryDescription
         {
             Type = QueryType.TimestampDisjoint,
@@ -334,6 +349,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ContactTimestampDisjointQuery = contactTimestampDisjointQuery,
             ContactTimestampStartQuery = contactTimestampStartQuery,
             ContactTimestampEndQuery = contactTimestampEndQuery,
+            GasTimestampDisjointQuery = gasTimestampDisjointQuery,
+            GasTimestampStartQuery = gasTimestampStartQuery,
+            GasTimestampEndQuery = gasTimestampEndQuery,
             PhaseTimestampDisjointQuery = phaseTimestampDisjointQuery,
             PhaseTimestampStartQuery = phaseTimestampStartQuery,
             PhaseTimestampEndQuery = phaseTimestampEndQuery,
@@ -352,8 +370,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             NativePresentationTextures = nativePresentations,
             BrushShader = allocateSimulation ? CompileShader("BrushApplication.hlsl") : null,
             CellularAutomataShader = allocateSimulation ? CompileShader("CellularAutomataSolver.hlsl") : null,
-            GasAdvectionProposalShader = allocateSimulation ? CompileShader("GasAdvectionProposal.hlsl") : null,
-            GasAdvectionResolveShader = allocateSimulation ? CompileShader("GasAdvectionResolve.hlsl") : null,
+            GasRedistributionShader = allocateSimulation ? CompileShader("GasRedistribution.hlsl") : null,
             ComponentInitializeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "InitializeComponents") : null,
             ComponentUnionShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "UnionComponents") : null,
             ComponentCompressShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "CompressComponents") : null,

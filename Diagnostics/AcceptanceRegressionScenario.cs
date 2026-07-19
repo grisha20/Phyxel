@@ -71,7 +71,9 @@ public enum AcceptanceScenarioMode
     CombustionQuench,
     SteamSelfCooling,
     BrushEmptyOnly,
-    CoalTypes
+    CoalTypes,
+    GasUniformDistribution,
+    SteamDistributionAndCooling
 }
 
 public static class AcceptanceRegressionScenario

@@ -21,13 +21,6 @@ static const uint OrdinaryHorizontalSearch = 8;
 static const uint OrdinarySurfaceBlockWidth = 2048;
 static const uint OrdinaryLocalSurfaceBlockWidth = 256;
 static const float OrdinaryLandingFrames = 1;
-static const float GasMinimumMass = 0.01;
-static const float GasTransferThreshold = 0.03;
-// Very light gases behave as discrete buoyant particles once their local mass
-// is too small for the continuum balancer. core:steam reaches this path from
-// data (density=0.03); no material ID is baked into the solver.
-static const float SparseGasParticleDensity = 0.0301;
-static const float SparseGasParticleMass = 0.0601;
 static const uint PathBlockerTileWidth = 32;
 // Keeps the vertical connectivity scan bounded even for tall maps. Column
 // balancing itself is deliberately limited to immediately adjacent columns.
@@ -108,39 +101,6 @@ bool IsSolid(GridCell cell)
     return CellKind(cell) == 2;
 }
 
-bool IsGasOrEmpty(GridCell cell)
-{
-    uint kind = CellKind(cell);
-    return kind == 0 || kind == 5;
-}
-
-GridCell GasWithMass(GridCell templateCell, float mass)
-{
-    if (mass < GasMinimumMass)
-    {
-        return CreateEmptyCell();
-    }
-    templateCell.Mass = min(mass, 1);
-    templateCell.IsActive = 1;
-    templateCell.BodyId = 0;
-    templateCell.Pressure = 0;
-    return templateCell;
-}
-
-GridCell GasTemplate(GridCell first, GridCell second)
-{
-    if (CellKind(first) == 5)
-    {
-        return first;
-    }
-    if (CellKind(second) == 5)
-    {
-        return second;
-    }
-    return CreateEmptyCell();
-}
-
-
 void MarkMovement(inout GridCell first, inout GridCell second, float horizontal, float vertical)
 {
     first.RestFrames = 0;
@@ -194,89 +154,6 @@ void ExchangeGranularWithLiquid(
     Grid[liquidIndex] = granular;
     CellMaterials[granularIndex] = liquid.MaterialIndex;
     CellMaterials[liquidIndex] = granular.MaterialIndex;
-}
-
-void RelaxGasPair(
-    uint firstIndex,
-    uint secondIndex,
-    float firstShare,
-    float horizontal,
-    float vertical)
-{
-    GridCell first = Grid[firstIndex];
-    GridCell second = Grid[secondIndex];
-    bool firstIsGas = CellKind(first) == SimulationKindGas;
-    bool secondIsGas = CellKind(second) == SimulationKindGas;
-    if (firstIsGas && secondIsGas && first.MaterialIndex != second.MaterialIndex)
-    {
-        return;
-    }
-    float firstMass = firstIsGas ? first.Mass : 0;
-    float secondMass = secondIsGas ? second.Mass : 0;
-    float totalMass = firstMass + secondMass;
-    if (totalMass < GasMinimumMass)
-    {
-        Grid[firstIndex] = CreateEmptyCell();
-        Grid[secondIndex] = CreateEmptyCell();
-        CellMaterials[firstIndex] = 0;
-        CellMaterials[secondIndex] = 0;
-        return;
-    }
-    float targetFirst = min(1, totalMass * firstShare);
-    float targetSecond = totalMass - targetFirst;
-    GridCell templateCell = GasTemplate(first, second);
-    bool sparseParticle =
-        Materials[templateCell.MaterialIndex].Density <= SparseGasParticleDensity &&
-        totalMass <= SparseGasParticleMass;
-    if (sparseParticle && firstIsGas != secondIsGas)
-    {
-        // Sparse gases are moved once per frame by the conflict-resolved
-        // advection pass. Pair relaxation must not move them again or create
-        // parity bands.
-        return;
-    }
-    if (abs(targetFirst - firstMass) <= GasTransferThreshold)
-    {
-        return;
-    }
-    float heatCapacity = Materials[templateCell.MaterialIndex].HeatCapacity;
-    float firstCapacity = heatCapacity * firstMass;
-    float secondCapacity = heatCapacity * secondMass;
-    float totalCapacity = firstCapacity + secondCapacity;
-    float thermalEnergy =
-        (firstIsGas ? firstCapacity * first.Temperature : 0) +
-        (secondIsGas ? secondCapacity * second.Temperature : 0);
-    float mixedTemperature = totalCapacity > 0
-        ? thermalEnergy / totalCapacity
-        : templateCell.Temperature;
-    // Do not discard a sparse gas fraction just because one side of the pair
-    // falls below GasMinimumMass. Carry that fraction into the other live
-    // side; otherwise a low-density steam cloud loses mass on every balance
-    // step and eventually appears to freeze/disappear in mid-air.
-    if (targetFirst < GasMinimumMass)
-    {
-        targetSecond += targetFirst;
-        targetFirst = 0;
-    }
-    if (targetSecond < GasMinimumMass)
-    {
-        targetFirst += targetSecond;
-        targetSecond = 0;
-    }
-    GridCell resolvedFirst = GasWithMass(templateCell, targetFirst);
-    GridCell resolvedSecond = GasWithMass(templateCell, targetSecond);
-    if (resolvedFirst.IsActive != 0) resolvedFirst.Temperature = mixedTemperature;
-    if (resolvedSecond.IsActive != 0) resolvedSecond.Temperature = mixedTemperature;
-    float mixedLifetime = firstIsGas && secondIsGas
-        ? min(first.Lifetime, second.Lifetime)
-        : firstIsGas ? first.Lifetime : second.Lifetime;
-    if (resolvedFirst.IsActive != 0) resolvedFirst.Lifetime = mixedLifetime;
-    if (resolvedSecond.IsActive != 0) resolvedSecond.Lifetime = mixedLifetime;
-    MarkMovement(resolvedFirst, resolvedSecond, horizontal, vertical);
-    Grid[firstIndex] = resolvedFirst;
-    Grid[secondIndex] = resolvedSecond;
-    CellMaterials[firstIndex] = resolvedFirst.IsActive != 0 ? resolvedFirst.MaterialIndex : 0;
-    CellMaterials[secondIndex] = resolvedSecond.IsActive != 0 ? resolvedSecond.MaterialIndex : 0;
 }
 
 bool SandSupported(uint2 coordinate)
@@ -685,34 +562,6 @@ void BuildPathBlockerMask(uint2 tileCoordinate)
     PathBlockerMasks[tileCoordinate.y * tilesPerRow + tileCoordinate.x] = mask;
 }
 
-bool GasPathClear(uint2 first, uint2 second)
-{
-    uint start = min(first.x, second.x) + 1;
-    uint end = max(first.x, second.x);
-    uint row = first.y * Width;
-    for (uint x = start; x < end; x++)
-    {
-        uint kind = CellKindAtIndex(row + x);
-        if (kind != 0 && kind != 5)
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool GasNearCeiling(uint2 coordinate)
-{
-    for (uint distance = 1; distance <= 12 && coordinate.y >= distance; distance++)
-    {
-        if (CellKindAt(coordinate - uint2(0, distance)) == 2)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 int WaterBaseY(uint x)
 {
     for (int y = int(Height) - 1; y >= 0; y--)
@@ -911,7 +760,6 @@ void ResolveVerticalPair(uint2 upperCoordinate)
             }
             return;
         }
-        RelaxGasPair(upperIndex, lowerIndex, 0.72, 0, -36);
         return;
     }
     bool canMove = upperKind == SimulationKindGranular
@@ -971,7 +819,6 @@ void ResolveDiagonalPair(uint2 upperCoordinate, uint2 lowerCoordinate)
             }
             return;
         }
-        RelaxGasPair(upperIndex, lowerIndex, 0.62, direction, -28);
         return;
     }
     bool canMove = upperKind == SimulationKindGranular
@@ -1044,7 +891,6 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
         {
             return;
         }
-        RelaxGasPair(leftIndex, rightIndex, 0.5, 28, 0);
         return;
     }
     if (leftKind == 4 && WaterCanFlowSide(
@@ -1086,22 +932,6 @@ void ResolveWaterSpan(uint2 leftCoordinate, uint stride)
     }
     if (rightKind == 4 && !WaterSupported(rightCoordinate))
     {
-        return;
-    }
-    if ((leftKind == 5 || rightKind == 5) &&
-        (leftKind == 0 || leftKind == 5) &&
-        (rightKind == 0 || rightKind == 5) &&
-        GasNearCeiling(leftCoordinate) && GasNearCeiling(rightCoordinate) &&
-        GasPathClear(leftCoordinate, rightCoordinate))
-    {
-        if ((leftKind == SimulationKindGas &&
-            (Materials[leftMaterial].Flags & MaterialFlagFlame) != 0) ||
-            (rightKind == SimulationKindGas &&
-            (Materials[rightMaterial].Flags & MaterialFlagFlame) != 0))
-        {
-            return;
-        }
-        RelaxGasPair(leftIndex, rightIndex, 0.5, 44, 0);
         return;
     }
     if ((leftKind != 4 && rightKind != 4) ||
@@ -2300,10 +2130,7 @@ bool CanMoveWater(uint2 coordinate, GridCell cell)
 bool CanMoveGas(uint2 coordinate, GridCell cell)
 {
     bool flame = (Materials[cell.MaterialIndex].Flags & MaterialFlagFlame) != 0;
-    bool sparseParticle =
-        Materials[cell.MaterialIndex].Density <= SparseGasParticleDensity &&
-        cell.Mass <= SparseGasParticleMass;
-    for (int yOffset = -1; yOffset <= 0; yOffset++)
+    for (int yOffset = -1; yOffset <= 1; yOffset++)
     {
         int y = int(coordinate.y) + yOffset;
         if (y < 0 || y >= int(Height))
@@ -2323,15 +2150,18 @@ bool CanMoveGas(uint2 coordinate, GridCell cell)
             }
             uint neighborIndex = FlattenCoordinate(uint2(x, y));
             uint neighborKind = CellKindAtIndex(neighborIndex);
-            if (neighborKind == 0 &&
-                (flame || sparseParticle || cell.Mass > GasTransferThreshold * 2))
+            if (neighborKind == 0)
             {
                 return true;
             }
-            if (neighborKind == 5)
+            if (!flame && neighborKind == SimulationKindGas)
             {
                 GridCell neighbor = Grid[neighborIndex];
-                if (abs(neighbor.Mass - cell.Mass) > GasTransferThreshold * 2)
+                bool neighborFlame =
+                    (Materials[neighbor.MaterialIndex].Flags & MaterialFlagFlame) != 0;
+                if (!neighborFlame &&
+                    (neighbor.MaterialIndex != cell.MaterialIndex ||
+                        abs(neighbor.Mass - cell.Mass) > 0.001))
                 {
                     return true;
                 }

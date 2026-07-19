@@ -12,10 +12,12 @@ namespace Phyxel.Graphics;
 public sealed class SimulationDispatchCoordinator
 {
     public const float FixedThermalStep = 0.05f;
+    public const double FixedGasStep = 1d / 60d;
     // A larger fixed-step exchange keeps thermal fronts visible at gameplay
     // scale while remaining stable with the 0.05 s Jacobi step.
     public const float ThermalExchangeRate = 16f;
     public const int MaximumThermalTicksPerFrame = 4;
+    public const int MaximumGasTicksPerFrame = 4;
     private static readonly uint[] PrimaryEvenPhases =
     [
         32, 0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
@@ -92,6 +94,12 @@ public sealed class SimulationDispatchCoordinator
     private bool fluidMatter;
     private bool liquidMatter;
     private bool gasMatter;
+    private readonly FixedStepGasScheduler gasScheduler = new();
+    private bool gasTimingPending;
+    private int gasTimingSamples;
+    private double gasTimingTotalMilliseconds;
+    private double gasTimingMinimumMilliseconds = double.PositiveInfinity;
+    private double gasTimingMaximumMilliseconds;
     private bool solidMatter;
     private bool cellularSleeping;
     private bool solidSleeping;
@@ -206,6 +214,7 @@ public sealed class SimulationDispatchCoordinator
     public int SettledObservations => settledObservations;
     public bool ThermalActive => thermalActive;
     public ulong ThermalTicks => thermalScheduler.TotalTicks;
+    public ulong GasTicks => gasScheduler.TotalTicks;
     public ThermalGpuTimingStatistics ThermalGpuTiming => new(
         thermalTimingSamples,
         thermalTimingSamples == 0 ? 0 : thermalTimingTotalMilliseconds / thermalTimingSamples,
@@ -216,6 +225,11 @@ public sealed class SimulationDispatchCoordinator
         contactTimingSamples == 0 ? 0 : contactTimingTotalMilliseconds / contactTimingSamples,
         contactTimingSamples == 0 ? 0 : contactTimingMinimumMilliseconds,
         contactTimingMaximumMilliseconds);
+    public ThermalGpuTimingStatistics GasRedistributionGpuTiming => new(
+        gasTimingSamples,
+        gasTimingSamples == 0 ? 0 : gasTimingTotalMilliseconds / gasTimingSamples,
+        gasTimingSamples == 0 ? 0 : gasTimingMinimumMilliseconds,
+        gasTimingMaximumMilliseconds);
     public ThermalGpuTimingStatistics PhaseGpuTiming => new(
         phaseTimingSamples,
         phaseTimingSamples == 0 ? 0 : phaseTimingTotalMilliseconds / phaseTimingSamples,
@@ -332,6 +346,7 @@ public sealed class SimulationDispatchCoordinator
         }
         PollPhaseTiming(resources);
         PollCombustionTiming(resources);
+        PollGasTiming(resources);
         ApplyPendingPhaseFallback(resources);
 
         if (settings.HydraulicPressure != previousHydraulicPressure)
@@ -476,9 +491,15 @@ public sealed class SimulationDispatchCoordinator
             presentationDirty = true;
         }
 
-        if (!settings.Paused && gasMatter && resources.IsSimulationAllocated)
+        int gasTicks = gasScheduler.Advance(
+            elapsedSeconds,
+            settings.Paused,
+            gasMatter && resources.IsSimulationAllocated);
+        for (int tick = 0; tick < gasTicks; tick++)
         {
-            DispatchGasAdvection(resources, ref constants);
+            ulong tickIndex = gasScheduler.TotalTicks - (ulong)gasTicks + (ulong)tick + 1;
+            bool measureGas = gasScheduler.TotalTicks >= 120 && !gasTimingPending;
+            DispatchGasRedistribution(resources, ref constants, tickIndex, measureGas);
             cellMaterialsDirty = false;
             cellularSleeping = false;
             presentationDirty = true;
@@ -586,7 +607,9 @@ public sealed class SimulationDispatchCoordinator
         thermalActive = containsMatter;
         contactTransitionPotential = containsContactTransitionSource;
         thermalScheduler.Reset();
+        gasScheduler.Reset();
         ResetThermalTiming();
+        ResetGasTiming();
         ResetContactTiming();
         ResetPhaseRuntime();
         ResetCombustionRuntime();
@@ -1198,6 +1221,8 @@ public sealed class SimulationDispatchCoordinator
         fluidMatter = false;
         liquidMatter = false;
         gasMatter = false;
+        gasScheduler.Reset();
+        ResetGasTiming();
         solidMatter = false;
         cellularSleeping = false;
         solidSleeping = false;
@@ -1451,46 +1476,101 @@ public sealed class SimulationDispatchCoordinator
         slot.Generation = combustionReadbackGeneration;
     }
 
-    private static void DispatchGasAdvection(
+    private void DispatchGasRedistribution(
         GpuSimulationResources resources,
-        ref SimulationFrameConstants constants)
+        ref SimulationFrameConstants constants,
+        ulong tickIndex,
+        bool measure)
     {
         DeviceContext context = resources.Context;
-        context.ClearUnorderedAccessView(
-            resources.EmissionClaims.UnorderedView,
-            new RawInt4(-1, -1, -1, -1));
-        context.UpdateSubresource(ref constants, resources.FrameConstants);
-        context.ComputeShader.Set(resources.GasAdvectionProposalShader);
+        if (measure)
+        {
+            context.Begin(resources.GasTimestampDisjointQuery);
+            context.End(resources.GasTimestampStartQuery);
+        }
+        uint previousFrame = constants.FrameIndex;
+        uint previousPhase = constants.SimulationPhase;
+        constants.FrameIndex = unchecked((uint)tickIndex);
+        context.ComputeShader.Set(resources.GasRedistributionShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResources(
-            0,
-            resources.Grid.ReadView,
-            resources.Materials.View);
-        context.ComputeShader.SetUnorderedAccessViews(
-            0,
-            resources.EmissionClaims.UnorderedView,
-            resources.EmissionRequests.UnorderedView);
-        context.Dispatch(
-            DivideRoundUp(resources.Width, 16),
-            DivideRoundUp(resources.Height, 16),
-            1);
-        Unbind(context, 2, 2);
-
-        context.ComputeShader.Set(resources.GasAdvectionResolveShader);
-        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResources(
-            0,
-            resources.EmissionRequests.View,
-            resources.EmissionClaims.View);
+        context.ComputeShader.SetShaderResource(0, resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Grid.ReadUnorderedView,
             resources.CellMaterials.UnorderedView);
-        context.Dispatch(
-            DivideRoundUp(resources.Width, 16),
-            DivideRoundUp(resources.Height, 16),
-            1);
-        Unbind(context, 2, 2);
+        // Adjacent horizontal balancing needs both disjoint parities per tick.
+        // Vertical edges alternate parity across fixed ticks, so every edge is
+        // still processed at 30 Hz without paying for a redundant fifth full
+        // grid pass. The fourth pass is the rotating long-range gas span.
+        for (uint pass = 0; pass < 4; pass++)
+        {
+            uint phase = pass == 0 ? unchecked((uint)tickIndex) & 1u : pass + 1;
+            constants.SimulationPhase = phase;
+            UpdateConstants(context, resources, ref constants);
+            int dispatchWidth = phase <= 1
+                ? resources.Width
+                : DivideRoundUp(resources.Width, 2);
+            int dispatchHeight = phase <= 1
+                ? DivideRoundUp(resources.Height, 2)
+                : resources.Height;
+            context.Dispatch(
+                DivideRoundUp(dispatchWidth, 16),
+                DivideRoundUp(dispatchHeight, 16),
+                1);
+        }
+        if (measure)
+        {
+            context.End(resources.GasTimestampEndQuery);
+            context.End(resources.GasTimestampDisjointQuery);
+            gasTimingPending = true;
+        }
+        Unbind(context, 1, 2);
+        constants.FrameIndex = previousFrame;
+        constants.SimulationPhase = previousPhase;
+    }
+
+    private void PollGasTiming(GpuSimulationResources resources)
+    {
+        if (!gasTimingPending)
+        {
+            return;
+        }
+        DeviceContext context = resources.Context;
+        bool disjointReady = context.GetData(
+            resources.GasTimestampDisjointQuery,
+            AsynchronousFlags.DoNotFlush,
+            out QueryDataTimestampDisjoint disjoint);
+        bool startReady = context.GetData(
+            resources.GasTimestampStartQuery,
+            AsynchronousFlags.DoNotFlush,
+            out long start);
+        bool endReady = context.GetData(
+            resources.GasTimestampEndQuery,
+            AsynchronousFlags.DoNotFlush,
+            out long end);
+        if (!disjointReady || !startReady || !endReady)
+        {
+            return;
+        }
+        gasTimingPending = false;
+        if (disjoint.Disjoint || disjoint.Frequency <= 0 || end < start)
+        {
+            return;
+        }
+        double milliseconds = (end - start) * 1000d / disjoint.Frequency;
+        gasTimingSamples++;
+        gasTimingTotalMilliseconds += milliseconds;
+        gasTimingMinimumMilliseconds = Math.Min(gasTimingMinimumMilliseconds, milliseconds);
+        gasTimingMaximumMilliseconds = Math.Max(gasTimingMaximumMilliseconds, milliseconds);
+    }
+
+    private void ResetGasTiming()
+    {
+        gasTimingPending = false;
+        gasTimingSamples = 0;
+        gasTimingTotalMilliseconds = 0;
+        gasTimingMinimumMilliseconds = double.PositiveInfinity;
+        gasTimingMaximumMilliseconds = 0;
     }
 
     private void DispatchEmissionResolve(GpuSimulationResources resources)

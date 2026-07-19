@@ -163,23 +163,32 @@ internal static class CorePhaseAcceptanceVerifier
         uint steam = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
         uint gas = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Gas);
         MaterialMetrics iceMetrics = Measure(moved, ice);
+        MaterialMetrics fixedIceMetrics = MeasureRegion(moved, ice, 70, 160, 85, 163);
         MaterialMetrics waterMetrics = Measure(moved, water);
         MaterialMetrics steamMetrics = Measure(moved, steam);
         MaterialMetrics gasMetrics = Measure(moved, gas);
         Console.WriteLine(
             $"PHYXEL_CORE_MOTION steam={steamMetrics} gas={gasMetrics}");
-        Require(iceMetrics.Cells == 64 && Math.Abs(iceMetrics.Mass - 64) <= 0.001 &&
-            iceMetrics.MinimumX == 70 && iceMetrics.MaximumX == 85 &&
-            iceMetrics.MinimumY == 160 && iceMetrics.MaximumY == 163,
-            $"fixed ice moved or changed={iceMetrics}", errors);
-        Require(waterMetrics.Cells > 0 && Math.Abs(waterMetrics.Mass - 128) <= 0.05 &&
+        Require(fixedIceMetrics.Cells == 64 &&
+            Math.Abs(fixedIceMetrics.Mass - 64) <= 0.001 &&
+            fixedIceMetrics.MinimumX == 70 && fixedIceMetrics.MaximumX == 85 &&
+            fixedIceMetrics.MinimumY == 160 && fixedIceMetrics.MaximumY == 163,
+            $"fixed ice moved or changed={fixedIceMetrics}", errors);
+        double newlyFrozenMass = Math.Max(0, iceMetrics.Mass - fixedIceMetrics.Mass);
+        double phaseFamilyMass = waterMetrics.Mass + steamMetrics.Mass + newlyFrozenMass;
+        Require(waterMetrics.Cells > 0 && Math.Abs(phaseFamilyMass - 192) <= 0.05 &&
             waterMetrics.AverageY > 95,
-            $"melted/condensed water did not fall or conserve mass={waterMetrics}", errors);
-        Require(steamMetrics.Cells > 0 && steamMetrics.Mass >= 60 && steamMetrics.AverageY < 178,
-            $"boiled steam did not rise or lost excessive mass={steamMetrics}", errors);
-        Require(steamMetrics.RestingCells * 4 < steamMetrics.Cells * 3 &&
-            steamMetrics.MaximumX - steamMetrics.MinimumX >= 16,
-            $"boiled steam stopped diffusing and became a frozen column={steamMetrics}", errors);
+            $"water/steam family did not fall or conserve mass water={waterMetrics} " +
+            $"steam={steamMetrics} newIceMass={newlyFrozenMass:F3}", errors);
+        bool steamStillPresent = steamMetrics.Mass >= 1;
+        Require(!steamStillPresent || steamMetrics.AverageY < 178,
+            $"remaining boiled steam did not rise={steamMetrics}", errors);
+        Require(!steamStillPresent ||
+            (steamMetrics.RestingCells * 4 < steamMetrics.Cells * 3 &&
+                steamMetrics.MaximumX - steamMetrics.MinimumX >= 16),
+            $"remaining boiled steam stopped diffusing={steamMetrics}", errors);
+        Require(waterMetrics.Mass >= 180,
+            $"boiled steam neither remained nor condensed into water={waterMetrics}", errors);
         Require(gasMetrics.Cells > 0 && gasMetrics.Mass >= 60 && gasMetrics.AverageY < 178,
             $"core:gas beside steam did not remain a separate moving gas={gasMetrics}", errors);
         Require(steam != gas, "core:steam and core:gas share a runtime index", errors);
@@ -385,6 +394,18 @@ internal static class CorePhaseAcceptanceVerifier
 
     private static MaterialMetrics Measure(SimulationWorldSnapshot snapshot, uint material)
     {
+        return MeasureRegion(
+            snapshot, material, 0, 0, snapshot.Width - 1, snapshot.Height - 1);
+    }
+
+    private static MaterialMetrics MeasureRegion(
+        SimulationWorldSnapshot snapshot,
+        uint material,
+        int left,
+        int top,
+        int right,
+        int bottom)
+    {
         int count = 0;
         int resting = 0;
         double mass = 0;
@@ -394,9 +415,9 @@ internal static class CorePhaseAcceptanceVerifier
         int minimumY = snapshot.Height;
         int maximumY = -1;
         ReadOnlySpan<GridCell> cells = Cells(snapshot);
-        for (int y = 0; y < snapshot.Height; y++)
+        for (int y = top; y <= bottom; y++)
         {
-            for (int x = 0; x < snapshot.Width; x++)
+            for (int x = left; x <= right; x++)
             {
                 GridCell cell = cells[y * snapshot.Width + x];
                 if (cell.IsActive == 0 || cell.MaterialIndex != material)

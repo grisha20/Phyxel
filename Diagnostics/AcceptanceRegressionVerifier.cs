@@ -211,6 +211,18 @@ public static class AcceptanceRegressionVerifier
                 materialRegistry,
                 thermalCheckpoints,
                 out report),
+            AcceptanceScenarioMode.GasUniformDistribution =>
+                GasUniformDistributionAcceptanceVerifier.Validate(
+                    snapshot,
+                    materialRegistry,
+                    thermalCheckpoints,
+                    out report),
+            AcceptanceScenarioMode.SteamDistributionAndCooling =>
+                SteamDistributionAndCoolingAcceptanceVerifier.Validate(
+                    snapshot,
+                    materialRegistry,
+                    thermalCheckpoints,
+                    out report),
             AcceptanceScenarioMode.PhaseThresholds or
             AcceptanceScenarioMode.PhaseHysteresis or
             AcceptanceScenarioMode.PhaseSingleTransition or

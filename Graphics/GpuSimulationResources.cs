@@ -49,6 +49,9 @@ public sealed class GpuSimulationResources : IDisposable
     public required Query ContactTimestampDisjointQuery { get; init; }
     public required Query ContactTimestampStartQuery { get; init; }
     public required Query ContactTimestampEndQuery { get; init; }
+    public required Query GasTimestampDisjointQuery { get; init; }
+    public required Query GasTimestampStartQuery { get; init; }
+    public required Query GasTimestampEndQuery { get; init; }
     public required Query PhaseTimestampDisjointQuery { get; init; }
     public required Query PhaseTimestampStartQuery { get; init; }
     public required Query PhaseTimestampEndQuery { get; init; }
@@ -71,8 +74,7 @@ public sealed class GpuSimulationResources : IDisposable
     public SharpDX.Direct3D11.Texture2D NativeReadTexture => NativePresentationTextures[1 - PresentationIndex];
     public ComputeShader? BrushShader { get; init; }
     public ComputeShader? CellularAutomataShader { get; init; }
-    public ComputeShader? GasAdvectionProposalShader { get; init; }
-    public ComputeShader? GasAdvectionResolveShader { get; init; }
+    public ComputeShader? GasRedistributionShader { get; init; }
     public ComputeShader? ComponentInitializeShader { get; init; }
     public ComputeShader? ComponentUnionShader { get; init; }
     public ComputeShader? ComponentCompressShader { get; init; }
@@ -114,8 +116,7 @@ public sealed class GpuSimulationResources : IDisposable
         ComponentUnionShader?.Dispose();
         ComponentInitializeShader?.Dispose();
         CellularAutomataShader?.Dispose();
-        GasAdvectionProposalShader?.Dispose();
-        GasAdvectionResolveShader?.Dispose();
+        GasRedistributionShader?.Dispose();
         BrushShader?.Dispose();
         foreach (KniTexture2D texture in PresentationTextures)
         {
@@ -134,6 +135,9 @@ public sealed class GpuSimulationResources : IDisposable
         ContactTimestampEndQuery.Dispose();
         ContactTimestampStartQuery.Dispose();
         ContactTimestampDisjointQuery.Dispose();
+        GasTimestampEndQuery.Dispose();
+        GasTimestampStartQuery.Dispose();
+        GasTimestampDisjointQuery.Dispose();
         PhaseTimestampEndQuery.Dispose();
         PhaseTimestampStartQuery.Dispose();
         PhaseTimestampDisjointQuery.Dispose();
