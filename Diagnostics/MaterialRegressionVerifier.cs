@@ -141,7 +141,7 @@ public static class MaterialRegressionVerifier
             File.Exists(Path.Combine(artifactDirectory, spreadImageName));
         bool passed = gas >= 1000 && mass >= 800 && averageY <= 105 &&
             maximumX - minimumX >= 240 && maximumY - minimumY >= 20 &&
-            dense <= gas / 3 && resting == gas && moving == 0 && images;
+            dense <= gas / 3 && resting < gas * 9 / 10 && moving > gas / 50 && images;
         report = $"PHYXEL_F gas={gas} mass={mass:0.0} averageY={averageY:0.0} dense={dense} resting={resting} moving={moving} bounds={minimumX},{minimumY}-{maximumX},{maximumY}";
         return passed;
     }

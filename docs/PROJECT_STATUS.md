@@ -1,5 +1,17 @@
 # Состояние проекта Phyxel
 
+## Current handoff (working tree, 2026-07-19)
+
+- Last completed commit: `e13d065 Add water ice steam phase chain`
+- Last completed functional commit: `e13d065 Add water ice steam phase chain`
+- Current task: combustion temperature/quenching and Powder Toy-like gas motion
+- Implemented locally (not committed): combustion ceiling, inert coal, latent-heat
+  boiling, faster thermal exchange, generic hot-solid glow, and proposal/resolve
+  sparse-gas advection.
+- `core:coal` is granular/BCOL-like so burned wood collapses into a charcoal pile
+  instead of retaining the exact tree silhouette.
+- Next task: review GPU acceptance captures and split changes into small commits.
+
 > [!IMPORTANT]
 > ## CURRENT HANDOFF
 

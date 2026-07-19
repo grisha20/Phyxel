@@ -60,7 +60,7 @@ public static class CoreMaterialIds
     ];
 }
 
-public sealed record MaterialTransitionRule(float Temperature, string IntoId);
+public sealed record MaterialTransitionRule(float Temperature, string IntoId, float LatentHeat = 0);
 
 public sealed record MaterialTransitionDefinitions(
     MaterialTransitionRule? Below,
@@ -71,7 +71,8 @@ public sealed record MaterialCombustionDefinition(
     float BurnRate,
     float HeatPerMass,
     string BurnedIntoId,
-    float FlameSpreadRate);
+    float FlameSpreadRate,
+    float MaximumTemperature);
 
 public sealed record MaterialEmissionDefinition(
     string SmokeIntoId,

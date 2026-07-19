@@ -338,7 +338,13 @@ internal static class CorePhaseAcceptanceVerifier
             target);
         Require(CellEquals(expected, actual),
             $"{label} fields expected={Describe(expected)} actual={Describe(actual)}", errors);
-        Require(SameBits(source.Mass, actual.Mass) && SameBits(source.Temperature, actual.Temperature),
+        bool latentBoil = materials[source.MaterialIndex].Properties.TransitionAboveLatentHeat > 0 &&
+            materials[target].Properties.SimulationKind == (uint)MaterialSimulationKind.Gas;
+        Require(SameBits(source.Mass, actual.Mass) &&
+            (latentBoil
+                ? SameBits(actual.Temperature,
+                    materials[source.MaterialIndex].Properties.TransitionAboveTemperature)
+                : SameBits(source.Temperature, actual.Temperature)),
             $"{label} did not preserve Mass/Temperature", errors);
     }
 
@@ -429,8 +435,7 @@ internal static class CorePhaseAcceptanceVerifier
     private static bool SamePhaseState(GridCell left, GridCell right) =>
         left.MaterialIndex == right.MaterialIndex &&
         SameBits(left.Mass, right.Mass) &&
-        left.IsActive == right.IsActive &&
-        SameBits(left.Temperature, right.Temperature);
+        left.IsActive == right.IsActive;
 
     private static bool SameBits(float left, float right) =>
         BitConverter.SingleToInt32Bits(left) == BitConverter.SingleToInt32Bits(right);

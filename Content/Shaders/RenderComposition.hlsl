@@ -139,6 +139,24 @@ float3 CombustionHeatGlow(GridCell cell)
     return float3(1.0, 0.09, 0.01) * heat * 0.30;
 }
 
+float3 HotMaterialIncandescence(GridCell cell)
+{
+    if (cell.IsActive == 0 || cell.MaterialIndex >= 256)
+    {
+        return 0;
+    }
+    MaterialProperties material = Materials[cell.MaterialIndex];
+    if (material.SimulationKind != SimulationKindSolid &&
+        material.SimulationKind != SimulationKindGranular)
+    {
+        return 0;
+    }
+    float redHeat = saturate((cell.Temperature - 400.0) / 500.0);
+    float yellowHeat = saturate((cell.Temperature - 700.0) / 500.0);
+    return lerp(float3(0.72, 0.015, 0.002), float3(1.0, 0.42, 0.025), yellowHeat) *
+        redHeat * 0.48;
+}
+
 float LiquidCoverage(uint2 coordinate, out float3 liquidColor)
 {
     float coverage = 0;
@@ -215,6 +233,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         color = MaterialColor(cell.MaterialIndex);
         color.rgb += CombustionHeatGlow(cell);
+        color.rgb += HotMaterialIncandescence(cell);
         uint kind = Materials[cell.MaterialIndex].SimulationKind;
         if (IsFluidMaterial(kind))
         {

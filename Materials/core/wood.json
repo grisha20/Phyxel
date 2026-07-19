@@ -9,9 +9,10 @@
   "combustion": {
     "ignitionTemperature": 300.0,
     "burnRate": 0.05,
-    "heatPerMass": 1800.0,
+    "heatPerMass": 800.0,
     "burnedInto": "core:coal",
-    "spreadRate": 3.0
+    "spreadRate": 3.0,
+    "maximumTemperature": 900.0
   },
   "emissions": {
     "smokeInto": "core:smoke",

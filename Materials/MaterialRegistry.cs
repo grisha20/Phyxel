@@ -389,9 +389,9 @@ public sealed class MaterialRegistry
         }
 
         MaterialSimulationKind targetKind = (MaterialSimulationKind)target.Properties.SimulationKind;
-        if (targetKind != MaterialSimulationKind.Solid)
+        if (targetKind is not (MaterialSimulationKind.Solid or MaterialSimulationKind.Granular))
         {
-            return $"burnedInto target '{combustion.BurnedIntoId}' must be fixed solid in combustion v1.";
+            return $"burnedInto target '{combustion.BurnedIntoId}' must be solid or granular in combustion v1.";
         }
         if ((target.Properties.Flags & (uint)MaterialFlags.MovableSolid) != 0)
         {
@@ -527,6 +527,8 @@ public sealed class MaterialRegistry
         properties.DecayIntoMaterialIndex = source.Lifecycle is { } lifecycle
             ? indexedById[lifecycle.DecayIntoId].RuntimeIndex
             : uint.MaxValue;
+        properties.MaximumCombustionTemperature = source.Combustion?.MaximumTemperature ?? 0;
+        properties.TransitionAboveLatentHeat = source.PhaseTransitions?.Above?.LatentHeat ?? 0;
         return properties;
     }
 

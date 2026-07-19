@@ -54,6 +54,7 @@ internal static class CombustionMaterialRegressionVerifier
             IgnitionTemperature = 300f,
             BurnRate = 0.08f,
             HeatPerMass = 1800f,
+            MaximumCombustionTemperature = 900f,
             FlameSpreadRate = 3f,
             BurnedIntoMaterialIndex = 2
         };
@@ -85,6 +86,15 @@ internal static class CombustionMaterialRegressionVerifier
         Require(burning.Temperature > originalTemperature, "Combustion did not add heat.");
         Require((summary & CombustionSummaryFlags.CombustionOccurred) != 0,
             "Combustion summary did not report fuel consumption.");
+
+        GridCell capped = new() { MaterialIndex = 1, Mass = 0.8f, IsActive = 1, Temperature = 899.9f };
+        CombustionRuntime.TryApply(ref capped, materials, 0.05f, out _, out _);
+        Require(capped.Temperature <= source.MaximumCombustionTemperature,
+            "Combustion-generated heat exceeded the material temperature ceiling.");
+        GridCell externallyHot = new() { MaterialIndex = 1, Mass = 0.8f, IsActive = 1, Temperature = 1200f };
+        CombustionRuntime.TryApply(ref externallyHot, materials, 0.05f, out _, out _);
+        Require(Same(externallyHot.Temperature, 1200f),
+            "Combustion ceiling incorrectly cooled an externally hotter cell.");
 
         GridCell fourTicks = new() { MaterialIndex = 1, Mass = 0.8f, IsActive = 1, Temperature = 301f };
         for (int index = 0; index < 4; index++)
@@ -171,8 +181,8 @@ internal static class CombustionMaterialRegressionVerifier
 
     private static void VerifyLayout()
     {
-        Require(Marshal.SizeOf<MaterialProperties>() == 96,
-            "MaterialProperties must be 96 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == 104,
+            "MaterialProperties must be 104 bytes.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.IgnitionTemperature)).ToInt32() == 64,
             "IgnitionTemperature offset must be 64.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.BurnRate)).ToInt32() == 68,
@@ -189,6 +199,10 @@ internal static class CombustionMaterialRegressionVerifier
             "MaximumLifetime offset must be 88.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.DecayIntoMaterialIndex)).ToInt32() == 92,
             "DecayIntoMaterialIndex offset must be 92.");
+        Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.MaximumCombustionTemperature)).ToInt32() == 96,
+            "MaximumCombustionTemperature offset must be 96.");
+        Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.TransitionAboveLatentHeat)).ToInt32() == 100,
+            "TransitionAboveLatentHeat offset must be 100.");
         Require(Marshal.SizeOf<GridCell>() == 40, "GridCell must be 40 bytes.");
 
         string shaderPath = Path.Combine(
@@ -206,7 +220,8 @@ internal static class CombustionMaterialRegressionVerifier
         [
             "float IgnitionTemperature", "float BurnRate", "float HeatPerMass",
             "uint BurnedIntoMaterialIndex", "float FlameSpreadRate",
-            "float MinimumLifetime", "float MaximumLifetime", "uint DecayIntoMaterialIndex"
+            "float MinimumLifetime", "float MaximumLifetime", "uint DecayIntoMaterialIndex",
+            "float MaximumCombustionTemperature", "float TransitionAboveLatentHeat"
         ];
         int previous = -1;
         foreach (string field in fields)
@@ -245,8 +260,12 @@ internal static class CombustionMaterialRegressionVerifier
             "Raw burnedInto string target was not normalized.");
         Require(Same(wood.Properties.IgnitionTemperature, 300f) &&
             Same(wood.Properties.BurnRate, 0.08f) &&
-            Same(wood.Properties.HeatPerMass, 1800f),
+            Same(wood.Properties.HeatPerMass, 1800f) &&
+            Same(wood.Properties.MaximumCombustionTemperature, 900f),
             "Combustion numeric properties were not copied to GPU properties.");
+        Require(registry[CoreMaterialIds.Coal].Combustion is null &&
+            registry[CoreMaterialIds.Coal].Properties.BurnedIntoMaterialIndex == uint.MaxValue,
+            "Bundled coal must be an inert hot residue in combustion v1.");
         Require(wood.Properties.BurnedIntoMaterialIndex == registry["test:coal"].RuntimeIndex,
             "Combustion target was not resolved after runtime ordering.");
         Require(registry["test:coal"].Properties.BurnedIntoMaterialIndex == uint.MaxValue,
@@ -339,7 +358,9 @@ internal static class CombustionMaterialRegressionVerifier
         {
             Console.SetError(originalError);
         }
-        foreach (string id in new[] { "test:granular_source", "test:movable_source2", "test:large_source", "test:phase_source2" })
+        Require(registry.TryGet("test:granular_source", out _),
+            "Granular combustion residue should be accepted for BCOL-like targets.");
+        foreach (string id in new[] { "test:movable_source2", "test:large_source", "test:phase_source2" })
         {
             Require(!registry.TryGet(id, out _), $"Invalid combustion target retained source '{id}'.");
         }
@@ -404,7 +425,7 @@ internal static class CombustionMaterialRegressionVerifier
     }
 
     private static string CombustionJson(float ignition, float burnRate, float heatPerMass, string target) =>
-        $$"""{ "ignitionTemperature": {{ignition.ToString(System.Globalization.CultureInfo.InvariantCulture)}}, "burnRate": {{burnRate.ToString(System.Globalization.CultureInfo.InvariantCulture)}}, "heatPerMass": {{heatPerMass.ToString(System.Globalization.CultureInfo.InvariantCulture)}}, "burnedInto": "{{target}}" }""";
+        $$"""{ "ignitionTemperature": {{ignition.ToString(System.Globalization.CultureInfo.InvariantCulture)}}, "burnRate": {{burnRate.ToString(System.Globalization.CultureInfo.InvariantCulture)}}, "heatPerMass": {{heatPerMass.ToString(System.Globalization.CultureInfo.InvariantCulture)}}, "burnedInto": "{{target}}", "maximumTemperature": 900.0 }""";
 
     private static string EmissionsJson(float smokeRate, string smokeTarget, float gasRate, string gasTarget) =>
         $$"""{ "smokeInto": "{{smokeTarget}}", "smokeRate": {{smokeRate.ToString(System.Globalization.CultureInfo.InvariantCulture)}}, "gasInto": "{{gasTarget}}", "gasRate": {{gasRate.ToString(System.Globalization.CultureInfo.InvariantCulture)}} }""";

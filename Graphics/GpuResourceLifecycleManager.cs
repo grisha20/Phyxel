@@ -332,6 +332,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             NativePresentationTextures = nativePresentations,
             BrushShader = allocateSimulation ? CompileShader("BrushApplication.hlsl") : null,
             CellularAutomataShader = allocateSimulation ? CompileShader("CellularAutomataSolver.hlsl") : null,
+            GasAdvectionProposalShader = allocateSimulation ? CompileShader("GasAdvectionProposal.hlsl") : null,
+            GasAdvectionResolveShader = allocateSimulation ? CompileShader("GasAdvectionResolve.hlsl") : null,
             ComponentInitializeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "InitializeComponents") : null,
             ComponentUnionShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "UnionComponents") : null,
             ComponentCompressShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "CompressComponents") : null,

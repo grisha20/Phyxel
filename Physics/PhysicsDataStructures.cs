@@ -44,6 +44,8 @@ public struct MaterialProperties
     public float MinimumLifetime;
     public float MaximumLifetime;
     public uint DecayIntoMaterialIndex;
+    public float MaximumCombustionTemperature;
+    public float TransitionAboveLatentHeat;
 }
 
 public enum BrushCommandMode : uint
@@ -103,7 +105,11 @@ public struct PhaseTransitionConstants
     public uint Width;
     public uint Height;
     public uint MaterialCount;
-    public uint Reserved;
+    public uint TickIndex;
+    public uint TickCount;
+    public uint Reserved0;
+    public uint Reserved1;
+    public uint Reserved2;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

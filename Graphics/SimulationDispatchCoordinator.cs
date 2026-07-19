@@ -14,7 +14,7 @@ public sealed class SimulationDispatchCoordinator
     public const float FixedThermalStep = 0.05f;
     // A larger fixed-step exchange keeps thermal fronts visible at gameplay
     // scale while remaining stable with the 0.05 s Jacobi step.
-    public const float ThermalExchangeRate = 10f;
+    public const float ThermalExchangeRate = 16f;
     public const int MaximumThermalTicksPerFrame = 4;
     private static readonly uint[] PrimaryEvenPhases =
     [
@@ -466,6 +466,14 @@ public sealed class SimulationDispatchCoordinator
             presentationDirty = true;
         }
 
+        if (!settings.Paused && gasMatter && resources.IsSimulationAllocated)
+        {
+            DispatchGasAdvection(resources, ref constants);
+            cellMaterialsDirty = false;
+            cellularSleeping = false;
+            presentationDirty = true;
+        }
+
         PollThermalTiming(resources);
         int thermalTicks = thermalScheduler.Advance(
             elapsedSeconds,
@@ -502,7 +510,7 @@ public sealed class SimulationDispatchCoordinator
         {
             bool measure = phaseDispatches >= 40 && !phaseTimingPending;
             PhaseSummaryReadbackScheduleResult readbackResult =
-                DispatchPhaseTransitions(resources, measure);
+                DispatchPhaseTransitions(resources, thermalTicks, measure);
             phaseDispatches++;
             maximumPhaseDispatchesPerFrame = Math.Max(maximumPhaseDispatchesPerFrame, phaseDispatchCount);
             lastPhaseDispatchFrame = frameIndex;
@@ -1315,6 +1323,48 @@ public sealed class SimulationDispatchCoordinator
         slot.Generation = combustionReadbackGeneration;
     }
 
+    private static void DispatchGasAdvection(
+        GpuSimulationResources resources,
+        ref SimulationFrameConstants constants)
+    {
+        DeviceContext context = resources.Context;
+        context.ClearUnorderedAccessView(
+            resources.EmissionClaims.UnorderedView,
+            new RawInt4(-1, -1, -1, -1));
+        context.UpdateSubresource(ref constants, resources.FrameConstants);
+        context.ComputeShader.Set(resources.GasAdvectionProposalShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Grid.ReadView,
+            resources.Materials.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.EmissionClaims.UnorderedView,
+            resources.EmissionRequests.UnorderedView);
+        context.Dispatch(
+            DivideRoundUp(resources.Width, 16),
+            DivideRoundUp(resources.Height, 16),
+            1);
+        Unbind(context, 2, 2);
+
+        context.ComputeShader.Set(resources.GasAdvectionResolveShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.EmissionRequests.View,
+            resources.EmissionClaims.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Grid.ReadUnorderedView,
+            resources.CellMaterials.UnorderedView);
+        context.Dispatch(
+            DivideRoundUp(resources.Width, 16),
+            DivideRoundUp(resources.Height, 16),
+            1);
+        Unbind(context, 2, 2);
+    }
+
     private void DispatchEmissionResolve(GpuSimulationResources resources)
     {
         EmissionConstants constants = new()
@@ -1464,13 +1514,16 @@ public sealed class SimulationDispatchCoordinator
 
     private PhaseSummaryReadbackScheduleResult DispatchPhaseTransitions(
         GpuSimulationResources resources,
+        int thermalTicks,
         bool measure)
     {
         PhaseTransitionConstants constants = new()
         {
             Width = (uint)resources.Width,
             Height = (uint)resources.Height,
-            MaterialCount = (uint)materialRegistry.Count
+            MaterialCount = (uint)materialRegistry.Count,
+            TickIndex = unchecked((uint)thermalScheduler.TotalTicks),
+            TickCount = (uint)Math.Max(1, thermalTicks)
         };
         DeviceContext context = resources.Context;
         context.ClearUnorderedAccessView(resources.PhaseSummary.UnorderedView, new RawInt4(0, 0, 0, 0));

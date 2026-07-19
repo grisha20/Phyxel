@@ -277,9 +277,12 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    float capacity = max(0.01, source.HeatCapacity * max(cell.Mass, CombustionMassEpsilon));
+    float capacityMass = max(cell.Mass, source.Density);
+    float capacity = max(0.01, source.HeatCapacity * capacityMass);
+    float generatedRise = burnedMass * source.HeatPerMass / capacity;
+    float permittedRise = max(0.0, source.MaximumCombustionTemperature - cell.Temperature);
     cell.Temperature = clamp(
-        cell.Temperature + burnedMass * source.HeatPerMass / capacity,
+        cell.Temperature + min(generatedRise, permittedRise),
         MinimumCombustionTemperature,
         MaximumCombustionTemperature);
     cell.Mass = max(residueMass, cell.Mass - burnedMass);

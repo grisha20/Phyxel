@@ -98,8 +98,8 @@ internal static class PhaseTransitionMaterialRegressionVerifier
 
     private static void VerifyLayouts()
     {
-        Require(Marshal.SizeOf<MaterialProperties>() == 96,
-            "MaterialProperties must be 96 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == 104,
+            "MaterialProperties must be 104 bytes.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.TransitionBelowTemperature)).ToInt32() == 48,
             "TransitionBelowTemperature offset must be 48.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.TransitionBelowMaterialIndex)).ToInt32() == 52,
@@ -130,7 +130,8 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             "float TransitionAboveTemperature", "uint TransitionAboveMaterialIndex",
             "float IgnitionTemperature", "float BurnRate", "float HeatPerMass",
             "uint BurnedIntoMaterialIndex", "float FlameSpreadRate",
-            "float MinimumLifetime", "float MaximumLifetime", "uint DecayIntoMaterialIndex"
+            "float MinimumLifetime", "float MaximumLifetime", "uint DecayIntoMaterialIndex",
+            "float MaximumCombustionTemperature", "float TransitionAboveLatentHeat"
         ];
         int previous = -1;
         foreach (string field in fields)
@@ -688,7 +689,9 @@ internal static class PhaseTransitionMaterialRegressionVerifier
         Same(left.FlameSpreadRate, right.FlameSpreadRate) &&
         Same(left.MinimumLifetime, right.MinimumLifetime) &&
         Same(left.MaximumLifetime, right.MaximumLifetime) &&
-        left.DecayIntoMaterialIndex == right.DecayIntoMaterialIndex;
+        left.DecayIntoMaterialIndex == right.DecayIntoMaterialIndex &&
+        Same(left.MaximumCombustionTemperature, right.MaximumCombustionTemperature) &&
+        Same(left.TransitionAboveLatentHeat, right.TransitionAboveLatentHeat);
 
     private static Color ParseColor(string value)
     {

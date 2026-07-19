@@ -67,7 +67,8 @@ public enum AcceptanceScenarioMode
     WaterIceSteamMotion,
     WaterIceSteamPause,
     WaterIceSteamV5RoundTrip,
-    CombustionChain
+    CombustionChain,
+    CombustionQuench
 }
 
 public static class AcceptanceRegressionScenario
@@ -123,6 +124,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.ThermalGas or
             AcceptanceScenarioMode.TemperatureProbeGpu => [],
             AcceptanceScenarioMode.CombustionChain => CreateCombustionChain(frame),
+            AcceptanceScenarioMode.CombustionQuench => CreateCombustionQuench(frame),
             AcceptanceScenarioMode.PhaseDispatchSmoke => [],
             AcceptanceScenarioMode.PhaseThresholds or
             AcceptanceScenarioMode.PhaseHysteresis or
@@ -162,9 +164,27 @@ public static class AcceptanceRegressionScenario
         }
         if (frame == 1)
         {
-            // The brush overlaps the upper surface: empty pixels become real
-            // FIRE particles, while combustible solid pixels ignite in place.
-            return [Create(190, 88, 5, materials.Fire, (uint)BrushCommandMode.Material, 0)];
+            // The acceptance chain starts with a deterministic thermal brush;
+            // the combustion pass then creates generic flame/smoke products.
+            // A separate manual fire-tool check covers discrete ignition.
+            return [CreateTemperature(190, 120, 46, materials.Wood, 500)];
+        }
+        return [];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateCombustionQuench(uint frame)
+    {
+        if (frame == 0)
+        {
+            return AddFill(180, 138, 240, 152, 7, 5, materials.Wood, 18101);
+        }
+        if (frame == 1)
+        {
+            return [CreateTemperature(210, 145, 38, materials.Wood, 500)];
+        }
+        if (frame is 100 or 110 or 120)
+        {
+            return AddFill(175, 75, 245, 105, 8, 5, materials.Water, 0);
         }
         return [];
     }

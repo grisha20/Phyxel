@@ -11,7 +11,7 @@
     "heatCapacity": 4.18,
     "transitions": {
       "below": { "temperature": 0.0, "into": "core:ice" },
-      "above": { "temperature": 100.0, "into": "core:steam" }
+      "above": { "temperature": 100.0, "into": "core:steam", "latentHeat": 2256.0 }
     }
   },
   "ui": { "order": 20, "hidden": false }

@@ -38,6 +38,8 @@ struct MaterialProperties
     float MinimumLifetime;
     float MaximumLifetime;
     uint DecayIntoMaterialIndex;
+    float MaximumCombustionTemperature;
+    float TransitionAboveLatentHeat;
 };
 
 struct MaterialEmissionProperties

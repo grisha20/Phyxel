@@ -102,6 +102,11 @@ public static class PhaseTransitionRuntime
             ? 2u
             : 0u;
         cell.Lifetime = target.MinimumLifetime;
+        if (source.TransitionAboveLatentHeat > 0 &&
+            targetKind == MaterialSimulationKind.Gas)
+        {
+            cell.Temperature = source.TransitionAboveTemperature;
+        }
         return cell;
     }
 

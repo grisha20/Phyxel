@@ -85,6 +85,7 @@ public sealed class AcceptanceRegressionHarness
             "water_ice_steam_pause" => AcceptanceScenarioMode.WaterIceSteamPause,
             "water_ice_steam_v5_roundtrip" => AcceptanceScenarioMode.WaterIceSteamV5RoundTrip,
             "combustion" or "combustion_chain" => AcceptanceScenarioMode.CombustionChain,
+            "combustion_quench" or "water_quench" => AcceptanceScenarioMode.CombustionQuench,
             _ => AcceptanceScenarioMode.None
         };
         phaseAcceptance = new PhaseAcceptanceController(Mode);
@@ -161,6 +162,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.ThermalCapacity => 1300,
                 AcceptanceScenarioMode.TemperatureProbeGpu => 240,
                 AcceptanceScenarioMode.CombustionChain => 1800,
+                AcceptanceScenarioMode.CombustionQuench => 900,
                 AcceptanceScenarioMode.PhaseDispatchSmoke => 240,
                 AcceptanceScenarioMode.ThermalUniform or
                 AcceptanceScenarioMode.ThermalConductivityCompare or

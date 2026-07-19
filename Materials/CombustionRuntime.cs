@@ -75,10 +75,13 @@ public static class CombustionRuntime
             return false;
         }
 
+        float capacityMass = Math.Max(cell.Mass, source.Density);
         float capacity = Math.Max(MaterialRegistry.MinimumHeatCapacity,
-            source.HeatCapacity * Math.Max(cell.Mass, MassEpsilon));
+            source.HeatCapacity * capacityMass);
+        float generatedRise = burnedMass * source.HeatPerMass / capacity;
+        float permittedRise = Math.Max(0, source.MaximumCombustionTemperature - cell.Temperature);
         cell.Temperature = Math.Clamp(
-            cell.Temperature + burnedMass * source.HeatPerMass / capacity,
+            cell.Temperature + Math.Min(generatedRise, permittedRise),
             MinimumTemperature,
             MaximumTemperature);
         cell.Mass = Math.Max(residueMass, cell.Mass - burnedMass);

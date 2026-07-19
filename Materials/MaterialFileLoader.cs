@@ -359,6 +359,7 @@ internal static partial class MaterialFileLoader
         JsonElement ignitionElement = default;
         JsonElement burnRateElement = default;
         JsonElement heatPerMassElement = default;
+        JsonElement maximumTemperatureElement = default;
         JsonElement burnedIntoElement = default;
         JsonElement spreadRateElement = default;
         HashSet<string> fields = new(StringComparer.OrdinalIgnoreCase);
@@ -386,6 +387,10 @@ internal static partial class MaterialFileLoader
             {
                 burnedIntoElement = property.Value;
             }
+            else if (property.Name.Equals("maximumTemperature", StringComparison.OrdinalIgnoreCase))
+            {
+                maximumTemperatureElement = property.Value;
+            }
             else if (property.Name.Equals("spreadRate", StringComparison.OrdinalIgnoreCase))
             {
                 spreadRateElement = property.Value;
@@ -412,6 +417,10 @@ internal static partial class MaterialFileLoader
         if (burnedIntoElement.ValueKind == JsonValueKind.Undefined)
         {
             throw new InvalidDataException("Поле combustion.burnedInto обязательно.");
+        }
+        if (maximumTemperatureElement.ValueKind == JsonValueKind.Undefined)
+        {
+            throw new InvalidDataException("Поле combustion.maximumTemperature обязательно.");
         }
 
         if (ignitionElement.ValueKind != JsonValueKind.Number ||
@@ -459,6 +468,16 @@ internal static partial class MaterialFileLoader
                 $"Материал '{sourceId}' не может сгорать сам в себя (combustion.burnedInto).");
         }
 
+        if (maximumTemperatureElement.ValueKind != JsonValueKind.Number ||
+            !maximumTemperatureElement.TryGetSingle(out float maximumTemperature) ||
+            !float.IsFinite(maximumTemperature) ||
+            maximumTemperature <= ignitionTemperature ||
+            maximumTemperature > MaterialRegistry.MaximumInitialTemperature)
+        {
+            throw new InvalidDataException(
+                $"combustion.maximumTemperature должна быть больше ignitionTemperature и не больше {MaterialRegistry.MaximumInitialTemperature}.");
+        }
+
         float spreadRate = 0;
         if (spreadRateElement.ValueKind != JsonValueKind.Undefined &&
             (spreadRateElement.ValueKind != JsonValueKind.Number ||
@@ -475,7 +494,8 @@ internal static partial class MaterialFileLoader
             burnRate,
             heatPerMass,
             burnedIntoId,
-            spreadRate);
+            spreadRate,
+            maximumTemperature);
     }
 
     private static MaterialEmissionDefinition? ParseEmissions(
@@ -703,6 +723,7 @@ internal static partial class MaterialFileLoader
 
         JsonElement temperatureElement = default;
         JsonElement intoElement = default;
+        JsonElement latentHeatElement = default;
         HashSet<string> fields = new(StringComparer.OrdinalIgnoreCase);
         foreach (JsonProperty property in value.EnumerateObject())
         {
@@ -719,6 +740,10 @@ internal static partial class MaterialFileLoader
             else if (property.Name.Equals("into", StringComparison.OrdinalIgnoreCase))
             {
                 intoElement = property.Value;
+            }
+            else if (property.Name.Equals("latentHeat", StringComparison.OrdinalIgnoreCase))
+            {
+                latentHeatElement = property.Value;
             }
             else
             {
@@ -762,7 +787,17 @@ internal static partial class MaterialFileLoader
                 $"Материал '{sourceId}' не может переходить сам в себя ({fieldPath}.into).");
         }
 
-        return new MaterialTransitionRule(temperature, targetId);
+        float latentHeat = 0;
+        if (latentHeatElement.ValueKind != JsonValueKind.Undefined &&
+            (direction != "above" || latentHeatElement.ValueKind != JsonValueKind.Number ||
+             !latentHeatElement.TryGetSingle(out latentHeat) || !float.IsFinite(latentHeat) ||
+             latentHeat <= 0 || latentHeat > 1_000_000f))
+        {
+            throw new InvalidDataException(
+                $"{fieldPath}.latentHeat допустим только для above и должен быть конечным числом больше 0.");
+        }
+
+        return new MaterialTransitionRule(temperature, targetId, latentHeat);
     }
 
     private static MaterialFlags ParseFlags(IEnumerable<string>? values, MaterialSimulationKind kind)

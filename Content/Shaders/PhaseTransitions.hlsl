@@ -5,7 +5,11 @@ cbuffer PhaseConstants : register(b0)
     uint PhaseWidth;
     uint PhaseHeight;
     uint MaterialCount;
-    uint PhaseReserved;
+    uint PhaseTickIndex;
+    uint PhaseTickCount;
+    uint PhaseReserved0;
+    uint PhaseReserved1;
+    uint PhaseReserved2;
 };
 
 StructuredBuffer<MaterialProperties> Materials : register(t0);
@@ -84,7 +88,30 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     MaterialProperties source = Materials[cell.MaterialIndex];
-    uint targetIndex = SelectPhaseTarget(cell, source);
+    bool latentTransitionAccepted = false;
+    if (source.TransitionAboveLatentHeat > 0 &&
+        source.TransitionAboveMaterialIndex != 0xffffffffu &&
+        cell.Temperature > source.TransitionAboveTemperature)
+    {
+        float excessTemperature = cell.Temperature - source.TransitionAboveTemperature;
+        float vaporizedFraction = saturate(
+            excessTemperature * max(0.01, source.HeatCapacity) /
+            source.TransitionAboveLatentHeat);
+        float transitionChance = excessTemperature >= 10.0
+            ? 1.0
+            : 1.0 - pow(1.0 - vaporizedFraction, max(1u, PhaseTickCount));
+        uint seed = index ^ (PhaseTickIndex * 0x9e3779b9u);
+        cell.Temperature = source.TransitionAboveTemperature;
+        if (HashUnitFloat(seed) >= transitionChance)
+        {
+            Grid[index] = cell;
+            return;
+        }
+        latentTransitionAccepted = true;
+    }
+    uint targetIndex = latentTransitionAccepted
+        ? source.TransitionAboveMaterialIndex
+        : SelectPhaseTarget(cell, source);
     if (!IsValidPhaseTarget(targetIndex))
     {
         return;

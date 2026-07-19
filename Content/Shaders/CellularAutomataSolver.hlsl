@@ -230,37 +230,10 @@ void RelaxGasPair(
         totalMass <= SparseGasParticleMass;
     if (sparseParticle && firstIsGas != secondIsGas)
     {
-        // Vertical and diagonal pairs are ordered upper/first, lower/second.
-        // Move an intact sparse particle upward rather than trying to split a
-        // 0.03-mass steam cell into sub-threshold fragments.
-        if (vertical < 0)
-        {
-            if (!firstIsGas && secondIsGas)
-            {
-                float riseRate = horizontal == 0 ? 6.0 : 3.5;
-                uint riseSeed = firstIndex ^ secondIndex ^
-                    (FrameIndex * 0x85ebca6bu) ^ templateCell.MaterialIndex;
-                if (HashUnitFloat(riseSeed) < saturate(riseRate * DeltaTime))
-                {
-                    SwapCells(firstIndex, secondIndex, horizontal, vertical);
-                }
-            }
-            return;
-        }
-        // At a ceiling, allow a small frame-rate-independent horizontal
-        // random walk so vapor spreads instead of forming a frozen column.
-        if (vertical == 0)
-        {
-            float driftChance = saturate(
-                Materials[templateCell.MaterialIndex].FlowRate * DeltaTime * 4.0);
-            uint driftSeed = firstIndex ^ secondIndex ^
-                (FrameIndex * 0x9e3779b9u) ^ templateCell.MaterialIndex;
-            if (HashUnitFloat(driftSeed) < driftChance)
-            {
-                SwapCells(firstIndex, secondIndex, horizontal, vertical);
-            }
-            return;
-        }
+        // Sparse gases are moved once per frame by the conflict-resolved
+        // advection pass. Pair relaxation must not move them again or create
+        // parity bands.
+        return;
     }
     if (abs(targetFirst - firstMass) <= GasTransferThreshold)
     {

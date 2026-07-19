@@ -75,7 +75,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static async Task RunAsync()
     {
-        Require(Marshal.SizeOf<MaterialProperties>() == 96, "MaterialProperties must be 96 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == 104, "MaterialProperties must be 104 bytes.");
         string directory = Path.Combine(
             Path.GetTempPath(),
             $"phyxel-thermal-materials-{Guid.NewGuid():N}");
@@ -367,7 +367,9 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         Same(left.FlameSpreadRate, right.FlameSpreadRate) &&
         Same(left.MinimumLifetime, right.MinimumLifetime) &&
         Same(left.MaximumLifetime, right.MaximumLifetime) &&
-        left.DecayIntoMaterialIndex == right.DecayIntoMaterialIndex;
+        left.DecayIntoMaterialIndex == right.DecayIntoMaterialIndex &&
+        Same(left.MaximumCombustionTemperature, right.MaximumCombustionTemperature) &&
+        Same(left.TransitionAboveLatentHeat, right.TransitionAboveLatentHeat);
 
     private static Color ParseColor(string value)
     {

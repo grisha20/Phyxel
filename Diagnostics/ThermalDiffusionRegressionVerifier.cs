@@ -14,7 +14,7 @@ namespace Phyxel.Diagnostics;
 internal static class ThermalDiffusionRegressionVerifier
 {
     private const float MinimumMass = 0.0001f;
-    private const float MaximumExchangeFraction = 0.50f;
+    private const float MaximumExchangeFraction = 0.80f;
 
     public static int Run()
     {

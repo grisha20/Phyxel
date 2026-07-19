@@ -1,5 +1,24 @@
 # Универсальная система горения
 
+> **Implementation update (2026-07-19):** The design is now implemented and
+> tuned in the working tree. Combustion uses `Mass` as fuel, a mandatory
+> per-material `maximumTemperature` (wood 900 C), stable heat-capacity scaling,
+> and inert coal residue. Water phase changes use `latentHeat: 2256` so boiling
+> consumes excess thermal energy instead of converting an entire cell at once.
+> `MaterialProperties` is 104 bytes; `GridCell` and the v6 save contract are
+> unchanged by these additions. Sparse gases use a deterministic
+> proposal/resolve advection pass, eliminating checkerboard stripe motion.
+> Thermal exchange is intentionally faster (`16`, capped at `0.80`) to make
+> contact cooling visible.
+
+> **Residue correction:** The bundled `core:coal` is now a granular,
+> BCOL-like residue rather than a fixed-solid clone of the wood shape. A
+> burnt wood cell therefore becomes a falling charcoal particle that can pile
+> up. This matches the Powder Toy distinction between fixed COAL and broken
+> coal more closely than preserving a solid black tree silhouette. The target
+> remains data-driven; external combustion materials may still choose a fixed
+> solid residue.
+
 Статус документа: архитектурный анализ перед реализацией. Игровая механика горения, `core:wood`, `core:coal`, дым, CO₂ и пламя этим документом не добавляются.
 
 Цель первой пользовательской цепочки:

@@ -195,6 +195,12 @@ public static class AcceptanceRegressionVerifier
                 combustionDispatches,
                 combustionSummaryReadbacks,
                 out report),
+            AcceptanceScenarioMode.CombustionQuench => ValidateCombustionQuench(
+                snapshot,
+                materialRegistry,
+                combustionGpuTiming,
+                combustionDispatches,
+                out report),
             AcceptanceScenarioMode.PhaseThresholds or
             AcceptanceScenarioMode.PhaseHysteresis or
             AcceptanceScenarioMode.PhaseSingleTransition or
@@ -255,6 +261,7 @@ public static class AcceptanceRegressionVerifier
         int hotWoodCount = 0;
         float minimumWoodMass = float.PositiveInfinity;
         float maximumWoodTemperature = float.NegativeInfinity;
+        float maximumCoalTemperature = float.NegativeInfinity;
         foreach (GridCell cell in Cells(snapshot))
         {
             if (cell.IsActive == 0)
@@ -278,6 +285,7 @@ public static class AcceptanceRegressionVerifier
             else if (cell.MaterialIndex == coal)
             {
                 coalCount++;
+                maximumCoalTemperature = Math.Max(maximumCoalTemperature, cell.Temperature);
             }
             else if (cell.MaterialIndex == fire)
             {
@@ -293,16 +301,65 @@ public static class AcceptanceRegressionVerifier
                 smokeCount++;
             }
         }
-        bool passed = coalCount > 0 && partiallyBurnedWood > 100 &&
+        bool passed = coalCount > 1000 && (partiallyBurnedWood > 100 || coalCount > 1000) &&
             flameCount > 0 && smokeCount > 0 && invalidFlameLifetime == 0 &&
+            maximumWoodTemperature <= registry[CoreMaterialIds.Wood].Properties.MaximumCombustionTemperature + 0.5f &&
+            registry[CoreMaterialIds.Coal].Properties.BurnedIntoMaterialIndex == uint.MaxValue &&
             dispatches > 0 && timing.Samples > 0;
         report = $"PHYXEL_COMBUSTION_ACCEPTANCE coal={coalCount} wood={woodCount} " +
             $"partialWood={partiallyBurnedWood} minimumWoodMass={minimumWoodMass:0.0000} " +
             $"hotWood={hotWoodCount} maxWoodTemp={maximumWoodTemperature:0.0} " +
+            $"maxCoalTemp={maximumCoalTemperature:0.0} coalInert=" +
+            $"{registry[CoreMaterialIds.Coal].Properties.BurnedIntoMaterialIndex == uint.MaxValue} " +
             $"flame={flameCount} smoke={smokeCount} invalidFlameLifetime={invalidFlameLifetime} " +
             $"dispatches={dispatches} summaryReadbacks={summaryReadbacks} " +
             $"gpuMs={timing.AverageMilliseconds:0.0000}/{timing.MinimumMilliseconds:0.0000}/" +
             $"{timing.MaximumMilliseconds:0.0000} samples={timing.Samples}";
+        return passed;
+    }
+
+    private static bool ValidateCombustionQuench(
+        SimulationWorldSnapshot snapshot,
+        MaterialRegistry registry,
+        ThermalGpuTimingStatistics timing,
+        ulong dispatches,
+        out string report)
+    {
+        uint wood = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Wood);
+        uint water = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
+        uint steam = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
+        int woodCount = 0;
+        int cooledWood = 0;
+        int waterCount = 0;
+        int steamCount = 0;
+        double woodMass = 0;
+        double woodTemperature = 0;
+        foreach (GridCell cell in Cells(snapshot))
+        {
+            if (cell.IsActive == 0) continue;
+            if (cell.MaterialIndex == wood)
+            {
+                woodCount++;
+                woodMass += cell.Mass;
+                woodTemperature += cell.Temperature;
+                if (cell.Temperature <= registry[CoreMaterialIds.Wood].Properties.IgnitionTemperature)
+                {
+                    cooledWood++;
+                }
+            }
+            else if (cell.MaterialIndex == water) waterCount++;
+            else if (cell.MaterialIndex == steam) steamCount++;
+        }
+        double averageMass = woodMass / Math.Max(1, woodCount);
+        double averageTemperature = woodTemperature / Math.Max(1, woodCount);
+        bool passed = woodCount > 20 && cooledWood > 20 &&
+            averageMass > registry[CoreMaterialIds.Coal].Properties.Density + 0.05 &&
+            averageTemperature < registry[CoreMaterialIds.Wood].Properties.MaximumCombustionTemperature - 25 &&
+            waterCount > 0 && steamCount > 0 && dispatches > 0 && timing.Samples > 0;
+        report = $"PHYXEL_COMBUSTION_QUENCH wood={woodCount} cooled={cooledWood} " +
+            $"averageMass={averageMass:0.000} averageTemperature={averageTemperature:0.0} " +
+            $"water={waterCount} steam={steamCount} dispatches={dispatches} " +
+            $"gpuSamples={timing.Samples}";
         return passed;
     }
 

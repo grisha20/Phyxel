@@ -67,6 +67,8 @@ public sealed class GpuSimulationResources : IDisposable
     public SharpDX.Direct3D11.Texture2D NativeReadTexture => NativePresentationTextures[1 - PresentationIndex];
     public ComputeShader? BrushShader { get; init; }
     public ComputeShader? CellularAutomataShader { get; init; }
+    public ComputeShader? GasAdvectionProposalShader { get; init; }
+    public ComputeShader? GasAdvectionResolveShader { get; init; }
     public ComputeShader? ComponentInitializeShader { get; init; }
     public ComputeShader? ComponentUnionShader { get; init; }
     public ComputeShader? ComponentCompressShader { get; init; }
@@ -106,6 +108,8 @@ public sealed class GpuSimulationResources : IDisposable
         ComponentUnionShader?.Dispose();
         ComponentInitializeShader?.Dispose();
         CellularAutomataShader?.Dispose();
+        GasAdvectionProposalShader?.Dispose();
+        GasAdvectionResolveShader?.Dispose();
         BrushShader?.Dispose();
         foreach (KniTexture2D texture in PresentationTextures)
         {

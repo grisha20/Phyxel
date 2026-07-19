@@ -30,9 +30,9 @@ internal static class PhaseTransitionRuntimeRegressionVerifier
     private static void VerifyLayoutsAndDeclarations()
     {
         Require(Marshal.SizeOf<GridCell>() == 40, "GridCell must be 40 bytes.");
-        Require(Marshal.SizeOf<MaterialProperties>() == 96, "MaterialProperties must be 96 bytes.");
-        Require(Marshal.SizeOf<PhaseTransitionConstants>() == 16,
-            "PhaseTransitionConstants must be 16 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == 104, "MaterialProperties must be 104 bytes.");
+        Require(Marshal.SizeOf<PhaseTransitionConstants>() == 32,
+            "PhaseTransitionConstants must be 32 bytes.");
         Require((uint)PhaseTransitionSummaryFlags.PhaseOccurred == 1u << 0 &&
             (uint)PhaseTransitionSummaryFlags.TargetCellular == 1u << 1 &&
             (uint)PhaseTransitionSummaryFlags.TargetLiquid == 1u << 2 &&
@@ -46,7 +46,7 @@ internal static class PhaseTransitionRuntimeRegressionVerifier
         string shared = File.ReadAllText(Path.Combine(shaderDirectory, "PhysicsShared.hlsli"));
         string shader = File.ReadAllText(Path.Combine(shaderDirectory, "PhaseTransitions.hlsl"));
         RequireOrdered(shader, "cbuffer PhaseConstants", "uint PhaseWidth;", "uint PhaseHeight;",
-            "uint MaterialCount;", "uint PhaseReserved;");
+            "uint MaterialCount;", "uint PhaseTickIndex;", "uint PhaseTickCount;");
         string[] sharedFlags =
         [
             "PhaseSummaryPhaseOccurred = 1u << 0",
