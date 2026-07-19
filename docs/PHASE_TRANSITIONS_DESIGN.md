@@ -1,6 +1,16 @@
 # Универсальные фазовые переходы
 
-Статус документа: schema/registry/layout-слой реализован коммитом `Add phase transition material schema`; общий GPU pass и его runtime-координация реализованы коммитом `Run universal phase transition GPU pass`; generic GPU acceptance реализован коммитом `Add phase transition GPU acceptance matrix`; первая пользовательская цепочка реализована коммитом `Add water ice steam phase chain`.
+> **Актуальное состояние (2026-07-20).** Универсальная схема, GPU pass,
+> координация и acceptance-матрица реализованы. Текущий writer создаёт сцены
+> v6 с 40-байтным `GridCell` (`Temperature` и `Lifetime`); v3/v4/v5 являются
+> legacy-форматами чтения. `MaterialProperties` занимает 120 байт. Рабочая
+> пользовательская цепочка — `core:ice ↔ core:water ↔ core:steam`, включая
+> latent heat кипения. Steam дополнительно использует общий `ambientCooling`
+> и общий gas redistribution. Исторические оценки размеров и формулировки
+> «ещё не реализовано» ниже следует читать как историю проектирования, если
+> они противоречат этому блоку или [ARCHITECTURE.md](ARCHITECTURE.md).
+
+Статус документа: schema/registry/layout-слой, общий GPU pass, runtime-координация, generic GPU acceptance и первая пользовательская цепочка реализованы.
 
 Первая реализованная пользовательская цепочка:
 

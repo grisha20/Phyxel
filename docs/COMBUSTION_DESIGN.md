@@ -1,13 +1,41 @@
 # Универсальная система горения
 
-> **Implementation update (2026-07-19):** The design is now implemented and
-> tuned in the working tree. Combustion uses `Mass` as fuel, a mandatory
+> **Актуальное состояние (2026-07-20).** Базовая универсальная система
+> горения реализована и находится в коммитах. Текущие layouts:
+> `GridCell = 40` байт, `MaterialProperties = 120` байт, current save = v6.
+> Реализованы `core:wood`, selectable transient `core:fire`, smoke, CO₂,
+> древесный уголь, скрытый мокрый древесный уголь и каменный уголь. Кисть
+> огня воспламеняет combustible solid на месте; прочие material-кисти пишут
+> только в empty. Обычные газы обрабатывает отдельный density-driven solver,
+> а материалы с флагом `flame` из него исключены. Исторические baseline и
+> предложения ниже сохранены как история проектирования; при противоречии
+> приоритет имеют этот блок, [ARCHITECTURE.md](ARCHITECTURE.md) и
+> [GAS_SIMULATION.md](GAS_SIMULATION.md).
+
+## Реализованная цепочка топлива и намокания
+
+- Wood использует mass как запас топлива, ignition/max temperature/burn rate
+  из JSON и превращается в `core:coal` через runtime target.
+- Emission-таблица data-driven создаёт flame, smoke и CO₂ без hardcode ID в
+  общем combustion shader.
+- Сухой charcoal (`density: 0.2`) плавает. Его общий liquid-contact переход
+  с `ratePerSecond: 0.35` ведёт в скрытый `core:wet_charcoal`.
+- Wet charcoal (`density: 1.15`) тонет; stone coal (`density: 1.4`) является
+  отдельным видимым granular-материалом и тонет сразу.
+- Контактный переход хранится в JSON как string target, после построения
+  registry разрешается в runtime index и выполняется фиксированным GPU tick.
+
+Ограничения текущего этапа: одна клетка не хранит смесь нескольких газов;
+flame имеет отдельную lifetime-модель; wet charcoal намеренно скрыт в UI;
+ambient cooling пара намеренно отводит энергию во внешнюю среду.
+
+> **Historical implementation update (2026-07-19):** Combustion uses `Mass` as fuel, a mandatory
 > per-material `maximumTemperature` (wood 900 C), stable heat-capacity scaling,
 > and inert coal residue. Water phase changes use `latentHeat: 2256` so boiling
 > consumes excess thermal energy instead of converting an entire cell at once.
-> `MaterialProperties` is 104 bytes; `GridCell` and the v6 save contract are
-> unchanged by these additions. Sparse gases use a deterministic
-> proposal/resolve advection pass, eliminating checkerboard stripe motion.
+> The then-current `MaterialProperties` was 104 bytes; the current structure
+> is 120 bytes. The older sparse-gas proposal/resolve implementation was later
+> replaced by `GasRedistribution.hlsl`.
 > Thermal exchange is intentionally faster (`16`, capped at `0.80`) to make
 > contact cooling visible.
 
@@ -19,7 +47,7 @@
 > remains data-driven; external combustion materials may still choose a fixed
 > solid residue.
 
-Статус документа: архитектурный анализ перед реализацией. Игровая механика горения, `core:wood`, `core:coal`, дым, CO₂ и пламя этим документом не добавляются.
+Исторический исходный статус: архитектурный анализ перед реализацией. Перечисленные механики теперь реализованы в production runtime.
 
 Цель первой пользовательской цепочки:
 

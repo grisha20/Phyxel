@@ -1,193 +1,161 @@
 # Архитектура Phyxel
 
-Документ описывает архитектуру на кодовом baseline `4d4eb7c`. Он фиксирует действующие границы системы, а не проектирует ещё не реализованные реакции, фазовые переходы или паки.
+Документ описывает фактическую архитектуру после реализации температуры, фаз, горения, угля и общего gas redistribution.
 
-## Архитектурные правила
+## Главные инварианты
 
-1. Вся физика отдельных клеток выполняется на GPU; CPU координирует ресурсы, команды, сохранения и проверки.
-2. Материал содержит данные, а движок реализует общее поведение его `SimulationKind` и flags.
-3. Один материал описывается одним JSON-файлом.
-4. Постоянная идентичность материала в файлах и сохранениях — строковый `namespace:name`.
-5. Компактный `ushort RuntimeIndex` существует только в рамках текущего процесса и может измениться после перезапуска.
-6. Shader и общий engine-код не должны проверять ID конкретного материала. Единственное индексное системное соглашение — `core:empty` имеет runtime-индекс 0, потому что GPU-буферы очищаются нулями.
-7. Будущие реакции должны описываться JSON-правилами и компилироваться в общую runtime/GPU-таблицу.
-8. Каждая универсальная механика добавляется отдельным engine-коммитом; контент использует её через данные.
-9. Каждый новый элемент и каждая общая механика получают acceptance-сценарий на реальном GPU.
-10. JSON-схемы и форматы сохранений версионируются; старый бинарный layout никогда не переопределяется текущей C#-структурой.
+- Постоянная идентичность материала — нормализованный string ID `namespace:name`.
+- `RuntimeIndex` назначается только на текущий запуск. Только `core:empty` обязан иметь индекс 0.
+- Основная физика использует `SimulationKind`, `Density`, flags и таблицы свойств, а не ID конкретного материала.
+- Одна клетка содержит один материал; смешение разных газов внутри клетки не моделируется.
+- C# и HLSL layouts совпадают по порядку, типам и размеру.
+- Массовая симуляция остаётся на GPU; игровая петля не делает блокирующих `Flush`/полных readback.
 
-## Общий поток данных
+## Основные компоненты
 
-```text
-Materials/**/*.json
-        ↓
-MaterialFileLoader → MaterialRegistry → runtime ushort indices
-        ↓                                  ↓
-MaterialProperties GPU table          scene palette mapping
-        ↓
-HLSL compute passes ↔ ping-pong GridCell buffers
-        ↓
-RenderComposition → back buffer
+- `Materials/MaterialFileLoader.cs` — строгий JSON parser и проверка диапазонов/полей.
+- `Materials/MaterialRegistry.cs` — загрузка core/external JSON, разрешение string targets и построение GPU-таблиц.
+- `Graphics/GpuResourceLifecycleManager.cs` — создание сеток, таблиц, proposal/summary/staging ресурсов и шейдеров.
+- `Graphics/SimulationDispatchCoordinator.cs` — расписание cellular, gas, thermal, contact, combustion, phase и composition passes.
+- `Serialization/SimulationStateSerializer.cs` и `WorldCellCodec.cs` — versioned scene/world I/O.
+- `Content/Shaders/PhysicsShared.hlsli` — общий контракт структур, kinds, flags и predicates.
+
+## Layout клетки
+
+`GridCell` имеет последовательный packed layout 40 байт:
+
+| Offset | Поле | Тип | Назначение |
+|---:|---|---|---|
+| 0 | `MaterialIndex` | `uint` | Runtime-позиция материала. |
+| 4 | `Mass` | `float` | Масса/заполнение. |
+| 8 | `VelocityX` | `float` | Горизонтальный импульс. |
+| 12 | `VelocityY` | `float` | Вертикальный импульс. |
+| 16 | `Pressure` | `float` | Гидравлическое состояние. |
+| 20 | `IsActive` | `uint` | Нулевая клетка является empty. |
+| 24 | `BodyId` | `uint` | Принадлежность movable-solid body. |
+| 28 | `RestFrames` | `uint` | Состояние покоя. |
+| 32 | `Temperature` | `float` | Температура, °C. |
+| 36 | `Lifetime` | `float` | Остаточное время transient-материала. |
+
+`LegacyGridCellV3V4` навсегда остаётся 32-байтным. Legacy v5 имеет stride 36. Codec переводит каждый layout по полям, без предположения о совпадении памяти.
+
+## Таблица материалов
+
+`MaterialProperties` — packed структура 120 байт (30 четырёхбайтных полей). Порядок в C# и HLSL одинаков:
+
+1. flags, kind, density, friction, flow rate и RGBA;
+2. initial temperature, conductivity, heat capacity;
+3. below/above phase thresholds и runtime targets;
+4. ignition, burn rate, heat per mass, burned-into target, flame spread;
+5. minimum/maximum lifetime и decay target;
+6. maximum combustion temperature и latent heat;
+7. ambient temperature/cooling rate;
+8. liquid-contact target/rate.
+
+Отдельная `MaterialEmissionProperties` хранит runtime targets/rates для smoke, gas и flame. JSON всегда хранит string IDs; registry разрешает их только после стабилизации полного набора материалов.
+
+## JSON-модель
+
+Один файл соответствует одному материалу. Базовые разделы: `schema`, `id`, `name`, `kind`, `flags`, `color`, `physics`, `thermal`, `combustion`, `emissions`, `lifecycle`, `contactTransitions`, `ui`.
+
+Пример внешнего теплообмена:
+
+```json
+"thermal": {
+  "initialTemperature": 105.0,
+  "conductivity": 0.04,
+  "heatCapacity": 2.08,
+  "ambientCooling": {
+    "temperature": 20.0,
+    "rate": 0.04
+  }
+}
 ```
 
-Вход пользователя идёт отдельным путём: UI/Input формирует `BrushDrawCommand`, coordinator загружает команды на GPU, `BrushApplication.hlsl` изменяет клетки, после чего остальные проходы видят обновлённую сетку.
+Отсутствующий `ambientCooling` означает rate 0 и сохраняет прежнее поведение. Rate конечный и находится в `(0, 100]`, temperature — в `[-273.15, 5000]`.
 
-## Основные модули
+Пример контактного перехода:
 
-| Область | Ответственность |
-|---|---|
-| `Program.cs`, `PhyxelGame.cs` | Запуск игры, основной цикл, переключатели и интеграция UI, GPU и сериализации. |
-| `Core/` | Настройки симуляции, включая разрешение и scale presets. |
-| `Materials/` | JSON-модель, строгая загрузка, core ID и runtime registry. |
-| `Physics/PhysicsDataStructures.cs` | Общие C# layouts данных, которые зеркалируются в HLSL. |
-| `Graphics/` | Жизненный цикл DX11-ресурсов, shader compilation/cache, dispatch-порядок, thermal scheduler и GPU timing. |
-| `Content/Shaders/` | Кисть, cellular/solid-симуляция, thermal diffusion, probe и композиция. |
-| `Input/`, `UI/` | Кодирование команд кисти и пользовательские элементы управления. |
-| `Serialization/` | Сцены v3/v4/v5, строковые палитры, world codec и GPU snapshot upload/readback. |
-| `Diagnostics/` | CPU regression, GPU acceptance, сценарии, метрики и артефакты. |
+```json
+"contactTransitions": {
+  "liquid": {
+    "into": "core:wet_charcoal",
+    "ratePerSecond": 0.35
+  }
+}
+```
 
-## Материалы и runtime registry
-
-### Загрузка
-
-`MaterialRegistry` сначала загружает обязательный набор из `Materials/core`, затем внешние JSON. В установленной игре корневая папка по умолчанию находится рядом с executable; для diagnostics её можно переопределить через `PHYXEL_CORE_MATERIALS_PATH` и `PHYXEL_MATERIALS_PATH`.
-
-Loader выполняет следующие действия:
-
-- читает schema 1 и нормализует ID в нижний регистр;
-- проверяет формат `namespace:name`, дубли, kind, flags и числовые диапазоны;
-- запрещает внешнему файлу заменять core ID;
-- останавливает запуск при ошибке core-файла;
-- пропускает повреждённый внешний файл и пишет `PHYXEL_MATERIAL_ERROR`;
-- ограничивает общий реестр 256 материалами;
-- сортирует `core:empty` первым, остальные материалы — по ID, затем назначает `RuntimeIndex`;
-- строит UI-список по `ui.order` и `ui.hidden`.
-
-Сейчас общие kinds: `none`, `granular`, `liquid`, `gas`, `solid`, `tool`. Единственный универсальный flag — `movable-solid`. Eraser имеет kind `tool`: удаление кодируется режимом команды, а индекс eraser не попадает в активную клетку.
-
-### GPU-таблица
-
-`MaterialRegistry.CreateGpuTable()` размещает `MaterialProperties` в runtime-позициях. Все shaders получают одну и ту же таблицу и принимают решения по `SimulationKind`, `Density`, `Friction`, `FlowRate`, thermal-полям и flags. Runtime-индекс — ключ массива, а не постоянная идентичность материала.
-
-## Общие layouts C# и HLSL
-
-Структуры используют последовательный layout без скрытого padding и должны оставаться синхронными с `Content/Shaders/PhysicsShared.hlsli`.
-
-### `GridCell` — 36 байт
-
-| Поле | Тип | Назначение |
-|---|---|---|
-| `MaterialIndex` | `uint` | Текущая runtime-позиция материала. |
-| `Mass` | `float` | Масса/заполнение клетки. |
-| `VelocityX`, `VelocityY` | `float` | Импульс клеточного материала. |
-| `Pressure` | `float` | Гидравлическое состояние жидкости. |
-| `IsActive` | `uint` | Нулевая клетка не содержит материал. |
-| `BodyId` | `uint` | Временная принадлежность movable-solid body. |
-| `RestFrames` | `uint` | Состояние покоя клеточной физики. |
-| `Temperature` | `float` | Температура клетки в °C. |
-
-`LegacyGridCellV3V4` навсегда остаётся отдельной 32-байтной структурой без температуры. Runtime-проверки фиксируют оба размера.
-
-### `MaterialProperties` — 64 байта
-
-Порядок полей: `Flags`, `SimulationKind`, `Density`, `Friction`, `FlowRate`, четыре компонента цвета, `InitialTemperature`, `ThermalConductivity`, `HeatCapacity`, затем порог и runtime target для перехода вниз и порог/runtime target для перехода вверх. Отсутствующий target кодируется `uint.MaxValue`.
-
-JSON хранит только строковые transition target IDs. Registry разрешает их после стабилизации полного набора материалов и назначения окончательных runtime-индексов. `RegistryHasPhaseTransitions` сообщает, остались ли в валидном реестре правила; phase compute pass пока не реализован.
-
-Thermal-параметры валидируются в пределах:
-
-- initial temperature: `-273.15…5000` °C;
-- conductivity: `0…1`;
-- heat capacity: `0.01…100`.
-
-### `BrushDrawCommand` — 36 байт
-
-Команда содержит координаты, runtime-индекс, радиус, плотность, mode, seed и `TargetTemperature`. Режимы: нанести материал, стереть клетку, установить температуру. Temperature mode меняет только активные клетки и не создаёт материал.
+Текущая модель поддерживает общий переход granular-источника при контакте с liquid. Target должен быть granular; rate конечный и находится в `(0, 100]`. Вероятность считается из фиксированного `dt`, поэтому результат не зависит от render FPS.
 
 ## GPU-ресурсы
 
-`GpuResourceLifecycleManager` создаёт или пересоздаёт ресурсы под текущее разрешение. Основные данные симуляции находятся в двух structured buffers `GridCell`, которые меняются ролями source/destination между проходами. Отдельно существуют:
+- Два structured buffer сетки меняются ролями source/destination там, где нужен race-free pass.
+- Таблицы material/emission properties доступны шейдерам только для чтения.
+- Cellular proposal/resolve, pressure routes, solid geometry, summaries и brush commands имеют отдельные buffers.
+- `CellMaterials` синхронизируется со сменой материала/клетки и используется для статистики и scheduling.
+- Timestamp/query и staging slots читаются асинхронно с `DoNotFlush`.
 
-- immutable/read-only для кадра таблица `MaterialProperties`;
-- командный buffer кисти;
-- вспомогательные buffers cellular proposals, статистики, маршрутов давления и solid-body geometry;
-- staging/query ресурсы для сохранения, probe, acceptance и timing;
-- output texture композиции.
+Clear обнуляет сетку. Это корректно, потому что нулевой layout представляет неактивную клетку, а `core:empty` всегда имеет runtime index 0.
 
-Сетка выделяется лениво. Clear обнуляет buffers, что одновременно создаёт валидный `core:empty` благодаря инварианту runtime index 0.
+## Расписание кадра
 
-## Порядок GPU-проходов кадра
+При активной симуляции coordinator выполняет:
 
-`SimulationDispatchCoordinator.DispatchFrame()` выполняет только нужные для состояния мира ветви:
+1. применение brush commands и обслуживание GPU-ресурсов;
+2. solid gravity/hydraulic preparation и cellular schedule при наличии awake matter;
+3. fixed 60 Hz ordinary-gas ticks;
+4. fixed 20 Hz thermal diffusion и следующий за ним contact transition;
+5. combustion/emission/transient lifecycle на thermal ticks;
+6. phase transition после thermal/combustion;
+7. composition только при изменившемся представлении.
 
-1. создать/изменить размер ресурсов и при необходимости очистить их;
-2. загрузить и применить brush commands;
-3. завершить отложенное обновление cellular rest-state;
-4. при включённой solid gravity: разметить компоненты, собрать геометрию и выполнить solid-body pass;
-5. при необходимости подготовить hydraulic routing buffers;
-6. выполнить основной cellular automata schedule, включая общие granular/liquid/gas-предикаты, pressure routes и возможный второй fluid step;
-7. получить предыдущие GPU timing results и выполнить от нуля до четырёх фиксированных thermal ticks;
-8. при изменившемся представлении выполнить `RenderComposition`.
+Pause останавливает cellular, gas, thermal, contact, combustion и phase clocks без накопления отложенного времени. Явные команды кисти всё ещё могут изменить сцену.
 
-Cellular и solid-проходы используют несколько proposal/resolve стадий, чтобы конкурирующие клетки не записывали один destination произвольно. Конкретный schedule оптимизируется по масштабу, гидравлике и присутствующим типам материала, но не по ID конкретного материала.
+## Газовая подсистема
 
-## Тепловая подсистема
+`FixedStepGasScheduler` выдаёт шаги по 1/60 с. Один tick запускает четыре `GasRedistribution` dispatch:
 
-`FixedStepThermalScheduler` накапливает frame time и выдаёт шаги по 0,05 с, максимум четыре за кадр. Pause полностью останавливает diffusion; температурная кисть при этом остаётся доступной как явная пользовательская команда.
+- один вертикальный parity (parity чередуется между ticks);
+- оба соседних горизонтальных parity;
+- один вращающийся long-range span из 1/4/16/64.
 
-`ThermalDiffusion.hlsl` читает только source grid и пишет только destination grid, поэтому соседние threads не конфликтуют. Для каждой активной клетки берутся четыре ортогональных соседа. Поток энергии учитывает:
+Обычным газом считается `kind: gas` без флага `flame`. Для пары empty/одинакового газа сохраняются масса, mass-weighted температура и lifetime. Разные материалы не сливаются: вертикально более плотный газ оказывается ниже, горизонтально допустима ограниченная перестановка.
 
-- разницу температур;
-- гармоническое среднее проводимостей двух материалов;
-- меньшую из контактирующих теплоёмкостей `Mass × HeatCapacity`;
-- ограниченную долю обмена за tick.
+Минимальная представимая порция — 0.01. Остатки не удаляются. Если пакет нельзя корректно разделить, целая порция выбирает сторону по детерминированному hash и целевой доле. Подробнее: [GAS_SIMULATION.md](GAS_SIMULATION.md).
 
-Пара клеток получает равные по модулю вклады при вычислении каждой стороны, поэтому суммарная энергия сохраняется с учётом float-погрешности. Неактивный neighbor не участвует: empty в текущей модели является вакуумом.
+## Температура, контакты и фазы
 
-Газовая клетка хранит температуру и массу. При объединении одинакового gas material температура пересчитывается из суммарной энергии; разные `MaterialIndex` не смешиваются.
+`FixedStepThermalScheduler` работает с шагом 0.05 с. `ThermalDiffusion.hlsl` читает source и пишет destination, поэтому соседние threads не конкурируют. Обмен учитывает разницу температур, проводимости и `Mass × HeatCapacity`.
 
-`TemperatureProbe.hlsl` считывает одну координату в маленький result buffer. CPU получает результат асинхронно, не блокируя каждый кадр полным snapshot.
+Ambient cooling применяется в thermal pass по стабильной формуле:
 
-## Форматы сцен
+```text
+factor = 1 - exp(-rate * dt)
+T += (ambientTemperature - T) * factor
+```
 
-Сохранение состоит из JSON-метаданных сцены и бинарной секции `.world`.
+Это открытая система: энергия уходит во внешнюю среду намеренно.
 
-### v3
+`ContactTransitions.hlsl` меняет material state при геометрическом контакте с liquid. `PhaseTransitions.hlsl` применяет не более одного below/above перехода за thermal batch, сохраняет массу/температуру и нормализует kind-specific поля. Summary readback использует ring slots; fallback wake-up не переиспользуется до завершения предыдущего запроса.
 
-- world header 20 байт, неявный cell stride 32;
-- numeric material indices интерпретируются только `LegacySceneV3Loader`;
-- legacy index 4 отображается в `core:stone`;
-- после codec-конвертации температура берётся из текущего JSON материала.
+## Горение и transient-материалы
 
-### v4
+Combustion pass использует данные материала: ignition threshold, burn rate, heat per mass, burned-into target и emissions. `core:fire` имеет флаг `flame`, собственный lifetime и decay target. Emission resolve создаёт продукты только в разрешённых destination-клетках.
 
-- world header 20 байт, неявный cell stride 32;
-- JSON содержит `MaterialPalette` как массив строковых ID, где позиция — компактный индекс сцены;
-- `core:gold_sand → core:sand` и `core:concrete → core:stone` выполняются при загрузке с предупреждением;
-- температура после конвертации берётся из материала.
+Обычная material-кисть пишет только в empty. Исключение не является заменой материала: кисть flame при попадании в combustible fixed solid повышает его температуру выше ignition threshold, сохраняя `MaterialIndex`, массу и геометрию.
 
-### v5 — текущая запись
+## Сохранения
 
-- world header 24 байта содержит magic, version, width, height, явный stride 36 и длину секции;
-- JSON сохраняет строковую палитру;
-- клетки содержат temperature и валидируются при чтении;
-- writer создаёт только v5, readers сохраняют поддержку v3/v4.
+- v3/v4: header 20 байт, неявный stride 32; v3 использует изолированную legacy palette, v4 — строковую scene palette.
+- v5: header с явным stride 36, клетка содержит temperature.
+- v6: текущий writer, явный stride 40, клетка содержит temperature и lifetime.
 
-Перед записью snapshot копируется и числовой lookup переводит runtime indices в scene compact indices. Живая сетка не модифицируется. При чтении палитра один раз переводится в массив scene-to-runtime, затем весь snapshot remap выполняется численно.
+Сцена хранит `MaterialPalette` как массив string IDs, где позиция — компактный scene index. При сохранении отдельная копия snapshot преобразуется runtime→scene числовой таблицей. При загрузке palette один раз преобразуется string→runtime, затем grid remap выполняется численно. Живая сетка не перекодируется.
 
-`ReadWorldAsync` проверяет положительные размеры, stride конкретной версии, переполнение, точную длину секции, обрезанный header/data и лишние байты. `WorldCellCodec` отдельно преобразует legacy layout по полям.
+## Ограничения расширения
 
-## Границы будущего расширения
-
-Следующие возможности пока отсутствуют и не должны подразумеваться текущими структурами:
-
-- универсальный phase-transition GPU pass и его resources/wake-up;
-- огонь, горение, дым и постоянные heat sources;
-- JSON reaction rules и GPU reaction table;
-- explosion/corrosion/dissolution;
-- pack manifest, dependency resolver и hub.
-
-При проектировании фазовых переходов нужно отдельно решить порядок относительно cellular/thermal passes, сохранение энергии при смене материала и поведение движущейся клетки. Добавлять проверки `core:water` или других конкретных ID в HLSL нельзя.
-> **Current fire extension:** `GridCell` includes `Lifetime` at offset 36 and is 40 bytes in save format v6. The v5 36-byte cell remains a decoded legacy format. `core:fire` is a selectable gas material; flame lifetime and decay are data-driven through `MaterialProperties`.
-# Актуальное расширение fire
-
-Некоторые разделы ниже описывают исторический baseline и намеренно говорят о нереализованных phase/reaction системах. Для текущего рабочего дерева эти утверждения superseded: phase/thermal passes уже действуют, а fire extension использует `GridCell.Lifetime` (40-byte current cell, save v6), selectable `core:fire`, data-driven lifecycle и universal combustion/emission passes. v3/v4/v5 остаются форматами загрузки.
+- Нельзя вводить material-specific runtime-ID в общие HLSL passes.
+- Новые универсальные свойства требуют синхронного изменения C#/HLSL layout, валидатора, defaults и acceptance.
+- Настоящая многокомпонентная смесь потребует отдельной модели состава клетки.
+- Flame остаётся отдельной transient-моделью и не должен попадать в обычное выравнивание газа.
+- Пакеты, зависимости, магазин/hub и произвольные реакции — отдельные будущие подсистемы.

@@ -300,11 +300,11 @@ public static class AcceptanceRegressionScenario
         }
         if (frame == 4)
         {
-            return AddFill(43, 205, 122, 240, 7, 4, materials.Water, 0);
+            return AddFill(43, 229, 122, 240, 7, 4, materials.Sand, 0);
         }
         if (frame == 5)
         {
-            return AddFill(43, 229, 122, 240, 7, 4, materials.Sand, 0);
+            return AddFill(43, 205, 122, 240, 7, 4, materials.Water, 0);
         }
         if (frame == 30)
         {

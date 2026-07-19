@@ -17,6 +17,7 @@ public static class AcceptanceRegressionVerifier
 
     private readonly record struct ComponentMetrics(
         int Count,
+        int SignificantCount,
         int Largest,
         int MinimumX,
         int MaximumX,
@@ -1411,15 +1412,22 @@ public static class AcceptanceRegressionVerifier
         int landedWholeStone = CountColor(landedImage, 205, 155, 425, 185, IsStone);
         int water = CountMaterial(grid, snapshot.Width, 0, snapshot.Width - 1, 0, snapshot.Height - 1, materials.Water);
         int sand = CountMaterial(grid, snapshot.Width, 0, snapshot.Width - 1, 0, snapshot.Height - 1, materials.Sand);
-        bool metalWhole = metal.Count == 3 && metal.Largest > 1800 && squareCells > 1800 &&
+        bool metalWhole = metal.SignificantCount == 3 &&
+            metal.Largest > 1800 && squareCells > 1800 &&
             supportedFragment > 150 && floorFragment > 150;
-        bool stoneSplit = stone.Count == 2 && stone.Largest > 700 &&
+        bool stoneSplit = stone.SignificantCount == 2 && stone.Largest > 700 &&
             supportedStone > 650 && floorStone > 500 && landedWholeStone > 1400 &&
             stone.MinimumY <= 170 && stone.MaximumY >= 240;
         bool passed = metalWhole && stoneSplit && water > 500 && sand > 300 &&
             suspendedMetal > 1500 && suspendedStone > 1000 &&
             File.Exists(fallingImage) && File.Exists(splitImage) && colors.Red == 0;
-        report = $"PHYXEL_B metalComponents={metal.Count} largestMetal={metal.Largest} square={squareCells} splitLevels={supportedFragment}/{floorFragment} stoneComponents={stone.Count} stoneCells={stone.Largest} stoneLevels={supportedStone}/{floorStone} landedWhole={landedWholeStone} water={water} sand={sand} suspendedMetal={suspendedMetal} suspendedStone={suspendedStone} red={colors.Red}";
+        report = $"PHYXEL_B metalComponents={metal.Count}/{metal.SignificantCount} " +
+            $"largestMetal={metal.Largest} square={squareCells} " +
+            $"splitLevels={supportedFragment}/{floorFragment} " +
+            $"stoneComponents={stone.Count}/{stone.SignificantCount} stoneCells={stone.Largest} " +
+            $"stoneLevels={supportedStone}/{floorStone} landedWhole={landedWholeStone} " +
+            $"water={water} sand={sand} suspendedMetal={suspendedMetal} " +
+            $"suspendedStone={suspendedStone} red={colors.Red}";
         return passed;
     }
 
@@ -1565,6 +1573,7 @@ public static class AcceptanceRegressionVerifier
         bool[] visited = new bool[grid.Length];
         int[] queue = new int[grid.Length];
         int components = 0;
+        int significantComponents = 0;
         int largest = 0;
         int minX = width;
         int maxX = 0;
@@ -1597,9 +1606,14 @@ public static class AcceptanceRegressionVerifier
                 Enqueue(grid, visited, queue, ref tail, index - width, y > 0, material);
                 Enqueue(grid, visited, queue, ref tail, index + width, y + 1 < height, material);
             }
+            if (size >= 32)
+            {
+                significantComponents++;
+            }
             largest = Math.Max(largest, size);
         }
-        return new ComponentMetrics(components, largest, minX, maxX, minY, maxY);
+        return new ComponentMetrics(
+            components, significantComponents, largest, minX, maxX, minY, maxY);
     }
 
     private static int ConnectedMaterialSize(

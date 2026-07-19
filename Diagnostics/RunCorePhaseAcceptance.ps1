@@ -74,12 +74,12 @@ try {
             -Mode 'water_ice_steam_pause' -TargetFps $fps
     }
 
-    $roundTripScene = Join-Path $artifactDirectory 'water-ice-steam-v5.json'
+    $roundTripScene = Join-Path $artifactDirectory 'water-ice-steam-v6.json'
     Invoke-CorePhaseCase -Label 'water_ice_steam_v5_roundtrip' `
         -Mode 'water_ice_steam_v5_roundtrip' -ScenePath $roundTripScene
     $scene = Get-Content -LiteralPath $roundTripScene -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($scene.Version -ne 5) {
-        throw "Actual-core round-trip wrote scene version $($scene.Version), expected 5."
+    if ($scene.Version -ne 6) {
+        throw "Actual-core round-trip wrote scene version $($scene.Version), expected 6."
     }
     foreach ($id in 'core:water', 'core:ice', 'core:steam') {
         if ($scene.MaterialPalette -notcontains $id) {

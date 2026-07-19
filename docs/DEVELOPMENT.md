@@ -1,6 +1,6 @@
 # Разработка Phyxel
 
-Практическое руководство соответствует baseline `4d4eb7c`. Актуальное состояние и следующий шаг всегда сначала проверяйте в [PROJECT_STATUS.md](PROJECT_STATUS.md), а системные границы — в [ARCHITECTURE.md](ARCHITECTURE.md).
+Практическое руководство актуально на 2026-07-20. Текущее состояние сначала проверяйте в [PROJECT_STATUS.md](PROJECT_STATUS.md), а системные границы — в [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Требования
 
@@ -59,7 +59,10 @@ Remove-Item -LiteralPath "$env:LOCALAPPDATA/Phyxel/ShaderCache" -Recurse -Force 
 - `CellularAutomataSolver.hlsl`;
 - `SolidBodySolver.hlsl` и `SolidComponents.hlsl`;
 - `ThermalDiffusion.hlsl`;
+- `ContactTransitions.hlsl`;
 - `PhaseTransitions.hlsl`;
+- `Combustion.hlsl`, `EmissionResolve.hlsl` и `TransientLifecycle.hlsl`;
+- `GasRedistribution.hlsl`;
 - `TemperatureProbe.hlsl`;
 - `RenderComposition.hlsl`.
 
@@ -77,7 +80,7 @@ $env:PHYXEL_VERIFY_WORLD_CODEC = '1'
 Remove-Item Env:PHYXEL_VERIFY_WORLD_CODEC
 ```
 
-Проверяет layouts 32/36 байт, чтение v3/v4/v5, legacy palette, миграции, повреждённые заголовки/длины и v5 round-trip.
+Проверяет layouts 32/36/40 байт, чтение v3/v4/v5/v6, legacy palette, миграции, повреждённые заголовки/длины и v6 round-trip.
 
 ### Thermal properties материалов
 
@@ -87,7 +90,17 @@ $env:PHYXEL_VERIFY_THERMAL_MATERIALS = '1'
 Remove-Item Env:PHYXEL_VERIFY_THERMAL_MATERIALS
 ```
 
-Проверяет 64-байтный C#/HLSL layout, core-значения, defaults внешнего JSON, строгие диапазоны и runtime-позиции GPU-таблицы.
+Проверяет 120-байтный C#/HLSL layout, core-значения, defaults внешнего JSON, строгие диапазоны, ambient/contact поля и runtime-позиции GPU-таблицы.
+
+### Combustion/lifecycle properties
+
+```powershell
+$env:PHYXEL_VERIFY_COMBUSTION_MATERIALS = '1'
+./bin/Debug/net8.0-windows/Phyxel.exe
+Remove-Item Env:PHYXEL_VERIFY_COMBUSTION_MATERIALS
+```
+
+Проверяет combustion/emission/lifecycle schema, C#/HLSL offsets, transient flame/smoke contract и core/external targets.
 
 ### Phase-transition schema и registry
 
@@ -97,7 +110,7 @@ $env:PHYXEL_VERIFY_PHASE_MATERIALS = '1'
 Remove-Item Env:PHYXEL_VERIFY_PHASE_MATERIALS
 ```
 
-Проверяет raw string targets, строгую вложенную schema, двухэтапное разрешение ссылок, каскад external dependencies, interval-based cycle validation, offsets 64-байтного GPU layout и sentinel defaults.
+Проверяет raw string targets, строгую вложенную schema, двухэтапное разрешение ссылок, каскад external dependencies, interval-based cycle validation, offsets 120-байтного GPU layout и sentinel defaults.
 
 ### Thermal diffusion и brush logic
 
@@ -169,6 +182,9 @@ Remove-Item Env:PHYXEL_ARTIFACT_DIR
 - thermal: `thermal_uniform`, `thermal_contact`, `thermal_capacity`, `conductivity_compare`, `thermal_insulator`, `thermal_vacuum`, `thermal_gas`, `temperature_probe_gpu`;
 - temperature tool: `temperature_brush`, `temperature_tool`.
 - phase runtime: `phase_dispatch_smoke` с `PHYXEL_MATERIALS_PATH=Diagnostics/PhaseAcceptanceMaterials`.
+- combustion/brush: `combustion_chain`, `combustion_quench`, `brush_empty_only`;
+- coal/contact: `coal_types`;
+- gas/steam: `gas_uniform_distribution`, `steam_self_cooling`, `steam_distribution_and_cooling`, `water_ice_steam_motion`.
 
 Для изменения общей GPU-структуры или pass order прогоните все группы. Acceptance-артефакты создаются только локально и не должны попадать в коммит.
 
@@ -223,7 +239,7 @@ Remove-Item Env:PHYXEL_ARTIFACT_DIR
 3. место нового pass в GPU schedule;
 4. правила для moving granular/liquid/gas/solid и сохранения массы/энергии;
 5. условия пропуска pass и стоимость памяти/кадра;
-6. совместимость v3/v4/v5;
+6. совместимость v3/v4/v5/v6;
 7. CPU regression и реальные GPU acceptance;
 8. границу задачи — какие соседние системы не входят в коммит.
 
