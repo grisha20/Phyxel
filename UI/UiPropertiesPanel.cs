@@ -57,19 +57,17 @@ public sealed class UiPropertiesPanel
         HydraulicsToggled = false;
         ResetRequested = false;
         ClearRequested = false;
-        ScaleChanged = false;
-
         clearConfirmTimer = Math.Max(0f, clearConfirmTimer - input.DeltaSeconds);
 
         int padding = 12;
         int innerX = bounds.X + padding;
         int innerWidth = bounds.Width - padding * 2;
-        // Info box occupies Y+28..Y+72; slider labels draw 24px above Bounds.Y
-        int cursorY = bounds.Y + 100;
+        // Info box occupies Y+34..Y+86; slider labels draw 24px above Bounds.Y
+        int cursorY = bounds.Y + 120;
 
         // Sliders Layout
         brushSlider.Bounds = new Rectangle(innerX, cursorY, innerWidth, 22);
-        cursorY += 56;
+        cursorY += 52;
 
         if (activeTool == PhyxelToolId.Temperature)
         {
@@ -169,8 +167,8 @@ public sealed class UiPropertiesPanel
             new Vector2(bounds.X + 12, bounds.Y + 8),
             UiTheme.TextMuted);
 
-        // Current Tool & Material Header Box
-        Rectangle infoBox = new(bounds.X + 12, bounds.Y + 28, bounds.Width - 24, 44);
+        // Current Tool & Material Header Box (height 52px, Y+34)
+        Rectangle infoBox = new(bounds.X + 12, bounds.Y + 34, bounds.Width - 24, 52);
         backdrop.Draw(spriteBatch, infoBox, 4);
         UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, infoBox, 1, UiTheme.BorderColor);
 
@@ -186,18 +184,18 @@ public sealed class UiPropertiesPanel
         spriteBatch.DrawString(
             font,
             $"Инструмент: {toolName}",
-            new Vector2(infoBox.X + 8, infoBox.Y + 4),
+            new Vector2(infoBox.X + 8, infoBox.Y + 5),
             UiTheme.TextPrimary);
 
         // Material color preview swatch
-        Rectangle swatch = new(infoBox.X + 8, infoBox.Y + 24, 14, 14);
+        Rectangle swatch = new(infoBox.X + 8, infoBox.Y + 29, 14, 14);
         spriteBatch.Draw(pixel, swatch, selectedMaterial.Color);
         UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, swatch, 1, UiTheme.BorderColor);
 
         spriteBatch.DrawString(
             font,
             $"Материал: {selectedMaterial.Name}",
-            new Vector2(swatch.Right + 6, infoBox.Y + 22),
+            new Vector2(swatch.Right + 6, infoBox.Y + 27),
             UiTheme.TextSecondary);
 
         // Draw Sliders
