@@ -257,12 +257,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         color = MaterialColor(cell.MaterialIndex);
         color.rgb += CombustionHeatGlow(cell);
         color.rgb += HotMaterialIncandescence(cell);
-        uint kind = Materials[cell.MaterialIndex].SimulationKind;
-        if (IsFluidMaterial(kind))
-        {
-            float fill = sqrt(saturate(cell.Mass));
-            color.rgb = lerp(float3(0.035, 0.041, 0.047), color.rgb, fill);
-        }
         if (IsFlameCell(cell))
         {
             float3 flame = FlameColor(cell, coordinate.x * 17 + coordinate.y * 131);
@@ -289,8 +283,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             float edgeNoise = (HashUnitFloat(
                 FlattenCoordinate(coordinate) ^ 0x6d2b79f5u) - 0.5) * 0.016;
             float gasOpacity = smoothstep(
-                0.035 + edgeNoise,
-                0.075 + edgeNoise,
+                GasVisibleMassThreshold - 0.02 + edgeNoise,
+                GasVisibleMassThreshold + 0.04 + edgeNoise,
                 gasCoverage) * 0.94;
             color.rgb = lerp(color.rgb, gasColor, gasOpacity);
         }

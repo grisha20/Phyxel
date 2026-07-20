@@ -122,13 +122,23 @@ internal static class ThermalDiffusionRegressionVerifier
         string render = File.ReadAllText(Path.Combine(shaderDirectory, "RenderComposition.hlsl"));
         Require(render.Contains("for (int y = -1; y <= 1; y++)", StringComparison.Ordinal) &&
             render.Contains("float edgeNoise", StringComparison.Ordinal) &&
-            render.Contains("0.035 + edgeNoise", StringComparison.Ordinal) &&
-            render.Contains("0.075 + edgeNoise", StringComparison.Ordinal) &&
-            !render.Contains("gasSampleWeight", StringComparison.Ordinal),
+            render.Contains("GasVisibleMassThreshold - 0.02 + edgeNoise", StringComparison.Ordinal) &&
+            render.Contains("GasVisibleMassThreshold + 0.04 + edgeNoise", StringComparison.Ordinal) &&
+            !render.Contains("gasSampleWeight", StringComparison.Ordinal) &&
+            !render.Contains("sqrt(saturate(cell.Mass))", StringComparison.Ordinal),
             "Continuum gas rendering is not using the flat-particle profile.");
         Require(brush.Contains("bool insideStrokeCore", StringComparison.Ordinal) &&
-            brush.Contains("!insideStrokeCore", StringComparison.Ordinal),
-            "Segment brushes do not preserve a continuous center line.");
+            brush.Contains("!insideStrokeCore", StringComparison.Ordinal) &&
+            brush.Contains("replaceableInvisibleGas", StringComparison.Ordinal) &&
+            brush.Contains("existing.Mass < GasVisibleMassThreshold", StringComparison.Ordinal),
+            "Brushes do not preserve a continuous center line or replace invisible gas.");
+        string cellular = File.ReadAllText(
+            Path.Combine(shaderDirectory, "CellularAutomataSolver.hlsl"));
+        Require(cellular.Contains("TransferLiquidMass", StringComparison.Ordinal) &&
+            cellular.Contains("ConsolidateLiquidDown", StringComparison.Ordinal) &&
+            cellular.Contains("ConsolidateLiquidSide", StringComparison.Ordinal) &&
+            cellular.Contains("destinationEnergy", StringComparison.Ordinal),
+            "Fractional liquid consolidation is missing or does not preserve thermal energy.");
         string probe = File.ReadAllText(Path.Combine(shaderDirectory, "TemperatureProbe.hlsl"));
         RequireOrdered(
             probe,

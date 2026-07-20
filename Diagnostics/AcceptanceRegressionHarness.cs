@@ -19,8 +19,8 @@ public sealed class AcceptanceRegressionHarness
     private static readonly ulong[] SteamDistributionCheckpointTicks = [20, 40, 80, 200];
     private const ulong SteamDistributionFinalTick = 400;
     private static readonly ulong[] SteamCloudCheckpointTicks =
-        [0, 20, 40, 80, 200, 400, 500, 600, 700, 800];
-    private const ulong SteamCloudFinalTick = 800;
+        [0, 20, 40, 80, 200, 400, 800, 1200, 1300, 1400, 1500];
+    private const ulong SteamCloudFinalTick = 1500;
     private MaterialRegistry? materialRegistry;
     private readonly List<ThermalAcceptanceCheckpoint> thermalCheckpoints = [];
     private readonly TemperatureProbeAcceptanceTrace temperatureProbeTrace = new();

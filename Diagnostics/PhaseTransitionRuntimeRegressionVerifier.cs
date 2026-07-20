@@ -65,9 +65,13 @@ internal static class PhaseTransitionRuntimeRegressionVerifier
         Require(shader.Contains("RWStructuredBuffer<GridCell> Grid", StringComparison.Ordinal) &&
             shader.Contains("InterlockedOr(PhaseSummary[0]", StringComparison.Ordinal),
             "Phase shader is not an in-place pass with one summary atomic.");
-        Require(!shader.Contains("Swap", StringComparison.Ordinal) &&
-            !shader.Contains("neighbor", StringComparison.OrdinalIgnoreCase),
-            "Phase shader must not swap cells or inspect neighbors.");
+        Require(!shader.Contains("Swap", StringComparison.Ordinal),
+            "Phase shader must not swap cells.");
+        Require(shader.Contains("HasCoherentGasForCondensation", StringComparison.Ordinal) &&
+            shader.Contains("GasCondensationNeighborhoodMass", StringComparison.Ordinal) &&
+            shader.Contains("source.SimulationKind == SimulationKindGas", StringComparison.Ordinal) &&
+            shader.Contains("target.SimulationKind == SimulationKindLiquid", StringComparison.Ordinal),
+            "Gas-to-liquid transitions do not reject isolated dilute gas tails.");
         Require(shader.Contains("cell.Temperature < source.TransitionBelowTemperature", StringComparison.Ordinal) &&
             shader.Contains("cell.Temperature > source.TransitionAboveTemperature", StringComparison.Ordinal),
             "Phase shader thresholds are not strict.");

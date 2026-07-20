@@ -16,6 +16,12 @@ StructuredBuffer<MaterialProperties> Materials : register(t0);
 RWStructuredBuffer<GridCell> Grid : register(u0);
 RWStructuredBuffer<uint> PhaseSummary : register(u1);
 
+// Continuum gas leaves a very dilute numerical tail far beyond its visible
+// cloud. That tail must not nucleate liquid by itself when it touches a cold
+// wall: condensation requires both a real cell contribution and a coherent
+// amount of the same gas in the immediate neighbourhood.
+static const float GasCondensationNeighborhoodMass = 0.08;
+
 bool IsValidPhaseTarget(uint materialIndex)
 {
     if (materialIndex == 0 || materialIndex >= MaterialCount)
@@ -71,6 +77,34 @@ uint BuildPhaseSummary(MaterialProperties source, MaterialProperties target)
     return flags;
 }
 
+bool HasCoherentGasForCondensation(uint2 coordinate, GridCell cell)
+{
+    float localMass = 0;
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            int2 neighborCoordinate = int2(coordinate) + int2(x, y);
+            if (neighborCoordinate.x < 0 || neighborCoordinate.y < 0 ||
+                neighborCoordinate.x >= int(PhaseWidth) ||
+                neighborCoordinate.y >= int(PhaseHeight))
+            {
+                continue;
+            }
+
+            GridCell neighbor = Grid[
+                uint(neighborCoordinate.y) * PhaseWidth + uint(neighborCoordinate.x)];
+            if (neighbor.IsActive != 0 && neighbor.MaterialIndex == cell.MaterialIndex)
+            {
+                localMass += max(0, neighbor.Mass);
+            }
+        }
+    }
+    return localMass >= GasCondensationNeighborhoodMass;
+}
+
 [numthreads(16, 16, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -118,6 +152,12 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     MaterialProperties target = Materials[targetIndex];
+    if (source.SimulationKind == SimulationKindGas &&
+        target.SimulationKind == SimulationKindLiquid &&
+        !HasCoherentGasForCondensation(coordinate, cell))
+    {
+        return;
+    }
     bool sourceCellular = IsCellularMaterial(source.SimulationKind);
     bool targetCellular = IsCellularMaterial(target.SimulationKind);
     cell.MaterialIndex = targetIndex;

@@ -22,7 +22,7 @@
     "heatCapacity": 2.08,
     "ambientCooling": {
       "temperature": 20.0,
-      "rate": 0.01
+      "rate": 0.0025
     },
     "transitions": {
       "below": {

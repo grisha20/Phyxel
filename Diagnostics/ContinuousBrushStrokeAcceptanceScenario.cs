@@ -15,6 +15,7 @@ internal static class ContinuousBrushStrokeAcceptanceScenario
     internal const int SteamY = 80;
     internal const int SandY = 120;
     internal const int TemperatureY = 170;
+    internal const int InvisibleSteamY = 195;
     internal const int EraserY = 220;
     internal const float TargetTemperature = 500;
     private const float Radius = 4;
@@ -38,6 +39,7 @@ internal static class ContinuousBrushStrokeAcceptanceScenario
         byte[] bytes = new byte[checked(width * height * Marshal.SizeOf<GridCell>())];
         Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes);
         FillLane(cells, width, TemperatureY, materials[CoreMaterialIds.Water]);
+        FillLane(cells, width, InvisibleSteamY, materials[CoreMaterialIds.Steam], 0.02f);
         FillLane(cells, width, EraserY, materials[CoreMaterialIds.Sand]);
         return new SimulationWorldSnapshot(width, height, bytes);
     }
@@ -59,6 +61,8 @@ internal static class ContinuousBrushStrokeAcceptanceScenario
             CreateSegment(SandY, materials.Sand, BrushCommandMode.Material, 1003, 0),
             CreateSegment(TemperatureY, materials.Water,
                 BrushCommandMode.SetTemperature, 1004, TargetTemperature),
+            CreateSegment(InvisibleSteamY, materials.Resolve(CoreMaterialIds.Ice),
+                BrushCommandMode.Material, 1006, 0),
             CreateSegment(EraserY, materials.Eraser, BrushCommandMode.Erase, 1005, 0)
         ];
     }
@@ -68,6 +72,14 @@ internal static class ContinuousBrushStrokeAcceptanceScenario
         int width,
         int centerY,
         MaterialDefinition material)
+        => FillLane(cells, width, centerY, material, 1);
+
+    private static void FillLane(
+        Span<GridCell> cells,
+        int width,
+        int centerY,
+        MaterialDefinition material,
+        float mass)
     {
         for (int y = centerY - 6; y <= centerY + 6; y++)
         {
@@ -76,7 +88,7 @@ internal static class ContinuousBrushStrokeAcceptanceScenario
                 cells[y * width + x] = new GridCell
                 {
                     MaterialIndex = material.RuntimeIndex,
-                    Mass = 1,
+                    Mass = mass,
                     IsActive = 1,
                     Temperature = material.Properties.InitialTemperature
                 };

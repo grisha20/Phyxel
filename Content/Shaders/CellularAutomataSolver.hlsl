@@ -156,6 +156,100 @@ void ExchangeGranularWithLiquid(
     CellMaterials[liquidIndex] = granular.MaterialIndex;
 }
 
+void TransferLiquidMass(
+    uint sourceIndex,
+    GridCell source,
+    uint destinationIndex,
+    GridCell destination,
+    float amount)
+{
+    float sourceMass = source.Mass;
+    float destinationMass = destination.Mass;
+    float transferred = min(amount, min(sourceMass, max(0, 1.0 - destinationMass)));
+    if (transferred <= 0.000001)
+    {
+        return;
+    }
+
+    float heatCapacity = max(0.01, Materials[source.MaterialIndex].HeatCapacity);
+    float destinationEnergy = destinationMass * heatCapacity * destination.Temperature +
+        transferred * heatCapacity * source.Temperature;
+    float destinationLifetime = destinationMass * destination.Lifetime +
+        transferred * source.Lifetime;
+    source.Mass = sourceMass - transferred;
+    destination.Mass = destinationMass + transferred;
+    destination.Temperature = destinationEnergy /
+        max(0.000001, destination.Mass * heatCapacity);
+    destination.Lifetime = destinationLifetime / max(0.000001, destination.Mass);
+    destination.VelocityX = 0;
+    destination.VelocityY = 0;
+    destination.BodyId = 0;
+    destination.RestFrames = 0;
+    if (HydraulicPressure == 0)
+    {
+        destination.Pressure = 0;
+    }
+
+    if (source.Mass <= 0.000001)
+    {
+        source = CreateEmptyCell();
+    }
+    else
+    {
+        source.VelocityX = 0;
+        source.VelocityY = 0;
+        source.BodyId = 0;
+        source.RestFrames = 0;
+        if (HydraulicPressure == 0)
+        {
+            source.Pressure = 0;
+        }
+    }
+    Grid[sourceIndex] = source;
+    Grid[destinationIndex] = destination;
+    CellMaterials[sourceIndex] = source.IsActive != 0 ? source.MaterialIndex : 0;
+    CellMaterials[destinationIndex] = destination.MaterialIndex;
+}
+
+bool ConsolidateLiquidDown(uint upperIndex, uint lowerIndex)
+{
+    GridCell upper = Grid[upperIndex];
+    GridCell lower = Grid[lowerIndex];
+    if (upper.IsActive == 0 || lower.IsActive == 0 ||
+        Materials[upper.MaterialIndex].SimulationKind != SimulationKindLiquid ||
+        upper.MaterialIndex != lower.MaterialIndex ||
+        upper.Mass <= 0.000001 || lower.Mass >= 0.999999)
+    {
+        return false;
+    }
+    TransferLiquidMass(upperIndex, upper, lowerIndex, lower, 1.0 - lower.Mass);
+    return true;
+}
+
+bool ConsolidateLiquidSide(uint leftIndex, uint rightIndex)
+{
+    GridCell left = Grid[leftIndex];
+    GridCell right = Grid[rightIndex];
+    if (left.IsActive == 0 || right.IsActive == 0 ||
+        Materials[left.MaterialIndex].SimulationKind != SimulationKindLiquid ||
+        left.MaterialIndex != right.MaterialIndex ||
+        left.Mass <= 0.000001 || right.Mass <= 0.000001 ||
+        left.Mass >= 0.999999 || right.Mass >= 0.999999)
+    {
+        return false;
+    }
+    bool preferRight = HashUnitFloat(leftIndex ^ 0x68bc21ebu) < 0.5;
+    if (preferRight)
+    {
+        TransferLiquidMass(leftIndex, left, rightIndex, right, 1.0 - right.Mass);
+    }
+    else
+    {
+        TransferLiquidMass(rightIndex, right, leftIndex, left, 1.0 - left.Mass);
+    }
+    return true;
+}
+
 bool SandSupported(uint2 coordinate)
 {
     if (coordinate.y + 1 >= Height)
@@ -734,6 +828,11 @@ void ResolveVerticalPair(uint2 upperCoordinate)
     uint lowerMaterial = CellMaterials[lowerIndex];
     uint upperKind = CellKindFromMaterial(upperMaterial);
     uint lowerKind = CellKindFromMaterial(lowerMaterial);
+    if (upperKind == SimulationKindLiquid && lowerKind == SimulationKindLiquid &&
+        upperMaterial == lowerMaterial && ConsolidateLiquidDown(upperIndex, lowerIndex))
+    {
+        return;
+    }
     if (upperKind == 2 || lowerKind == 2)
     {
         return;
@@ -789,6 +888,11 @@ void ResolveDiagonalPair(uint2 upperCoordinate, uint2 lowerCoordinate)
     uint lowerMaterial = CellMaterials[lowerIndex];
     uint upperKind = CellKindFromMaterial(upperMaterial);
     uint lowerKind = CellKindFromMaterial(lowerMaterial);
+    if (upperKind == SimulationKindLiquid && lowerKind == SimulationKindLiquid &&
+        upperMaterial == lowerMaterial && ConsolidateLiquidDown(upperIndex, lowerIndex))
+    {
+        return;
+    }
     if (upperKind == 2 || lowerKind == 2)
     {
         return;
@@ -845,6 +949,11 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
     uint rightMaterial = CellMaterials[rightIndex];
     uint leftKind = CellKindFromMaterial(leftMaterial);
     uint rightKind = CellKindFromMaterial(rightMaterial);
+    if (leftKind == SimulationKindLiquid && rightKind == SimulationKindLiquid &&
+        leftMaterial == rightMaterial && ConsolidateLiquidSide(leftIndex, rightIndex))
+    {
+        return;
+    }
     if (leftKind == 2 || rightKind == 2)
     {
         return;

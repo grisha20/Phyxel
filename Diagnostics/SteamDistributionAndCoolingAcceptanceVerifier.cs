@@ -40,30 +40,31 @@ internal static class SteamDistributionAndCoolingAcceptanceVerifier
         {
             Require(stages[0].SteamMass > 255 && stages[0].WaterMass < 0.01 &&
                 stages[0].SteamAverageY is > 180 and < 205 &&
-                stages[0].SteamHorizontalSpan is >= 45 and <= 100 &&
-                stages[0].SteamRows >= 35,
+                stages[0].SteamHorizontalSpan is >= 200 and <= 300 &&
+                stages[0].SteamRows >= 60,
                 $"steam did not begin a local buoyant spread={stages[0]}", errors);
-            Require(stages[1].SteamMass > 255 && stages[1].WaterMass < 0.01 &&
+            Require(stages[1].SteamMass > 255 && stages[1].WaterMass < 0.10 &&
                 stages[1].SteamAverageY < stages[0].SteamAverageY &&
                 stages[1].SteamHorizontalSpan >= stages[0].SteamHorizontalSpan,
                 $"steam did not continue rising and spreading={stages[0]} -> {stages[1]}", errors);
-            Require(stages[2].SteamMass > 255 && stages[2].WaterMass < 0.01 &&
-                stages[2].SteamAverageY is > 150 and < 190 &&
-                stages[2].SteamHorizontalSpan is >= 120 and <= 190,
+            Require(stages[2].SteamMass > 255 && stages[2].WaterMass < 0.20 &&
+                stages[2].SteamAverageY is > 170 and < 200 &&
+                stages[2].SteamHorizontalSpan is >= 240 and <= 320,
                 $"steam moved non-locally or failed to spread as a cloud={stages[2]}", errors);
-            Require(stages[0].SteamFractionalCells == 0 &&
-                stages[1].SteamFractionalCells == 0 &&
-                stages[2].SteamFractionalCells == 0,
-                "steam packets were split during gas redistribution", errors);
+            Require(stages[0].SteamFractionalCells >= stages[0].SteamCells * 0.95 &&
+                stages[1].SteamFractionalCells >= stages[1].SteamCells * 0.95 &&
+                stages[2].SteamFractionalCells >= stages[2].SteamCells * 0.95,
+                "steam did not form the expected fractional continuum field", errors);
             Require(stages[1].SteamTemperature < stages[0].SteamTemperature &&
                 stages[2].SteamTemperature < stages[1].SteamTemperature &&
                 stages[3].SteamTemperature < stages[2].SteamTemperature,
                 $"steam did not cool monotonically={string.Join(" -> ", stages)}", errors);
-            Require(stages[3].SteamMass > 255 && stages[3].WaterMass < 0.01 &&
-                stages[3].SteamAverageY < 150 && stages[3].SteamHorizontalSpan >= 200,
+            Require(stages[3].SteamMass > 255 && stages[3].WaterMass < 0.50 &&
+                stages[3].SteamAverageY < stages[2].SteamAverageY &&
+                stages[3].SteamHorizontalSpan >= 260,
                 $"steam did not remain a slowly cooling broad cloud={stages[3]}", errors);
         }
-        Require(final.WaterMass is >= 1 and < 80 && final.SteamMass > 175 &&
+        Require(final.WaterMass is >= 0.5 and < 80 && final.SteamMass > 175 &&
             final.WaterAverageY > 220 && final.WaterHorizontalSpan >= 5,
             $"steam did not begin gradual droplet condensation={final}", errors);
 

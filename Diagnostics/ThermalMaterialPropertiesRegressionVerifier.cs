@@ -160,7 +160,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             Require(Same(properties.HeatCapacity, expected.HeatCapacity),
                 $"{expected.Id} heatCapacity is incorrect.");
             float expectedAmbientTemperature = expected.Id == CoreMaterialIds.Steam ? 20f : 0f;
-            float expectedAmbientRate = expected.Id == CoreMaterialIds.Steam ? 0.01f : 0f;
+            float expectedAmbientRate = expected.Id == CoreMaterialIds.Steam ? 0.0025f : 0f;
             Require(Same(properties.AmbientTemperature, expectedAmbientTemperature) &&
                 Same(properties.AmbientCoolingRate, expectedAmbientRate),
                 $"{expected.Id} ambient cooling is incorrect.");

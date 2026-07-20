@@ -24,6 +24,7 @@ internal static class ContinuousBrushStrokeAcceptanceVerifier
             materials.GetRequiredRuntimeIndex(CoreMaterialIds.Sand), "sand", errors);
 
         int temperatureCells = 0;
+        int replacedInvisibleSteam = 0;
         int erasedCells = 0;
         for (int x = ContinuousBrushStrokeAcceptanceScenario.StartX;
             x <= ContinuousBrushStrokeAcceptanceScenario.EndX;
@@ -43,6 +44,18 @@ internal static class ContinuousBrushStrokeAcceptanceVerifier
                 AddError($"temperature gap at x={x}: {Describe(heated)}", errors);
             }
 
+            GridCell frozen = cells[
+                ContinuousBrushStrokeAcceptanceScenario.InvisibleSteamY * snapshot.Width + x];
+            if (frozen.IsActive != 0 &&
+                frozen.MaterialIndex == materials.GetRequiredRuntimeIndex(CoreMaterialIds.Ice))
+            {
+                replacedInvisibleSteam++;
+            }
+            else
+            {
+                AddError($"invisible steam blocked ice at x={x}: {Describe(frozen)}", errors);
+            }
+
             GridCell erased = cells[
                 ContinuousBrushStrokeAcceptanceScenario.EraserY * snapshot.Width + x];
             if (erased.IsActive == 0 && erased.MaterialIndex == 0)
@@ -58,7 +71,8 @@ internal static class ContinuousBrushStrokeAcceptanceVerifier
         int expected = ContinuousBrushStrokeAcceptanceScenario.EndX -
             ContinuousBrushStrokeAcceptanceScenario.StartX + 1;
         report = $"PHYXEL_CONTINUOUS_BRUSH expected={expected} " +
-            $"temperature={temperatureCells} eraser={erasedCells}";
+            $"temperature={temperatureCells} replacedGas={replacedInvisibleSteam} " +
+            $"eraser={erasedCells}";
         if (errors.Count == 0)
         {
             return true;

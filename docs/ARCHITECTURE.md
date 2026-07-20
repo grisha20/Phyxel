@@ -67,7 +67,7 @@
   "heatCapacity": 2.08,
   "ambientCooling": {
     "temperature": 20.0,
-    "rate": 0.01
+    "rate": 0.0025
   }
 }
 ```
@@ -117,7 +117,7 @@ Pause останавливает cellular, gas, thermal, contact, combustion и 
 
 Обычным газом считается `kind: gas` без флага `flame`. Газовая клетка перемещается только в соседнюю empty-клетку и переносится целиком: solver не делит `Mass`, не объединяет одинаковый газ и не выполняет long-range перенос. `MaterialIndex`, `Mass`, `Temperature` и `Lifetime` сохраняются внутри пакета. Разные материалы не смешиваются; более плотный газ сортируется ниже менее плотного.
 
-Пар использует тот же generic solver. Его начальная температура, ambient cooling и порог конденсации задаются в JSON; текущие значения — 122 °C, rate 0.01 к 20 °C и переход в воду ниже 98 °C. Подробнее: [GAS_SIMULATION.md](GAS_SIMULATION.md).
+Пар использует тот же generic solver. Его начальная температура, ambient cooling и порог конденсации задаются в JSON; текущие значения — 122 °C, rate 0.0025 к 20 °C и переход в воду ниже 98 °C. Подробнее: [GAS_SIMULATION.md](GAS_SIMULATION.md).
 
 ## Температура, контакты и фазы
 
@@ -132,7 +132,7 @@ T += (ambientTemperature - T) * factor
 
 Это открытая система: энергия уходит во внешнюю среду намеренно.
 
-`ContactTransitions.hlsl` меняет material state при геометрическом контакте с liquid. `PhaseTransitions.hlsl` применяет не более одного below/above перехода за thermal batch, сохраняет массу/температуру и нормализует kind-specific поля. Summary readback использует ring slots; fallback wake-up не переиспользуется до завершения предыдущего запроса.
+`ContactTransitions.hlsl` меняет material state при геометрическом контакте с liquid. `PhaseTransitions.hlsl` применяет не более одного below/above перехода за thermal batch, сохраняет массу/температуру и нормализует kind-specific поля. Для gas → liquid требуется связная масса того же газа в локальной окрестности: разреженный численный хвост не считается самостоятельным центром конденсации. Summary readback использует ring slots; fallback wake-up не переиспользуется до завершения предыдущего запроса.
 
 ## Горение и transient-материалы
 

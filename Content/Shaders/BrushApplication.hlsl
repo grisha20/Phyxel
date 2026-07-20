@@ -77,9 +77,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     if (existing.IsActive != 0)
     {
-        if ((material.Flags & MaterialFlagFlame) != 0)
+        MaterialProperties existingMaterial = Materials[existing.MaterialIndex];
+        bool replaceableInvisibleGas =
+            existingMaterial.SimulationKind == SimulationKindGas &&
+            (existingMaterial.Flags & MaterialFlagFlame) == 0 &&
+            existing.Mass < GasVisibleMassThreshold;
+        if (!replaceableInvisibleGas && (material.Flags & MaterialFlagFlame) != 0)
         {
-            MaterialProperties existingMaterial = Materials[existing.MaterialIndex];
             if (existingMaterial.SimulationKind == SimulationKindSolid &&
                 existingMaterial.BurnedIntoMaterialIndex != 0xffffffffu &&
                 existingMaterial.FlameSpreadRate > 0)
@@ -92,7 +96,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
                 Grid[index] = existing;
             }
         }
-        return;
+        if (!replaceableInvisibleGas)
+        {
+            return;
+        }
     }
 
     GridCell cell = CreateEmptyCell();

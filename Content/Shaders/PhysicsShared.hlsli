@@ -85,6 +85,7 @@ static const uint PhaseSummaryTouchesLiquid = 1u << 4;
 static const uint PhaseSummaryTouchesSolid = 1u << 5;
 static const uint PhaseSummaryTargetMovableSolid = 1u << 6;
 static const float MaximumMaterialDensity = 100.0;
+static const float GasVisibleMassThreshold = 0.035;
 static const uint BrushCommandModeMaterial = 0;
 static const uint BrushCommandModeErase = 1;
 static const uint BrushCommandModeSetTemperature = 2;

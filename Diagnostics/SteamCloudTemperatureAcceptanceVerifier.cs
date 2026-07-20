@@ -17,8 +17,8 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
         out string report)
     {
         List<string> errors = [];
-        Require(checkpoints.Count == 10,
-            $"steam cloud checkpoints expected=10 actual={checkpoints.Count}", errors);
+        Require(checkpoints.Count == 11,
+            $"steam cloud checkpoints expected=11 actual={checkpoints.Count}", errors);
         uint steam = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
         uint water = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
         List<CloudStage> stages = checkpoints
@@ -38,7 +38,7 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
                 "Pause changed steam movement or temperature before the first thermal tick", errors);
         }
 
-        if (stages.Count >= 10)
+        if (stages.Count >= 11)
         {
             Require(stages[1].TotalMass > stages[0].TotalMass + 100 &&
                 stages[2].TotalMass > stages[1].TotalMass + 100,
@@ -53,6 +53,8 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
             }
             Require(Math.Abs(final.TotalMass - releasedMass) <= 0.05,
                 $"final steam/water mass changed={final.TotalMass:F4} expected={releasedMass:F4}", errors);
+            Require(stages.Take(7).All(stage => stage.BoundaryWaterCells == 0),
+                $"dilute invisible steam condensed against a remote wall={Join(stages.Take(7))}", errors);
 
             CloudStage joined = stages[3];
             Require(joined.SteamMass > 0 && joined.HorizontalSpan >= 120 &&
@@ -72,7 +74,7 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
                 $"steam center is not warmer than its exposed edge={developed}", errors);
 
             int firstWaterIndex = stages.FindIndex(stage => stage.WaterMass >= 0.5);
-            Require(firstWaterIndex is >= 4 and <= 9,
+            Require(firstWaterIndex is >= 7 and <= 10,
                 $"condensation was not delayed and gradual firstWaterStage={firstWaterIndex}", errors);
             if (firstWaterIndex >= 0)
             {
@@ -93,6 +95,8 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
             Require(final.WaterMass >= 0.5 &&
                 final.WaterMass < releasedMass * 0.10 && final.SteamMass > releasedMass * 0.90,
                 $"final capture did not preserve gradual condensation={final}", errors);
+            Require(final.WaterCells <= final.WaterMass * 64 + 64,
+                $"condensed water remained a field of near-empty dark cells={final}", errors);
         }
 
         report = "PHYXEL_STEAM_CLOUD " +
@@ -204,6 +208,7 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
         HashSet<int> waterSet = waterCells.Select(cell => cell.Y * snapshot.Width + cell.X).ToHashSet();
         (int waterComponents, int largestWaterComponent) = Components(waterSet, snapshot.Width, 1);
         int edgeWater = 0;
+        int boundaryWater = 0;
         if (steamCells.Count > 0)
         {
             double centerX = (minX + maxX) * 0.5;
@@ -215,6 +220,13 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
                 double nx = (x - centerX) / halfWidth;
                 double ny = (y - centerY) / halfHeight;
                 if (nx * nx + ny * ny >= 0.45 || y > maxY) edgeWater++;
+                if (x <= SteamCloudTemperatureAcceptanceScenario.Left + 4 ||
+                    x >= SteamCloudTemperatureAcceptanceScenario.Right - 4 ||
+                    y <= SteamCloudTemperatureAcceptanceScenario.Top + 4 ||
+                    y >= SteamCloudTemperatureAcceptanceScenario.Bottom - 4)
+                {
+                    boundaryWater++;
+                }
             }
         }
 
@@ -236,7 +248,8 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
             adjacentPairs,
             waterComponents,
             largestWaterComponent,
-            waterCells.Count > 0 ? edgeWater / (double)waterCells.Count : 0);
+            waterCells.Count > 0 ? edgeWater / (double)waterCells.Count : 0,
+            boundaryWater);
     }
 
     private static (int Count, int Largest) Components(HashSet<int> cells, int width, int radius)
@@ -304,7 +317,8 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
         int AdjacentTemperaturePairs,
         int WaterComponents,
         int LargestWaterComponent,
-        double WaterEdgeFraction)
+        double WaterEdgeFraction,
+        int BoundaryWaterCells)
     {
         public double TotalMass => SteamMass + WaterMass;
 
@@ -313,6 +327,7 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
             $"span={HorizontalSpan}x{VerticalSpan} clusters={SignificantClusters} ceiling={CeilingFraction:P0} " +
             $"tempDense/edge={DenseTemperature:F2}/{EdgeTemperature:F2} " +
             $"adjacent={MeanAdjacentTemperatureDifference:F2}/{MaximumAdjacentTemperatureDifference:F2} " +
-            $"droplets={WaterComponents}/{LargestWaterComponent} edgeWater={WaterEdgeFraction:P0}";
+            $"droplets={WaterComponents}/{LargestWaterComponent} edgeWater={WaterEdgeFraction:P0} " +
+            $"boundaryWater={BoundaryWaterCells}";
     }
 }
