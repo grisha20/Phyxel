@@ -32,8 +32,9 @@ internal static class GasUniformDistributionAcceptanceVerifier
         Require(single.Cells == GasUniformDistributionAcceptanceScenario.SingleMass &&
             single.FractionalCells == 0,
             $"single gas packets were split or merged={single}", errors);
-        Require(single.HorizontalSpan >= 120 && single.Rows is >= 4 and <= 20,
-            $"single gas did not form a smooth buoyant ceiling layer={single}", errors);
+        Require(single.HorizontalSpan >= 120 && single.Rows is >= 40 and <= 130 &&
+            single.AverageY < 80,
+            $"single gas did not form a broad buoyant cloud={single}", errors);
         Require(single.ParityImbalance <= 0.18,
             $"single gas has vertical parity bands={single}", errors);
 

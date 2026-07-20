@@ -41,11 +41,11 @@ void MovePacket(
     if (vertical)
     {
         gas.VelocityX = 0;
-        gas.VelocityY = gasMovesToFirst ? -12 : 12;
+        gas.VelocityY = gasMovesToFirst ? -4 : 4;
     }
     else
     {
-        gas.VelocityX = gasMovesToFirst ? -12 : 12;
+        gas.VelocityX = gasMovesToFirst ? -6 : 6;
         gas.VelocityY = 0;
     }
 
@@ -69,13 +69,14 @@ float PacketMoveChance(
     float flow = saturate(Materials[gas.MaterialIndex].FlowRate);
     if (vertical || diagonal)
     {
-        // Y grows downwards. Buoyancy strongly favours the upper destination,
-        // while a small downward component keeps an enclosed cloud diffusive.
+        // Y grows downwards. Gas diffusion is deliberately stronger than its
+        // buoyant drift: an open cloud should spread locally instead of being
+        // pulled into a narrow ceiling layer.
         return gasIsFirst
-            ? (diagonal ? 0.025 : 0.045) * flow
-            : (diagonal ? 0.32 : 0.90) * flow;
+            ? (diagonal ? 0.34 : 0.22) * flow
+            : (diagonal ? 0.48 : 0.36) * flow;
     }
-    return 0.38 * flow;
+    return 0.62 * flow;
 }
 
 void ResolvePacketPair(

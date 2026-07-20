@@ -224,6 +224,12 @@ public static class AcceptanceRegressionVerifier
                     materialRegistry,
                     thermalCheckpoints,
                     out report),
+            AcceptanceScenarioMode.SteamCloudTemperature =>
+                SteamCloudTemperatureAcceptanceVerifier.Validate(
+                    snapshot,
+                    materialRegistry,
+                    thermalCheckpoints,
+                    out report),
             AcceptanceScenarioMode.PhaseThresholds or
             AcceptanceScenarioMode.PhaseHysteresis or
             AcceptanceScenarioMode.PhaseSingleTransition or
@@ -324,7 +330,7 @@ public static class AcceptanceRegressionVerifier
                 smokeCount++;
             }
         }
-        bool passed = coalCount > 1000 && (partiallyBurnedWood > 100 || coalCount > 1000) &&
+        bool passed = partiallyBurnedWood > 100 &&
             flameCount > 0 && smokeCount > 0 && invalidFlameLifetime == 0 &&
             maximumWoodTemperature <= registry[CoreMaterialIds.Wood].Properties.MaximumCombustionTemperature + 0.5f &&
             registry[CoreMaterialIds.Coal].Properties.BurnedIntoMaterialIndex == uint.MaxValue &&

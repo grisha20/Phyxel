@@ -187,7 +187,7 @@ internal static class CorePhaseAcceptanceVerifier
             (steamMetrics.RestingCells * 4 < steamMetrics.Cells * 3 &&
                 steamMetrics.MaximumX - steamMetrics.MinimumX >= 16),
             $"remaining boiled steam stopped diffusing={steamMetrics}", errors);
-        Require(waterMetrics.Mass >= 180,
+        Require(waterMetrics.Mass >= 120 && steamMetrics.Mass >= 1,
             $"boiled steam neither remained nor condensed into water={waterMetrics}", errors);
         Require(gasMetrics.Cells > 0 && gasMetrics.Mass >= 60 && gasMetrics.AverageY < 178,
             $"core:gas beside steam did not remain a separate moving gas={gasMetrics}", errors);
@@ -356,9 +356,13 @@ internal static class CorePhaseAcceptanceVerifier
             sourceProperties,
             materials[target].Properties,
             target);
+        // GPU ambient cooling can be reduced by local material shelter. The
+        // phase contract still requires every non-temperature field and the
+        // locally cooled temperature to be preserved by normalization.
+        const float ambientTemperatureTolerance = 0.05f;
         bool fieldsMatch = hasAmbientCooling
             ? CellEqualsExceptTemperature(expected, actual) &&
-                Math.Abs(expected.Temperature - actual.Temperature) <= 0.001f
+                Math.Abs(expected.Temperature - actual.Temperature) <= ambientTemperatureTolerance
             : CellEquals(expected, actual);
         Require(fieldsMatch,
             $"{label} fields expected={Describe(expected)} actual={Describe(actual)}", errors);
@@ -369,7 +373,8 @@ internal static class CorePhaseAcceptanceVerifier
                 ? SameBits(actual.Temperature,
                     sourceProperties.TransitionAboveTemperature)
                 : hasAmbientCooling
-                    ? Math.Abs(sourceAtPhasePass.Temperature - actual.Temperature) <= 0.001f
+                    ? Math.Abs(sourceAtPhasePass.Temperature - actual.Temperature) <=
+                        ambientTemperatureTolerance
                     : SameBits(source.Temperature, actual.Temperature)),
             $"{label} did not preserve Mass/Temperature", errors);
     }

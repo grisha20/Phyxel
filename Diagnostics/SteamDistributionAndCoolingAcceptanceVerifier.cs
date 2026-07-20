@@ -39,7 +39,7 @@ internal static class SteamDistributionAndCoolingAcceptanceVerifier
         if (stages.Count >= 4)
         {
             Require(stages[0].SteamMass > 255 && stages[0].WaterMass < 0.01 &&
-                stages[0].SteamAverageY < 180 &&
+                stages[0].SteamAverageY is > 180 and < 205 &&
                 stages[0].SteamHorizontalSpan is >= 45 and <= 100 &&
                 stages[0].SteamRows >= 35,
                 $"steam did not begin a local buoyant spread={stages[0]}", errors);
@@ -48,9 +48,9 @@ internal static class SteamDistributionAndCoolingAcceptanceVerifier
                 stages[1].SteamHorizontalSpan >= stages[0].SteamHorizontalSpan,
                 $"steam did not continue rising and spreading={stages[0]} -> {stages[1]}", errors);
             Require(stages[2].SteamMass > 255 && stages[2].WaterMass < 0.01 &&
-                stages[2].SteamAverageY < 50 &&
-                stages[2].SteamHorizontalSpan is >= 85 and <= 160,
-                $"steam moved non-locally or failed to reach the ceiling={stages[2]}", errors);
+                stages[2].SteamAverageY is > 150 and < 190 &&
+                stages[2].SteamHorizontalSpan is >= 120 and <= 190,
+                $"steam moved non-locally or failed to spread as a cloud={stages[2]}", errors);
             Require(stages[0].SteamFractionalCells == 0 &&
                 stages[1].SteamFractionalCells == 0 &&
                 stages[2].SteamFractionalCells == 0,
@@ -59,13 +59,13 @@ internal static class SteamDistributionAndCoolingAcceptanceVerifier
                 stages[2].SteamTemperature < stages[1].SteamTemperature &&
                 stages[3].SteamTemperature < stages[2].SteamTemperature,
                 $"steam did not cool monotonically={string.Join(" -> ", stages)}", errors);
-            Require(stages[3].SteamMass > 50 && stages[3].WaterMass > 50 &&
-                stages[3].WaterAverageY > 220 && stages[3].WaterHorizontalSpan >= 80,
-                $"steam did not condense gradually into falling droplets={stages[3]}", errors);
+            Require(stages[3].SteamMass > 255 && stages[3].WaterMass < 0.01 &&
+                stages[3].SteamAverageY < 150 && stages[3].SteamHorizontalSpan >= 200,
+                $"steam did not remain a slowly cooling broad cloud={stages[3]}", errors);
         }
-        Require(final.WaterMass > 240 && final.SteamMass < 16 &&
-            final.WaterAverageY > 235 && final.WaterHorizontalSpan >= 100,
-            $"steam did not finish settling after gradual condensation={final}", errors);
+        Require(final.WaterMass is >= 1 and < 80 && final.SteamMass > 175 &&
+            final.WaterAverageY > 220 && final.WaterHorizontalSpan >= 5,
+            $"steam did not begin gradual droplet condensation={final}", errors);
 
         report = "PHYXEL_STEAM_DISTRIBUTION " +
             string.Join(" | ", stages.Select((stage, index) =>

@@ -73,7 +73,8 @@ public enum AcceptanceScenarioMode
     BrushEmptyOnly,
     CoalTypes,
     GasUniformDistribution,
-    SteamDistributionAndCooling
+    SteamDistributionAndCooling,
+    SteamCloudTemperature
 }
 
 public static class AcceptanceRegressionScenario
@@ -131,6 +132,8 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.CombustionChain => CreateCombustionChain(frame),
             AcceptanceScenarioMode.CombustionQuench => CreateCombustionQuench(frame),
             AcceptanceScenarioMode.SteamSelfCooling => [],
+            AcceptanceScenarioMode.SteamCloudTemperature =>
+                SteamCloudTemperatureAcceptanceScenario.CreateCommands(frame, materialRegistry),
             AcceptanceScenarioMode.BrushEmptyOnly => BrushEmptyOnlyAcceptanceScenario.CreateCommands(frame, materials),
             AcceptanceScenarioMode.CoalTypes => [],
             AcceptanceScenarioMode.PhaseDispatchSmoke => [],

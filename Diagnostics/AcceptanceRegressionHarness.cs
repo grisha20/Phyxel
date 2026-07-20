@@ -18,6 +18,9 @@ public sealed class AcceptanceRegressionHarness
     private static readonly ulong[] GasCheckpointTicks = [120];
     private static readonly ulong[] SteamDistributionCheckpointTicks = [20, 40, 80, 200];
     private const ulong SteamDistributionFinalTick = 400;
+    private static readonly ulong[] SteamCloudCheckpointTicks =
+        [0, 20, 40, 80, 200, 400, 500, 600, 700, 800];
+    private const ulong SteamCloudFinalTick = 800;
     private MaterialRegistry? materialRegistry;
     private readonly List<ThermalAcceptanceCheckpoint> thermalCheckpoints = [];
     private readonly TemperatureProbeAcceptanceTrace temperatureProbeTrace = new();
@@ -96,6 +99,7 @@ public sealed class AcceptanceRegressionHarness
             "coal_types" => AcceptanceScenarioMode.CoalTypes,
             "gas_uniform_distribution" => AcceptanceScenarioMode.GasUniformDistribution,
             "steam_distribution_and_cooling" => AcceptanceScenarioMode.SteamDistributionAndCooling,
+            "steam_cloud_temperature" => AcceptanceScenarioMode.SteamCloudTemperature,
             _ => AcceptanceScenarioMode.None
         };
         phaseAcceptance = new PhaseAcceptanceController(Mode);
@@ -181,6 +185,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.CoalTypes => uint.MaxValue,
                 AcceptanceScenarioMode.GasUniformDistribution => 600,
                 AcceptanceScenarioMode.SteamDistributionAndCooling => uint.MaxValue,
+                AcceptanceScenarioMode.SteamCloudTemperature => uint.MaxValue,
                 AcceptanceScenarioMode.PhaseDispatchSmoke => 240,
                 AcceptanceScenarioMode.ThermalUniform or
                 AcceptanceScenarioMode.ThermalConductivityCompare or
@@ -207,6 +212,8 @@ public sealed class AcceptanceRegressionHarness
                 GasUniformDistributionAcceptanceScenario.CreateInitialWorld(
                     Mode, width, height, materialRegistry) ??
                 SteamDistributionAndCoolingAcceptanceScenario.CreateInitialWorld(
+                    Mode, width, height, materialRegistry) ??
+                SteamCloudTemperatureAcceptanceScenario.CreateInitialWorld(
                     Mode, width, height, materialRegistry);
 
     public Point? GetProbeCoordinate(uint frame) => Mode switch
@@ -346,6 +353,23 @@ public sealed class AcceptanceRegressionHarness
             }
             return ready;
         }
+        if (Mode == AcceptanceScenarioMode.SteamCloudTemperature)
+        {
+            if (thermalCheckpoints.Count >= SteamCloudCheckpointTicks.Length)
+            {
+                return false;
+            }
+            ulong steamTarget = SteamCloudCheckpointTicks[thermalCheckpoints.Count];
+            bool ready = steamTarget == 0
+                ? frame >= Math.Max(1u, SteamCloudTemperatureAcceptanceScenario.PauseFrames / 2) &&
+                    dispatchCoordinator.ThermalTicks == 0
+                : dispatchCoordinator.ThermalTicks >= steamTarget;
+            if (ready)
+            {
+                checkpointTick = dispatchCoordinator.ThermalTicks;
+            }
+            return ready;
+        }
         if (Mode != AcceptanceScenarioMode.ThermalContact ||
             thermalCheckpoints.Count >= ThermalContactCheckpointTicks.Length) return false;
         ulong target = ThermalContactCheckpointTicks[thermalCheckpoints.Count];
@@ -387,6 +411,9 @@ public sealed class AcceptanceRegressionHarness
             : Mode == AcceptanceScenarioMode.SteamDistributionAndCooling
             ? thermalCheckpoints.Count >= SteamDistributionCheckpointTicks.Length &&
                 dispatchCoordinator.ThermalTicks >= SteamDistributionFinalTick
+            : Mode == AcceptanceScenarioMode.SteamCloudTemperature
+            ? thermalCheckpoints.Count >= SteamCloudCheckpointTicks.Length &&
+                dispatchCoordinator.ThermalTicks >= SteamCloudFinalTick
             : phaseAcceptance.IsPhaseMode
             ? phaseAcceptance.CanBeginFinalCapture(frame, dispatchCoordinator)
             : frame >= CaptureFrame;
@@ -444,6 +471,10 @@ public sealed class AcceptanceRegressionHarness
         else if (Mode == AcceptanceScenarioMode.CoalTypes)
         {
             settings.Paused = frame < 30;
+        }
+        else if (Mode == AcceptanceScenarioMode.SteamCloudTemperature)
+        {
+            settings.Paused = frame < SteamCloudTemperatureAcceptanceScenario.PauseFrames;
         }
     }
 

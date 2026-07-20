@@ -93,8 +93,18 @@ internal static class ThermalDiffusionRegressionVerifier
             "Thermal shader must not use atomic temperature updates.");
         Require(thermal.Contains("2 * conductivityA * conductivityB / conductivitySum", StringComparison.Ordinal),
             "Thermal shader harmonic contact conductivity is missing.");
+        Require(thermal.Contains("IsSameGas", StringComparison.Ordinal) &&
+            thermal.Contains("SameGasConductivityFloor", StringComparison.Ordinal) &&
+            thermal.Contains("AmbientSurfaceExposure", StringComparison.Ordinal) &&
+            thermal.Contains("immediateEmptyNeighbors", StringComparison.Ordinal) &&
+            thermal.Contains("localEmptyNeighbors", StringComparison.Ordinal),
+            "Thermal shader is missing same-gas equalization or surface-aware ambient cooling.");
         Require(thermal.Contains("DestinationGrid[index] = (GridCell)0", StringComparison.Ordinal),
             "Thermal shader does not normalize inactive cells.");
+        string gas = File.ReadAllText(Path.Combine(shaderDirectory, "GasRedistribution.hlsl"));
+        Require(gas.Contains("return 0.62 * flow", StringComparison.Ordinal) &&
+            gas.Contains("(diagonal ? 0.48 : 0.36) * flow", StringComparison.Ordinal),
+            "Gas redistribution lost its diffusion-dominant movement tuning.");
         string probe = File.ReadAllText(Path.Combine(shaderDirectory, "TemperatureProbe.hlsl"));
         RequireOrdered(
             probe,
