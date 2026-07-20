@@ -21,6 +21,7 @@ internal static partial class MaterialFileLoader
         public string[] Flags { get; set; } = [];
         public string? Color { get; set; }
         public MaterialPhysicsDocument? Physics { get; set; }
+        public MaterialGasDocument? Gas { get; set; }
         public MaterialThermalDocument? Thermal { get; set; }
         public JsonElement Combustion { get; set; }
         public JsonElement Emissions { get; set; }
@@ -236,6 +237,7 @@ internal static partial class MaterialFileLoader
         MaterialSimulationKind kind = ParseKind(document.Kind);
         Color color = ParseColor(document.Color ?? "#FFFFFF");
         MaterialPhysicsDocument physics = document.Physics ?? new MaterialPhysicsDocument();
+        MaterialGasDocument? gas = document.Gas;
         MaterialThermalDocument thermal = document.Thermal ?? new MaterialThermalDocument();
         if (!float.IsFinite(physics.Density) || physics.Density < 0 ||
             physics.Density > MaterialRegistry.MaximumDensity ||
@@ -249,6 +251,34 @@ internal static partial class MaterialFileLoader
         {
             throw new InvalidDataException(
                 $"Неизвестное поле thermal '{thermal.UnknownFields.Keys.OrderBy(key => key, StringComparer.Ordinal).First()}'.");
+        }
+        if (gas is not null)
+        {
+            if (kind != MaterialSimulationKind.Gas)
+            {
+                throw new InvalidDataException("The gas block is allowed only for kind 'gas'.");
+            }
+            if (gas.UnknownFields is { Count: > 0 })
+            {
+                throw new InvalidDataException(
+                    $"Unknown gas field '{gas.UnknownFields.Keys.OrderBy(key => key, StringComparer.Ordinal).First()}'.");
+            }
+            if (!float.IsFinite(gas.Diffusion) ||
+                gas.Diffusion < MaterialRegistry.MinimumGasDiffusion ||
+                gas.Diffusion > MaterialRegistry.MaximumGasDiffusion)
+            {
+                throw new InvalidDataException(
+                    $"gas.diffusion must be finite and between " +
+                    $"{MaterialRegistry.MinimumGasDiffusion} and {MaterialRegistry.MaximumGasDiffusion}.");
+            }
+            if (!float.IsFinite(gas.Buoyancy) ||
+                gas.Buoyancy < MaterialRegistry.MinimumGasBuoyancy ||
+                gas.Buoyancy > MaterialRegistry.MaximumGasBuoyancy)
+            {
+                throw new InvalidDataException(
+                    $"gas.buoyancy must be finite and between " +
+                    $"{MaterialRegistry.MinimumGasBuoyancy} and {MaterialRegistry.MaximumGasBuoyancy}.");
+            }
         }
         if (!float.IsFinite(thermal.InitialTemperature) ||
             thermal.InitialTemperature < MaterialRegistry.MinimumInitialTemperature ||
@@ -333,6 +363,12 @@ internal static partial class MaterialFileLoader
                 thermal.HeatCapacity,
                 ambientTemperature,
                 ambientCoolingRate,
+                kind == MaterialSimulationKind.Gas && (flags & MaterialFlags.Flame) == 0
+                    ? gas?.Diffusion ?? MaterialRegistry.DefaultGasDiffusion
+                    : 0,
+                kind == MaterialSimulationKind.Gas && (flags & MaterialFlags.Flame) == 0
+                    ? gas?.Buoyancy ?? 0
+                    : 0,
                 color),
             ui.Order,
             ui.Hidden)
@@ -342,8 +378,18 @@ internal static partial class MaterialFileLoader
             Emissions = emissions,
             Lifecycle = lifecycle,
             LiquidContactTransition = liquidContactTransition,
+            Gas = gas is null ? null : new MaterialGasDefinition(gas.Diffusion, gas.Buoyancy),
             SourcePath = path
         };
+    }
+
+    private sealed class MaterialGasDocument
+    {
+        public float Diffusion { get; set; } = MaterialRegistry.DefaultGasDiffusion;
+        public float Buoyancy { get; set; }
+
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? UnknownFields { get; set; }
     }
 
     private static MaterialLiquidContactTransitionDefinition? ParseContactTransitions(

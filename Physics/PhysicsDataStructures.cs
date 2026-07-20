@@ -50,6 +50,8 @@ public struct MaterialProperties
     public float AmbientCoolingRate;
     public uint ContactLiquidIntoMaterialIndex;
     public float ContactLiquidRatePerSecond;
+    public float GasDiffusion;
+    public float GasBuoyancy;
 }
 
 public enum BrushCommandMode : uint

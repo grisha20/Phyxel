@@ -5,6 +5,7 @@
   "kind": "gas",
   "color": "#9BC4D29B",
   "physics": { "density": 0.08, "friction": 0.005, "flowRate": 1.2 },
+  "gas": { "diffusion": 0.30, "buoyancy": 0.0 },
   "thermal": { "initialTemperature": 20.0, "conductivity": 0.03, "heatCapacity": 1.0 },
   "ui": { "order": 60, "hidden": false }
 }

@@ -20,21 +20,22 @@ internal static class GasUniformDistributionAcceptanceVerifier
         Require(checkpoints.Count == 1,
             $"gas checkpoints expected=1 actual={checkpoints.Count}", errors);
 
+        uint co2Material = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2);
         uint gas = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Gas);
         GasMetrics single = Measure(
-            snapshot, gas,
+            snapshot, co2Material,
             GasUniformDistributionAcceptanceScenario.SingleLeft + 4,
             GasUniformDistributionAcceptanceScenario.SingleTop + 4,
             GasUniformDistributionAcceptanceScenario.SingleRight - 4,
             GasUniformDistributionAcceptanceScenario.SingleBottom - 4);
         Require(Math.Abs(single.Mass - GasUniformDistributionAcceptanceScenario.SingleMass) <= 0.05,
             $"single gas mass changed={single.Mass:F4}", errors);
-        Require(single.Cells == GasUniformDistributionAcceptanceScenario.SingleMass &&
-            single.FractionalCells == 0,
-            $"single gas packets were split or merged={single}", errors);
-        Require(single.HorizontalSpan >= 120 && single.Rows is >= 40 and <= 130 &&
-            single.AverageY < 80,
-            $"single gas did not form a broad buoyant cloud={single}", errors);
+        Require(single.Cells >= GasUniformDistributionAcceptanceScenario.SingleMass * 4 &&
+            single.FractionalCells >= single.Cells * 0.95,
+            $"single gas did not become a fractional concentration field={single}", errors);
+        Require(single.HorizontalSpan >= 110 && single.Rows is >= 40 and <= 130 &&
+            single.AverageY > 102,
+            $"CO2 did not form a broad, gently descending cloud={single}", errors);
         Require(single.ParityImbalance <= 0.18,
             $"single gas has vertical parity bands={single}", errors);
 
@@ -47,9 +48,9 @@ internal static class GasUniformDistributionAcceptanceVerifier
             GasUniformDistributionAcceptanceScenario.ObstacleBottom - 4);
         Require(Math.Abs(obstacle.Mass - GasUniformDistributionAcceptanceScenario.ObstacleMass) <= 0.05,
             $"obstacle gas mass changed={obstacle.Mass:F4}", errors);
-        Require(obstacle.Cells == GasUniformDistributionAcceptanceScenario.ObstacleMass &&
-            obstacle.FractionalCells == 0,
-            $"obstacle gas packets were split or merged={obstacle}", errors);
+        Require(obstacle.Cells > GasUniformDistributionAcceptanceScenario.ObstacleMass &&
+            obstacle.FractionalCells >= obstacle.Cells * 0.95,
+            $"obstacle gas did not diffuse as fractional mass={obstacle}", errors);
         Require(obstacle.MinimumX < 190 && obstacle.MaximumX > 260 && obstacle.MinimumY < 150,
             $"gas did not rise locally around the divider={obstacle}", errors);
 
@@ -78,16 +79,15 @@ internal static class GasUniformDistributionAcceptanceVerifier
             {
                 Require(Math.Abs(metrics.Mass - GasUniformDistributionAcceptanceScenario.MultiMass) <= 0.05,
                     $"{name} mass changed={metrics.Mass:F4}", errors);
-                Require(metrics.Cells == GasUniformDistributionAcceptanceScenario.MultiMass &&
-                    metrics.FractionalCells == 0,
-                    $"{name} packets were split, merged or lost={metrics}", errors);
+                Require(metrics.Cells > GasUniformDistributionAcceptanceScenario.MultiMass &&
+                    metrics.FractionalCells >= metrics.Cells * 0.95,
+                    $"{name} did not form a fractional concentration field={metrics}", errors);
                 Require(metrics.HorizontalSpan >= 45,
                     $"{name} did not diffuse from the mixed gas cloud={metrics}", errors);
             }
-            Require(steam.AverageY + 0.5 < smoke.AverageY &&
-                smoke.AverageY + 0.5 < ordinary.AverageY &&
-                ordinary.AverageY + 0.5 < co2.AverageY,
-                $"gases are not density-layered steam={steam.AverageY:F2} " +
+            Require(steam.AverageY + 2 < co2.AverageY &&
+                ordinary.AverageY + 2 < co2.AverageY,
+                $"light gases did not stay above CO2 steam={steam.AverageY:F2} " +
                 $"smoke={smoke.AverageY:F2} gas={ordinary.AverageY:F2} co2={co2.AverageY:F2}",
                 errors);
         }

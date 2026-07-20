@@ -97,9 +97,9 @@ public sealed class AcceptanceRegressionHarness
             "steam_self_cooling" => AcceptanceScenarioMode.SteamSelfCooling,
             "brush_empty_only" => AcceptanceScenarioMode.BrushEmptyOnly,
             "coal_types" => AcceptanceScenarioMode.CoalTypes,
-            "gas_uniform_distribution" => AcceptanceScenarioMode.GasUniformDistribution,
+            "gas_uniform_distribution" or "gas_smooth_cloud" => AcceptanceScenarioMode.GasUniformDistribution,
             "steam_distribution_and_cooling" => AcceptanceScenarioMode.SteamDistributionAndCooling,
-            "steam_cloud_temperature" => AcceptanceScenarioMode.SteamCloudTemperature,
+            "steam_cloud_temperature" or "steam_smooth_cloud" => AcceptanceScenarioMode.SteamCloudTemperature,
             _ => AcceptanceScenarioMode.None
         };
         phaseAcceptance = new PhaseAcceptanceController(Mode);

@@ -4,7 +4,9 @@ StructuredBuffer<MaterialProperties> Materials : register(t0);
 RWStructuredBuffer<GridCell> Grid : register(u0);
 RWStructuredBuffer<uint> CellMaterials : register(u1);
 
-bool IsOrdinaryGas(GridCell cell)
+static const float MinimumGasMass = 0.0005;
+
+bool IsContinuumGas(GridCell cell)
 {
     if (cell.IsActive == 0)
     {
@@ -15,11 +17,6 @@ bool IsOrdinaryGas(GridCell cell)
         (material.Flags & MaterialFlagFlame) == 0;
 }
 
-bool IsEmpty(GridCell cell)
-{
-    return cell.IsActive == 0;
-}
-
 void StorePair(uint firstIndex, GridCell first, uint secondIndex, GridCell second)
 {
     Grid[firstIndex] = first;
@@ -28,58 +25,147 @@ void StorePair(uint firstIndex, GridCell first, uint secondIndex, GridCell secon
     CellMaterials[secondIndex] = second.IsActive != 0 ? second.MaterialIndex : 0;
 }
 
-void MovePacket(
-    uint gasIndex,
-    GridCell gas,
-    uint emptyIndex,
-    bool gasMovesToFirst,
-    bool vertical)
+GridCell CreateGasCell(
+    GridCell templateCell,
+    float mass,
+    float temperature,
+    float lifetime,
+    float velocityX,
+    float velocityY)
 {
-    gas.BodyId = 0;
-    gas.Pressure = 0;
-    gas.RestFrames = 0;
-    if (vertical)
+    if (mass < MinimumGasMass)
     {
-        gas.VelocityX = 0;
-        gas.VelocityY = gasMovesToFirst ? -4 : 4;
+        return CreateEmptyCell();
     }
-    else
-    {
-        gas.VelocityX = gasMovesToFirst ? -6 : 6;
-        gas.VelocityY = 0;
-    }
-
-    GridCell empty = CreateEmptyCell();
-    if (gasMovesToFirst)
-    {
-        StorePair(emptyIndex, gas, gasIndex, empty);
-    }
-    else
-    {
-        StorePair(gasIndex, empty, emptyIndex, gas);
-    }
+    GridCell result = templateCell;
+    result.Mass = mass;
+    result.Temperature = temperature;
+    result.Lifetime = lifetime;
+    result.VelocityX = velocityX;
+    result.VelocityY = velocityY;
+    result.Pressure = 0;
+    result.IsActive = 1;
+    result.BodyId = 0;
+    result.RestFrames = 0;
+    return result;
 }
 
-float PacketMoveChance(
-    GridCell gas,
-    bool gasIsFirst,
+void ResolveDifferentGases(
+    uint firstIndex,
+    GridCell first,
+    uint secondIndex,
+    GridCell second,
+    bool verticalOrDiagonal,
+    uint seed)
+{
+    if (!verticalOrDiagonal)
+    {
+        return;
+    }
+    MaterialProperties firstMaterial = Materials[first.MaterialIndex];
+    MaterialProperties secondMaterial = Materials[second.MaterialIndex];
+    if (firstMaterial.Density <= secondMaterial.Density + 0.000001)
+    {
+        return;
+    }
+    float separation = min(firstMaterial.GasDiffusion, secondMaterial.GasDiffusion) * 0.35;
+    if (HashUnitFloat(seed) >= separation)
+    {
+        return;
+    }
+    first.RestFrames = 0;
+    second.RestFrames = 0;
+    StorePair(firstIndex, second, secondIndex, first);
+}
+
+void RedistributeSameGas(
+    uint firstIndex,
+    GridCell first,
+    uint secondIndex,
+    GridCell second,
     bool vertical,
     bool diagonal)
 {
-    float flow = saturate(Materials[gas.MaterialIndex].FlowRate);
+    bool firstGas = IsContinuumGas(first);
+    GridCell templateCell = first;
+    if (!firstGas)
+    {
+        templateCell = second;
+    }
+    MaterialProperties material = Materials[templateCell.MaterialIndex];
+    float firstMass = firstGas ? first.Mass : 0;
+    float secondMass = IsContinuumGas(second) ? second.Mass : 0;
+    float totalMass = firstMass + secondMass;
+    if (totalMass < MinimumGasMass)
+    {
+        return;
+    }
+
+    float firstFraction = 0.5;
     if (vertical || diagonal)
     {
-        // Y grows downwards. Gas diffusion is deliberately stronger than its
-        // buoyant drift: an open cloud should spread locally instead of being
-        // pulled into a narrow ceiling layer.
-        return gasIsFirst
-            ? (diagonal ? 0.34 : 0.22) * flow
-            : (diagonal ? 0.48 : 0.36) * flow;
+        firstFraction = saturate(0.5 + material.GasBuoyancy * (diagonal ? 0.6 : 1.0));
     }
-    return 0.62 * flow;
+    float targetFirstMass = totalMass * firstFraction;
+    float passWeight = diagonal ? 0.42 : vertical ? 0.55 : 0.70;
+    float relaxation = saturate(material.GasDiffusion * passWeight);
+    float newFirstMass = firstMass + (targetFirstMass - firstMass) * relaxation;
+    float newSecondMass = totalMass - newFirstMass;
+
+    // Never discard a sub-cell tail: consolidate it into the paired cell.
+    if (newFirstMass < MinimumGasMass)
+    {
+        newFirstMass = 0;
+        newSecondMass = totalMass;
+    }
+    else if (newSecondMass < MinimumGasMass)
+    {
+        newFirstMass = totalMass;
+        newSecondMass = 0;
+    }
+
+    float heatCapacity = material.HeatCapacity;
+    float firstEnergy = firstMass > 0 ? firstMass * heatCapacity * first.Temperature : 0;
+    float secondEnergy = secondMass > 0 ? secondMass * heatCapacity * second.Temperature : 0;
+    float firstLifetimeAmount = firstMass > 0 ? firstMass * first.Lifetime : 0;
+    float secondLifetimeAmount = secondMass > 0 ? secondMass * second.Lifetime : 0;
+    float transfer = newSecondMass - secondMass;
+    if (transfer > 0)
+    {
+        firstEnergy -= transfer * heatCapacity * first.Temperature;
+        secondEnergy += transfer * heatCapacity * first.Temperature;
+        firstLifetimeAmount -= transfer * first.Lifetime;
+        secondLifetimeAmount += transfer * first.Lifetime;
+    }
+    else if (transfer < 0)
+    {
+        float movedMass = -transfer;
+        firstEnergy += movedMass * heatCapacity * second.Temperature;
+        secondEnergy -= movedMass * heatCapacity * second.Temperature;
+        firstLifetimeAmount += movedMass * second.Lifetime;
+        secondLifetimeAmount -= movedMass * second.Lifetime;
+    }
+
+    float directionX = vertical ? 0 : transfer;
+    float directionY = vertical || diagonal ? transfer : 0;
+    GridCell newFirst = CreateGasCell(
+        templateCell,
+        newFirstMass,
+        newFirstMass > 0 ? firstEnergy / (newFirstMass * heatCapacity) : 0,
+        newFirstMass > 0 ? max(0, firstLifetimeAmount / newFirstMass) : 0,
+        -directionX * 8,
+        -directionY * 8);
+    GridCell newSecond = CreateGasCell(
+        templateCell,
+        newSecondMass,
+        newSecondMass > 0 ? secondEnergy / (newSecondMass * heatCapacity) : 0,
+        newSecondMass > 0 ? max(0, secondLifetimeAmount / newSecondMass) : 0,
+        directionX * 8,
+        directionY * 8);
+    StorePair(firstIndex, newFirst, secondIndex, newSecond);
 }
 
-void ResolvePacketPair(
+void ResolveContinuumPair(
     uint firstIndex,
     uint secondIndex,
     bool vertical,
@@ -88,63 +174,22 @@ void ResolvePacketPair(
 {
     GridCell first = Grid[firstIndex];
     GridCell second = Grid[secondIndex];
-    bool firstGas = IsOrdinaryGas(first);
-    bool secondGas = IsOrdinaryGas(second);
-    bool firstEmpty = IsEmpty(first);
-    bool secondEmpty = IsEmpty(second);
+    bool firstGas = IsContinuumGas(first);
+    bool secondGas = IsContinuumGas(second);
+    bool firstEmpty = first.IsActive == 0;
+    bool secondEmpty = second.IsActive == 0;
     if ((!firstGas && !firstEmpty) || (!secondGas && !secondEmpty) ||
         (!firstGas && !secondGas))
     {
         return;
     }
-
-    if (firstGas && secondGas)
+    if (firstGas && secondGas && first.MaterialIndex != second.MaterialIndex)
     {
-        if (first.MaterialIndex == second.MaterialIndex)
-        {
-            return;
-        }
-
-        if (vertical || diagonal)
-        {
-            float firstDensity = Materials[first.MaterialIndex].Density;
-            float secondDensity = Materials[second.MaterialIndex].Density;
-            if (firstDensity > secondDensity + 0.000001 &&
-                HashUnitFloat(seed) < (diagonal ? 0.24 : 0.75))
-            {
-                first.RestFrames = 0;
-                second.RestFrames = 0;
-                StorePair(firstIndex, second, secondIndex, first);
-            }
-        }
-        else if (HashUnitFloat(seed) < 0.12)
-        {
-            first.RestFrames = 0;
-            second.RestFrames = 0;
-            StorePair(firstIndex, second, secondIndex, first);
-        }
+        ResolveDifferentGases(
+            firstIndex, first, secondIndex, second, vertical || diagonal, seed);
         return;
     }
-
-    GridCell gas = first;
-    bool gasIsFirst = firstGas;
-    if (!firstGas)
-    {
-        gas = second;
-    }
-    if (HashUnitFloat(seed) >= PacketMoveChance(gas, gasIsFirst, vertical, diagonal))
-    {
-        return;
-    }
-
-    if (gasIsFirst)
-    {
-        MovePacket(firstIndex, first, secondIndex, false, vertical || diagonal);
-    }
-    else
-    {
-        MovePacket(secondIndex, second, firstIndex, true, vertical || diagonal);
-    }
+    RedistributeSameGas(firstIndex, first, secondIndex, second, vertical, diagonal);
 }
 
 [numthreads(16, 16, 1)]
@@ -158,7 +203,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             return;
         }
         uint firstIndex = FlattenCoordinate(upper);
-        ResolvePacketPair(
+        ResolveContinuumPair(
             firstIndex,
             firstIndex + Width,
             true,
@@ -175,7 +220,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             return;
         }
         uint firstIndex = FlattenCoordinate(left);
-        ResolvePacketPair(
+        ResolveContinuumPair(
             firstIndex,
             firstIndex + 1,
             false,
@@ -184,8 +229,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    // One disjoint diagonal per 2x2 block adds local isotropic diffusion
-    // without write races or the long-range mass teleportation used before.
     uint2 block = dispatchThreadId.xy * 2;
     if (block.x + 1 >= Width || block.y + 1 >= Height)
     {
@@ -197,7 +240,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint2 lower = block + uint2(otherDiagonal ? 0u : 1u, 1u);
     uint firstIndex = FlattenCoordinate(upper);
     uint secondIndex = FlattenCoordinate(lower);
-    ResolvePacketPair(
+    ResolveContinuumPair(
         firstIndex,
         secondIndex,
         false,

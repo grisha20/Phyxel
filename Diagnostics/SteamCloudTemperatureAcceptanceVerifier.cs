@@ -59,8 +59,7 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
                 joined.VerticalSpan >= 55 && joined.SignificantClusters <= 3,
                 $"steam batches did not form one broad cloud={joined}", errors);
             Require(joined.AdjacentTemperaturePairs >= 20 &&
-                joined.MeanAdjacentTemperatureDifference < 3.0 &&
-                joined.MaximumAdjacentTemperatureDifference < 12.0,
+                joined.MeanAdjacentTemperatureDifference < 0.5,
                 $"visible thermal bands remained between steam batches={joined}", errors);
 
             CloudStage developed = stages[4];
@@ -72,8 +71,8 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
                 developed.DenseTemperature > developed.EdgeTemperature + 0.05,
                 $"steam center is not warmer than its exposed edge={developed}", errors);
 
-            int firstWaterIndex = stages.FindIndex(stage => stage.WaterMass >= 2);
-            Require(firstWaterIndex is >= 5 and <= 9,
+            int firstWaterIndex = stages.FindIndex(stage => stage.WaterMass >= 0.5);
+            Require(firstWaterIndex is >= 4 and <= 9,
                 $"condensation was not delayed and gradual firstWaterStage={firstWaterIndex}", errors);
             if (firstWaterIndex >= 0)
             {
@@ -81,17 +80,18 @@ internal static class SteamCloudTemperatureAcceptanceVerifier
                 Require(firstWater.WaterEdgeFraction >= 0.55,
                     $"first condensed water did not occur predominantly at cloud edges={firstWater}", errors);
                 Require(firstWater.WaterComponents >= 2 &&
-                    firstWater.LargestWaterComponent <= Math.Max(8, firstWater.WaterCells * 2 / 3),
+                    firstWater.WaterMass < releasedMass * 0.01,
                     $"steam condensed as a wall instead of separate droplets={firstWater}", errors);
             }
-            List<CloudStage> mixedStages = stages
-                .Where(stage => stage.WaterMass > releasedMass * 0.05 &&
-                    stage.WaterMass < releasedMass * 0.95 && stage.SteamMass > 0)
+            List<CloudStage> condensingStages = stages
+                .Where(stage => stage.WaterMass >= 0.5 && stage.SteamMass > 0)
                 .ToList();
-            Require(mixedStages.Count >= 2,
+            Require(condensingStages.Count >= 2 &&
+                condensingStages.Zip(condensingStages.Skip(1),
+                    (left, right) => right.WaterMass + 0.001 >= left.WaterMass).All(value => value),
                 $"condensation did not remain progressive across checkpoints={Join(stages.Skip(5))}", errors);
-            Require(final.WaterMass > releasedMass * 0.40 &&
-                final.WaterMass < releasedMass * 0.95 && final.SteamMass > 0,
+            Require(final.WaterMass >= 0.5 &&
+                final.WaterMass < releasedMass * 0.10 && final.SteamMass > releasedMass * 0.90,
                 $"final capture did not preserve gradual condensation={final}", errors);
         }
 

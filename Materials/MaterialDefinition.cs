@@ -95,6 +95,10 @@ public sealed record MaterialLiquidContactTransitionDefinition(
     string IntoId,
     float RatePerSecond);
 
+public sealed record MaterialGasDefinition(
+    float Diffusion,
+    float Buoyancy);
+
 public sealed record MaterialDefinition(
     string Id,
     ushort RuntimeIndex,
@@ -109,6 +113,7 @@ public sealed record MaterialDefinition(
     public MaterialEmissionDefinition? Emissions { get; init; }
     public MaterialLifecycleDefinition? Lifecycle { get; init; }
     public MaterialLiquidContactTransitionDefinition? LiquidContactTransition { get; init; }
+    public MaterialGasDefinition? Gas { get; init; }
     internal string SourcePath { get; init; } = string.Empty;
     internal bool IsBundled { get; init; }
 }

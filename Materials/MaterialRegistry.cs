@@ -27,6 +27,11 @@ public sealed class MaterialRegistry
     public const float MaximumLifetime = 3600f;
     public const float MaximumAmbientCoolingRate = 100f;
     public const float MaximumContactTransitionRate = 100f;
+    public const float DefaultGasDiffusion = 0.25f;
+    public const float MinimumGasDiffusion = 0f;
+    public const float MaximumGasDiffusion = 1f;
+    public const float MinimumGasBuoyancy = -0.25f;
+    public const float MaximumGasBuoyancy = 0.25f;
 
     private readonly ReadOnlyCollection<MaterialDefinition> materials;
     private readonly ReadOnlyCollection<MaterialDefinition> selectableMaterials;
@@ -624,6 +629,8 @@ public sealed class MaterialRegistry
         float heatCapacity,
         float ambientTemperature,
         float ambientCoolingRate,
+        float gasDiffusion,
+        float gasBuoyancy,
         Color color)
     {
         return new MaterialProperties
@@ -642,6 +649,8 @@ public sealed class MaterialRegistry
             HeatCapacity = heatCapacity,
             AmbientTemperature = ambientTemperature,
             AmbientCoolingRate = ambientCoolingRate,
+            GasDiffusion = gasDiffusion,
+            GasBuoyancy = gasBuoyancy,
             TransitionBelowMaterialIndex = uint.MaxValue,
             TransitionAboveMaterialIndex = uint.MaxValue,
             BurnedIntoMaterialIndex = uint.MaxValue,

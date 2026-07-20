@@ -79,7 +79,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static async Task RunAsync()
     {
-        Require(Marshal.SizeOf<MaterialProperties>() == 120, "MaterialProperties must be 120 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == 128, "MaterialProperties must be 128 bytes.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.AmbientTemperature)).ToInt32() == 104,
             "AmbientTemperature offset must be 104.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.AmbientCoolingRate)).ToInt32() == 108,
@@ -88,6 +88,10 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             "ContactLiquidIntoMaterialIndex offset must be 112.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.ContactLiquidRatePerSecond)).ToInt32() == 116,
             "ContactLiquidRatePerSecond offset must be 116.");
+        Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.GasDiffusion)).ToInt32() == 120,
+            "GasDiffusion offset must be 120.");
+        Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.GasBuoyancy)).ToInt32() == 124,
+            "GasBuoyancy offset must be 124.");
         Require(Marshal.SizeOf<ContactTransitionConstants>() == 16,
             "ContactTransitionConstants must be 16 bytes.");
         string contactShader = File.ReadAllText(Path.Combine(

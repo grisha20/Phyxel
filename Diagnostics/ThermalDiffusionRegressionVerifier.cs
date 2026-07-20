@@ -102,9 +102,12 @@ internal static class ThermalDiffusionRegressionVerifier
         Require(thermal.Contains("DestinationGrid[index] = (GridCell)0", StringComparison.Ordinal),
             "Thermal shader does not normalize inactive cells.");
         string gas = File.ReadAllText(Path.Combine(shaderDirectory, "GasRedistribution.hlsl"));
-        Require(gas.Contains("return 0.62 * flow", StringComparison.Ordinal) &&
-            gas.Contains("(diagonal ? 0.48 : 0.36) * flow", StringComparison.Ordinal),
-            "Gas redistribution lost its diffusion-dominant movement tuning.");
+        Require(gas.Contains("RedistributeSameGas", StringComparison.Ordinal) &&
+            gas.Contains("GasDiffusion", StringComparison.Ordinal) &&
+            gas.Contains("GasBuoyancy", StringComparison.Ordinal) &&
+            gas.Contains("firstMass * heatCapacity * first.Temperature", StringComparison.Ordinal) &&
+            !gas.Contains("Interlocked", StringComparison.Ordinal),
+            "Gas redistribution is not a race-safe, mass-carrying continuum pass.");
         string probe = File.ReadAllText(Path.Combine(shaderDirectory, "TemperatureProbe.hlsl"));
         RequireOrdered(
             probe,

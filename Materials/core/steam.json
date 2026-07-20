@@ -12,6 +12,10 @@
     "friction": 0.005,
     "flowRate": 1.20
   },
+  "gas": {
+    "diffusion": 0.32,
+    "buoyancy": 0.035
+  },
   "thermal": {
     "initialTemperature": 122.0,
     "conductivity": 0.04,

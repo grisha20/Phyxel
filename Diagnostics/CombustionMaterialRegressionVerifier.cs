@@ -181,8 +181,8 @@ internal static class CombustionMaterialRegressionVerifier
 
     private static void VerifyLayout()
     {
-        Require(Marshal.SizeOf<MaterialProperties>() == 120,
-            "MaterialProperties must be 120 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == 128,
+            "MaterialProperties must be 128 bytes.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.IgnitionTemperature)).ToInt32() == 64,
             "IgnitionTemperature offset must be 64.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.BurnRate)).ToInt32() == 68,

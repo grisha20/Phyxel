@@ -50,7 +50,7 @@ internal static class GasUniformDistributionAcceptanceScenario
         BuildChamber(cells, width, ObstacleLeft, ObstacleTop, ObstacleRight, ObstacleBottom, fixture);
 
         Fill(cells, width, 70, 100, 89, 119,
-            materials.GetRequiredRuntimeIndex(CoreMaterialIds.Gas), 20, 0);
+            materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2), 20, 0);
 
         string[] gasIds =
         [

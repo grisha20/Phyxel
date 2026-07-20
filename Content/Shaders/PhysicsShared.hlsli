@@ -44,6 +44,8 @@ struct MaterialProperties
     float AmbientCoolingRate;
     uint ContactLiquidIntoMaterialIndex;
     float ContactLiquidRatePerSecond;
+    float GasDiffusion;
+    float GasBuoyancy;
 };
 
 struct MaterialEmissionProperties

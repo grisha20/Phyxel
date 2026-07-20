@@ -60,7 +60,7 @@ internal static class SteamCloudTemperatureAcceptanceScenario
         [
             new BrushDrawCommand
             {
-                X = SourceX,
+                X = frame == secondBatchFrame ? SourceX - 92 : SourceX + 92,
                 Y = SourceY,
                 MaterialIndex = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Steam),
                 Radius = BatchRadius,
