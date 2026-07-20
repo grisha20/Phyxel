@@ -27,7 +27,7 @@ internal static class BrushEmptyOnlyAcceptanceScenario
     [
         (CoreMaterialIds.Sand, 45, 70),
         (CoreMaterialIds.Water, 110, 70),
-        (CoreMaterialIds.Gas, 175, 70),
+        (CoreMaterialIds.Co2, 175, 70),
         (CoreMaterialIds.Steam, 240, 70),
         (CoreMaterialIds.Fixture, 305, 70),
         (CoreMaterialIds.Wood, 370, 70),

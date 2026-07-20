@@ -169,7 +169,7 @@ internal static class ThermalAcceptanceScenario
     {
         uint wall = materials.GetRequiredRuntimeIndex("acceptance:thermal_insulator");
         uint gas = materials.GetRequiredRuntimeIndex("acceptance:thermal_gas");
-        uint otherGas = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Gas);
+        uint otherGas = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2);
         Fill(cells, width, 149, 79, 331, 80, wall, 20, 2);
         Fill(cells, width, 149, 190, 331, 191, wall, 20, 2);
         Fill(cells, width, 149, 81, 150, 189, wall, 20, 2);

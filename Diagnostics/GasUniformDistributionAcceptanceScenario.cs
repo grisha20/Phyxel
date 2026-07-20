@@ -56,7 +56,7 @@ internal static class GasUniformDistributionAcceptanceScenario
         [
             CoreMaterialIds.Steam,
             CoreMaterialIds.Smoke,
-            CoreMaterialIds.Gas,
+            "acceptance:gas",
             CoreMaterialIds.Co2
         ];
         FillMixedGases(cells, width, 250, 70, 309, 89, materials, gasIds);

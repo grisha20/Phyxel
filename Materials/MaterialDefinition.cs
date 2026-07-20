@@ -33,7 +33,6 @@ public static class CoreMaterialIds
     public const string Metal = "core:metal";
     public const string Stone = "core:stone";
     public const string Eraser = "core:eraser";
-    public const string Gas = "core:gas";
     public const string Fixture = "core:fixture";
     public const string Wood = "core:wood";
     public const string Coal = "core:coal";
@@ -52,7 +51,6 @@ public static class CoreMaterialIds
         Metal,
         Stone,
         Eraser,
-        Gas,
         Fixture,
         Wood,
         Coal,

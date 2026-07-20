@@ -100,7 +100,7 @@ internal static class BrushEmptyOnlyAcceptanceVerifier
         GridCell overlap = after[BrushEmptyOnlyAcceptanceScenario.OverlapY * snapshot.Width +
             BrushEmptyOnlyAcceptanceScenario.OverlapX];
         Require(overlap.IsActive != 0 &&
-            overlap.MaterialIndex == materials.GetRequiredRuntimeIndex(CoreMaterialIds.Gas),
+            overlap.MaterialIndex == materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2),
             $"overlapping commands were not deterministic first-writer-wins: {Describe(overlap)}", errors);
         Require(ignitedWood == 13 * 13,
             $"flame brush did not ignite wood in place expected=169 actual={ignitedWood}", errors);

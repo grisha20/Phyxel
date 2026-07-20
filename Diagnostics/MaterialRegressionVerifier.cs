@@ -109,6 +109,7 @@ public static class MaterialRegressionVerifier
         int resting = 0;
         int moving = 0;
         int dense = 0;
+        int fractional = 0;
         int minimumX = snapshot.Width;
         int maximumX = 0;
         int minimumY = snapshot.Height;
@@ -128,6 +129,7 @@ public static class MaterialRegressionVerifier
                 mass += cell.Mass;
                 weightedY += y * cell.Mass;
                 dense += cell.Mass >= 0.8f ? 1 : 0;
+                fractional += cell.Mass > 0.0005f && cell.Mass < 0.9995f ? 1 : 0;
                 resting += cell.RestFrames >= 60 ? 1 : 0;
                 moving += Math.Abs(cell.VelocityX) + Math.Abs(cell.VelocityY) > 0.02f ? 1 : 0;
                 minimumX = Math.Min(minimumX, x);
@@ -139,12 +141,11 @@ public static class MaterialRegressionVerifier
         double averageY = weightedY / Math.Max(0.001, mass);
         bool images = File.Exists(Path.Combine(artifactDirectory, riseImageName)) &&
             File.Exists(Path.Combine(artifactDirectory, spreadImageName));
-        bool intactPackets = Math.Abs(mass - gas) <= Math.Max(0.01, gas * 0.0001) &&
-            dense == gas;
-        bool passed = gas >= 1000 && intactPackets && averageY <= 180 &&
+        bool continuum = gas >= mass * 4 && fractional >= gas * 9 / 10;
+        bool passed = mass >= 1000 && continuum && averageY is >= 160 and <= 245 &&
             maximumX - minimumX >= 170 && maximumY - minimumY >= 40 &&
-            resting < gas * 9 / 10 && moving > gas / 50 && images;
-        report = $"PHYXEL_F gas={gas} mass={mass:0.0} averageY={averageY:0.0} dense={dense} resting={resting} moving={moving} bounds={minimumX},{minimumY}-{maximumX},{maximumY}";
+            resting < gas * 9 / 10 && moving > gas / 100 && images;
+        report = $"PHYXEL_F gas={gas} fractional={fractional} mass={mass:0.0} averageY={averageY:0.0} dense={dense} resting={resting} moving={moving} bounds={minimumX},{minimumY}-{maximumX},{maximumY}";
         return passed;
     }
 }

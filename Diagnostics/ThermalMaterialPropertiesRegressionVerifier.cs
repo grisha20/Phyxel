@@ -40,8 +40,6 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             7.8f, 0.35f, 0f, "#8E9CA6", 20f, 1f, 0.50f),
         new(CoreMaterialIds.Stone, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
             9.2f, 0.75f, 0f, "#5C6065", 20f, 0.25f, 0.84f),
-        new(CoreMaterialIds.Gas, MaterialSimulationKind.Gas, MaterialFlags.None,
-            0.08f, 0.005f, 1.2f, "#9BC4D29B", 20f, 0.03f, 1f),
         new(CoreMaterialIds.Fixture, MaterialSimulationKind.Solid, MaterialFlags.None,
             100f, 0.9f, 0f, "#525B63", 20f, 0.25f, 0.84f),
         new(CoreMaterialIds.Wood, MaterialSimulationKind.Solid, MaterialFlags.None,
@@ -55,7 +53,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         new(CoreMaterialIds.Smoke, MaterialSimulationKind.Gas, MaterialFlags.None,
             0.04f, 0f, 1f, "#777777B0", 120f, 0.08f, 1f),
         new(CoreMaterialIds.Co2, MaterialSimulationKind.Gas, MaterialFlags.None,
-            0.12f, 0f, 0.8f, "#B5B5B580", 120f, 0.06f, 0.85f),
+            0.12f, 0f, 0.8f, "#B5B5B580", 20f, 0.06f, 0.85f),
         new(CoreMaterialIds.Fire, MaterialSimulationKind.Gas, MaterialFlags.Flame,
             1.0f, 0f, 1.4f, "#FF3A08E8", 650f, 0.35f, 1.0f),
         new(CoreMaterialIds.Eraser, MaterialSimulationKind.Tool, MaterialFlags.None,
@@ -137,7 +135,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static void VerifyCoreMaterials(MaterialRegistry registry)
     {
-        Require(ExpectedCoreMaterials.Length == 17, "Expected bundled core material count changed.");
+        Require(ExpectedCoreMaterials.Length == 16, "Expected bundled core material count changed.");
         foreach (ExpectedMaterial expected in ExpectedCoreMaterials)
         {
             MaterialDefinition actual = registry[expected.Id];

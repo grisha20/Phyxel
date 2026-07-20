@@ -127,7 +127,7 @@ internal static class ThermalAcceptanceVerifier
                 break;
             case AcceptanceScenarioMode.ThermalGas:
                 uint gas = materials.GetRequiredRuntimeIndex("acceptance:thermal_gas");
-                uint otherGas = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Gas);
+                uint otherGas = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2);
                 (double beforeMass, double beforeGasEnergy) = MaterialTotals(initial, materials, gas);
                 (double afterMass, double afterGasEnergy) = MaterialTotals(snapshot, materials, gas);
                 (double beforeOtherMass, double beforeOtherEnergy) = MaterialTotals(initial, materials, otherGas);

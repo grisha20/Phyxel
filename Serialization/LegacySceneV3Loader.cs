@@ -18,7 +18,7 @@ internal static class LegacySceneV3Loader
         CoreMaterialIds.Metal,
         CoreMaterialIds.Stone,
         CoreMaterialIds.Eraser,
-        CoreMaterialIds.Gas,
+        CoreMaterialIds.Co2,
         CoreMaterialIds.Fixture
     ];
 

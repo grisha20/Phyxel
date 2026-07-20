@@ -126,7 +126,7 @@ internal static class CorePhaseAcceptanceScenario
         Fill(cells, width, 70, 160, 85, 163, materials, CoreMaterialIds.Ice, -5, 1, 2);
         Fill(cells, width, 150, 80, 157, 87, materials, CoreMaterialIds.Ice, 10, 1, 2);
         Fill(cells, width, 230, 180, 237, 187, materials, CoreMaterialIds.Water, 110, 1, 0);
-        Fill(cells, width, 238, 180, 245, 187, materials, CoreMaterialIds.Gas, 110, 1, 0);
+        Fill(cells, width, 238, 180, 245, 187, materials, CoreMaterialIds.Co2, 110, 1, 0);
         Fill(cells, width, 310, 80, 317, 87, materials, CoreMaterialIds.Steam, 80, 1, 0);
     }
 

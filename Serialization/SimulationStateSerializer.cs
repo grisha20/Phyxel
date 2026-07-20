@@ -57,6 +57,7 @@ public sealed class SimulationStateSerializer
     private const int CurrentVersion = 6;
     private const string RemovedGoldSandId = "core:gold_sand";
     private const string RenamedConcreteId = "core:concrete";
+    private const string RenamedGasId = "core:gas";
     private readonly JsonSerializerOptions options = new() { WriteIndented = true };
     private bool capturePending;
     private SimulationWorldSnapshot? emptySnapshot;
@@ -431,6 +432,11 @@ public sealed class SimulationStateSerializer
         {
             replacementId = CoreMaterialIds.Stone;
             warning = "Материал 'core:concrete' переименован и мигрирован в 'core:stone'.";
+        }
+        else if (id == RenamedGasId)
+        {
+            replacementId = CoreMaterialIds.Co2;
+            warning = "Материал 'core:gas' переименован и мигрирован в 'core:co2'.";
         }
         else
         {

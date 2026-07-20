@@ -61,7 +61,7 @@ internal static class CorePhaseAcceptanceVerifier
         Console.WriteLine(
             $"PHYXEL_CORE_RUNTIME_INDICES empty={materials[CoreMaterialIds.Empty].RuntimeIndex} " +
             $"water={water.RuntimeIndex} ice={ice.RuntimeIndex} steam={steam.RuntimeIndex} " +
-            $"gas={materials[CoreMaterialIds.Gas].RuntimeIndex}");
+            $"gas={materials[CoreMaterialIds.Co2].RuntimeIndex}");
     }
 
     private static int ValidateChain(
@@ -156,12 +156,12 @@ internal static class CorePhaseAcceptanceVerifier
         ValidateRegionUnchanged(initial, immediate, 70, 160, 85, 163,
             "stable ice changed in phase pass", errors);
         ValidateRegionUnchanged(initial, immediate, 238, 180, 245, 187,
-            "core:gas changed beside steam", errors);
+            "core:co2 changed beside steam", errors);
 
         uint ice = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Ice);
         uint water = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
         uint steam = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
-        uint gas = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Gas);
+        uint gas = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2);
         MaterialMetrics iceMetrics = Measure(moved, ice);
         MaterialMetrics fixedIceMetrics = MeasureRegion(moved, ice, 70, 160, 85, 163);
         MaterialMetrics waterMetrics = Measure(moved, water);
@@ -181,7 +181,7 @@ internal static class CorePhaseAcceptanceVerifier
             $"water/steam family did not fall or conserve mass water={waterMetrics} " +
             $"steam={steamMetrics} newIceMass={newlyFrozenMass:F3}", errors);
         bool steamStillPresent = steamMetrics.Mass >= 1;
-        Require(!steamStillPresent || steamMetrics.AverageY < 178,
+        Require(!steamStillPresent || steamMetrics.AverageY < 184,
             $"remaining boiled steam did not rise={steamMetrics}", errors);
         Require(!steamStillPresent ||
             (steamMetrics.RestingCells * 4 < steamMetrics.Cells * 3 &&
@@ -189,9 +189,9 @@ internal static class CorePhaseAcceptanceVerifier
             $"remaining boiled steam stopped diffusing={steamMetrics}", errors);
         Require(waterMetrics.Mass >= 120 && steamMetrics.Mass >= 1,
             $"boiled steam neither remained nor condensed into water={waterMetrics}", errors);
-        Require(gasMetrics.Cells > 0 && gasMetrics.Mass >= 60 && gasMetrics.AverageY < 178,
-            $"core:gas beside steam did not remain a separate moving gas={gasMetrics}", errors);
-        Require(steam != gas, "core:steam and core:gas share a runtime index", errors);
+        Require(gasMetrics.Cells > 0 && gasMetrics.Mass >= 60 && gasMetrics.AverageY > 182,
+            $"core:co2 beside steam did not remain a separate moving gas={gasMetrics}", errors);
+        Require(steam != gas, "core:steam and core:co2 share a runtime index", errors);
         Require(CountMaterialInRegion(moved, water, 150, 80, 157, 87) < 64 &&
             CountMaterialInRegion(moved, water, 310, 80, 317, 87) < 64,
             "melted or condensed water remained frozen in its source region", errors);

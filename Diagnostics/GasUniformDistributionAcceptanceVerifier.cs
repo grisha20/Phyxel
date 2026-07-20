@@ -21,7 +21,7 @@ internal static class GasUniformDistributionAcceptanceVerifier
             $"gas checkpoints expected=1 actual={checkpoints.Count}", errors);
 
         uint co2Material = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2);
-        uint gas = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Gas);
+        uint gas = materials.GetRequiredRuntimeIndex("acceptance:gas");
         GasMetrics single = Measure(
             snapshot, co2Material,
             GasUniformDistributionAcceptanceScenario.SingleLeft + 4,

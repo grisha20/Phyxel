@@ -106,26 +106,26 @@ internal static class WorldCellCodecRegressionVerifier
             "GasRedistribution.hlsl");
         string shader = File.ReadAllText(shaderPath);
         Require(
-            shader.Contains("void ResolvePacketPair(", StringComparison.Ordinal) &&
-            shader.Contains("void MovePacket(", StringComparison.Ordinal),
-            "Local gas packet movement contract is missing.");
+            shader.Contains("void ResolveContinuumPair(", StringComparison.Ordinal) &&
+            shader.Contains("void RedistributeSameGas(", StringComparison.Ordinal),
+            "Local gas continuum contract is missing.");
         Require(
-            !shader.Contains("first.MaterialIndex != second.MaterialIndex", StringComparison.Ordinal) &&
-            shader.Contains("first.MaterialIndex == second.MaterialIndex", StringComparison.Ordinal) &&
-            shader.Contains("firstDensity > secondDensity", StringComparison.Ordinal),
+            shader.Contains("first.MaterialIndex != second.MaterialIndex", StringComparison.Ordinal) &&
+            shader.Contains("firstMaterial.Density <= secondMaterial.Density", StringComparison.Ordinal) &&
+            shader.Contains("StorePair(firstIndex, second, secondIndex, first)", StringComparison.Ordinal),
             "Different gases are not kept distinct and sorted by density.");
         Require(
-            shader.Contains("StorePair(emptyIndex, gas, gasIndex, empty)", StringComparison.Ordinal) &&
-            shader.Contains("StorePair(gasIndex, empty, emptyIndex, gas)", StringComparison.Ordinal),
-            "Gas movement does not transfer the intact GridCell packet.");
+            shader.Contains("firstMass + secondMass", StringComparison.Ordinal) &&
+            shader.Contains("firstMass * heatCapacity * first.Temperature", StringComparison.Ordinal) &&
+            shader.Contains("firstMass * first.Lifetime", StringComparison.Ordinal),
+            "Gas redistribution does not preserve mass, thermal energy and lifetime.");
         Require(
             shader.Contains("(material.Flags & MaterialFlagFlame) == 0", StringComparison.Ordinal),
             "Flame exclusion is missing from ordinary gas movement.");
         Require(
-            !shader.Contains("GasMinimumRepresentableMass", StringComparison.Ordinal) &&
-            !shader.Contains("mixedTemperature", StringComparison.Ordinal) &&
+            !shader.Contains("Interlocked", StringComparison.Ordinal) &&
             !shader.Contains("HorizontalPathAllowsGas", StringComparison.Ordinal),
-            "Legacy mass splitting, temperature mixing or long-range movement remains enabled.");
+            "Gas continuum introduced atomics or long-range movement.");
     }
 
     private static void VerifyGasSchedulerContract()
@@ -215,29 +215,33 @@ internal static class WorldCellCodecRegressionVerifier
             SelectedMaterialId = "core:concrete",
             SavedAt = DateTimeOffset.UnixEpoch,
             HydraulicPressure = false,
-            MaterialPalette = new[] { "core:empty", "core:gold_sand", "core:concrete" }
+            MaterialPalette = new[] { "core:empty", "core:gold_sand", "core:concrete", "core:gas" }
         });
         LegacyGridCellV3V4 goldSand = CreateLegacyCell(1, 1.5f, 4.25f, -8.5f, 0, 1, 0, 3);
         LegacyGridCellV3V4 concrete = CreateLegacyCell(2, 9.2f, 0.5f, 1.5f, 6.5f, 1, 52, 14);
+        LegacyGridCellV3V4 gas = CreateLegacyCell(3, 0.75f, 1.25f, -2.5f, 0, 1, 0, 4);
         LegacyGridCellV3V4 dirtyInactive = CreateLegacyCell(1, 2, 3, 4, 5, 0, 6, 7);
         await WriteLegacyWorldAsync(
             Path.ChangeExtension(scenePath, ".world"),
             4,
-            3,
+            4,
             1,
-            EncodeLegacyCells(goldSand, concrete, dirtyInactive));
+            EncodeLegacyCells(goldSand, concrete, gas, dirtyInactive));
 
         LoadedSimulationScene loaded = await serializer.LoadAsync(scenePath, materials) ??
             throw new InvalidOperationException("Synthetic v4 scene did not load.");
         uint sandIndex = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
         uint stoneIndex = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Stone);
+        uint co2Index = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2);
         Require(loaded.State.SelectedMaterial == stoneIndex, "core:concrete selected material did not migrate to core:stone.");
         Require(ContainsWarning(loaded.Warnings, "core:gold_sand"), "core:gold_sand migration warning is missing.");
         Require(ContainsWarning(loaded.Warnings, "core:concrete"), "core:concrete migration warning is missing.");
+        Require(ContainsWarning(loaded.Warnings, "core:gas"), "core:gas migration warning is missing.");
         AssertCells(
             loaded.World,
             CreateCurrentCell(goldSand, sandIndex, 20f),
             CreateCurrentCell(concrete, stoneIndex, 20f),
+            CreateCurrentCell(gas, co2Index, 20f),
             default);
     }
 

@@ -14,7 +14,7 @@ internal sealed class AcceptanceMaterialIndices
         Metal = Resolve(CoreMaterialIds.Metal);
         Stone = Resolve(CoreMaterialIds.Stone);
         Eraser = Resolve(CoreMaterialIds.Eraser);
-        Gas = Resolve(CoreMaterialIds.Gas);
+        Gas = Resolve(CoreMaterialIds.Co2);
         Fixture = Resolve(CoreMaterialIds.Fixture);
         Wood = Resolve(CoreMaterialIds.Wood);
         Coal = Resolve(CoreMaterialIds.Coal);

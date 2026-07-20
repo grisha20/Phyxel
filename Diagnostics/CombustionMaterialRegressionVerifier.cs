@@ -335,7 +335,7 @@ internal static class CombustionMaterialRegressionVerifier
         await ExpectRejectedAsync(root, coreDirectory, "emissions", "test:emissions",
             MaterialJson("test:emissions", "solid", 0.8f,
                 CombustionJson(300f, 0.1f, 1000f, "core:empty"),
-                thermalExtra: ", \"emissions\": { \"smokeInto\": \"core:gas\" }"));
+                thermalExtra: ", \"emissions\": { \"smokeInto\": \"core:co2\" }"));
 
         string targetDirectory = CreateDirectory(root, "invalid-targets");
         await WriteMaterialAsync(targetDirectory, "granular-target.json", MaterialJson("test:granular_target", "granular", 0.2f));
