@@ -108,6 +108,11 @@ internal static class ThermalDiffusionRegressionVerifier
             gas.Contains("firstMass * heatCapacity * first.Temperature", StringComparison.Ordinal) &&
             !gas.Contains("Interlocked", StringComparison.Ordinal),
             "Gas redistribution is not a race-safe, mass-carrying continuum pass.");
+        string render = File.ReadAllText(Path.Combine(shaderDirectory, "RenderComposition.hlsl"));
+        Require(render.Contains("for (int y = -1; y <= 1; y++)", StringComparison.Ordinal) &&
+            render.Contains("float gasSampleWeight = x == 0 && y == 0 ? 4", StringComparison.Ordinal) &&
+            render.Contains("smoothstep(0.01, 0.32, gasCoverage)", StringComparison.Ordinal),
+            "Continuum gas rendering is not using the compact edge-preserving profile.");
         string probe = File.ReadAllText(Path.Combine(shaderDirectory, "TemperatureProbe.hlsl"));
         RequireOrdered(
             probe,

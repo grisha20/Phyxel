@@ -13,8 +13,8 @@
     "flowRate": 1.20
   },
   "gas": {
-    "diffusion": 0.32,
-    "buoyancy": 0.035
+    "diffusion": 0.36,
+    "buoyancy": 0.060
   },
   "thermal": {
     "initialTemperature": 122.0,

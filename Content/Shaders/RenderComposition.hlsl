@@ -170,9 +170,9 @@ void FluidCoverage(
     float gasWeight = 0;
     float3 weightedLiquidColor = 0;
     float3 weightedGasColor = 0;
-    for (int y = -2; y <= 2; y++)
+    for (int y = -1; y <= 1; y++)
     {
-        for (int x = -2; x <= 2; x++)
+        for (int x = -1; x <= 1; x++)
         {
             int2 sample = int2(coordinate) + int2(x, y);
             if (sample.x < 0 || sample.y < 0 ||
@@ -180,13 +180,9 @@ void FluidCoverage(
             {
                 continue;
             }
-            int absoluteX = abs(x);
-            int absoluteY = abs(y);
-            float gasSampleWeight = (absoluteX == 0 ? 6 : absoluteX == 1 ? 4 : 1) *
-                (absoluteY == 0 ? 6 : absoluteY == 1 ? 4 : 1);
-            float liquidSampleWeight = absoluteX <= 1 && absoluteY <= 1
-                ? (x == 0 && y == 0 ? 4 : x == 0 || y == 0 ? 2 : 1)
-                : 0;
+            float gasSampleWeight = x == 0 && y == 0 ? 4 :
+                x == 0 || y == 0 ? 2 : 1;
+            float liquidSampleWeight = gasSampleWeight;
             GridCell sampleCell = Grid[FlattenCoordinate(uint2(sample))];
             if (sampleCell.IsActive != 0)
             {
@@ -291,10 +287,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             color.rgb = lerp(color.rgb, liquidColor, saturate(liquidCoverage * 2.5));
         }
-        if (gasCoverage > 0.002)
+        if (gasCoverage > 0.01)
         {
-            color.rgb = lerp(color.rgb, gasColor,
-                1.0 - exp(-gasCoverage * 3.2));
+            float gasOpacity = smoothstep(0.01, 0.32, gasCoverage) * 0.72;
+            color.rgb = lerp(color.rgb, gasColor, gasOpacity);
         }
     }
     float3 glow = max(FlameGlow(coordinate), FlameTrail(coordinate));

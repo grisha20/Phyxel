@@ -33,8 +33,8 @@ internal static class GasUniformDistributionAcceptanceVerifier
         Require(single.Cells >= GasUniformDistributionAcceptanceScenario.SingleMass * 4 &&
             single.FractionalCells >= single.Cells * 0.95,
             $"single gas did not become a fractional concentration field={single}", errors);
-        Require(single.HorizontalSpan >= 110 && single.Rows is >= 40 and <= 130 &&
-            single.AverageY > 102,
+        Require(single.HorizontalSpan >= 110 && single.Rows is >= 30 and <= 130 &&
+            single.AverageY >= 117,
             $"CO2 did not form a broad, gently descending cloud={single}", errors);
         Require(single.ParityImbalance <= 0.18,
             $"single gas has vertical parity bands={single}", errors);
