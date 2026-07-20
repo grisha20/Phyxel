@@ -61,6 +61,12 @@ public enum BrushCommandMode : uint
     SetTemperature = 2
 }
 
+public enum BrushCommandShape : uint
+{
+    Point = 0,
+    Segment = 1
+}
+
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct BrushDrawCommand
 {
@@ -73,6 +79,9 @@ public struct BrushDrawCommand
     public uint Seed;
     public uint Reserved;
     public float TargetTemperature;
+    public int EndX;
+    public int EndY;
+    public BrushCommandShape Shape;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

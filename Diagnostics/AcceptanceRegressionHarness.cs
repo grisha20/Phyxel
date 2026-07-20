@@ -96,6 +96,7 @@ public sealed class AcceptanceRegressionHarness
             "combustion_quench" or "water_quench" => AcceptanceScenarioMode.CombustionQuench,
             "steam_self_cooling" => AcceptanceScenarioMode.SteamSelfCooling,
             "brush_empty_only" => AcceptanceScenarioMode.BrushEmptyOnly,
+            "continuous_brush_stroke" => AcceptanceScenarioMode.ContinuousBrushStroke,
             "coal_types" => AcceptanceScenarioMode.CoalTypes,
             "gas_uniform_distribution" or "gas_smooth_cloud" or
             "gas_visual_profile" or "gas_vertical_speed" =>
@@ -184,6 +185,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.CombustionQuench => 900,
                 AcceptanceScenarioMode.SteamSelfCooling => uint.MaxValue,
                 AcceptanceScenarioMode.BrushEmptyOnly => 7,
+                AcceptanceScenarioMode.ContinuousBrushStroke => 3,
                 AcceptanceScenarioMode.CoalTypes => uint.MaxValue,
                 AcceptanceScenarioMode.GasUniformDistribution => 600,
                 AcceptanceScenarioMode.SteamDistributionAndCooling => uint.MaxValue,
@@ -210,6 +212,8 @@ public sealed class AcceptanceRegressionHarness
             ? null
             : ThermalAcceptanceScenario.Create(Mode, width, height, materialRegistry) ??
                 BrushEmptyOnlyAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry) ??
+                ContinuousBrushStrokeAcceptanceScenario.CreateInitialWorld(
+                    Mode, width, height, materialRegistry) ??
                 CoalTypesAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry) ??
                 GasUniformDistributionAcceptanceScenario.CreateInitialWorld(
                     Mode, width, height, materialRegistry) ??
@@ -466,7 +470,8 @@ public sealed class AcceptanceRegressionHarness
         {
             settings.Paused = frame < 30;
         }
-        else if (Mode == AcceptanceScenarioMode.BrushEmptyOnly)
+        else if (Mode is AcceptanceScenarioMode.BrushEmptyOnly or
+            AcceptanceScenarioMode.ContinuousBrushStroke)
         {
             settings.Paused = true;
         }

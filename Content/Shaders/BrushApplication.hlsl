@@ -8,21 +8,32 @@ RWStructuredBuffer<GridCell> Grid : register(u0);
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint commandIndex = dispatchThreadId.z;
-    if (commandIndex >= CommandCount || dispatchThreadId.x >= MaximumBrushDiameter ||
-        dispatchThreadId.y >= MaximumBrushDiameter)
+    if (commandIndex >= CommandCount || dispatchThreadId.x >= DispatchExtentX ||
+        dispatchThreadId.y >= DispatchExtentY)
     {
         return;
     }
 
     BrushDrawCommand command = Commands[commandIndex];
-    int halfDiameter = int(MaximumBrushDiameter / 2);
-    int2 offset = int2(dispatchThreadId.xy) - int2(halfDiameter, halfDiameter);
-    if (dot(float2(offset), float2(offset)) > command.Radius * command.Radius)
+    int radius = int(ceil(command.Radius));
+    int2 start = int2(command.X, command.Y);
+    int2 end = command.Shape == BrushCommandShapeSegment
+        ? int2(command.EndX, command.EndY)
+        : start;
+    int2 boundsMinimum = min(start, end) - int2(radius, radius);
+    int2 position = boundsMinimum + int2(dispatchThreadId.xy);
+    float2 segment = float2(end - start);
+    float segmentLengthSquared = dot(segment, segment);
+    float interpolation = segmentLengthSquared > 0
+        ? saturate(dot(float2(position - start), segment) / segmentLengthSquared)
+        : 0;
+    float2 nearest = float2(start) + segment * interpolation;
+    float2 distanceFromStroke = float2(position) - nearest;
+    if (dot(distanceFromStroke, distanceFromStroke) > command.Radius * command.Radius)
     {
         return;
     }
 
-    int2 position = int2(command.X, command.Y) + offset;
     if (position.x < 0 || position.y < 0 || position.x >= int(Width) || position.y >= int(Height))
     {
         return;

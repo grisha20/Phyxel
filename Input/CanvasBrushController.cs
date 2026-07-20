@@ -60,7 +60,7 @@ public sealed class CanvasBrushController
             : temperatureToolActive
                 ? BrushCommandMode.SetTemperature
                 : BrushCommandMode.Material;
-        AppendInterpolatedCommands(
+        AppendStrokeCommand(
             previousGridPosition,
             gridPosition,
             selectedMaterial,
@@ -71,7 +71,7 @@ public sealed class CanvasBrushController
         return frameCommands;
     }
 
-    private void AppendInterpolatedCommands(
+    private void AppendStrokeCommand(
         Point start,
         Point end,
         ushort material,
@@ -79,32 +79,26 @@ public sealed class CanvasBrushController
         float targetTemperature,
         SimulationSettings settings)
     {
-        int deltaX = end.X - start.X;
-        int deltaY = end.Y - start.Y;
-        float distance = MathF.Sqrt(deltaX * deltaX + deltaY * deltaY);
-        float spacing = MathF.Max(1f, settings.BrushRadius * 0.42f);
-        int samples = Math.Max(1, (int)MathF.Ceiling(distance / spacing));
-        for (int sample = 0; sample <= samples && frameCommands.Count < SimulationSettings.MaximumBrushCommands; sample++)
+        frameCommands.Add(new BrushDrawCommand
         {
-            float interpolation = sample / (float)samples;
-            frameCommands.Add(new BrushDrawCommand
-            {
-                X = (int)MathF.Round(start.X + deltaX * interpolation),
-                Y = (int)MathF.Round(start.Y + deltaY * interpolation),
-                MaterialIndex = material,
-                Radius = settings.BrushRadius,
-                Density = settings.SpawnDensity,
-                Mode = mode,
-                Seed = ++commandSeed,
-                Reserved = activeBodyId,
-                TargetTemperature = mode == BrushCommandMode.SetTemperature
-                    ? Math.Clamp(
-                        float.IsFinite(targetTemperature) ? targetTemperature : 20f,
-                        MaterialRegistry.MinimumInitialTemperature,
-                        MaterialRegistry.MaximumInitialTemperature)
-                    : 0
-            });
-        }
+            X = start.X,
+            Y = start.Y,
+            EndX = end.X,
+            EndY = end.Y,
+            Shape = BrushCommandShape.Segment,
+            MaterialIndex = material,
+            Radius = settings.BrushRadius,
+            Density = settings.SpawnDensity,
+            Mode = mode,
+            Seed = ++commandSeed,
+            Reserved = activeBodyId,
+            TargetTemperature = mode == BrushCommandMode.SetTemperature
+                ? Math.Clamp(
+                    float.IsFinite(targetTemperature) ? targetTemperature : 20f,
+                    MaterialRegistry.MinimumInitialTemperature,
+                    MaterialRegistry.MaximumInitialTemperature)
+                : 0
+        });
     }
 
     private static Point MapToGrid(Point pointer, Rectangle canvas, SimulationSettings settings)

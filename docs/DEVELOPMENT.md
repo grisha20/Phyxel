@@ -182,7 +182,7 @@ Remove-Item Env:PHYXEL_ARTIFACT_DIR
 - thermal: `thermal_uniform`, `thermal_contact`, `thermal_capacity`, `conductivity_compare`, `thermal_insulator`, `thermal_vacuum`, `thermal_gas`, `temperature_probe_gpu`;
 - temperature tool: `temperature_brush`, `temperature_tool`.
 - phase runtime: `phase_dispatch_smoke` с `PHYXEL_MATERIALS_PATH=Diagnostics/PhaseAcceptanceMaterials`.
-- combustion/brush: `combustion_chain`, `combustion_quench`, `brush_empty_only`;
+- combustion/brush: `combustion_chain`, `combustion_quench`, `brush_empty_only`, `continuous_brush_stroke`;
 - coal/contact: `coal_types`;
 - gas/steam: `gas_uniform_distribution`, `steam_self_cooling`, `steam_distribution_and_cooling`, `water_ice_steam_motion`.
 

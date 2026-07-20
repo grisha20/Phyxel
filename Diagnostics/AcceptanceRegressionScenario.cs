@@ -71,6 +71,7 @@ public enum AcceptanceScenarioMode
     CombustionQuench,
     SteamSelfCooling,
     BrushEmptyOnly,
+    ContinuousBrushStroke,
     CoalTypes,
     GasUniformDistribution,
     SteamDistributionAndCooling,
@@ -135,6 +136,8 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.SteamCloudTemperature =>
                 SteamCloudTemperatureAcceptanceScenario.CreateCommands(frame, materialRegistry),
             AcceptanceScenarioMode.BrushEmptyOnly => BrushEmptyOnlyAcceptanceScenario.CreateCommands(frame, materials),
+            AcceptanceScenarioMode.ContinuousBrushStroke =>
+                ContinuousBrushStrokeAcceptanceScenario.CreateCommands(frame, materials),
             AcceptanceScenarioMode.CoalTypes => [],
             AcceptanceScenarioMode.PhaseDispatchSmoke => [],
             AcceptanceScenarioMode.PhaseThresholds or

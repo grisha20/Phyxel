@@ -715,13 +715,26 @@ public sealed class SimulationDispatchCoordinator
             constants.CommandCount = 1;
             constants.MaximumBrushDiameter =
                 (uint)(MathF.Ceiling(command[0].Radius) * 2 + 1);
+            int radius = (int)MathF.Ceiling(command[0].Radius);
+            int endX = command[0].Shape == BrushCommandShape.Segment
+                ? command[0].EndX
+                : command[0].X;
+            int endY = command[0].Shape == BrushCommandShape.Segment
+                ? command[0].EndY
+                : command[0].Y;
+            constants.DispatchExtentX =
+                (uint)(Math.Abs(endX - command[0].X) + radius * 2 + 1);
+            constants.DispatchExtentY =
+                (uint)(Math.Abs(endY - command[0].Y) + radius * 2 + 1);
             UpdateConstants(context, resources, ref constants);
             context.ComputeShader.Set(resources.BrushShader);
             context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
             context.ComputeShader.SetShaderResources(0, resources.Commands.View, resources.Materials.View);
             context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.ReadUnorderedView);
-            int diameter = Math.Max(1, (int)constants.MaximumBrushDiameter);
-            context.Dispatch(DivideRoundUp(diameter, 16), DivideRoundUp(diameter, 16), 1);
+            context.Dispatch(
+                DivideRoundUp((int)constants.DispatchExtentX, 16),
+                DivideRoundUp((int)constants.DispatchExtentY, 16),
+                1);
             Unbind(context, 2, 1);
         }
     }
@@ -1178,6 +1191,15 @@ public sealed class SimulationDispatchCoordinator
                 continue;
             }
             ExpandActiveRegion(command.X, command.Y, (int)MathF.Ceiling(command.Radius), width, height);
+            if (command.Shape == BrushCommandShape.Segment)
+            {
+                ExpandActiveRegion(
+                    command.EndX,
+                    command.EndY,
+                    (int)MathF.Ceiling(command.Radius),
+                    width,
+                    height);
+            }
 
             if (command.Mode == BrushCommandMode.Erase)
             {

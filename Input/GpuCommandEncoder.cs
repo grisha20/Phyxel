@@ -26,6 +26,13 @@ public sealed class GpuCommandEncoder
                     command.Mode,
                     "Unsupported brush command mode.");
             }
+            if (command.Shape is not (BrushCommandShape.Point or BrushCommandShape.Segment))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(source),
+                    command.Shape,
+                    "Unsupported brush command shape.");
+            }
             if (command.Mode == BrushCommandMode.SetTemperature)
             {
                 if (!float.IsFinite(command.TargetTemperature))

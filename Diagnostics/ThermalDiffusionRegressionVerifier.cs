@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Xna.Framework;
@@ -43,8 +44,8 @@ internal static class ThermalDiffusionRegressionVerifier
             "TemperatureProbeConstants must be 16 bytes.");
         Require(Marshal.SizeOf<TemperatureProbeResult>() == 16,
             "TemperatureProbeResult must be 16 bytes.");
-        Require(Marshal.SizeOf<BrushDrawCommand>() == 36,
-            "BrushDrawCommand must be 36 bytes.");
+        Require(Marshal.SizeOf<BrushDrawCommand>() == 48,
+            "BrushDrawCommand must be 48 bytes.");
         Require(Enum.GetUnderlyingType(typeof(BrushCommandMode)) == typeof(uint) &&
             (uint)BrushCommandMode.Material == 0 && (uint)BrushCommandMode.Erase == 1 &&
             (uint)BrushCommandMode.SetTemperature == 2,
@@ -62,11 +63,19 @@ internal static class ThermalDiffusionRegressionVerifier
             "uint Mode;",
             "uint Seed;",
             "uint Reserved;",
-            "float TargetTemperature;");
+            "float TargetTemperature;",
+            "int EndX;",
+            "int EndY;",
+            "uint Shape;");
         Require(shared.Contains("BrushCommandModeMaterial = 0", StringComparison.Ordinal) &&
             shared.Contains("BrushCommandModeErase = 1", StringComparison.Ordinal) &&
             shared.Contains("BrushCommandModeSetTemperature = 2", StringComparison.Ordinal),
             "Brush command HLSL mode constants do not match C#.");
+        Require(Enum.GetUnderlyingType(typeof(BrushCommandShape)) == typeof(uint) &&
+            (uint)BrushCommandShape.Point == 0 && (uint)BrushCommandShape.Segment == 1 &&
+            shared.Contains("BrushCommandShapePoint = 0", StringComparison.Ordinal) &&
+            shared.Contains("BrushCommandShapeSegment = 1", StringComparison.Ordinal),
+            "Brush command shape values differ between C# and HLSL.");
         string brush = File.ReadAllText(Path.Combine(shaderDirectory, "BrushApplication.hlsl"));
         int temperatureBranch = brush.IndexOf(
             "command.Mode == BrushCommandModeSetTemperature",
@@ -159,6 +168,25 @@ internal static class ThermalDiffusionRegressionVerifier
             left, canvas, settings, 1, false, false, 500, false)[0];
         Require(material.Mode == BrushCommandMode.Material && material.TargetTemperature == 0,
             "Ordinary material brush command changed semantics.");
+        Require(material.Shape == BrushCommandShape.Segment &&
+            material.X == material.EndX && material.Y == material.EndY,
+            "A new brush stroke is not encoded as a zero-length capsule.");
+
+        CanvasBrushController stroke = new();
+        _ = stroke.CreateCommands(
+            left, canvas, settings, 1, false, false, 500, false);
+        RawInputSnapshot moved = left with
+        {
+            MousePosition = new Point(450, 170),
+            LeftPressed = false
+        };
+        IReadOnlyList<BrushDrawCommand> strokeCommands = stroke.CreateCommands(
+            moved, canvas, settings, 1, false, false, 500, false);
+        Require(strokeCommands.Count == 1 &&
+            strokeCommands[0].Shape == BrushCommandShape.Segment &&
+            strokeCommands[0].X == 100 && strokeCommands[0].Y == 100 &&
+            strokeCommands[0].EndX == 450 && strokeCommands[0].EndY == 170,
+            "A fast pointer move was not encoded as one continuous capsule.");
 
         GpuCommandEncoder encoder = new();
         BrushDrawCommand tooHot = temperature;

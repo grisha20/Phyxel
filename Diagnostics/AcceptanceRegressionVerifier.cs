@@ -207,6 +207,11 @@ public static class AcceptanceRegressionVerifier
                 snapshot,
                 materialRegistry,
                 out report),
+            AcceptanceScenarioMode.ContinuousBrushStroke =>
+                ContinuousBrushStrokeAcceptanceVerifier.Validate(
+                    snapshot,
+                    materialRegistry,
+                    out report),
             AcceptanceScenarioMode.CoalTypes => CoalTypesAcceptanceVerifier.Validate(
                 snapshot,
                 materialRegistry,

@@ -88,6 +88,8 @@ static const float MaximumMaterialDensity = 100.0;
 static const uint BrushCommandModeMaterial = 0;
 static const uint BrushCommandModeErase = 1;
 static const uint BrushCommandModeSetTemperature = 2;
+static const uint BrushCommandShapePoint = 0;
+static const uint BrushCommandShapeSegment = 1;
 
 struct BrushDrawCommand
 {
@@ -100,6 +102,9 @@ struct BrushDrawCommand
     uint Seed;
     uint Reserved;
     float TargetTemperature;
+    int EndX;
+    int EndY;
+    uint Shape;
 };
 
 struct SimulationStatistics

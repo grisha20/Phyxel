@@ -138,7 +138,7 @@ T += (ambientTemperature - T) * factor
 
 Combustion pass использует данные материала: ignition threshold, burn rate, heat per mass, burned-into target и emissions. `core:fire` имеет флаг `flame`, собственный lifetime и decay target. Emission resolve создаёт продукты только в разрешённых destination-клетках.
 
-Обычная material-кисть пишет только в empty. Исключение не является заменой материала: кисть flame при попадании в combustible fixed solid повышает его температуру выше ignition threshold, сохраняя `MaterialIndex`, массу и геометрию.
+Обычная material-кисть пишет только в empty. Между предыдущей и текущей позициями указателя передаётся одна capsule-команда в координатах симуляции, поэтому быстрый штрих непрерывен и не зависит от FPS. Тот же segment-путь используют температура и ластик. Исключение не является заменой материала: кисть flame при попадании в combustible fixed solid повышает его температуру выше ignition threshold, сохраняя `MaterialIndex`, массу и геометрию.
 
 ## Сохранения
 
