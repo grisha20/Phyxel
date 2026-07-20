@@ -3,7 +3,7 @@
   "id": "core:co2",
   "name": { "ru": "CO₂", "en": "CO₂" },
   "kind": "gas",
-  "color": "#B5B5B580",
+  "color": "#666666FF",
   "physics": { "density": 0.12, "friction": 0.0, "flowRate": 0.8 },
   "gas": { "diffusion": 0.34, "buoyancy": -0.085 },
   "thermal": { "initialTemperature": 20.0, "conductivity": 0.06, "heatCapacity": 0.85 },

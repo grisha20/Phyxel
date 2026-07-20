@@ -40,7 +40,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     uint index = FlattenCoordinate(uint2(position));
-    if (command.Mode == BrushCommandModeMaterial &&
+    float strokeCoreRadius = max(0.75, command.Radius * 0.18);
+    bool insideStrokeCore = command.Shape == BrushCommandShapeSegment &&
+        dot(distanceFromStroke, distanceFromStroke) <= strokeCoreRadius * strokeCoreRadius;
+    if (command.Mode == BrushCommandModeMaterial && !insideStrokeCore &&
         HashUnitFloat(index ^ command.Seed ^ FrameIndex) > command.Density)
     {
         return;

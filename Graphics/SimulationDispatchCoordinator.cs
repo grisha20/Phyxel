@@ -12,12 +12,12 @@ namespace Phyxel.Graphics;
 public sealed class SimulationDispatchCoordinator
 {
     public const float FixedThermalStep = 0.05f;
-    public const double FixedGasStep = 1d / 60d;
+    public const double FixedGasStep = 1d / 120d;
     // A larger fixed-step exchange keeps thermal fronts visible at gameplay
     // scale while remaining stable with the 0.05 s Jacobi step.
     public const float ThermalExchangeRate = 16f;
     public const int MaximumThermalTicksPerFrame = 4;
-    public const int MaximumGasTicksPerFrame = 4;
+    public const int MaximumGasTicksPerFrame = 8;
     private static readonly uint[] PrimaryEvenPhases =
     [
         32, 0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,

@@ -141,20 +141,20 @@ internal static class WorldCellCodecRegressionVerifier
             {
                 dispatches += scheduler.Advance(1d / framesPerSecond, false, true);
             }
-            Require(scheduler.TotalTicks == 60 && dispatches == 60,
+            Require(scheduler.TotalTicks == 120 && dispatches == 120,
                 $"Gas fixed-step schedule differs at {framesPerSecond} FPS: " +
                 $"ticks/dispatches={scheduler.TotalTicks}/{dispatches}.");
         }
 
         FixedStepGasScheduler paused = new();
-        Require(paused.Advance(0.01, false, true) == 0,
+        Require(paused.Advance(0.005, false, true) == 0,
             "Gas scheduler unexpectedly ticked before one fixed step.");
         for (int frame = 0; frame < 120; frame++)
         {
             Require(paused.Advance(1d / 30d, true, true) == 0,
                 "Gas scheduler advanced while paused.");
         }
-        Require(paused.Advance(0.007, false, true) == 1 && paused.TotalTicks == 1,
+        Require(paused.Advance(0.004, false, true) == 1 && paused.TotalTicks == 1,
             "Gas scheduler accumulated paused time or lost its pre-pause fraction.");
         paused.Reset();
         Require(paused.TotalTicks == 0,

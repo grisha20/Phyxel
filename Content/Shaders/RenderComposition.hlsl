@@ -165,11 +165,8 @@ void FluidCoverage(
     out float3 gasColor)
 {
     float liquidAmount = 0;
-    float gasAmount = 0;
     float liquidWeight = 0;
-    float gasWeight = 0;
     float3 weightedLiquidColor = 0;
-    float3 weightedGasColor = 0;
     for (int y = -1; y <= 1; y++)
     {
         for (int x = -1; x <= 1; x++)
@@ -180,9 +177,8 @@ void FluidCoverage(
             {
                 continue;
             }
-            float gasSampleWeight = x == 0 && y == 0 ? 4 :
+            float liquidSampleWeight = x == 0 && y == 0 ? 4 :
                 x == 0 || y == 0 ? 2 : 1;
-            float liquidSampleWeight = gasSampleWeight;
             GridCell sampleCell = Grid[FlattenCoordinate(uint2(sample))];
             if (sampleCell.IsActive != 0)
             {
@@ -194,24 +190,21 @@ void FluidCoverage(
                     weightedLiquidColor +=
                         MaterialColor(sampleCell.MaterialIndex).rgb * amount;
                 }
-                else if (material.SimulationKind == SimulationKindGas &&
-                    (material.Flags & MaterialFlagFlame) == 0)
-                {
-                    float amount = saturate(sampleCell.Mass) *
-                        material.ColorA * gasSampleWeight;
-                    gasAmount += amount;
-                    weightedGasColor +=
-                        MaterialColor(sampleCell.MaterialIndex).rgb * amount;
-                }
             }
             liquidWeight += liquidSampleWeight;
-            gasWeight += gasSampleWeight;
         }
     }
     liquidCoverage = liquidAmount / max(liquidWeight, 1);
     liquidColor = liquidAmount > 0 ? weightedLiquidColor / liquidAmount : 0;
-    gasCoverage = gasAmount / max(gasWeight, 1);
-    gasColor = gasAmount > 0 ? weightedGasColor / gasAmount : 0;
+    GridCell gasCell = Grid[FlattenCoordinate(coordinate)];
+    bool visibleGas = gasCell.IsActive != 0 &&
+        Materials[gasCell.MaterialIndex].SimulationKind == SimulationKindGas &&
+        !IsFlameCell(gasCell);
+    float4 directGasColor = visibleGas ? MaterialColor(gasCell.MaterialIndex) : 0;
+    gasCoverage = visibleGas
+        ? saturate(gasCell.Mass) * directGasColor.a
+        : 0;
+    gasColor = directGasColor.rgb;
 }
 
 void Collect(GridCell cell)
@@ -287,9 +280,18 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             color.rgb = lerp(color.rgb, liquidColor, saturate(liquidCoverage * 2.5));
         }
-        if (gasCoverage > 0.01)
+        if (gasCoverage > 0)
         {
-            float gasOpacity = smoothstep(0.01, 0.32, gasCoverage) * 0.72;
+            // TPT's CO2/WTRV use the ordinary flat-particle path rather than
+            // a blur mode. A narrow concentration contour gives the lower
+            // resolution continuum grid the same readable outer boundary
+            // without turning fractional mass into a wide translucent halo.
+            float edgeNoise = (HashUnitFloat(
+                FlattenCoordinate(coordinate) ^ 0x6d2b79f5u) - 0.5) * 0.016;
+            float gasOpacity = smoothstep(
+                0.035 + edgeNoise,
+                0.075 + edgeNoise,
+                gasCoverage) * 0.94;
             color.rgb = lerp(color.rgb, gasColor, gasOpacity);
         }
     }

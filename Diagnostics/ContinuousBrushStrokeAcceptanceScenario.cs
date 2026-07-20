@@ -99,7 +99,7 @@ internal static class ContinuousBrushStrokeAcceptanceScenario
             Shape = BrushCommandShape.Segment,
             Radius = Radius,
             MaterialIndex = material,
-            Density = 1,
+            Density = mode == BrushCommandMode.Material ? 0.25f : 1,
             Mode = mode,
             Seed = seed,
             TargetTemperature = targetTemperature

@@ -6,7 +6,7 @@
     "en": "Steam"
   },
   "kind": "gas",
-  "color": "#DDEBF0A0",
+  "color": "#A0A0FFFF",
   "physics": {
     "density": 0.03,
     "friction": 0.005,

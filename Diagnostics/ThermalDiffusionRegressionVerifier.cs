@@ -117,11 +117,18 @@ internal static class ThermalDiffusionRegressionVerifier
             gas.Contains("firstMass * heatCapacity * first.Temperature", StringComparison.Ordinal) &&
             !gas.Contains("Interlocked", StringComparison.Ordinal),
             "Gas redistribution is not a race-safe, mass-carrying continuum pass.");
+        Require(Math.Abs(SimulationDispatchCoordinator.FixedGasStep - 1d / 120d) < 1e-12,
+            "Gas redistribution is not running at the required 120 Hz motion rate.");
         string render = File.ReadAllText(Path.Combine(shaderDirectory, "RenderComposition.hlsl"));
         Require(render.Contains("for (int y = -1; y <= 1; y++)", StringComparison.Ordinal) &&
-            render.Contains("float gasSampleWeight = x == 0 && y == 0 ? 4", StringComparison.Ordinal) &&
-            render.Contains("smoothstep(0.01, 0.32, gasCoverage)", StringComparison.Ordinal),
-            "Continuum gas rendering is not using the compact edge-preserving profile.");
+            render.Contains("float edgeNoise", StringComparison.Ordinal) &&
+            render.Contains("0.035 + edgeNoise", StringComparison.Ordinal) &&
+            render.Contains("0.075 + edgeNoise", StringComparison.Ordinal) &&
+            !render.Contains("gasSampleWeight", StringComparison.Ordinal),
+            "Continuum gas rendering is not using the flat-particle profile.");
+        Require(brush.Contains("bool insideStrokeCore", StringComparison.Ordinal) &&
+            brush.Contains("!insideStrokeCore", StringComparison.Ordinal),
+            "Segment brushes do not preserve a continuous center line.");
         string probe = File.ReadAllText(Path.Combine(shaderDirectory, "TemperatureProbe.hlsl"));
         RequireOrdered(
             probe,
