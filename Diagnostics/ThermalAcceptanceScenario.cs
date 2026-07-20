@@ -96,7 +96,8 @@ internal static class ThermalAcceptanceScenario
                 break;
             case AcceptanceScenarioMode.SteamSelfCooling:
                 Fill(cells, width, 236, 180, 243, 187,
-                    materials.GetRequiredRuntimeIndex(CoreMaterialIds.Steam), 105, 1);
+                    materials.GetRequiredRuntimeIndex(CoreMaterialIds.Steam),
+                    materials[CoreMaterialIds.Steam].Properties.InitialTemperature, 1);
                 break;
             case AcceptanceScenarioMode.PhaseDispatchSmoke:
                 CreatePhaseDispatchFixture(cells, width, height, materials);

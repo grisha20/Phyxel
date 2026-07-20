@@ -35,7 +35,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         new(CoreMaterialIds.Ice, MaterialSimulationKind.Solid, MaterialFlags.None,
             0.92f, 0.10f, 0f, "#A9DDF2", -5f, 0.80f, 2.10f),
         new(CoreMaterialIds.Steam, MaterialSimulationKind.Gas, MaterialFlags.None,
-            0.03f, 0.005f, 1.20f, "#DDEBF0A0", 105f, 0.04f, 2.08f),
+            0.03f, 0.005f, 1.20f, "#DDEBF0A0", 122f, 0.04f, 2.08f),
         new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
             7.8f, 0.35f, 0f, "#8E9CA6", 20f, 1f, 0.50f),
         new(CoreMaterialIds.Stone, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
@@ -158,7 +158,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             Require(Same(properties.HeatCapacity, expected.HeatCapacity),
                 $"{expected.Id} heatCapacity is incorrect.");
             float expectedAmbientTemperature = expected.Id == CoreMaterialIds.Steam ? 20f : 0f;
-            float expectedAmbientRate = expected.Id == CoreMaterialIds.Steam ? 0.04f : 0f;
+            float expectedAmbientRate = expected.Id == CoreMaterialIds.Steam ? 0.01f : 0f;
             Require(Same(properties.AmbientTemperature, expectedAmbientTemperature) &&
                 Same(properties.AmbientCoolingRate, expectedAmbientRate),
                 $"{expected.Id} ambient cooling is incorrect.");
@@ -226,7 +226,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
                     "core:ice melting target is not core:water.");
                 break;
             case CoreMaterialIds.Steam:
-                Require(Same(properties.TransitionBelowTemperature, 95f),
+                Require(Same(properties.TransitionBelowTemperature, 98f),
                     "core:steam condensation threshold changed.");
                 Require(properties.TransitionBelowMaterialIndex == registry[CoreMaterialIds.Water].RuntimeIndex,
                     "core:steam condensation target is not core:water.");

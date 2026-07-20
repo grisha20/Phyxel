@@ -36,27 +36,36 @@ internal static class SteamDistributionAndCoolingAcceptanceVerifier
             SteamDistributionAndCoolingAcceptanceScenario.InitialMass) <= 0.05,
             $"final steam/water mass changed={final.TotalMass:F4}", errors);
 
-        if (stages.Count >= 2)
+        if (stages.Count >= 4)
         {
-            Require(stages[0].SteamMass > 230 && stages[0].SteamAverageY < 195 &&
-                stages[0].SteamHorizontalSpan >= 300 && stages[0].SteamRows >= 80,
-                $"steam did not rise before cooling={stages[0]}", errors);
-            Require(stages[1].SteamHorizontalSpan >= 250 && stages[1].SteamRows >= 150,
-                $"steam did not spread across the chamber={stages[1]}", errors);
-            Require(stages[1].SteamTemperature < stages[0].SteamTemperature,
-                $"steam did not cool monotonically={stages[0]} -> {stages[1]}", errors);
+            Require(stages[0].SteamMass > 255 && stages[0].WaterMass < 0.01 &&
+                stages[0].SteamAverageY < 180 &&
+                stages[0].SteamHorizontalSpan is >= 45 and <= 100 &&
+                stages[0].SteamRows >= 35,
+                $"steam did not begin a local buoyant spread={stages[0]}", errors);
+            Require(stages[1].SteamMass > 255 && stages[1].WaterMass < 0.01 &&
+                stages[1].SteamAverageY < stages[0].SteamAverageY &&
+                stages[1].SteamHorizontalSpan >= stages[0].SteamHorizontalSpan,
+                $"steam did not continue rising and spreading={stages[0]} -> {stages[1]}", errors);
+            Require(stages[2].SteamMass > 255 && stages[2].WaterMass < 0.01 &&
+                stages[2].SteamAverageY < 50 &&
+                stages[2].SteamHorizontalSpan is >= 85 and <= 160,
+                $"steam moved non-locally or failed to reach the ceiling={stages[2]}", errors);
+            Require(stages[0].SteamFractionalCells == 0 &&
+                stages[1].SteamFractionalCells == 0 &&
+                stages[2].SteamFractionalCells == 0,
+                "steam packets were split during gas redistribution", errors);
+            Require(stages[1].SteamTemperature < stages[0].SteamTemperature &&
+                stages[2].SteamTemperature < stages[1].SteamTemperature &&
+                stages[3].SteamTemperature < stages[2].SteamTemperature,
+                $"steam did not cool monotonically={string.Join(" -> ", stages)}", errors);
+            Require(stages[3].SteamMass > 50 && stages[3].WaterMass > 50 &&
+                stages[3].WaterAverageY > 220 && stages[3].WaterHorizontalSpan >= 80,
+                $"steam did not condense gradually into falling droplets={stages[3]}", errors);
         }
-        if (stages.Count >= 3)
-        {
-            Require(stages[2].WaterMass > 30 && stages[2].WaterHorizontalSpan >= 100,
-                $"steam did not condense in multiple locations={stages[2]}", errors);
-            Require(stages[2].SteamTemperature <= stages[1].SteamTemperature + 0.05,
-                $"steam reheated during ambient cooling={stages[1]} -> {stages[2]}", errors);
-        }
-        Require(final.WaterMass > 250 && final.SteamMass < 1,
-            $"steam did not complete condensation={final}", errors);
-        Require(final.WaterAverageY > 230 && final.WaterHorizontalSpan >= 100,
-            $"condensed water did not fall to the chamber floor={final}", errors);
+        Require(final.WaterMass > 240 && final.SteamMass < 16 &&
+            final.WaterAverageY > 235 && final.WaterHorizontalSpan >= 100,
+            $"steam did not finish settling after gradual condensation={final}", errors);
 
         report = "PHYXEL_STEAM_DISTRIBUTION " +
             string.Join(" | ", stages.Select((stage, index) =>
@@ -81,6 +90,8 @@ internal static class SteamDistributionAndCoolingAcceptanceVerifier
         double steamWeightedY = 0;
         double waterWeightedY = 0;
         double steamWeightedTemperature = 0;
+        int steamCells = 0;
+        int steamFractionalCells = 0;
         int steamMinX = int.MaxValue;
         int steamMaxX = int.MinValue;
         int steamMinY = int.MaxValue;
@@ -98,6 +109,8 @@ internal static class SteamDistributionAndCoolingAcceptanceVerifier
                 }
                 if (cell.MaterialIndex == steam)
                 {
+                    steamCells++;
+                    if (Math.Abs(cell.Mass - 1) > 0.0001) steamFractionalCells++;
                     steamMass += cell.Mass;
                     steamWeightedY += y * cell.Mass;
                     steamWeightedTemperature += cell.Temperature * cell.Mass;
@@ -118,6 +131,8 @@ internal static class SteamDistributionAndCoolingAcceptanceVerifier
         return new SteamStage(
             steamMass,
             waterMass,
+            steamCells,
+            steamFractionalCells,
             steamMass > 0 ? steamWeightedY / steamMass : 0,
             waterMass > 0 ? waterWeightedY / waterMass : 0,
             steamMass > 0 ? steamWeightedTemperature / steamMass : 0,
@@ -137,6 +152,8 @@ internal static class SteamDistributionAndCoolingAcceptanceVerifier
     private readonly record struct SteamStage(
         double SteamMass,
         double WaterMass,
+        int SteamCells,
+        int SteamFractionalCells,
         double SteamAverageY,
         double WaterAverageY,
         double SteamTemperature,
@@ -147,7 +164,8 @@ internal static class SteamDistributionAndCoolingAcceptanceVerifier
         public double TotalMass => SteamMass + WaterMass;
 
         public override string ToString() =>
-            $"steam={SteamMass:F3} water={WaterMass:F3} temp={SteamTemperature:F2} " +
+            $"steam={SteamMass:F3}/{SteamCells} fractional={SteamFractionalCells} " +
+            $"water={WaterMass:F3} temp={SteamTemperature:F2} " +
             $"steamY={SteamAverageY:F1} steamSpan={SteamHorizontalSpan} rows={SteamRows} " +
             $"waterY={WaterAverageY:F1} waterSpan={WaterHorizontalSpan}";
     }

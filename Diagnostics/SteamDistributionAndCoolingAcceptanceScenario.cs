@@ -38,7 +38,8 @@ internal static class SteamDistributionAndCoolingAcceptanceScenario
         Fill(cells, width, Left, Bottom - 3, Right, Bottom, fixture, 20);
         Fill(cells, width, Left, Top, Left + 3, Bottom, fixture, 20);
         Fill(cells, width, Right - 3, Top, Right, Bottom, fixture, 20);
-        Fill(cells, width, 232, 190, 247, 205, steam, 105);
+        Fill(cells, width, 232, 190, 247, 205, steam,
+            materials[CoreMaterialIds.Steam].Properties.InitialTemperature);
         return new SimulationWorldSnapshot(width, height, bytes);
     }
 

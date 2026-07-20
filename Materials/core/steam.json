@@ -13,16 +13,16 @@
     "flowRate": 1.20
   },
   "thermal": {
-    "initialTemperature": 105.0,
+    "initialTemperature": 122.0,
     "conductivity": 0.04,
     "heatCapacity": 2.08,
     "ambientCooling": {
       "temperature": 20.0,
-      "rate": 0.04
+      "rate": 0.01
     },
     "transitions": {
       "below": {
-        "temperature": 95.0,
+        "temperature": 98.0,
         "into": "core:water"
       }
     }

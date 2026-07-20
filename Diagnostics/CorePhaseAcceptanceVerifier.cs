@@ -56,8 +56,8 @@ internal static class CorePhaseAcceptanceVerifier
             ice.Properties.TransitionAboveTemperature == 2,
             "core:ice melt rule is not 2 -> core:water", errors);
         Require(steam.Properties.TransitionBelowMaterialIndex == water.RuntimeIndex &&
-            steam.Properties.TransitionBelowTemperature == 95,
-            "core:steam condensation rule is not 95 -> core:water", errors);
+            steam.Properties.TransitionBelowTemperature == 98,
+            "core:steam condensation rule is not 98 -> core:water", errors);
         Console.WriteLine(
             $"PHYXEL_CORE_RUNTIME_INDICES empty={materials[CoreMaterialIds.Empty].RuntimeIndex} " +
             $"water={water.RuntimeIndex} ice={ice.RuntimeIndex} steam={steam.RuntimeIndex} " +

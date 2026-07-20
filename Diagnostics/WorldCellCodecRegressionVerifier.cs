@@ -105,57 +105,27 @@ internal static class WorldCellCodecRegressionVerifier
             "Shaders",
             "GasRedistribution.hlsl");
         string shader = File.ReadAllText(shaderPath);
-        int functionStart = shader.IndexOf(
-            "void RedistributeSameGasOrEmpty(", StringComparison.Ordinal);
-        int functionEnd = shader.IndexOf(
-            "bool HorizontalPathAllowsGas(", functionStart, StringComparison.Ordinal);
-        Require(functionStart >= 0 && functionEnd > functionStart,
-            "RedistributeSameGasOrEmpty is missing.");
-        string function = shader[functionStart..functionEnd];
         Require(
-            shader.Contains("first.MaterialIndex != second.MaterialIndex", StringComparison.Ordinal) &&
+            shader.Contains("void ResolvePacketPair(", StringComparison.Ordinal) &&
+            shader.Contains("void MovePacket(", StringComparison.Ordinal),
+            "Local gas packet movement contract is missing.");
+        Require(
+            !shader.Contains("first.MaterialIndex != second.MaterialIndex", StringComparison.Ordinal) &&
+            shader.Contains("first.MaterialIndex == second.MaterialIndex", StringComparison.Ordinal) &&
             shader.Contains("firstDensity > secondDensity", StringComparison.Ordinal),
             "Different gases are not kept distinct and sorted by density.");
         Require(
-            function.Contains("heatCapacity * firstMass * first.Temperature", StringComparison.Ordinal) &&
-            function.Contains("heatCapacity * secondMass * second.Temperature", StringComparison.Ordinal),
-            "Gas redistribution does not calculate mass-weighted thermal energy.");
+            shader.Contains("StorePair(emptyIndex, gas, gasIndex, empty)", StringComparison.Ordinal) &&
+            shader.Contains("StorePair(gasIndex, empty, emptyIndex, gas)", StringComparison.Ordinal),
+            "Gas movement does not transfer the intact GridCell packet.");
         Require(
-            function.Contains("resolvedFirst.Temperature = mixedTemperature", StringComparison.Ordinal) &&
-            function.Contains("resolvedSecond.Temperature = mixedTemperature", StringComparison.Ordinal),
-            "Gas redistribution does not assign mixed temperature to both portions.");
+            shader.Contains("(material.Flags & MaterialFlagFlame) == 0", StringComparison.Ordinal),
+            "Flame exclusion is missing from ordinary gas movement.");
         Require(
-            shader.Contains("(material.Flags & MaterialFlagFlame) == 0", StringComparison.Ordinal) &&
-            function.Contains("totalMass < GasMinimumRepresentableMass", StringComparison.Ordinal) &&
-            function.Contains("return;", StringComparison.Ordinal),
-            "Flame exclusion or sub-threshold mass preservation is missing.");
-
-        const float heatCapacity = 1.5f;
-        const float firstMass = 0.8f;
-        const float secondMass = 0.4f;
-        const float firstTemperature = 100f;
-        const float secondTemperature = 400f;
-        float initialMass = firstMass + secondMass;
-        float initialEnergy = heatCapacity * firstMass * firstTemperature +
-            heatCapacity * secondMass * secondTemperature;
-        float mixedTemperature = initialEnergy / (heatCapacity * initialMass);
-        float resolvedFirstMass = initialMass * 0.5f;
-        float resolvedSecondMass = initialMass - resolvedFirstMass;
-        float resolvedEnergy = heatCapacity * resolvedFirstMass * mixedTemperature +
-            heatCapacity * resolvedSecondMass * mixedTemperature;
-        Require(MathF.Abs(mixedTemperature - 200f) <= 0.0001f, "Gas mixed temperature is incorrect.");
-        Require(
-            MathF.Abs(initialMass - resolvedFirstMass - resolvedSecondMass) <= 0.00001f,
-            "Gas reference redistribution does not conserve mass.");
-        Require(
-            MathF.Abs(initialEnergy - resolvedEnergy) <= 0.0001f,
-            "Gas reference redistribution does not conserve thermal energy.");
-
-        float splitTemperature =
-            (heatCapacity * firstMass * firstTemperature) / (heatCapacity * firstMass);
-        Require(
-            splitTemperature == firstTemperature,
-            "Splitting one gas cell must preserve its temperature.");
+            !shader.Contains("GasMinimumRepresentableMass", StringComparison.Ordinal) &&
+            !shader.Contains("mixedTemperature", StringComparison.Ordinal) &&
+            !shader.Contains("HorizontalPathAllowsGas", StringComparison.Ordinal),
+            "Legacy mass splitting, temperature mixing or long-range movement remains enabled.");
     }
 
     private static void VerifyGasSchedulerContract()

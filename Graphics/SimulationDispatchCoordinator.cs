@@ -1498,10 +1498,9 @@ public sealed class SimulationDispatchCoordinator
             0,
             resources.Grid.ReadUnorderedView,
             resources.CellMaterials.UnorderedView);
-        // Adjacent horizontal balancing needs both disjoint parities per tick.
-        // Vertical edges alternate parity across fixed ticks, so every edge is
-        // still processed at 30 Hz without paying for a redundant fifth full
-        // grid pass. The fourth pass is the rotating long-range gas span.
+        // Gas packets move only across disjoint adjacent pairs. Vertical edges
+        // alternate parity; both horizontal parities and one diagonal pairing
+        // run every fixed tick without long-range mass splitting.
         for (uint pass = 0; pass < 4; pass++)
         {
             uint phase = pass == 0 ? unchecked((uint)tickIndex) & 1u : pass + 1;
@@ -1510,7 +1509,7 @@ public sealed class SimulationDispatchCoordinator
             int dispatchWidth = phase <= 1
                 ? resources.Width
                 : DivideRoundUp(resources.Width, 2);
-            int dispatchHeight = phase <= 1
+            int dispatchHeight = phase <= 1 || phase == 4
                 ? DivideRoundUp(resources.Height, 2)
                 : resources.Height;
             context.Dispatch(

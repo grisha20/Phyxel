@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Phyxel.Materials;
 using Phyxel.Physics;
@@ -51,21 +52,14 @@ internal static class GasUniformDistributionAcceptanceScenario
         Fill(cells, width, 70, 100, 89, 119,
             materials.GetRequiredRuntimeIndex(CoreMaterialIds.Gas), 20, 0);
 
-        (string Id, int Left)[] gases =
+        string[] gasIds =
         [
-            (CoreMaterialIds.Steam, 190),
-            (CoreMaterialIds.Smoke, 250),
-            (CoreMaterialIds.Gas, 310),
-            (CoreMaterialIds.Co2, 370)
+            CoreMaterialIds.Steam,
+            CoreMaterialIds.Smoke,
+            CoreMaterialIds.Gas,
+            CoreMaterialIds.Co2
         ];
-        foreach ((string id, int left) in gases)
-        {
-            MaterialDefinition material = materials[id];
-            Fill(cells, width, left, 80, left + 14, 99,
-                material.RuntimeIndex,
-                id == CoreMaterialIds.Steam ? 200 : material.Properties.InitialTemperature,
-                material.Properties.MaximumLifetime);
-        }
+        FillMixedGases(cells, width, 250, 70, 309, 89, materials, gasIds);
 
         // A divider with a bottom opening and two ceiling pockets exercises
         // connected-space traversal without allowing gases through fixtures.
@@ -97,6 +91,37 @@ internal static class GasUniformDistributionAcceptanceScenario
         Fill(cells, width, left, bottom - 3, right, bottom, fixture, 20, 0);
         Fill(cells, width, left, top, left + 3, bottom, fixture, 20, 0);
         Fill(cells, width, right - 3, top, right, bottom, fixture, 20, 0);
+    }
+
+    private static void FillMixedGases(
+        Span<GridCell> cells,
+        int width,
+        int left,
+        int top,
+        int right,
+        int bottom,
+        MaterialRegistry materials,
+        IReadOnlyList<string> ids)
+    {
+        int ordinal = 0;
+        for (int y = top; y <= bottom; y++)
+        {
+            for (int x = left; x <= right; x++)
+            {
+                MaterialDefinition material = materials[ids[ordinal % ids.Count]];
+                cells[y * width + x] = new GridCell
+                {
+                    MaterialIndex = material.RuntimeIndex,
+                    Mass = 1,
+                    IsActive = 1,
+                    Temperature = material.Id == CoreMaterialIds.Steam
+                        ? 200
+                        : material.Properties.InitialTemperature,
+                    Lifetime = material.Properties.MaximumLifetime
+                };
+                ordinal++;
+            }
+        }
     }
 
     private static void Fill(

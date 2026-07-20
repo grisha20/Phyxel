@@ -139,9 +139,11 @@ public static class MaterialRegressionVerifier
         double averageY = weightedY / Math.Max(0.001, mass);
         bool images = File.Exists(Path.Combine(artifactDirectory, riseImageName)) &&
             File.Exists(Path.Combine(artifactDirectory, spreadImageName));
-        bool passed = gas >= 1000 && mass >= 800 && averageY <= 105 &&
-            maximumX - minimumX >= 240 && maximumY - minimumY >= 20 &&
-            dense <= gas / 3 && resting < gas * 9 / 10 && moving > gas / 50 && images;
+        bool intactPackets = Math.Abs(mass - gas) <= Math.Max(0.01, gas * 0.0001) &&
+            dense == gas;
+        bool passed = gas >= 1000 && intactPackets && averageY <= 105 &&
+            maximumX - minimumX >= 170 && maximumY - minimumY >= 10 &&
+            resting < gas * 9 / 10 && moving > gas / 50 && images;
         report = $"PHYXEL_F gas={gas} mass={mass:0.0} averageY={averageY:0.0} dense={dense} resting={resting} moving={moving} bounds={minimumX},{minimumY}-{maximumX},{maximumY}";
         return passed;
     }

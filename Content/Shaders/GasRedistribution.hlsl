@@ -4,9 +4,6 @@ StructuredBuffer<MaterialProperties> Materials : register(t0);
 RWStructuredBuffer<GridCell> Grid : register(u0);
 RWStructuredBuffer<uint> CellMaterials : register(u1);
 
-static const float GasMinimumRepresentableMass = 0.01;
-static const float GasTransferEpsilon = 0.0005;
-
 bool IsOrdinaryGas(GridCell cell)
 {
     if (cell.IsActive == 0)
@@ -23,22 +20,6 @@ bool IsEmpty(GridCell cell)
     return cell.IsActive == 0;
 }
 
-GridCell BuildGasPortion(GridCell source, float mass)
-{
-    if (mass <= 0)
-    {
-        return CreateEmptyCell();
-    }
-    source.Mass = mass;
-    source.IsActive = 1;
-    source.BodyId = 0;
-    source.Pressure = 0;
-    source.RestFrames = 0;
-    source.VelocityX = 0;
-    source.VelocityY = 0;
-    return source;
-}
-
 void StorePair(uint firstIndex, GridCell first, uint secondIndex, GridCell second)
 {
     Grid[firstIndex] = first;
@@ -47,139 +28,95 @@ void StorePair(uint firstIndex, GridCell first, uint secondIndex, GridCell secon
     CellMaterials[secondIndex] = second.IsActive != 0 ? second.MaterialIndex : 0;
 }
 
-void RedistributeSameGasOrEmpty(
-    uint firstIndex,
-    GridCell first,
-    uint secondIndex,
-    GridCell second,
+void MovePacket(
+    uint gasIndex,
+    GridCell gas,
+    uint emptyIndex,
+    bool gasMovesToFirst,
+    bool vertical)
+{
+    gas.BodyId = 0;
+    gas.Pressure = 0;
+    gas.RestFrames = 0;
+    if (vertical)
+    {
+        gas.VelocityX = 0;
+        gas.VelocityY = gasMovesToFirst ? -12 : 12;
+    }
+    else
+    {
+        gas.VelocityX = gasMovesToFirst ? -12 : 12;
+        gas.VelocityY = 0;
+    }
+
+    GridCell empty = CreateEmptyCell();
+    if (gasMovesToFirst)
+    {
+        StorePair(emptyIndex, gas, gasIndex, empty);
+    }
+    else
+    {
+        StorePair(gasIndex, empty, emptyIndex, gas);
+    }
+}
+
+float PacketMoveChance(
+    GridCell gas,
+    bool gasIsFirst,
     bool vertical,
-    float firstShare)
+    bool diagonal)
 {
-    bool firstGas = IsOrdinaryGas(first);
-    bool secondGas = IsOrdinaryGas(second);
-    float firstMass = firstGas ? first.Mass : 0;
-    float secondMass = secondGas ? second.Mass : 0;
-    float totalMass = firstMass + secondMass;
-    if (totalMass <= 0)
+    float flow = saturate(Materials[gas.MaterialIndex].FlowRate);
+    if (vertical || diagonal)
     {
-        return;
+        // Y grows downwards. Buoyancy strongly favours the upper destination,
+        // while a small downward component keeps an enclosed cloud diffusive.
+        return gasIsFirst
+            ? (diagonal ? 0.025 : 0.045) * flow
+            : (diagonal ? 0.32 : 0.90) * flow;
     }
-
-    // A sub-threshold remnant is still real material. Keep it in its current
-    // cell until it can merge instead of silently deleting it.
-    if (totalMass < GasMinimumRepresentableMass)
-    {
-        return;
-    }
-
-    float targetFirst = min(1, totalMass * firstShare);
-    float targetSecond = totalMass - targetFirst;
-    if (targetFirst > 0 && targetSecond > 0 &&
-        targetFirst < GasMinimumRepresentableMass &&
-        targetSecond < GasMinimumRepresentableMass)
-    {
-        // A packet this small cannot be split without creating fractional
-        // liquid fog after condensation. Move the intact packet according to
-        // the same target share instead; the fixed-tick hash avoids any
-        // permanent down/right bias while preserving all mass and energy.
-        bool keepFirst = HashUnitFloat(
-            firstIndex ^ secondIndex ^ (FrameIndex * 0x27d4eb2du)) <
-            targetFirst / totalMass;
-        targetFirst = keepFirst ? totalMass : 0;
-        targetSecond = keepFirst ? 0 : totalMass;
-    }
-    else if (targetFirst < GasMinimumRepresentableMass)
-    {
-        targetSecond += targetFirst;
-        targetFirst = 0;
-    }
-    else if (targetSecond < GasMinimumRepresentableMass)
-    {
-        targetFirst += targetSecond;
-        targetSecond = 0;
-    }
-    if (abs(targetFirst - firstMass) <= GasTransferEpsilon)
-    {
-        return;
-    }
-
-    GridCell source = first;
-    if (!firstGas)
-    {
-        source = second;
-    }
-    float heatCapacity = max(Materials[source.MaterialIndex].HeatCapacity, 0.01);
-    float totalCapacity = heatCapacity * totalMass;
-    float thermalEnergy =
-        (firstGas ? heatCapacity * firstMass * first.Temperature : 0) +
-        (secondGas ? heatCapacity * secondMass * second.Temperature : 0);
-    float mixedTemperature = totalCapacity > 0
-        ? thermalEnergy / totalCapacity
-        : source.Temperature;
-    float mixedLifetime = totalMass > 0
-        ? ((firstGas ? firstMass * first.Lifetime : 0) +
-            (secondGas ? secondMass * second.Lifetime : 0)) / totalMass
-        : source.Lifetime;
-
-    GridCell resolvedFirst = BuildGasPortion(source, targetFirst);
-    GridCell resolvedSecond = BuildGasPortion(source, targetSecond);
-    if (resolvedFirst.IsActive != 0)
-    {
-        resolvedFirst.Temperature = mixedTemperature;
-        resolvedFirst.Lifetime = mixedLifetime;
-        resolvedFirst.VelocityX = vertical ? 0 : -12;
-        resolvedFirst.VelocityY = vertical ? -12 : 0;
-    }
-    if (resolvedSecond.IsActive != 0)
-    {
-        resolvedSecond.Temperature = mixedTemperature;
-        resolvedSecond.Lifetime = mixedLifetime;
-        resolvedSecond.VelocityX = vertical ? 0 : 12;
-        resolvedSecond.VelocityY = vertical ? 12 : 0;
-    }
-    StorePair(firstIndex, resolvedFirst, secondIndex, resolvedSecond);
+    return 0.38 * flow;
 }
 
-bool HorizontalPathAllowsGas(uint firstIndex, uint secondIndex)
-{
-    [loop]
-    for (uint index = firstIndex + 1; index < secondIndex; index++)
-    {
-        GridCell cell = Grid[index];
-        if (!IsEmpty(cell) && !IsOrdinaryGas(cell))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-void ResolveGasPair(uint firstIndex, uint secondIndex, bool vertical, uint seed)
+void ResolvePacketPair(
+    uint firstIndex,
+    uint secondIndex,
+    bool vertical,
+    bool diagonal,
+    uint seed)
 {
     GridCell first = Grid[firstIndex];
     GridCell second = Grid[secondIndex];
     bool firstGas = IsOrdinaryGas(first);
     bool secondGas = IsOrdinaryGas(second);
-    if ((!firstGas && !IsEmpty(first)) || (!secondGas && !IsEmpty(second)) ||
+    bool firstEmpty = IsEmpty(first);
+    bool secondEmpty = IsEmpty(second);
+    if ((!firstGas && !firstEmpty) || (!secondGas && !secondEmpty) ||
         (!firstGas && !secondGas))
     {
         return;
     }
 
-    if (firstGas && secondGas && first.MaterialIndex != second.MaterialIndex)
+    if (firstGas && secondGas)
     {
-        if (vertical)
+        if (first.MaterialIndex == second.MaterialIndex)
+        {
+            return;
+        }
+
+        if (vertical || diagonal)
         {
             float firstDensity = Materials[first.MaterialIndex].Density;
             float secondDensity = Materials[second.MaterialIndex].Density;
-            if (firstDensity > secondDensity + 0.000001)
+            if (firstDensity > secondDensity + 0.000001 &&
+                HashUnitFloat(seed) < (diagonal ? 0.24 : 0.75))
             {
                 first.RestFrames = 0;
                 second.RestFrames = 0;
                 StorePair(firstIndex, second, secondIndex, first);
             }
         }
-        else if (HashUnitFloat(seed) < 0.20)
+        else if (HashUnitFloat(seed) < 0.12)
         {
             first.RestFrames = 0;
             second.RestFrames = 0;
@@ -188,13 +125,25 @@ void ResolveGasPair(uint firstIndex, uint secondIndex, bool vertical, uint seed)
         return;
     }
 
-    RedistributeSameGasOrEmpty(
-        firstIndex,
-        first,
-        secondIndex,
-        second,
-        vertical,
-        vertical ? 0.56 : 0.5);
+    GridCell gas = first;
+    bool gasIsFirst = firstGas;
+    if (!firstGas)
+    {
+        gas = second;
+    }
+    if (HashUnitFloat(seed) >= PacketMoveChance(gas, gasIsFirst, vertical, diagonal))
+    {
+        return;
+    }
+
+    if (gasIsFirst)
+    {
+        MovePacket(firstIndex, first, secondIndex, false, vertical || diagonal);
+    }
+    else
+    {
+        MovePacket(secondIndex, second, firstIndex, true, vertical || diagonal);
+    }
 }
 
 [numthreads(16, 16, 1)]
@@ -208,10 +157,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             return;
         }
         uint firstIndex = FlattenCoordinate(upper);
-        ResolveGasPair(
+        ResolvePacketPair(
             firstIndex,
             firstIndex + Width,
             true,
+            false,
             firstIndex ^ (FrameIndex * 0x9e3779b9u));
         return;
     }
@@ -224,52 +174,32 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             return;
         }
         uint firstIndex = FlattenCoordinate(left);
-        ResolveGasPair(
+        ResolvePacketPair(
             firstIndex,
             firstIndex + 1,
+            false,
             false,
             firstIndex ^ (FrameIndex * 0x85ebca6bu));
         return;
     }
 
-    uint stride = 1u << ((FrameIndex >> 1) & 3u); // 1, 2, 4, 8
-    stride *= stride; // 1, 4, 16, 64
-    // Alternate the long-range block origin every stride cycle. Without the
-    // shifted layout, a thin concentration can remain trapped behind the
-    // permanent 2*stride block boundaries even though the space is connected.
-    uint origin = ((FrameIndex >> 3) & 1u) * stride;
-    uint pairsPerRow = (Width + 1) / 2;
-    if (dispatchThreadId.x >= pairsPerRow || dispatchThreadId.y >= Height)
+    // One disjoint diagonal per 2x2 block adds local isotropic diffusion
+    // without write races or the long-range mass teleportation used before.
+    uint2 block = dispatchThreadId.xy * 2;
+    if (block.x + 1 >= Width || block.y + 1 >= Height)
     {
         return;
     }
-    uint block = dispatchThreadId.x / stride;
-    uint withinBlock = dispatchThreadId.x - block * stride;
-    uint firstX = origin + block * stride * 2 + withinBlock;
-    uint secondX = firstX + stride;
-    if (secondX >= Width)
-    {
-        return;
-    }
-    uint firstIndex = FlattenCoordinate(uint2(firstX, dispatchThreadId.y));
-    uint secondIndex = FlattenCoordinate(uint2(secondX, dispatchThreadId.y));
-    GridCell first = Grid[firstIndex];
-    GridCell second = Grid[secondIndex];
-    bool firstGas = IsOrdinaryGas(first);
-    bool secondGas = IsOrdinaryGas(second);
-    if ((!firstGas && !secondGas) ||
-        (!firstGas && !IsEmpty(first)) ||
-        (!secondGas && !IsEmpty(second)))
-    {
-        return;
-    }
-    if (!HorizontalPathAllowsGas(firstIndex, secondIndex))
-    {
-        return;
-    }
-    ResolveGasPair(
+    bool otherDiagonal = HashUnitFloat(
+        FlattenCoordinate(block) ^ (FrameIndex * 0xc2b2ae35u)) < 0.5;
+    uint2 upper = block + uint2(otherDiagonal ? 1u : 0u, 0u);
+    uint2 lower = block + uint2(otherDiagonal ? 0u : 1u, 1u);
+    uint firstIndex = FlattenCoordinate(upper);
+    uint secondIndex = FlattenCoordinate(lower);
+    ResolvePacketPair(
         firstIndex,
         secondIndex,
         false,
-        firstIndex ^ secondIndex ^ (FrameIndex * 0xc2b2ae35u));
+        true,
+        firstIndex ^ secondIndex ^ (FrameIndex * 0x27d4eb2du));
 }

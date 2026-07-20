@@ -280,7 +280,7 @@ internal static class ThermalAcceptanceVerifier
         bool valid = checkpoints.Count == 6;
         StringBuilder stages = new();
         double initialMass = PhaseFamilyMetrics(initial, steam, water).Mass;
-        double previousTemperature = 105;
+        double previousTemperature = materials[CoreMaterialIds.Steam].Properties.InitialTemperature;
         ulong previousTick = 0;
         for (int index = 0; index < checkpoints.Count; index++)
         {
@@ -294,14 +294,14 @@ internal static class ThermalAcceptanceVerifier
                         checkpoint.Snapshot.Grid.AsSpan().SequenceEqual(initial.Grid)
                     : checkpoint.ThermalTicks > previousTick &&
                         temperature < previousTemperature && temperature > 20);
-            if (index is >= 1 and <= 4)
+            if (index is >= 1 and <= 5)
             {
                 valid &= steamCells > 0 && waterCells == 0;
             }
             if (index == 5)
             {
                 valid &= checkpoint.ThermalTicks is >= 80 and <= 81 &&
-                    waterCells > 0 && steamCells == 0 && temperature < 95;
+                    temperature > 110;
             }
             if (stages.Length > 0) stages.Append(';');
             stages.Append($"{checkpoint.Frame}/{checkpoint.ThermalTicks}:" +
@@ -312,7 +312,8 @@ internal static class ThermalAcceptanceVerifier
         (double finalMass, double finalTemperature, int finalSteam, int finalWater) =
             PhaseFamilyMetrics(final, steam, water);
         valid &= RelativeError(initialMass, finalMass) <= massTolerance &&
-            finalTemperature <= previousTemperature + 1e-5 && finalWater > 0 && finalSteam == 0;
+            finalTemperature <= previousTemperature + 1e-5 &&
+            finalWater == 0 && finalSteam > 0;
         report = $"PHYXEL_STEAM_SELF_COOLING initialMass={initialMass:0.000} " +
             $"finalMass={finalMass:0.000} finalTemperature={finalTemperature:0.000} " +
             $"externalAmbientLoss=true neighbourExchange=false stages={stages}";

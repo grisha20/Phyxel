@@ -35,7 +35,7 @@ internal static class PhaseTransitionMaterialRegressionVerifier
         new(CoreMaterialIds.Ice, MaterialSimulationKind.Solid, MaterialFlags.None,
             0.92f, 0.10f, 0, "#A9DDF2", -5, 0.80f, 2.10f),
         new(CoreMaterialIds.Steam, MaterialSimulationKind.Gas, MaterialFlags.None,
-            0.03f, 0.005f, 1.20f, "#DDEBF0A0", 105, 0.04f, 2.08f),
+            0.03f, 0.005f, 1.20f, "#DDEBF0A0", 122, 0.04f, 2.08f),
         new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
             7.8f, 0.35f, 0, "#8E9CA6", 20, 1, 0.50f),
         new(CoreMaterialIds.Stone, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
@@ -482,7 +482,7 @@ internal static class PhaseTransitionMaterialRegressionVerifier
                     true, 2, CoreMaterialIds.Water);
                 break;
             case CoreMaterialIds.Steam:
-                VerifyRule(registry, material.Id, true, 95, CoreMaterialIds.Water,
+                VerifyRule(registry, material.Id, true, 98, CoreMaterialIds.Water,
                     false, 0, null);
                 break;
             default:

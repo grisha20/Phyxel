@@ -157,34 +157,58 @@ float3 HotMaterialIncandescence(GridCell cell)
         redHeat * 0.48;
 }
 
-float LiquidCoverage(uint2 coordinate, out float3 liquidColor)
+void FluidCoverage(
+    uint2 coordinate,
+    out float liquidCoverage,
+    out float3 liquidColor,
+    out float gasCoverage,
+    out float3 gasColor)
 {
-    float coverage = 0;
+    float liquidAmount = 0;
+    float gasAmount = 0;
     float weight = 0;
-    float3 weightedColor = 0;
+    float3 weightedLiquidColor = 0;
+    float3 weightedGasColor = 0;
     for (int y = -1; y <= 1; y++)
     {
         for (int x = -1; x <= 1; x++)
         {
             int2 sample = int2(coordinate) + int2(x, y);
-            if (sample.x < 0 || sample.y < 0 || sample.x >= int(Width) || sample.y >= int(Height))
+            if (sample.x < 0 || sample.y < 0 ||
+                sample.x >= int(Width) || sample.y >= int(Height))
             {
                 continue;
             }
-            float sampleWeight = x == 0 && y == 0 ? 4 : x == 0 || y == 0 ? 2 : 1;
-            GridCell cell = Grid[FlattenCoordinate(uint2(sample))];
-            if (cell.IsActive != 0 &&
-                Materials[cell.MaterialIndex].SimulationKind == SimulationKindLiquid)
+            float sampleWeight = x == 0 && y == 0 ? 4 :
+                x == 0 || y == 0 ? 2 : 1;
+            GridCell sampleCell = Grid[FlattenCoordinate(uint2(sample))];
+            if (sampleCell.IsActive != 0)
             {
-                float amount = saturate(cell.Mass) * sampleWeight;
-                coverage += amount;
-                weightedColor += MaterialColor(cell.MaterialIndex).rgb * amount;
+                MaterialProperties material = Materials[sampleCell.MaterialIndex];
+                if (material.SimulationKind == SimulationKindLiquid)
+                {
+                    float amount = saturate(sampleCell.Mass) * sampleWeight;
+                    liquidAmount += amount;
+                    weightedLiquidColor +=
+                        MaterialColor(sampleCell.MaterialIndex).rgb * amount;
+                }
+                else if (material.SimulationKind == SimulationKindGas &&
+                    (material.Flags & MaterialFlagFlame) == 0)
+                {
+                    float amount = sqrt(saturate(sampleCell.Mass)) *
+                        material.ColorA * sampleWeight;
+                    gasAmount += amount;
+                    weightedGasColor +=
+                        MaterialColor(sampleCell.MaterialIndex).rgb * amount;
+                }
             }
             weight += sampleWeight;
         }
     }
-    liquidColor = coverage > 0 ? weightedColor / coverage : 0;
-    return coverage / max(weight, 1);
+    liquidCoverage = liquidAmount / max(weight, 1);
+    liquidColor = liquidAmount > 0 ? weightedLiquidColor / liquidAmount : 0;
+    gasCoverage = gasAmount / max(weight, 1);
+    gasColor = gasAmount > 0 ? weightedGasColor / gasAmount : 0;
 }
 
 void Collect(GridCell cell)
@@ -237,7 +261,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         uint kind = Materials[cell.MaterialIndex].SimulationKind;
         if (IsFluidMaterial(kind))
         {
-            float fill = kind == SimulationKindLiquid ? 1 : sqrt(saturate(cell.Mass));
+            float fill = sqrt(saturate(cell.Mass));
+            if (kind == SimulationKindGas && !IsFlameCell(cell))
+            {
+                fill *= color.a * 0.72;
+            }
             color.rgb = lerp(float3(0.035, 0.041, 0.047), color.rgb, fill);
         }
         if (IsFlameCell(cell))
@@ -248,11 +276,18 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     else
     {
+        float liquidCoverage;
         float3 liquidColor;
-        float coverage = LiquidCoverage(coordinate, liquidColor);
-        if (coverage > 0.02)
+        float gasCoverage;
+        float3 gasColor;
+        FluidCoverage(coordinate, liquidCoverage, liquidColor, gasCoverage, gasColor);
+        if (liquidCoverage > 0.02)
         {
-            color.rgb = lerp(color.rgb, liquidColor, saturate(coverage * 2.5));
+            color.rgb = lerp(color.rgb, liquidColor, saturate(liquidCoverage * 2.5));
+        }
+        if (gasCoverage > 0.01)
+        {
+            color.rgb = lerp(color.rgb, gasColor, saturate(gasCoverage * 1.35));
         }
     }
     float3 glow = max(FlameGlow(coordinate), FlameTrail(coordinate));
