@@ -69,6 +69,7 @@ public sealed class UiValueSlider
     public float Step { get; }
     public float Value { get; set; }
     public Rectangle Bounds { get; set; }
+    public bool IsDragging => dragging;
 
     public bool Update(RawInputSnapshot input)
     {

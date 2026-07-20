@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Globalization;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Core;
@@ -21,249 +19,6 @@ public readonly record struct UiFrameActions(
 
 public sealed class SandboxUiCoordinator
 {
-    private readonly MaterialRegistry materialRegistry;
-    private readonly SpriteFont font;
-    private readonly Texture2D pixel;
-    private readonly Texture2D brushOutline;
-    private readonly UiPanelBackdropRenderer panelRenderer;
-    private readonly List<(ushort RuntimeIndex, UiIconButton Button)> materialButtons = [];
-    private readonly UiIconButton pauseButton = new(UiLocalizationProvider.Pause);
-    private readonly UiIconButton clearButton = new(UiLocalizationProvider.Clear);
-    private readonly UiIconButton saveButton = new(UiLocalizationProvider.Save);
-    private readonly UiIconButton loadButton = new(UiLocalizationProvider.Load);
-    private readonly UiIconButton solidGravityButton = new(UiLocalizationProvider.SolidGravity);
-    private readonly UiIconButton hydraulicsButton = new(UiLocalizationProvider.HydraulicPressure);
-    private readonly UiIconButton temperatureButton = new(UiLocalizationProvider.TemperatureTool)
-    {
-        AccentColor = new Color(232, 132, 72)
-    };
-    private readonly UiValueSlider brushSlider;
-    private readonly UiValueSlider densitySlider;
-    private readonly UiValueSlider temperatureSlider;
-    private readonly UiValueSlider scaleSlider;
-    private ushort selectedMaterial;
-    private float clearConfirmationRemaining;
-    private bool compactLayout;
-
-    public SandboxUiCoordinator(
-        MaterialRegistry materialRegistry,
-        SpriteFont font,
-        GpuResourceLifecycleManager resources)
-    {
-        this.materialRegistry = materialRegistry;
-        this.font = font;
-        pixel = resources.PixelTexture;
-        brushOutline = resources.BrushOutlineTexture;
-        panelRenderer = new UiPanelBackdropRenderer(resources.PixelTexture, resources.CircleTexture);
-        foreach (MaterialDefinition material in materialRegistry.SelectableMaterials)
-        {
-            UiIconButton button = new(material.Name)
-            {
-                AccentColor = material.Color
-            };
-            materialButtons.Add((material.RuntimeIndex, button));
-        }
-
-        brushSlider = new UiValueSlider(UiLocalizationProvider.BrushSize, 1, 96, 1, 18, " px");
-        densitySlider = new UiValueSlider(UiLocalizationProvider.SpawnDensity, 5, 100, 1, 82, "%");
-        temperatureSlider = new UiValueSlider(
-            UiLocalizationProvider.TargetTemperature,
-            -200,
-            2000,
-            10,
-            500,
-            " °C",
-            "0");
-        scaleSlider = new UiValueSlider(
-            "Масштаб симуляции",
-            [25, 35, 50, 75, 85, 100],
-            SimulationSettings.DefaultScale * 100,
-            "%",
-            "0");
-        SelectedMaterial = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
-    }
-
-    public ushort SelectedMaterial
-    {
-        get => selectedMaterial;
-        set
-        {
-            selectedMaterial = value;
-            TemperatureToolActive = false;
-        }
-    }
-    public bool TemperatureToolActive { get; private set; }
-    public float TargetTemperature => temperatureSlider.Value;
-    public Rectangle CanvasBounds { get; private set; }
-    public Rectangle SidePanelBounds { get; private set; }
-    public Rectangle InfoPanelBounds { get; private set; }
-    public bool PointerConsumed { get; private set; }
-
-    public UiFrameActions Update(RawInputSnapshot input, Viewport viewport, SimulationSettings settings)
-    {
-        Layout(viewport);
-        PointerConsumed = SidePanelBounds.Contains(input.MousePosition) || InfoPanelBounds.Contains(input.MousePosition);
-        if (input.WheelDelta != 0 && CanvasBounds.Contains(input.MousePosition) && !PointerConsumed)
-        {
-            settings.BrushRadius = Math.Clamp(settings.BrushRadius + Math.Sign(input.WheelDelta) * 2, 1, 96);
-        }
-
-        clearConfirmationRemaining = Math.Max(0f, clearConfirmationRemaining - input.DeltaSeconds);
-        for (int index = 0; index < materialButtons.Count; index++)
-        {
-            (ushort runtimeIndex, UiIconButton button) = materialButtons[index];
-            button.Active = !TemperatureToolActive && runtimeIndex == SelectedMaterial;
-            if (button.Update(input))
-            {
-                SelectedMaterial = runtimeIndex;
-                TemperatureToolActive = false;
-            }
-        }
-
-        temperatureButton.Active = TemperatureToolActive;
-        if (temperatureButton.Update(input))
-        {
-            TemperatureToolActive = true;
-        }
-
-        pauseButton.Active = settings.Paused;
-        pauseButton.Label = compactLayout
-            ? settings.Paused ? "Продолжить" : "Пауза"
-            : settings.Paused ? UiLocalizationProvider.Continue : UiLocalizationProvider.Pause;
-        if (pauseButton.Update(input))
-        {
-            settings.Paused = !settings.Paused;
-        }
-
-        solidGravityButton.Active = settings.SolidGravity;
-        bool gravityChanged = false;
-        if (solidGravityButton.Update(input))
-        {
-            settings.SolidGravity = !settings.SolidGravity;
-            solidGravityButton.Active = settings.SolidGravity;
-            gravityChanged = true;
-        }
-
-        hydraulicsButton.Active = settings.HydraulicPressure;
-        bool hydraulicsChanged = false;
-        if (hydraulicsButton.Update(input))
-        {
-            settings.HydraulicPressure = !settings.HydraulicPressure;
-            hydraulicsButton.Active = settings.HydraulicPressure;
-            hydraulicsChanged = true;
-        }
-
-        bool clearRequested = false;
-        if (clearButton.Update(input))
-        {
-            if (clearConfirmationRemaining > 0f)
-            {
-                clearRequested = true;
-                clearConfirmationRemaining = 0f;
-            }
-            else
-            {
-                clearConfirmationRemaining = 3f;
-            }
-        }
-
-        clearButton.Label = clearConfirmationRemaining > 0f
-            ? compactLayout ? "Подтвердить" : UiLocalizationProvider.ConfirmClear
-            : compactLayout ? "Очистить" : UiLocalizationProvider.Clear;
-        solidGravityButton.Label = UiLocalizationProvider.SolidGravity;
-        hydraulicsButton.Label = compactLayout ? "Сосуды" : UiLocalizationProvider.HydraulicPressure;
-        saveButton.Label = compactLayout ? "Сохранить" : UiLocalizationProvider.Save;
-        loadButton.Label = compactLayout ? "Загрузить" : UiLocalizationProvider.Load;
-        bool saveRequested = saveButton.Update(input) || input.SavePressed;
-        bool loadRequested = loadButton.Update(input) || input.LoadPressed;
-        if (brushSlider.Update(input))
-        {
-            settings.BrushRadius = (int)brushSlider.Value;
-        }
-
-        if (TemperatureToolActive)
-        {
-            temperatureSlider.Update(input);
-        }
-        else if (densitySlider.Update(input))
-        {
-            settings.SpawnDensity = densitySlider.Value / 100f;
-        }
-
-        bool scaleChanged = scaleSlider.Update(input);
-        if (scaleChanged)
-        {
-            settings.ApplyScale(scaleSlider.Value / 100f);
-        }
-
-        brushSlider.Value = settings.BrushRadius;
-        densitySlider.Value = settings.SpawnDensity * 100f;
-        scaleSlider.Value = settings.Scale * 100f;
-        return new UiFrameActions(
-            clearRequested,
-            saveRequested,
-            loadRequested,
-            scaleChanged,
-            gravityChanged,
-            hydraulicsChanged);
-    }
-
-    public void Draw(
-        SpriteBatch spriteBatch,
-        SimulationSettings settings,
-        SimulationStatistics statistics,
-        double framesPerSecond,
-        string transientStatus,
-        TemperatureProbeResult? temperatureProbe)
-    {
-        panelRenderer.Draw(spriteBatch, SidePanelBounds, 12);
-        panelRenderer.Draw(spriteBatch, InfoPanelBounds, 8);
-        spriteBatch.DrawString(
-            font,
-            UiLocalizationProvider.Materials,
-            new Vector2(SidePanelBounds.X + 14, SidePanelBounds.Y + 12),
-            new Color(170, 170, 170));
-        foreach ((ushort _, UiIconButton button) in materialButtons)
-        {
-            button.Draw(spriteBatch, font, panelRenderer, pixel, true);
-        }
-        temperatureButton.Draw(spriteBatch, font, panelRenderer, pixel);
-
-        brushSlider.Draw(spriteBatch, font, panelRenderer, pixel);
-        if (TemperatureToolActive)
-        {
-            temperatureSlider.Draw(spriteBatch, font, panelRenderer, pixel);
-        }
-        else
-        {
-            densitySlider.Draw(spriteBatch, font, panelRenderer, pixel);
-        }
-        scaleSlider.Draw(spriteBatch, font, panelRenderer, pixel);
-        pauseButton.Draw(spriteBatch, font, panelRenderer, pixel);
-        solidGravityButton.Draw(spriteBatch, font, panelRenderer, pixel);
-        hydraulicsButton.Draw(spriteBatch, font, panelRenderer, pixel);
-        clearButton.Draw(spriteBatch, font, panelRenderer, pixel);
-        saveButton.Draw(spriteBatch, font, panelRenderer, pixel);
-        loadButton.Draw(spriteBatch, font, panelRenderer, pixel);
-        string selectedName = TemperatureToolActive
-            ? UiLocalizationProvider.TemperatureTool
-            : materialRegistry[SelectedMaterial].Name;
-        string gravityState = settings.SolidGravity ? "вкл" : "выкл";
-        string hydraulicsState = settings.HydraulicPressure ? "вкл" : "выкл";
-        string probeInfo = FormatTemperatureProbe(materialRegistry, temperatureProbe);
-        string info = $"FPS {framesPerSecond,5:0}   Частицы {statistics.ActiveCells:N0}   Твердые {statistics.SolidCells:N0}   Выбрано: {selectedName}   {probeInfo}   Кисть: {settings.BrushRadius} px   Гравитация: {gravityState}   Сосуды: {hydraulicsState}";
-        spriteBatch.DrawString(font, info, new Vector2(InfoPanelBounds.X + 12, InfoPanelBounds.Y + 9), Color.White);
-        if (!string.IsNullOrWhiteSpace(transientStatus))
-        {
-            Vector2 statusSize = font.MeasureString(transientStatus);
-            spriteBatch.DrawString(
-                font,
-                transientStatus,
-                new Vector2(InfoPanelBounds.Right - statusSize.X - 12, InfoPanelBounds.Y + 9),
-                new Color(128, 198, 238));
-        }
-    }
-
     public static string FormatTemperatureProbe(
         MaterialRegistry materialRegistry,
         TemperatureProbeResult? probe)
@@ -285,8 +40,197 @@ public sealed class SandboxUiCoordinator
         }
         string temperature = value.Temperature.ToString(
             "0.0",
-            CultureInfo.GetCultureInfo("ru-RU"));
+            System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
         return $"Материал: {material.Name}   Температура: {temperature} °C";
+    }
+    private readonly MaterialRegistry materialRegistry;
+    private readonly SpriteFont font;
+    private readonly Texture2D pixel;
+    private readonly Texture2D brushOutline;
+    private readonly UiPanelBackdropRenderer panelRenderer;
+
+    private readonly UiTopBar topBar;
+    private readonly UiLeftToolbar leftToolbar = new();
+    private readonly UiPropertiesPanel propertiesPanel = new();
+    private readonly UiCategoryPalette categoryPalette;
+    private readonly UiStatusBar statusBar = new();
+
+    private ushort selectedMaterial;
+    private UiLayoutBounds currentLayout;
+
+    public SandboxUiCoordinator(
+        MaterialRegistry materialRegistry,
+        SpriteFont font,
+        GpuResourceLifecycleManager resources)
+    {
+        this.materialRegistry = materialRegistry;
+        this.font = font;
+        pixel = resources.PixelTexture;
+        brushOutline = resources.BrushOutlineTexture;
+        panelRenderer = new UiPanelBackdropRenderer(resources.PixelTexture, resources.CircleTexture);
+        topBar = new UiTopBar(font);
+        categoryPalette = new UiCategoryPalette(materialRegistry, font);
+
+        SelectedMaterial = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
+    }
+
+    public ushort SelectedMaterial
+    {
+        get => selectedMaterial;
+        set
+        {
+            selectedMaterial = value;
+            if (leftToolbar.ActiveTool == PhyxelToolId.Temperature)
+            {
+                leftToolbar.ActiveTool = PhyxelToolId.Brush;
+            }
+        }
+    }
+
+    public bool TemperatureToolActive => leftToolbar.ActiveTool == PhyxelToolId.Temperature;
+    public float TargetTemperature => propertiesPanel.TargetTemperature;
+
+    public Rectangle CanvasBounds => currentLayout.SimulationCanvas;
+    public Rectangle SidePanelBounds => currentLayout.RightPanel;
+    public Rectangle InfoPanelBounds => currentLayout.StatusBar;
+    public bool PointerConsumed { get; private set; }
+
+    public UiFrameActions Update(RawInputSnapshot input, Viewport viewport, SimulationSettings settings)
+    {
+        currentLayout = UiLayoutCalculator.Calculate(viewport);
+
+        // 1. Top bar update
+        bool paused = settings.Paused;
+        topBar.Update(input, currentLayout.TopBar, ref paused);
+        settings.Paused = paused;
+
+        // 2. Left toolbar update
+        leftToolbar.Update(input, currentLayout.LeftToolbar, out bool leftConsumed);
+
+        // 3. Properties panel update
+        MaterialDefinition currentMatDef = materialRegistry.TryGet(SelectedMaterial, out MaterialDefinition mat)
+            ? mat
+            : materialRegistry[CoreMaterialIds.Sand];
+
+        propertiesPanel.Update(
+            input,
+            currentLayout.RightPanel,
+            settings,
+            leftToolbar.ActiveTool,
+            currentMatDef,
+            out bool rightConsumed);
+
+        // Synchronize Temperature tool click
+        if (leftToolbar.ActiveTool == PhyxelToolId.Eraser)
+        {
+            SelectedMaterial = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Eraser);
+        }
+
+        // 4. Category palette update
+        ushort? newlySelected = categoryPalette.Update(
+            input,
+            currentLayout.BottomPalette,
+            SelectedMaterial,
+            TemperatureToolActive,
+            out bool bottomConsumed);
+
+        if (newlySelected.HasValue)
+        {
+            SelectedMaterial = newlySelected.Value;
+            leftToolbar.ActiveTool = PhyxelToolId.Brush;
+        }
+
+        bool topConsumed = currentLayout.TopBar.Contains(input.MousePosition);
+        bool statusConsumed = currentLayout.StatusBar.Contains(input.MousePosition);
+
+        PointerConsumed = topConsumed || leftConsumed || rightConsumed || bottomConsumed || statusConsumed;
+
+        // Mouse Wheel brush size inside Canvas
+        if (input.WheelDelta != 0 && CanvasBounds.Contains(input.MousePosition) && !PointerConsumed)
+        {
+            settings.BrushRadius = Math.Clamp(settings.BrushRadius + Math.Sign(input.WheelDelta) * 2, 1, 96);
+        }
+
+        bool clearRequested = propertiesPanel.ClearRequested;
+        bool saveRequested = topBar.SaveRequested || input.SavePressed;
+        bool loadRequested = topBar.LoadRequested || input.LoadPressed;
+
+        return new UiFrameActions(
+            clearRequested,
+            saveRequested,
+            loadRequested,
+            propertiesPanel.ScaleChanged,
+            propertiesPanel.GravityToggled,
+            propertiesPanel.HydraulicsToggled);
+    }
+
+    public void Draw(
+        SpriteBatch spriteBatch,
+        SimulationSettings settings,
+        SimulationStatistics statistics,
+        double framesPerSecond,
+        string transientStatus,
+        TemperatureProbeResult? temperatureProbe)
+    {
+        topBar.RecordFrameTime((float)(1.0 / Math.Max(1.0, framesPerSecond)));
+
+        // 1. Top Bar
+        topBar.Draw(
+            spriteBatch,
+            font,
+            panelRenderer,
+            pixel,
+            currentLayout.TopBar,
+            framesPerSecond,
+            settings.Paused);
+
+        // 2. Left Toolbar
+        leftToolbar.Draw(
+            spriteBatch,
+            font,
+            panelRenderer,
+            pixel,
+            currentLayout.LeftToolbar);
+
+        // 3. Properties Panel
+        MaterialDefinition currentMatDef = materialRegistry.TryGet(SelectedMaterial, out MaterialDefinition mat)
+            ? mat
+            : materialRegistry[CoreMaterialIds.Sand];
+
+        propertiesPanel.Draw(
+            spriteBatch,
+            font,
+            panelRenderer,
+            pixel,
+            currentLayout.RightPanel,
+            leftToolbar.ActiveTool,
+            currentMatDef);
+
+        // 4. Bottom Category Palette
+        categoryPalette.Draw(
+            spriteBatch,
+            font,
+            panelRenderer,
+            pixel,
+            currentLayout.BottomPalette,
+            SelectedMaterial,
+            TemperatureToolActive);
+
+        // 5. Bottom Status Bar
+        statusBar.Draw(
+            spriteBatch,
+            font,
+            panelRenderer,
+            pixel,
+            currentLayout.StatusBar,
+            materialRegistry,
+            SelectedMaterial,
+            TemperatureToolActive,
+            temperatureProbe,
+            statistics,
+            framesPerSecond,
+            settings.Scale,
+            settings.Paused);
     }
 
     public void DrawBrushIndicator(
@@ -296,7 +240,7 @@ public sealed class SandboxUiCoordinator
         SimulationSettings settings,
         bool eraseOverride)
     {
-        if (!worldBounds.Contains(pointer))
+        if (!worldBounds.Contains(pointer) || PointerConsumed)
         {
             return;
         }
@@ -304,85 +248,18 @@ public sealed class SandboxUiCoordinator
         float pixelScale = worldBounds.Width / (float)Math.Max(1, settings.Width);
         int diameter = Math.Max(3, (int)MathF.Round((settings.BrushRadius * 2 + 1) * pixelScale));
         Rectangle bounds = new(pointer.X - diameter / 2, pointer.Y - diameter / 2, diameter, diameter);
+
         bool erasing = eraseOverride ||
-            !TemperatureToolActive &&
+            (!TemperatureToolActive &&
             (MaterialSimulationKind)materialRegistry[SelectedMaterial].Properties.SimulationKind ==
-                MaterialSimulationKind.Tool;
+                MaterialSimulationKind.Tool);
+
         Color color = erasing
             ? new Color(255, 96, 96, 190)
             : TemperatureToolActive
                 ? new Color(255, 154, 86, 190)
                 : new Color(210, 235, 255, 175);
+
         spriteBatch.Draw(brushOutline, bounds, color);
-    }
-
-    private void Layout(Viewport viewport)
-    {
-        compactLayout = viewport.Height < 750;
-        float scale = Math.Clamp(viewport.Height / 1080f, 0.72f, 1.35f);
-        int margin = Math.Max(8, (int)(12 * scale));
-        int sideWidth = Math.Max(206, (int)(220 * scale));
-        int infoHeight = Math.Max(38, (int)(40 * scale));
-        SidePanelBounds = new Rectangle(
-            viewport.Width - sideWidth - margin,
-            margin,
-            sideWidth,
-            viewport.Height - infoHeight - margin * 3);
-        InfoPanelBounds = new Rectangle(
-            margin,
-            viewport.Height - infoHeight - margin,
-            viewport.Width - margin * 2,
-            infoHeight);
-        int compactToolbarHeight = compactLayout ? 40 : 0;
-        CanvasBounds = new Rectangle(
-            0,
-            compactToolbarHeight,
-            SidePanelBounds.X - margin,
-            InfoPanelBounds.Y - margin - compactToolbarHeight);
-        int innerX = SidePanelBounds.X + 10;
-        int innerWidth = SidePanelBounds.Width - 20;
-        int cursorY = SidePanelBounds.Y + 42;
-        int buttonHeight = compactLayout ? 30 : Math.Max(36, (int)(40 * scale));
-        int buttonSpacing = compactLayout ? 3 : 5;
-        foreach ((ushort _, UiIconButton button) in materialButtons)
-        {
-            button.Bounds = new Rectangle(innerX, cursorY, innerWidth, buttonHeight);
-            cursorY += buttonHeight + buttonSpacing;
-        }
-        temperatureButton.Bounds = new Rectangle(innerX, cursorY, innerWidth, buttonHeight);
-        cursorY += buttonHeight + buttonSpacing;
-
-        cursorY += compactLayout ? 24 : 28;
-        brushSlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
-        cursorY += compactLayout ? 49 : 64;
-        densitySlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
-        temperatureSlider.Bounds = densitySlider.Bounds;
-        cursorY += compactLayout ? 49 : 64;
-        scaleSlider.Bounds = new Rectangle(innerX + 4, cursorY, innerWidth - 8, 22);
-        UiIconButton[] serviceButtons =
-            [pauseButton, solidGravityButton, hydraulicsButton, clearButton, saveButton, loadButton];
-        if (compactLayout)
-        {
-            int toolbarWidth = CanvasBounds.Width;
-            int toolbarGap = 4;
-            int serviceWidth = (toolbarWidth - toolbarGap * (serviceButtons.Length - 1)) / serviceButtons.Length;
-            for (int index = 0; index < serviceButtons.Length; index++)
-            {
-                serviceButtons[index].Bounds = new Rectangle(
-                    index * (serviceWidth + toolbarGap),
-                    4,
-                    serviceWidth,
-                    32);
-            }
-
-            return;
-        }
-
-        cursorY += 45;
-        foreach (UiIconButton button in serviceButtons)
-        {
-            button.Bounds = new Rectangle(innerX, cursorY, innerWidth, buttonHeight);
-            cursorY += buttonHeight + 5;
-        }
     }
 }

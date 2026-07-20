@@ -1,2 +1,4 @@
-PHYXEL_K_SAVED_SPIRAL water=331350 upperWater=300010 bottomWater=31340 tankTop=232 outerRise=0 firstBend=7 innerRise=6087 moving=18 pressureMoves=0 pressurePlans=0 farColumnMoves=0
+PHYXEL_COAL_TYPES dry=2/2,000/y=90,0/span=54/run=1 wet=262/262,000/y=222,9/span=139/run=12 stone=132/132,000/y=221,3/span=21/run=12 externalLight=0/0,000/y=0,0/span=0/run=0 externalHeavy=0/0,000/y=0,0/span=0/run=0 charcoalMass=264,000/264,000 roundTrip=True
+PHYXEL_COAL_TYPES_FAILURE acceptance light/heavy granular materials are missing
+PHYXEL_ACCEPTANCE_METRICS size=480x270 fps=358,9 thermalGpuMs=0,0961/0,0911/0,1004 samples=51 contactGpuMs=0,0297/0,0287/0,0307 contactSamples=51 gasGpuMs=0,1034/0,1024/0,1157 gasSamples=49 phaseGpuMs=0,0293/0,0287/0,0328 phaseSamples=51 phaseDispatches=247 phaseMaxPerFrame=1 phaseSummaryReadbacks=183 phaseFallbackWakeUps=61 combustionGpuMs=0,0658/0,0645/0,0727 combustionSamples=51 combustionDispatches=247 combustionSummaryReadbacks=183 probeGpuMs=0,0000/0,0000/0,0000 probeSamples=0
 PHYXEL_ACCEPTANCE_FAILED

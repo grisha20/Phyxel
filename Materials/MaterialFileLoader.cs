@@ -56,6 +56,7 @@ internal static partial class MaterialFileLoader
     {
         public int Order { get; set; }
         public bool Hidden { get; set; }
+        public string? Category { get; set; }
     }
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
@@ -371,7 +372,8 @@ internal static partial class MaterialFileLoader
                     : 0,
                 color),
             ui.Order,
-            ui.Hidden)
+            ui.Hidden,
+            ui.Category)
         {
             PhaseTransitions = transitions,
             Combustion = combustion,

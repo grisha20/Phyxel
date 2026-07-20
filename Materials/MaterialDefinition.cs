@@ -104,7 +104,8 @@ public sealed record MaterialDefinition(
     Color Color,
     MaterialProperties Properties,
     int UiOrder = 0,
-    bool Hidden = false)
+    bool Hidden = false,
+    string? Category = null)
 {
     public MaterialTransitionDefinitions? PhaseTransitions { get; init; }
     public MaterialCombustionDefinition? Combustion { get; init; }
