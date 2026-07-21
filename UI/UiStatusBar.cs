@@ -55,11 +55,11 @@ public sealed class UiStatusBar
         spriteBatch.Draw(pixel, new Rectangle(statusX - 12, bounds.Y + 7, 1, bounds.Height - 14), UiTheme.BorderColor);
         int dotSize = 8;
         spriteBatch.Draw(pixel, new Rectangle(statusX, bounds.Center.Y - dotSize / 2, dotSize, dotSize), statusColor);
-        spriteBatch.DrawString(font, statusBlock, new Vector2(statusX + 14, textY), statusColor);
+        spriteBatch.DrawString(font, statusBlock, new Vector2(statusX + 14, textY), UiTheme.TextPrimary);
 
         x = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, tempProbeText, UiTheme.TextSecondary);
-        x = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, $"Частиц: {statistics.ActiveCells:N0}", UiTheme.TextSecondary);
         x = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, $"Масштаб: {currentScale:0.00}x", UiTheme.TextSecondary);
+        x = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, $"Частиц: {statistics.ActiveCells:N0}", UiTheme.TextSecondary);
         _ = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, $"{displayedFps:0} FPS", UiTheme.TextMuted);
     }
 

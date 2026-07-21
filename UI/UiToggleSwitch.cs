@@ -40,12 +40,6 @@ public sealed class UiToggleSwitch
             renderer.DrawRoundedRectangle(spriteBatch, Bounds, rowColor, 5);
         }
 
-        spriteBatch.DrawString(
-            font,
-            Label,
-            new Vector2(Bounds.X + 4, Bounds.Center.Y - font.LineSpacing / 2f),
-            UiTheme.TextSecondary);
-
         int switchHeight = Math.Clamp(Bounds.Height - 12, 20, 28);
         int switchWidth = (int)(switchHeight * 1.75f);
         Rectangle track = new(
@@ -53,6 +47,20 @@ public sealed class UiToggleSwitch
             Bounds.Center.Y - switchHeight / 2,
             switchWidth,
             switchHeight);
+        Vector2 labelSize = font.MeasureString(Label);
+        int availableLabelWidth = Math.Max(1, track.X - Bounds.X - 12);
+        float labelScale = Math.Clamp(availableLabelWidth / Math.Max(1f, labelSize.X), 0.76f, 1f);
+        spriteBatch.DrawString(
+            font,
+            Label,
+            new Vector2(Bounds.X + 4, Bounds.Center.Y - labelSize.Y * labelScale / 2f),
+            UiTheme.TextSecondary,
+            0,
+            Vector2.Zero,
+            labelScale,
+            SpriteEffects.None,
+            0);
+
         renderer.DrawRoundedRectangle(
             spriteBatch,
             track,

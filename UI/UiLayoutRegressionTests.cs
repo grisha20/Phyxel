@@ -168,6 +168,9 @@ public static class UiLayoutRegressionTests
                     "Property switches overlap.");
                 Require(!panel.ResetButtonBounds.Intersects(panel.ClearButtonBounds),
                     "Property action buttons overlap.");
+                Require(!panel.ResetButtonBounds.Intersects(panel.HydraulicsToggleBounds) &&
+                        !panel.ClearButtonBounds.Intersects(panel.HydraulicsToggleBounds),
+                    "Property action buttons overlap the simulation switches.");
 
                 UiLeftToolbar toolbar = new();
                 foreach (ToolDefinition tool in UiLeftToolbar.Tools)
@@ -256,7 +259,25 @@ public static class UiLayoutRegressionTests
         Require(!UiPropertiesPanel.ShowsBrushControls(PhyxelToolId.Pan),
             "Camera must not show brush-specific controls.");
 
-        Console.WriteLine("[PASS] Properties visibility, Reset, compact actions, and one-frame ScaleChanged.");
+        panel.Update(Input(new Point(-1, -1)), layout.RightPanel, font, settings,
+            PhyxelToolId.Pan, sand, out _);
+        Require(IsInside(panel.ResetViewButtonBounds, layout.RightPanel),
+            "Camera reset-view button escaped properties panel.");
+        panel.Update(
+            Input(panel.ResetViewButtonBounds.Center, leftDown: true, leftPressed: true),
+            layout.RightPanel,
+            font,
+            settings,
+            PhyxelToolId.Pan,
+            sand,
+            out _);
+        Require(panel.ResetViewRequested && !panel.ResetRequested,
+            "Camera reset-view action was not distinct from physics restart.");
+        panel.Update(Input(new Point(-1, -1)), layout.RightPanel, font, settings,
+            PhyxelToolId.Pan, sand, out _);
+        Require(!panel.ResetViewRequested, "Camera reset-view action persisted beyond one frame.");
+
+        Console.WriteLine("[PASS] Properties visibility, physics restart, camera reset, compact actions, and one-frame ScaleChanged.");
     }
 
     private static void TestToolAndMaterialPersistence(
@@ -446,7 +467,21 @@ public static class UiLayoutRegressionTests
             "Aspect-fill crop escaped preview texture.");
         Require(Math.Abs(source.Width / (float)source.Height - destination.Width / (float)destination.Height) < 0.02f,
             "Aspect-fill crop distorted preview proportions.");
-        Console.WriteLine("[PASS] Material card title truncation and aspect-fill crop.");
+
+        (string wrapped, float titleScale) = UiCategoryPalette.FitCardTitle(font, "Древесный уголь", 120);
+        Require(wrapped.Contains('\n') && !wrapped.Contains('…') && titleScale is >= 0.72f and <= 1f,
+            "Two-word material title did not use a readable two-line layout.");
+        foreach (string line in wrapped.Split('\n'))
+        {
+            Require(font.MeasureString(line).X * titleScale <= 120.5f,
+                "Wrapped material title escaped its card width.");
+        }
+
+        UiLayoutBounds layout = UiLayoutCalculator.Calculate(new Viewport(0, 0, 1920, 1080), 1f);
+        int capacity = UiCategoryPalette.CalculateVisibleCardCapacity(layout.BottomPalette, font);
+        Require(capacity is >= 8 and <= 11,
+            $"1920px material palette capacity must stay within 8-11 cards, got {capacity}.");
+        Console.WriteLine($"[PASS] Material titles, aspect-fill crop, and 1920px capacity ({capacity} cards).");
     }
 
     private static void TestMaterialCategorization(MaterialRegistry registry)

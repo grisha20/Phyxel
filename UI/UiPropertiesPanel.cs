@@ -76,9 +76,10 @@ public sealed class UiPropertiesPanel
         int padding = 14;
         int innerX = bounds.X + padding;
         int innerWidth = bounds.Width - padding * 2;
-        int cardHeight = Math.Clamp(font.LineSpacing + 24, 46, 58);
-        toolCardBounds = new Rectangle(innerX, bounds.Y + font.LineSpacing + 24, innerWidth, cardHeight);
-        int cursorY = toolCardBounds.Bottom + 8;
+        bool compact = bounds.Height < 720;
+        int cardHeight = Math.Clamp(font.LineSpacing + (compact ? 16 : 24), 42, 58);
+        toolCardBounds = new Rectangle(innerX, bounds.Y + font.LineSpacing + (compact ? 18 : 24), innerWidth, cardHeight);
+        int cursorY = toolCardBounds.Bottom + (compact ? 6 : 8);
 
         if (activeTool == PhyxelToolId.Pan)
         {
@@ -87,13 +88,13 @@ public sealed class UiPropertiesPanel
         else
         {
             materialCardBounds = new Rectangle(innerX, cursorY, innerWidth, cardHeight);
-            cursorY = materialCardBounds.Bottom + 12;
+            cursorY = materialCardBounds.Bottom + (compact ? 8 : 12);
         }
 
         toolParametersHeaderY = cursorY;
-        cursorY += Math.Max(20, (int)MathF.Round(font.LineSpacing * 0.82f)) + 8;
-        int sliderHeight = font.LineSpacing + 30;
-        int sliderGap = 10;
+        cursorY += Math.Max(16, (int)MathF.Round(font.LineSpacing * (compact ? 0.68f : 0.82f))) + (compact ? 4 : 8);
+        int sliderHeight = font.LineSpacing + (compact ? 22 : 30);
+        int sliderGap = compact ? 6 : 10;
 
         if (ShowsBrushControls(activeTool))
         {
@@ -142,16 +143,16 @@ public sealed class UiPropertiesPanel
         }
 
         simulationHeaderY = cursorY;
-        cursorY += Math.Max(20, (int)MathF.Round(font.LineSpacing * 0.82f)) + 8;
+        cursorY += Math.Max(16, (int)MathF.Round(font.LineSpacing * (compact ? 0.68f : 0.82f))) + (compact ? 4 : 8);
         scaleSlider.Bounds = new Rectangle(innerX, cursorY, innerWidth, sliderHeight);
         if (scaleSlider.Update(input))
         {
             settings.ApplyScale(scaleSlider.Value / 100f);
             ScaleChanged = true;
         }
-        cursorY += sliderHeight + 10;
+        cursorY += sliderHeight + (compact ? 6 : 10);
 
-        int toggleHeight = Math.Clamp(font.LineSpacing + 18, 40, 52);
+        int toggleHeight = Math.Clamp(font.LineSpacing + (compact ? 12 : 18), 36, 52);
         solidGravityToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (solidGravityToggle.Update(input))
         {

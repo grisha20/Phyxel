@@ -117,8 +117,6 @@ public sealed class UiValueSlider
 
     public void Draw(SpriteBatch spriteBatch, SpriteFont font, UiPanelBackdropRenderer renderer, Texture2D pixel)
     {
-        spriteBatch.DrawString(font, Label, new Vector2(Bounds.X, Bounds.Y), UiTheme.TextSecondary);
-
         string valueText = FormattedValue;
         Vector2 valueSize = font.MeasureString(valueText);
         Rectangle valueBox = new(
@@ -126,6 +124,20 @@ public sealed class UiValueSlider
             Bounds.Y - 2,
             (int)valueSize.X + 16,
             font.LineSpacing + 6);
+        Vector2 labelSize = font.MeasureString(Label);
+        int labelWidth = Math.Max(1, valueBox.X - Bounds.X - 8);
+        float labelScale = Math.Clamp(labelWidth / Math.Max(1f, labelSize.X), 0.72f, 1f);
+        spriteBatch.DrawString(
+            font,
+            Label,
+            new Vector2(Bounds.X, Bounds.Y + (font.LineSpacing - labelSize.Y * labelScale) * 0.5f),
+            UiTheme.TextSecondary,
+            0,
+            Vector2.Zero,
+            labelScale,
+            SpriteEffects.None,
+            0);
+
         renderer.DrawRoundedRectangle(spriteBatch, valueBox, UiTheme.FieldBackground, 4);
         UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, valueBox, 1, UiTheme.BorderColor);
         spriteBatch.DrawString(

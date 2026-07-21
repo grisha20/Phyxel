@@ -156,11 +156,11 @@ public sealed class UiLeftToolbar
             float textY = itemBounds.Y + (itemHeight - font.LineSpacing) / 2f;
             if (!tool.Enabled)
             {
-                const float nameScale = 0.82f;
-                const float tagScale = 0.66f;
+                float nameScale = itemHeight < 44 ? 0.70f : 0.82f;
+                float tagScale = itemHeight < 44 ? 0.46f : 0.66f;
                 Vector2 tagSize = font.MeasureString("Скоро") * tagScale;
                 int badgeWidth = (int)tagSize.X + 12;
-                int badgeHeight = (int)(font.LineSpacing * tagScale) + 8;
+                int badgeHeight = (int)(font.LineSpacing * tagScale) + (itemHeight < 44 ? 5 : 8);
                 Rectangle badge = new(iconBox.Right + 8, itemBounds.Bottom - badgeHeight - 4, badgeWidth, badgeHeight);
                 float maxTextWidth = itemBounds.Right - iconBox.Right - 17;
 

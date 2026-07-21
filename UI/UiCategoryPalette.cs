@@ -40,7 +40,17 @@ public sealed class UiCategoryPalette
 
     public SpriteFont Font { set => font = value; }
 
-    private static int ComputeCardWidth(int cardHeight) => Math.Clamp((int)(cardHeight * 1.55f), 96, 132);
+    internal static int ComputeCardWidth(int cardHeight) => Math.Clamp((int)(cardHeight * 1.55f), 96, 132);
+
+    internal static int CalculateVisibleCardCapacity(Rectangle bounds, SpriteFont font)
+    {
+        int tabHeight = Math.Clamp(font.LineSpacing + 13, 32, 45);
+        int stripTop = bounds.Y + 8 + tabHeight + 8;
+        int cardHeight = Math.Max(1, bounds.Bottom - stripTop - 10);
+        int cardWidth = ComputeCardWidth(cardHeight);
+        int stripWidth = Math.Max(1, bounds.Width - 80);
+        return Math.Max(1, (stripWidth + 6) / (cardWidth + 6));
+    }
 
     public void RebuildCategoryCache()
     {
