@@ -396,6 +396,25 @@ public static class UiLayoutRegressionTests
                 category.DisplayName);
         }
 
+        Rectangle narrowPalette = new(0, 0, 420, layout.BottomPalette.Height);
+        Rectangle powdersTab = coordinator.CategoryPalette.GetCategoryTabBounds(
+            narrowPalette,
+            MaterialCategoryType.Powders);
+        coordinator.CategoryPalette.Update(
+            Input(powdersTab.Center, leftDown: true, leftPressed: true),
+            narrowPalette,
+            selectedMaterial,
+            false,
+            out _);
+        coordinator.CategoryPalette.Update(
+            Input(new Point(narrowPalette.Center.X, narrowPalette.Bottom - 30), wheelDelta: -120),
+            narrowPalette,
+            selectedMaterial,
+            false,
+            out _);
+        Require(coordinator.CategoryPalette.ScrollOffset > 0,
+            "Dynamic material cards did not scroll when the palette was too narrow.");
+
         coordinator.SelectedMaterial = previousMaterial;
         coordinator.ActiveTool = previousTool;
         Console.WriteLine("[PASS] Category tabs filter materials, reset scrolling, and preserve selection.");
@@ -584,31 +603,27 @@ public static class UiLayoutRegressionTests
         Require(Math.Abs(source.Width / (float)source.Height - destination.Width / (float)destination.Height) < 0.02f,
             "Aspect-fill crop distorted preview proportions.");
 
-        (string wrapped, float titleScale) = UiCategoryPalette.FitCardTitle(font, "Древесный уголь", 120);
-        Require(wrapped.Contains('\n') && !wrapped.Contains('…') && titleScale is >= 0.72f and <= 1f,
-            "Two-word material title did not use a readable two-line layout.");
-        foreach (string line in wrapped.Split('\n'))
-        {
-            Require(font.MeasureString(line).X * titleScale <= 120.5f,
-                "Wrapped material title escaped its card width.");
-        }
-
         int sandWidth = UiCategoryPalette.ComputeCardWidth(font, "Песок", destination.Height);
         int charcoalWidth = UiCategoryPalette.ComputeCardWidth(font, "Древесный уголь", destination.Height);
         int stoneCoalWidth = UiCategoryPalette.ComputeCardWidth(font, "Каменный уголь", destination.Height);
-        Require(sandWidth is >= 116 and <= 170 && charcoalWidth > sandWidth && stoneCoalWidth > sandWidth,
-            "Material cards did not expand for two-line coal names.");
-        Require(charcoalWidth <= 170 && stoneCoalWidth <= 170,
+        Require(sandWidth is >= 116 and <= 210 && charcoalWidth > sandWidth && stoneCoalWidth > sandWidth,
+            "Material cards did not expand for full coal names.");
+        Require(charcoalWidth <= 210 && stoneCoalWidth <= 210,
             "Dynamic material card width exceeded its maximum.");
         foreach (string coalName in new[] { "Древесный уголь", "Каменный уголь" })
         {
             int cardWidth = UiCategoryPalette.ComputeCardWidth(font, coalName, destination.Height);
             (string coalTitle, float coalScale) = UiCategoryPalette.FitCardTitle(font, coalName, cardWidth - 16);
-            Require(coalTitle.Contains('\n') && !coalTitle.Contains('…'),
-                $"Material title '{coalName}' was not preserved in full on two lines.");
-            Require(font.MeasureString(coalTitle).Y * coalScale + 12 <= destination.Height - 12,
-                $"Material title '{coalName}' does not fit vertically inside its card.");
+            Require(!coalTitle.Contains('\n') && !coalTitle.Contains('…') && coalTitle == coalName,
+                $"Material title '{coalName}' was not preserved in full on one line.");
+            Require(coalScale is >= 0.80f and <= 1f && font.MeasureString(coalTitle).X * coalScale <= cardWidth - 16,
+                $"Material title '{coalName}' does not fit horizontally inside its card.");
         }
+        int overlayHeight = UiCategoryPalette.ComputeMaterialLabelOverlayHeight(font);
+        Require(overlayHeight is >= 28 and <= 34,
+            $"Material label overlay height is outside the 28-34 px range: {overlayHeight}.");
+        Require(UiCategoryPalette.MaterialLabelOverlayAlpha is >= 150 and <= 185,
+            "Material label overlay is not translucent enough to reveal the preview.");
 
         UiLayoutBounds layout = UiLayoutCalculator.Calculate(new Viewport(0, 0, 1920, 1080), 1f);
         int capacity = UiCategoryPalette.CalculateVisibleCardCapacity(layout.BottomPalette, font);

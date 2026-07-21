@@ -11,6 +11,7 @@ namespace Phyxel.UI;
 
 public sealed class UiCategoryPalette
 {
+    internal static readonly byte MaterialLabelOverlayAlpha = 172;
     private readonly MaterialRegistry registry;
     private SpriteFont font;
     private readonly MaterialCardPreviewCache previewCache;
@@ -65,20 +66,13 @@ public sealed class UiCategoryPalette
     internal static int ComputeCardWidth(SpriteFont font, string title, int cardHeight)
     {
         int baseWidth = ComputeCardWidth(cardHeight);
-        string[] words = title.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length < 2)
-        {
-            return baseWidth;
-        }
-
-        float widestWord = 0;
-        foreach (string word in words)
-        {
-            widestWord = Math.Max(widestWord, font.MeasureString(word).X);
-        }
-        int textWidth = (int)MathF.Ceiling(widestWord) + 24;
-        return Math.Clamp(Math.Max(baseWidth + 8, textWidth), 116, 170);
+        float titleScale = ComputeCardTitleScale(font, title, 210 - 24);
+        int textWidth = (int)MathF.Ceiling(font.MeasureString(title).X * titleScale) + 24;
+        return Math.Clamp(Math.Max(baseWidth, textWidth), 116, 210);
     }
+
+    internal static int ComputeMaterialLabelOverlayHeight(SpriteFont font) =>
+        Math.Clamp(font.LineSpacing + 8, 28, 34);
 
     internal static int CalculateVisibleCardCapacity(Rectangle bounds, SpriteFont font)
     {
@@ -315,23 +309,31 @@ public sealed class UiCategoryPalette
                 int inset = isSelected ? 3 : 2;
                 (string title, float titleScale) = FitCardTitle(font, mat.Name, cardBounds.Width - inset * 2 - 12);
                 Vector2 titleSize = font.MeasureString(title) * titleScale;
-                int labelHeight = Math.Clamp(
-                    Math.Max(font.LineSpacing + 14, (int)MathF.Ceiling(titleSize.Y) + 12),
-                    30,
-                    Math.Max(30, cardBounds.Height - 12));
                 Rectangle previewBounds = new(
                     cardBounds.X + inset,
                     cardBounds.Y + inset,
                     cardBounds.Width - inset * 2,
-                    Math.Max(1, cardBounds.Height - labelHeight - inset));
+                    Math.Max(1, cardBounds.Height - inset * 2));
                 DrawPreview(spriteBatch, pixel, mat, previewBounds);
 
+                if (isHovered)
+                {
+                    Color hoverOverlay = hoveredMaterialPressed
+                        ? new Color(0, 0, 0, 48)
+                        : new Color(255, 255, 255, 20);
+                    spriteBatch.Draw(pixel, previewBounds, hoverOverlay);
+                }
+
+                int labelHeight = ComputeMaterialLabelOverlayHeight(font);
                 Rectangle labelBounds = new(
-                    cardBounds.X + inset,
-                    previewBounds.Bottom,
-                    cardBounds.Width - inset * 2,
-                    cardBounds.Bottom - inset - previewBounds.Bottom);
-                spriteBatch.Draw(pixel, labelBounds, new Color(13, 16, 21, 245));
+                    previewBounds.X,
+                    previewBounds.Bottom - labelHeight,
+                    previewBounds.Width,
+                    labelHeight);
+                spriteBatch.Draw(
+                    pixel,
+                    labelBounds,
+                    new Color((byte)13, (byte)16, (byte)21, MaterialLabelOverlayAlpha));
 
                 Vector2 namePos = new(
                     labelBounds.Center.X - titleSize.X * 0.5f,
@@ -457,42 +459,23 @@ public sealed class UiCategoryPalette
 
     internal static (string Text, float Scale) FitCardTitle(SpriteFont font, string text, int maximumWidth)
     {
-        if (font.MeasureString(text).X <= maximumWidth)
+        float scale = ComputeCardTitleScale(font, text, maximumWidth);
+        if (font.MeasureString(text).X * scale <= maximumWidth)
         {
-            return (text, 1f);
+            return (text, scale);
         }
 
-        string[] words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length >= 2)
-        {
-            int bestSplit = 1;
-            float bestWidth = float.MaxValue;
-            for (int split = 1; split < words.Length; split++)
-            {
-                string first = string.Join(' ', words, 0, split);
-                string second = string.Join(' ', words, split, words.Length - split);
-                float widest = Math.Max(font.MeasureString(first).X, font.MeasureString(second).X);
-                if (widest < bestWidth)
-                {
-                    bestWidth = widest;
-                    bestSplit = split;
-                }
-            }
+        return (TruncateToWidthScaled(font, text, maximumWidth, scale), scale);
+    }
 
-            string firstLine = string.Join(' ', words, 0, bestSplit);
-            string secondLine = string.Join(' ', words, bestSplit, words.Length - bestSplit);
-            float scale = Math.Clamp(maximumWidth / Math.Max(1f, bestWidth), 0.72f, 0.88f);
-            firstLine = TruncateToWidthScaled(font, firstLine, maximumWidth, scale);
-            secondLine = TruncateToWidthScaled(font, secondLine, maximumWidth, scale);
-            return ($"{firstLine}\n{secondLine}", scale);
-        }
-
-        const float minimumScale = 0.72f;
-        if (font.MeasureString(text).X * minimumScale <= maximumWidth)
+    private static float ComputeCardTitleScale(SpriteFont font, string text, int maximumWidth)
+    {
+        float width = Math.Max(1f, font.MeasureString(text).X);
+        if (width <= maximumWidth)
         {
-            return (text, minimumScale);
+            return 1f;
         }
-        return (TruncateToWidthScaled(font, text, maximumWidth, minimumScale), minimumScale);
+        return Math.Clamp(maximumWidth / width, 0.80f, 0.90f);
     }
 
     private static string TruncateToWidthScaled(SpriteFont font, string text, int maximumWidth, float scale)
