@@ -111,6 +111,12 @@ internal static partial class MaterialFileLoader
                 {
                     throw new InvalidDataException($"Bundled material ID '{definition.Id}' must use the core namespace.");
                 }
+                if (!string.IsNullOrWhiteSpace(definition.Category) &&
+                    !Phyxel.UI.MaterialCategoryResolver.TryResolveExplicitCategory(definition.Category, out _))
+                {
+                    throw new InvalidDataException(
+                        $"ui.category '{definition.Category}' must be one of: powders, liquids, gases, solids, combustion, tools.");
+                }
                 if (!ids.Add(definition.Id))
                 {
                     throw new InvalidDataException($"Duplicate bundled material ID '{definition.Id}'.");
@@ -174,6 +180,14 @@ internal static partial class MaterialFileLoader
                 {
                     LogError(path, $"External material cannot declare the reserved core ID '{definition.Id}'.");
                     continue;
+                }
+                if (!string.IsNullOrWhiteSpace(definition.Category) &&
+                    !Phyxel.UI.MaterialCategoryResolver.TryResolveExplicitCategory(definition.Category, out _))
+                {
+                    LogWarning(
+                        path,
+                        $"ui.category '{definition.Category}' is unknown; category was selected from kind/flags.");
+                    definition = definition with { Category = null };
                 }
                 if (reservedIds.Contains(definition.Id))
                 {
@@ -1084,6 +1098,11 @@ internal static partial class MaterialFileLoader
     internal static void LogError(string path, string message)
     {
         Console.Error.WriteLine($"PHYXEL_MATERIAL_ERROR file=\"{path}\" message=\"{message}\"");
+    }
+
+    internal static void LogWarning(string path, string message)
+    {
+        Console.Error.WriteLine($"PHYXEL_MATERIAL_WARNING file=\"{path}\" message=\"{message}\"");
     }
 
     [GeneratedRegex("^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$", RegexOptions.CultureInvariant)]

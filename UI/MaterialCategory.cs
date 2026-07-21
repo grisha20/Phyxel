@@ -36,46 +36,9 @@ public static class MaterialCategoryResolver
 
     public static MaterialCategoryType Resolve(MaterialDefinition material)
     {
-        // 1. Explicit Category if specified in JSON
-        if (!string.IsNullOrWhiteSpace(material.Category))
+        if (TryResolveExplicitCategory(material.Category, out MaterialCategoryType explicitCategory))
         {
-            string cat = material.Category.Trim().ToLowerInvariant();
-            switch (cat)
-            {
-                case "powders":
-                case "powder":
-                case "granular":
-                case "порошки":
-                case "порошок":
-                    return MaterialCategoryType.Powders;
-                case "liquids":
-                case "liquid":
-                case "жидкости":
-                case "жидкость":
-                    return MaterialCategoryType.Liquids;
-                case "gases":
-                case "gas":
-                case "газы":
-                case "газ":
-                    return MaterialCategoryType.Gases;
-                case "solids":
-                case "solid":
-                case "твёрдые":
-                case "твердые":
-                case "твёрдое":
-                case "твердое":
-                    return MaterialCategoryType.Solids;
-                case "combustion":
-                case "fire":
-                case "горение":
-                case "огонь":
-                    return MaterialCategoryType.Combustion;
-                case "tools":
-                case "tool":
-                case "инструменты":
-                case "инструмент":
-                    return MaterialCategoryType.Tools;
-            }
+            return explicitCategory;
         }
 
         // 2. Fallback to properties (kind/flags/id)
@@ -106,6 +69,26 @@ public static class MaterialCategoryResolver
                 return MaterialCategoryType.Solids;
             default:
                 return MaterialCategoryType.Solids;
+        }
+    }
+
+    public static bool TryResolveExplicitCategory(string? value, out MaterialCategoryType category)
+    {
+        category = default;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        switch (value.Trim())
+        {
+            case "powders": category = MaterialCategoryType.Powders; return true;
+            case "liquids": category = MaterialCategoryType.Liquids; return true;
+            case "gases": category = MaterialCategoryType.Gases; return true;
+            case "solids": category = MaterialCategoryType.Solids; return true;
+            case "combustion": category = MaterialCategoryType.Combustion; return true;
+            case "tools": category = MaterialCategoryType.Tools; return true;
+            default: return false;
         }
     }
 }

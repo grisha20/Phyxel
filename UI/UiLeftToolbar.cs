@@ -38,7 +38,7 @@ public sealed class UiLeftToolbar
         new(PhyxelToolId.Circle, "circle", "Круг", false, "Скоро"),
         new(PhyxelToolId.Fill, "fill", "Заливка", false, "Скоро"),
         new(PhyxelToolId.Eyedropper, "eyedropper", "Пипетка", false, "Скоро"),
-        new(PhyxelToolId.Pan, "pan", "Камера / панорама", false, "Скоро: панорамирование вида")
+        new(PhyxelToolId.Pan, "pan", "Камера / панорама", true, "ЛКМ — перемещение, колесо — масштаб")
     ];
 
     private PhyxelToolId activeTool = PhyxelToolId.Brush;
@@ -224,6 +224,28 @@ public sealed class UiLeftToolbar
             UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, tipBounds, 1, UiTheme.BorderColor);
             spriteBatch.DrawString(font, tooltipText, new Vector2(tipBounds.X + 8, tipBounds.Y + 5), UiTheme.TextPrimary);
         }
+    }
+
+    internal Rectangle GetToolBounds(Rectangle bounds, SpriteFont font, PhyxelToolId toolId)
+    {
+        int padding = 10;
+        int itemHeight = GetItemHeight(font);
+        int itemY = bounds.Y + GetHeaderHeight(font);
+        for (int index = 0; index < Tools.Count; index++)
+        {
+            ToolDefinition tool = Tools[index];
+            if (tool.Id == PhyxelToolId.Pan)
+            {
+                itemY += 8;
+            }
+            Rectangle itemBounds = new(bounds.X + padding, itemY, bounds.Width - padding * 2, itemHeight);
+            if (tool.Id == toolId)
+            {
+                return itemBounds;
+            }
+            itemY += itemHeight + 5;
+        }
+        return Rectangle.Empty;
     }
 
     private static int GetHeaderHeight(SpriteFont font) => font.LineSpacing + 28;

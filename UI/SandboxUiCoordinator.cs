@@ -95,12 +95,20 @@ public sealed class SandboxUiCoordinator : IDisposable
     }
 
     public bool TemperatureToolActive => leftToolbar.ActiveTool == PhyxelToolId.Temperature;
+    public bool PanToolActive => leftToolbar.ActiveTool == PhyxelToolId.Pan;
     public float TargetTemperature => propertiesPanel.TargetTemperature;
+    internal PhyxelToolId ActiveTool
+    {
+        get => leftToolbar.ActiveTool;
+        set => leftToolbar.ActiveTool = value;
+    }
+    internal UiLayoutBounds CurrentLayout => currentLayout;
 
     public Rectangle CanvasBounds => currentLayout.SimulationCanvas;
     public Rectangle SidePanelBounds => currentLayout.RightPanel;
     public Rectangle InfoPanelBounds => currentLayout.StatusBar;
     public bool PointerConsumed { get; private set; }
+    public bool BlocksBrushInput => PointerConsumed || PanToolActive;
 
     public UiFrameActions Update(
         RawInputSnapshot input,
@@ -161,7 +169,8 @@ public sealed class SandboxUiCoordinator : IDisposable
         PointerConsumed = topConsumed || leftConsumed || rightConsumed || bottomConsumed || statusConsumed;
 
         // Mouse Wheel brush size inside Canvas
-        if (input.WheelDelta != 0 && CanvasBounds.Contains(input.MousePosition) && !PointerConsumed)
+        if (input.WheelDelta != 0 && CanvasBounds.Contains(input.MousePosition) &&
+            !PointerConsumed && !PanToolActive)
         {
             settings.BrushRadius = Math.Clamp(settings.BrushRadius + Math.Sign(input.WheelDelta) * 2, 1, 96);
         }
@@ -258,6 +267,11 @@ public sealed class SandboxUiCoordinator : IDisposable
         bool eraseOverride)
     {
         if (!worldBounds.Contains(pointer) || PointerConsumed)
+        {
+            return;
+        }
+
+        if (PanToolActive)
         {
             return;
         }

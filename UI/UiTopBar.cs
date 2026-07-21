@@ -32,6 +32,12 @@ public sealed class UiTopBar
     public bool SaveRequested { get; private set; }
     public bool LoadRequested { get; private set; }
     public bool SettingsRequested { get; private set; }
+    internal bool SettingsEnabled => settingsButton.Enabled;
+    internal Rectangle SettingsButtonBounds => settingsButton.Bounds;
+    internal Rectangle SaveButtonBounds => saveButton.Bounds;
+    internal Rectangle LoadButtonBounds => loadButton.Bounds;
+    internal Rectangle PauseButtonBounds => pauseButton.Bounds;
+    internal IReadOnlyList<UiIconButton> Buttons => [saveButton, loadButton, pauseButton, settingsButton];
 
     public void Update(RawInputSnapshot input, Rectangle bounds, ref bool paused)
     {
@@ -43,7 +49,8 @@ public sealed class UiTopBar
         pauseButton.Label = paused ? "Продолжить" : "Пауза";
         pauseButton.IconKey = paused ? "play" : "pause";
 
-        int buttonHeight = Math.Clamp(font.LineSpacing + 14, 34, bounds.Height - 12);
+        int maximumButtonHeight = Math.Max(28, bounds.Height - 10);
+        int buttonHeight = Math.Clamp(font.LineSpacing + 12, Math.Min(32, maximumButtonHeight), maximumButtonHeight);
         int startX = bounds.X + Math.Max(164, (int)font.MeasureString("PHYXEL").X + 72);
         int startY = bounds.Y + (bounds.Height - buttonHeight) / 2;
         int gap = Math.Max(6, bounds.Height / 10);

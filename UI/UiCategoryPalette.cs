@@ -210,7 +210,7 @@ public sealed class UiCategoryPalette
             UiIconRenderer.DrawCategoryIcon(spriteBatch, pixel, cat.Type, dotRect, cat.AccentColor);
 
             Vector2 textPos = new(dotRect.Right + 6, tabBounds.Y + (tabHeight - font.LineSpacing) / 2);
-            string tabLabel = TruncateToWidth(cat.DisplayName, tabBounds.Right - (int)textPos.X - 8);
+                string tabLabel = TruncateToWidth(font, cat.DisplayName, tabBounds.Right - (int)textPos.X - 8);
             spriteBatch.DrawString(font, tabLabel, textPos, isSelectedTab ? UiTheme.TextPrimary : UiTheme.TextSecondary);
 
             tabX += tabWidthDraw + tabGapDraw;
@@ -278,7 +278,7 @@ public sealed class UiCategoryPalette
                     cardBounds.Bottom - inset - previewBounds.Bottom);
                 spriteBatch.Draw(pixel, labelBounds, new Color(13, 16, 21, 245));
 
-                string title = TruncateToWidth(mat.Name, labelBounds.Width - 12);
+                string title = TruncateToWidth(font, mat.Name, labelBounds.Width - 12);
                 Vector2 titleSize = font.MeasureString(title);
                 Vector2 namePos = new(
                     labelBounds.Center.X - titleSize.X * 0.5f,
@@ -361,21 +361,27 @@ public sealed class UiCategoryPalette
     }
 
     internal static Rectangle CalculateAspectFillSource(Texture2D texture, Rectangle destination)
+        => CalculateAspectFillSource(texture.Width, texture.Height, destination);
+
+    internal static Rectangle CalculateAspectFillSource(
+        int sourceWidth,
+        int sourceHeight,
+        Rectangle destination)
     {
-        float sourceAspect = texture.Width / (float)Math.Max(1, texture.Height);
+        float sourceAspect = sourceWidth / (float)Math.Max(1, sourceHeight);
         float destinationAspect = destination.Width / (float)Math.Max(1, destination.Height);
 
         if (sourceAspect > destinationAspect)
         {
-            int width = Math.Max(1, (int)MathF.Round(texture.Height * destinationAspect));
-            return new Rectangle((texture.Width - width) / 2, 0, width, texture.Height);
+            int width = Math.Max(1, (int)MathF.Round(sourceHeight * destinationAspect));
+            return new Rectangle((sourceWidth - width) / 2, 0, width, sourceHeight);
         }
 
-        int height = Math.Max(1, (int)MathF.Round(texture.Width / destinationAspect));
-        return new Rectangle(0, (texture.Height - height) / 2, texture.Width, height);
+        int height = Math.Max(1, (int)MathF.Round(sourceWidth / destinationAspect));
+        return new Rectangle(0, (sourceHeight - height) / 2, sourceWidth, height);
     }
 
-    private string TruncateToWidth(string text, int maximumWidth)
+    internal static string TruncateToWidth(SpriteFont font, string text, int maximumWidth)
     {
         if (font.MeasureString(text).X <= maximumWidth)
         {

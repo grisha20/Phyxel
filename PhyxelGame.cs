@@ -23,13 +23,17 @@ public sealed class PhyxelGame : Game
     private readonly SimulationSettings settings = new();
     private readonly RawInputSampler inputSampler = new();
     private readonly CanvasBrushController brushController = new();
+    private readonly CanvasCameraController cameraController = new();
     private readonly GpuCommandEncoder commandEncoder = new();
     private readonly SimulationStateSerializer stateSerializer = new();
     private readonly GpuDebugProbe debugProbe = new();
     private readonly GpuTemperatureProbe temperatureProbe = new();
     private readonly AcceptanceRegressionHarness acceptance = new();
     private readonly string scenePath;
+    private readonly string? uiScreenshotPath;
+    private readonly float? uiDpiOverride;
     private SpriteBatch? spriteBatch;
+    private RasterizerState? canvasRasterizerState;
     private MaterialRegistry? materialRegistry;
     private GpuResourceLifecycleManager? resourceManager;
     private SimulationDispatchCoordinator? dispatchCoordinator;
@@ -50,17 +54,30 @@ public sealed class PhyxelGame : Game
     private double displayedFrameRate = 60;
     private uint frameIndex;
     private RawInputSnapshot latestInput;
+    private bool uiScreenshotCaptured;
 
     public PhyxelGame()
     {
+        int requestedWidth = ReadWindowDimension("PHYXEL_WINDOW_WIDTH", SimulationSettings.NativeWidth);
+        int requestedHeight = ReadWindowDimension("PHYXEL_WINDOW_HEIGHT", SimulationSettings.NativeHeight);
+        bool windowed = Environment.GetEnvironmentVariable("PHYXEL_WINDOWED") == "1";
+        if (float.TryParse(
+            Environment.GetEnvironmentVariable("PHYXEL_UI_DPI_SCALE"),
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture,
+            out float parsedDpiScale) && parsedDpiScale is >= 1f and <= 2f)
+        {
+            uiDpiOverride = parsedDpiScale;
+        }
+
         graphics = new GraphicsDeviceManager(this)
         {
-            PreferredBackBufferWidth = SimulationSettings.NativeWidth,
-            PreferredBackBufferHeight = SimulationSettings.NativeHeight,
+            PreferredBackBufferWidth = requestedWidth,
+            PreferredBackBufferHeight = requestedHeight,
             GraphicsProfile = GraphicsProfile.HiDef,
             SynchronizeWithVerticalRetrace = true,
             PreferMultiSampling = false,
-            IsFullScreen = true,
+            IsFullScreen = !windowed,
             HardwareModeSwitch = false
         };
         Content.RootDirectory = "Content";
@@ -68,6 +85,7 @@ public sealed class PhyxelGame : Game
         IsFixedTimeStep = false;
         TargetElapsedTime = TimeSpan.FromSeconds(1d / 60d);
         Window.AllowUserResizing = true;
+        Window.Title = "Phyxel";
         if (acceptance.Active)
         {
             string? requestedScale = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_SCALE");
@@ -95,11 +113,17 @@ public sealed class PhyxelGame : Game
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Phyxel",
                 "scene.json");
+        uiScreenshotPath = Environment.GetEnvironmentVariable("PHYXEL_UI_SCREENSHOT_PATH");
     }
 
     protected override void LoadContent()
     {
         spriteBatch = new SpriteBatch(GraphicsDevice);
+        canvasRasterizerState = new RasterizerState
+        {
+            CullMode = CullMode.None,
+            ScissorTestEnable = true
+        };
         UiFontSet fonts = new(
             Content.Load<SpriteFont>("Fonts/SandboxFont"),
             Content.Load<SpriteFont>("Fonts/SandboxFontMedium"),
@@ -110,7 +134,7 @@ public sealed class PhyxelGame : Game
         resourceManager.PrepareSimulation(settings);
         dispatchCoordinator = new SimulationDispatchCoordinator(resourceManager, materialRegistry);
         userInterface = new SandboxUiCoordinator(materialRegistry, fonts, resourceManager);
-        UiLayoutRegressionTests.RunAllTests(materialRegistry);
+        UiLayoutRegressionTests.RunAllTests(materialRegistry, fonts, userInterface);
         SimulationWorldSnapshot? initialAcceptanceWorld = acceptance.CreateInitialWorld(
             settings.Width,
             settings.Height);
@@ -151,7 +175,7 @@ public sealed class PhyxelGame : Game
         UiFrameActions actions = userInterface.Update(
             input,
             GraphicsDevice.Viewport,
-            UiDisplayScale.GetDpiScale(Window.Handle),
+            uiDpiOverride ?? UiDisplayScale.GetDpiScale(Window.Handle),
             settings);
         ProcessUiActions(actions);
         acceptance.ConfigureSettings(frameIndex, settings);
@@ -160,7 +184,18 @@ public sealed class PhyxelGame : Game
             settings,
             dispatchCoordinator,
             temperatureProbe);
-        Rectangle worldBounds = FitWorldToCanvas(userInterface.CanvasBounds, settings.Width, settings.Height);
+        Rectangle fittedWorldBounds = FitWorldToCanvas(
+            userInterface.CanvasBounds,
+            settings.Width,
+            settings.Height);
+        Rectangle worldBounds = acceptance.Active
+            ? fittedWorldBounds
+            : cameraController.Update(
+                input,
+                userInterface.CanvasBounds,
+                fittedWorldBounds,
+                userInterface.PanToolActive,
+                userInterface.PointerConsumed);
         IReadOnlyList<BrushDrawCommand> commands = acceptance.Active
             ? acceptance.CreateCommands(frameIndex)
             : brushController.CreateCommands(
@@ -172,7 +207,7 @@ public sealed class PhyxelGame : Game
                     .Properties.SimulationKind == MaterialSimulationKind.Tool,
                 userInterface.TemperatureToolActive,
                 userInterface.TargetTemperature,
-                userInterface.PointerConsumed);
+                userInterface.BlocksBrushInput);
         try
         {
             uint acceptanceFrame = frameIndex;
@@ -184,11 +219,13 @@ public sealed class PhyxelGame : Game
             debugProbe.Update(currentResources, frameIndex++);
             Point? probeCoordinate = acceptance.OwnsTemperatureProbe
                 ? acceptance.GetProbeCoordinate(acceptanceFrame)
-                : GpuTemperatureProbe.MapPointerToCell(
-                    input.MousePosition,
-                    worldBounds,
-                    currentResources.Width,
-                    currentResources.Height);
+                : !userInterface.CanvasBounds.Contains(input.MousePosition) || userInterface.PointerConsumed
+                    ? null
+                    : GpuTemperatureProbe.MapPointerToCell(
+                        input.MousePosition,
+                        worldBounds,
+                        currentResources.Width,
+                        currentResources.Height);
             temperatureProbe.Update(currentResources, probeCoordinate, input.DeltaSeconds);
             acceptance.ObserveTemperatureProbe(acceptanceFrame, temperatureProbe.Latest);
             dispatchCoordinator.ObserveStatistics(debugProbe.Latest);
@@ -210,6 +247,17 @@ public sealed class PhyxelGame : Game
         base.Update(gameTime);
     }
 
+    private static int ReadWindowDimension(string variableName, int fallback)
+    {
+        return int.TryParse(
+            Environment.GetEnvironmentVariable(variableName),
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out int value) && value is >= 640 and <= 7680
+            ? value
+            : fallback;
+    }
+
     protected override void Draw(GameTime gameTime)
     {
         GraphicsDevice.Clear(new Color(9, 11, 14));
@@ -218,18 +266,21 @@ public sealed class PhyxelGame : Game
             base.Draw(gameTime);
             return;
         }
-        Rectangle worldBounds = FitWorldToCanvas(
+        Rectangle fittedWorldBounds = FitWorldToCanvas(
             userInterface.CanvasBounds,
             currentResources.Width,
             currentResources.Height);
+        Rectangle worldBounds = cameraController.GetWorldBounds(fittedWorldBounds);
         spriteBatch.Begin(
             SpriteSortMode.Deferred,
             BlendState.Opaque,
             SamplerState.LinearClamp,
             DepthStencilState.None,
-            RasterizerState.CullNone);
+            canvasRasterizerState);
+        GraphicsDevice.ScissorRectangle = userInterface.CanvasBounds;
         spriteBatch.Draw(currentResources.PresentationTexture, worldBounds, Color.White);
         spriteBatch.End();
+        GraphicsDevice.ScissorRectangle = GraphicsDevice.Viewport.Bounds;
         spriteBatch.Begin(
             SpriteSortMode.Deferred,
             BlendState.AlphaBlend,
@@ -250,6 +301,7 @@ public sealed class PhyxelGame : Game
             transientStatus,
             temperatureProbe.Latest);
         spriteBatch.End();
+        CaptureUiScreenshotIfRequested();
         UpdateFrameRate(gameTime);
         base.Draw(gameTime);
     }
@@ -258,6 +310,7 @@ public sealed class PhyxelGame : Game
     {
         userInterface?.Dispose();
         resourceManager?.Dispose();
+        canvasRasterizerState?.Dispose();
         spriteBatch?.Dispose();
         base.UnloadContent();
     }
@@ -308,6 +361,28 @@ public sealed class PhyxelGame : Game
             pendingLoad = stateSerializer.LoadAsync(scenePath, materialRegistry);
             SetStatus("Загрузка…");
         }
+    }
+
+    private void CaptureUiScreenshotIfRequested()
+    {
+        if (uiScreenshotCaptured || string.IsNullOrWhiteSpace(uiScreenshotPath))
+        {
+            return;
+        }
+
+        int width = GraphicsDevice.PresentationParameters.BackBufferWidth;
+        int height = GraphicsDevice.PresentationParameters.BackBufferHeight;
+        Color[] pixels = new Color[width * height];
+        GraphicsDevice.GetBackBufferData(pixels);
+        using Texture2D capture = new(GraphicsDevice, width, height);
+        capture.SetData(pixels);
+        string fullPath = Path.GetFullPath(uiScreenshotPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        using FileStream stream = File.Create(fullPath);
+        capture.SaveAsPng(stream, width, height);
+        uiScreenshotCaptured = true;
+        Console.WriteLine($"PHYXEL_UI_SCREENSHOT {width}x{height} {fullPath}");
+        Exit();
     }
 
     private void ProcessSerializationCompletion()
