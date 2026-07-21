@@ -60,7 +60,25 @@ public sealed class UiCategoryPalette
         return Rectangle.Empty;
     }
 
-    internal static int ComputeCardWidth(int cardHeight) => Math.Clamp((int)(cardHeight * 1.55f), 96, 132);
+    internal static int ComputeCardWidth(int cardHeight) => Math.Clamp((int)(cardHeight * 1.55f), 116, 132);
+
+    internal static int ComputeCardWidth(SpriteFont font, string title, int cardHeight)
+    {
+        int baseWidth = ComputeCardWidth(cardHeight);
+        string[] words = title.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length < 2)
+        {
+            return baseWidth;
+        }
+
+        float widestWord = 0;
+        foreach (string word in words)
+        {
+            widestWord = Math.Max(widestWord, font.MeasureString(word).X);
+        }
+        int textWidth = (int)MathF.Ceiling(widestWord) + 24;
+        return Math.Clamp(Math.Max(baseWidth + 8, textWidth), 116, 170);
+    }
 
     internal static int CalculateVisibleCardCapacity(Rectangle bounds, SpriteFont font)
     {
@@ -135,14 +153,13 @@ public sealed class UiCategoryPalette
 
         List<MaterialDefinition> currentList = categorizedMaterials[activeCategory];
         int cardHeight = fullCardsBounds.Height;
-        int cardWidth = ComputeCardWidth(cardHeight);
         int gap = 6;
 
         // Compute total cards width for scrolling
         int totalCardsWidth = 0;
         for (int i = 0; i < currentList.Count; i++)
         {
-            totalCardsWidth += cardWidth + gap;
+            totalCardsWidth += ComputeCardWidth(font, currentList[i].Name, cardHeight) + gap;
         }
         if (currentList.Count > 0) totalCardsWidth -= gap;
         bool overflow = totalCardsWidth > fullCardsBounds.Width;
@@ -175,6 +192,7 @@ public sealed class UiCategoryPalette
         for (int i = 0; i < currentList.Count; i++)
         {
             MaterialDefinition mat = currentList[i];
+            int cardWidth = ComputeCardWidth(font, mat.Name, cardHeight);
             Rectangle cardBounds = new(cardX, cardsStripBounds.Y, cardWidth, cardHeight);
 
             if (cardBounds.Right >= cardsStripBounds.X && cardBounds.X <= cardsStripBounds.Right)
@@ -259,11 +277,10 @@ public sealed class UiCategoryPalette
         List<MaterialDefinition> currentList = categorizedMaterials[activeCategory];
         int gap = 6;
         Rectangle fullCardsBounds = GetCardsStripBounds(bounds, false);
-        int cardWidth = ComputeCardWidth(fullCardsBounds.Height);
         int totalCardsWidthDraw = 0;
         for (int i = 0; i < currentList.Count; i++)
         {
-            totalCardsWidthDraw += cardWidth + gap;
+            totalCardsWidthDraw += ComputeCardWidth(font, currentList[i].Name, fullCardsBounds.Height) + gap;
         }
         bool overflow = totalCardsWidthDraw - gap > fullCardsBounds.Width;
         cardsStripBounds = GetCardsStripBounds(bounds, overflow);
@@ -278,6 +295,7 @@ public sealed class UiCategoryPalette
         for (int i = 0; i < currentList.Count; i++)
         {
             MaterialDefinition mat = currentList[i];
+            int cardWidth = ComputeCardWidth(font, mat.Name, cardsStripBounds.Height);
             Rectangle cardBounds = new(cardX, cardsStripBounds.Y, cardWidth, cardsStripBounds.Height);
 
             // Clip drawing inside strip bounds
@@ -295,7 +313,12 @@ public sealed class UiCategoryPalette
                 backdrop.DrawRoundedRectangle(spriteBatch, cardBounds, cardBg, 7);
 
                 int inset = isSelected ? 3 : 2;
-                int labelHeight = Math.Clamp(font.LineSpacing + 14, 30, Math.Max(30, cardBounds.Height / 2));
+                (string title, float titleScale) = FitCardTitle(font, mat.Name, cardBounds.Width - inset * 2 - 12);
+                Vector2 titleSize = font.MeasureString(title) * titleScale;
+                int labelHeight = Math.Clamp(
+                    Math.Max(font.LineSpacing + 14, (int)MathF.Ceiling(titleSize.Y) + 12),
+                    30,
+                    Math.Max(30, cardBounds.Height - 12));
                 Rectangle previewBounds = new(
                     cardBounds.X + inset,
                     cardBounds.Y + inset,
@@ -310,8 +333,6 @@ public sealed class UiCategoryPalette
                     cardBounds.Bottom - inset - previewBounds.Bottom);
                 spriteBatch.Draw(pixel, labelBounds, new Color(13, 16, 21, 245));
 
-                (string title, float titleScale) = FitCardTitle(font, mat.Name, labelBounds.Width - 12);
-                Vector2 titleSize = font.MeasureString(title) * titleScale;
                 Vector2 namePos = new(
                     labelBounds.Center.X - titleSize.X * 0.5f,
                     labelBounds.Center.Y - titleSize.Y * 0.5f);

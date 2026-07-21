@@ -182,6 +182,28 @@ public static class UiLayoutRegressionTests
                     Require(IsInside(toolBounds, layout.LeftToolbar),
                         $"Tool '{tool.DisplayName}' bounds {toolBounds} escaped panel {layout.LeftToolbar} " +
                         $"at {width}x{height}, DPI {dpi}.");
+                    if (tool.Enabled)
+                    {
+                        int iconSize = Math.Clamp(toolBounds.Height - 14, 22, 30);
+                        int availableTextWidth = Math.Max(1, toolBounds.Width - 11 - iconSize - 12);
+                        int availableTextHeight = Math.Max(1, toolBounds.Height - 6);
+                        (string text, float scale) = UiLeftToolbar.FitEnabledToolLabel(
+                            font,
+                            tool,
+                            availableTextWidth,
+                            availableTextHeight);
+                        Vector2 textSize = font.MeasureString(text) * scale;
+                        Require(textSize.X <= availableTextWidth + 0.5f && textSize.Y <= availableTextHeight + 0.5f,
+                            $"Tool '{tool.DisplayName}' text escaped its item at {width}x{height}, DPI {dpi}.");
+                        Require(scale >= 0.72f,
+                            $"Tool '{tool.DisplayName}' became too small at {width}x{height}, DPI {dpi}.");
+                        if (tool.Id == PhyxelToolId.Pan && width == 1920 && height == 1080 && dpi == 1f)
+                        {
+                            Require(text == "Камера\nПанорама",
+                                $"Camera tool did not use the preferred two-line label (text='{text}', scale={scale:0.###}, " +
+                                $"available={availableTextWidth}x{availableTextHeight}).");
+                        }
+                    }
                 }
             }
         }
@@ -569,6 +591,23 @@ public static class UiLayoutRegressionTests
         {
             Require(font.MeasureString(line).X * titleScale <= 120.5f,
                 "Wrapped material title escaped its card width.");
+        }
+
+        int sandWidth = UiCategoryPalette.ComputeCardWidth(font, "Песок", destination.Height);
+        int charcoalWidth = UiCategoryPalette.ComputeCardWidth(font, "Древесный уголь", destination.Height);
+        int stoneCoalWidth = UiCategoryPalette.ComputeCardWidth(font, "Каменный уголь", destination.Height);
+        Require(sandWidth is >= 116 and <= 170 && charcoalWidth > sandWidth && stoneCoalWidth > sandWidth,
+            "Material cards did not expand for two-line coal names.");
+        Require(charcoalWidth <= 170 && stoneCoalWidth <= 170,
+            "Dynamic material card width exceeded its maximum.");
+        foreach (string coalName in new[] { "Древесный уголь", "Каменный уголь" })
+        {
+            int cardWidth = UiCategoryPalette.ComputeCardWidth(font, coalName, destination.Height);
+            (string coalTitle, float coalScale) = UiCategoryPalette.FitCardTitle(font, coalName, cardWidth - 16);
+            Require(coalTitle.Contains('\n') && !coalTitle.Contains('…'),
+                $"Material title '{coalName}' was not preserved in full on two lines.");
+            Require(font.MeasureString(coalTitle).Y * coalScale + 12 <= destination.Height - 12,
+                $"Material title '{coalName}' does not fit vertically inside its card.");
         }
 
         UiLayoutBounds layout = UiLayoutCalculator.Calculate(new Viewport(0, 0, 1920, 1080), 1f);

@@ -153,7 +153,6 @@ public sealed class UiLeftToolbar
             UiIconRenderer.DrawToolIcon(spriteBatch, pixel, tool.Key, iconBox, iconColor);
 
             // Title — measure available width to prevent overlap with "Скоро" tag
-            float textY = itemBounds.Y + (itemHeight - font.LineSpacing) / 2f;
             if (!tool.Enabled)
             {
                 float nameScale = itemHeight < 44 ? 0.70f : 0.82f;
@@ -195,8 +194,27 @@ public sealed class UiLeftToolbar
             }
             else
             {
-                Vector2 textPos = new(iconBox.Right + 8, textY);
-                spriteBatch.DrawString(font, tool.DisplayName, textPos, textColor);
+                int availableTextWidth = Math.Max(1, itemBounds.Right - iconBox.Right - 12);
+                int availableTextHeight = Math.Max(1, itemBounds.Height - 6);
+                (string displayText, float nameScale) = FitEnabledToolLabel(
+                    font,
+                    tool,
+                    availableTextWidth,
+                    availableTextHeight);
+                Vector2 textSize = font.MeasureString(displayText) * nameScale;
+                Vector2 textPos = new(
+                    iconBox.Right + 6,
+                    itemBounds.Center.Y - textSize.Y / 2f);
+                spriteBatch.DrawString(
+                    font,
+                    displayText,
+                    textPos,
+                    textColor,
+                    0,
+                    Vector2.Zero,
+                    nameScale,
+                    SpriteEffects.None,
+                    0);
             }
 
             itemY += itemHeight + 6;
@@ -241,6 +259,42 @@ public sealed class UiLeftToolbar
             itemY += itemHeight + 6;
         }
         return Rectangle.Empty;
+    }
+
+    internal static (string Text, float Scale) FitEnabledToolLabel(
+        SpriteFont font,
+        ToolDefinition tool,
+        int maximumWidth,
+        int maximumHeight)
+    {
+        const float minimumScale = 0.72f;
+        string text = tool.Id == PhyxelToolId.Pan ? "Камера\nПанорама" : tool.DisplayName;
+        Vector2 size = font.MeasureString(text);
+        float scale = Math.Min(
+            1f,
+            Math.Min(maximumWidth / Math.Max(1f, size.X), maximumHeight / Math.Max(1f, size.Y)));
+
+        if (tool.Id == PhyxelToolId.Pan && scale < minimumScale)
+        {
+            text = "Камера";
+            size = font.MeasureString(text);
+            scale = Math.Min(
+                1f,
+                Math.Min(maximumWidth / Math.Max(1f, size.X), maximumHeight / Math.Max(1f, size.Y)));
+        }
+
+        if (scale >= minimumScale)
+        {
+            return (text, scale);
+        }
+
+        scale = minimumScale;
+        const string ellipsis = "…";
+        while (text.Length > 1 && font.MeasureString(text + ellipsis).X * scale > maximumWidth)
+        {
+            text = text[..^1];
+        }
+        return (text + ellipsis, scale);
     }
 
     private static int GetHeaderHeight(SpriteFont font) => font.LineSpacing + 28;
