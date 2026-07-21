@@ -593,6 +593,24 @@ public sealed class SimulationDispatchCoordinator
         ResetActivity(resources.IsSimulationAllocated);
     }
 
+    public void ResetCurrentSimulation(SimulationSettings settings)
+    {
+        if (boundResources is null || !boundResources.IsSimulationAllocated)
+        {
+            ResetActivity(false);
+            return;
+        }
+
+        bool containsMatter = worldHasMatter;
+        bool containsContactSource = contactTransitionPotential;
+        RestoreWorldActivity(
+            boundResources,
+            containsMatter,
+            containsContactSource,
+            settings.HydraulicPressure);
+        previousSolidGravity = settings.SolidGravity;
+    }
+
     public void RestoreWorldActivity(
         GpuSimulationResources resources,
         bool containsMatter,

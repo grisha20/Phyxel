@@ -11,25 +11,30 @@ public readonly record struct UiLayoutBounds(
     Rectangle BottomPalette,
     Rectangle StatusBar,
     Rectangle SimulationCanvas,
-    bool IsCompact);
+    bool IsCompact,
+    float Scale,
+    float DpiScale);
 
 public static class UiLayoutCalculator
 {
-    public static UiLayoutBounds Calculate(Viewport viewport)
+    public static UiLayoutBounds Calculate(Viewport viewport, float dpiScale = 1f)
     {
         int width = viewport.Width;
         int height = viewport.Height;
 
-        // Base scale factor relative to standard 1080p
-        float scale = Math.Clamp(height / 1080f, 0.72f, 1.4f);
-        bool isCompact = height < 750;
+        float resolutionScale = Math.Min(width / 1920f, height / 1080f);
+        float readableDpiScale = Math.Min(
+            Math.Clamp(dpiScale, 1f, 2f),
+            Math.Max(0.84f, resolutionScale * 1.25f));
+        float scale = Math.Clamp(Math.Max(resolutionScale, readableDpiScale), 0.82f, 1.4f);
+        bool isCompact = width < 1450 || height < 800;
 
-        int margin = Math.Max(4, (int)(8 * scale));
-        int topBarHeight = Math.Max(40, (int)(48 * scale));
-        int statusBarHeight = Math.Max(24, (int)(28 * scale));
-        int leftToolbarWidth = Math.Max(140, (int)(170 * scale));
-        int rightPanelWidth = Math.Max(210, (int)(250 * scale));
-        int bottomPaletteHeight = Math.Max(95, (int)(120 * scale));
+        int margin = Math.Max(6, (int)MathF.Round(8 * scale));
+        int topBarHeight = Math.Max(44, (int)MathF.Round(52 * scale));
+        int statusBarHeight = Math.Max(30, (int)MathF.Round(32 * scale));
+        int leftToolbarWidth = Math.Max(168, (int)MathF.Round(190 * scale));
+        int rightPanelWidth = Math.Max(250, (int)MathF.Round(300 * scale));
+        int bottomPaletteHeight = Math.Max(118, (int)MathF.Round(145 * scale));
 
         Rectangle topBar = new(0, 0, width, topBarHeight);
         Rectangle statusBar = new(0, height - statusBarHeight, width, statusBarHeight);
@@ -48,7 +53,7 @@ public static class UiLayoutCalculator
             margin,
             middleTop,
             leftToolbarWidth,
-            middleHeight);
+            Math.Max(100, bottomPalette.Top - margin - middleTop));
 
         Rectangle rightPanel = new(
             width - rightPanelWidth - margin,
@@ -74,6 +79,8 @@ public static class UiLayoutCalculator
             bottomPalette,
             statusBar,
             simulationCanvas,
-            isCompact);
+            isCompact,
+            scale,
+            dpiScale);
     }
 }

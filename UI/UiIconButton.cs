@@ -9,7 +9,8 @@ public enum UiButtonVisualState
     Idle,
     Hover,
     Pressed,
-    Active
+    Active,
+    Disabled
 }
 
 public sealed class UiIconButton
@@ -22,11 +23,18 @@ public sealed class UiIconButton
     public string Label { get; set; }
     public Rectangle Bounds { get; set; }
     public bool Active { get; set; }
+    public bool Enabled { get; set; } = true;
     public Color AccentColor { get; set; } = new(78, 132, 190);
     public UiButtonVisualState VisualState { get; private set; }
 
     public bool Update(RawInputSnapshot input)
     {
+        if (!Enabled)
+        {
+            VisualState = UiButtonVisualState.Disabled;
+            return false;
+        }
+
         bool hovered = Bounds.Contains(input.MousePosition);
         VisualState = Active
             ? UiButtonVisualState.Active
@@ -50,6 +58,7 @@ public sealed class UiIconButton
             UiButtonVisualState.Hover => new Color(62, 62, 62, 235),
             UiButtonVisualState.Pressed => new Color(46, 86, 122, 245),
             UiButtonVisualState.Active => new Color(48, 88, 124, 245),
+            UiButtonVisualState.Disabled => new Color(32, 35, 40, 205),
             _ => new Color(43, 43, 43, 230)
         };
         renderer.DrawRoundedRectangle(spriteBatch, Bounds, background, 6);
@@ -67,6 +76,10 @@ public sealed class UiIconButton
 
         Vector2 size = font.MeasureString(Label);
         Vector2 position = new(Bounds.X + textOffset, Bounds.Y + (Bounds.Height - size.Y) * 0.5f);
-        spriteBatch.DrawString(font, Label, position, Color.White);
+        spriteBatch.DrawString(
+            font,
+            Label,
+            position,
+            Enabled ? Color.White : UiTheme.TextDisabled);
     }
 }

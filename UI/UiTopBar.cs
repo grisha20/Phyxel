@@ -8,7 +8,7 @@ namespace Phyxel.UI;
 
 public sealed class UiTopBar
 {
-    private readonly SpriteFont font;
+    private SpriteFont font;
     private readonly UiIconButton saveButton = new("Сохранить");
     private readonly UiIconButton loadButton = new("Загрузить");
     private readonly UiIconButton pauseButton = new("Пауза");
@@ -17,7 +17,10 @@ public sealed class UiTopBar
     public UiTopBar(SpriteFont font)
     {
         this.font = font;
+        settingsButton.Enabled = false;
     }
+
+    public SpriteFont Font { set => font = value; }
 
     private readonly Queue<float> frameTimeHistory = new();
     private const int MaxHistoryCount = 40;

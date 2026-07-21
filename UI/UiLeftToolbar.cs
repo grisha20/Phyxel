@@ -33,7 +33,7 @@ public sealed class UiLeftToolbar
         new(PhyxelToolId.Brush, "brush", "Кисть", true, "Обычное рисование материалом"),
         new(PhyxelToolId.Eraser, "eraser", "Ластик", true, "Стирание элементов"),
         new(PhyxelToolId.Temperature, "temperature", "Температура", true, "Изменение температуры"),
-        new(PhyxelToolId.Pan, "pan", "Камера", true, "Панорамирование вида"),
+        new(PhyxelToolId.Pan, "pan", "Камера", false, "Скоро: панорамирование вида"),
         new(PhyxelToolId.Line, "line", "Линия", false, "Скоро"),
         new(PhyxelToolId.Rectangle, "rectangle", "Прямоуг.", false, "Скоро"),
         new(PhyxelToolId.Circle, "circle", "Круг", false, "Скоро"),

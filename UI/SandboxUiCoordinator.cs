@@ -11,6 +11,7 @@ namespace Phyxel.UI;
 
 public readonly record struct UiFrameActions(
     bool ClearRequested,
+    bool ResetRequested,
     bool SaveRequested,
     bool LoadRequested,
     bool ScaleChanged,
@@ -44,7 +45,8 @@ public sealed class SandboxUiCoordinator : IDisposable
         return $"Материал: {material.Name}   Температура: {temperature} °C";
     }
     private readonly MaterialRegistry materialRegistry;
-    private readonly SpriteFont font;
+    private readonly UiFontSet fonts;
+    private SpriteFont font;
     private readonly Texture2D pixel;
     private readonly Texture2D brushOutline;
     private readonly UiPanelBackdropRenderer panelRenderer;
@@ -61,11 +63,12 @@ public sealed class SandboxUiCoordinator : IDisposable
 
     public SandboxUiCoordinator(
         MaterialRegistry materialRegistry,
-        SpriteFont font,
+        UiFontSet fonts,
         GpuResourceLifecycleManager resources)
     {
         this.materialRegistry = materialRegistry;
-        this.font = font;
+        this.fonts = fonts;
+        font = fonts.Regular;
         pixel = resources.PixelTexture;
         brushOutline = resources.BrushOutlineTexture;
         panelRenderer = new UiPanelBackdropRenderer(resources.PixelTexture, resources.CircleTexture);
@@ -99,9 +102,16 @@ public sealed class SandboxUiCoordinator : IDisposable
     public Rectangle InfoPanelBounds => currentLayout.StatusBar;
     public bool PointerConsumed { get; private set; }
 
-    public UiFrameActions Update(RawInputSnapshot input, Viewport viewport, SimulationSettings settings)
+    public UiFrameActions Update(
+        RawInputSnapshot input,
+        Viewport viewport,
+        float dpiScale,
+        SimulationSettings settings)
     {
-        currentLayout = UiLayoutCalculator.Calculate(viewport);
+        currentLayout = UiLayoutCalculator.Calculate(viewport, dpiScale);
+        font = fonts.Select(dpiScale, currentLayout.Scale);
+        topBar.Font = font;
+        categoryPalette.Font = font;
 
         // 1. Top bar update
         bool paused = settings.Paused;
@@ -161,6 +171,7 @@ public sealed class SandboxUiCoordinator : IDisposable
 
         return new UiFrameActions(
             clearRequested,
+            propertiesPanel.ResetRequested,
             saveRequested,
             loadRequested,
             propertiesPanel.ScaleChanged,

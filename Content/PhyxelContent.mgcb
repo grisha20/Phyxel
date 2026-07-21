@@ -9,3 +9,13 @@
 /importer:FontDescriptionImporter
 /processor:FontDescriptionProcessor
 /build:Fonts/SandboxFont.spritefont
+
+#begin Fonts/SandboxFontMedium.spritefont
+/importer:FontDescriptionImporter
+/processor:FontDescriptionProcessor
+/build:Fonts/SandboxFontMedium.spritefont
+
+#begin Fonts/SandboxFontLarge.spritefont
+/importer:FontDescriptionImporter
+/processor:FontDescriptionProcessor
+/build:Fonts/SandboxFontLarge.spritefont

@@ -12,7 +12,7 @@ namespace Phyxel.UI;
 public sealed class UiCategoryPalette
 {
     private readonly MaterialRegistry registry;
-    private readonly SpriteFont font;
+    private SpriteFont font;
     private readonly MaterialCardPreviewCache previewCache;
     private MaterialCategoryType activeCategory = MaterialCategoryType.Powders;
     private int scrollOffset;
@@ -32,6 +32,8 @@ public sealed class UiCategoryPalette
         this.previewCache = previewCache;
         RebuildCategoryCache();
     }
+
+    public SpriteFont Font { set => font = value; }
 
     private static int ComputeCardWidth(int cardHeight) => Math.Clamp((int)(cardHeight * 1.55f), 96, 132);
 

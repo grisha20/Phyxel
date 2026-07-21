@@ -16,6 +16,7 @@ public sealed class CanvasBrushController
     private uint commandSeed;
     private uint activeBodyId;
     private uint nextBodyId = 1;
+    private Rectangle previousCanvasBounds;
 
     public IReadOnlyList<BrushDrawCommand> CreateCommands(
         RawInputSnapshot input,
@@ -28,14 +29,16 @@ public sealed class CanvasBrushController
         bool pointerConsumedByUi)
     {
         frameCommands.Clear();
+        if (canvasBounds != previousCanvasBounds)
+        {
+            strokeActive = false;
+            previousCanvasBounds = canvasBounds;
+        }
+
         bool drawing = input.LeftDown || input.RightDown;
         if (!drawing || pointerConsumedByUi || !canvasBounds.Contains(input.MousePosition))
         {
-            if (!drawing)
-            {
-                strokeActive = false;
-            }
-
+            strokeActive = false;
             return frameCommands;
         }
 

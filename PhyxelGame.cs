@@ -100,13 +100,16 @@ public sealed class PhyxelGame : Game
     protected override void LoadContent()
     {
         spriteBatch = new SpriteBatch(GraphicsDevice);
-        SpriteFont font = Content.Load<SpriteFont>("Fonts/SandboxFont");
+        UiFontSet fonts = new(
+            Content.Load<SpriteFont>("Fonts/SandboxFont"),
+            Content.Load<SpriteFont>("Fonts/SandboxFontMedium"),
+            Content.Load<SpriteFont>("Fonts/SandboxFontLarge"));
         materialRegistry = new MaterialRegistry();
         acceptance.ConfigureMaterials(materialRegistry);
         resourceManager = new GpuResourceLifecycleManager(GraphicsDevice, materialRegistry);
         resourceManager.PrepareSimulation(settings);
         dispatchCoordinator = new SimulationDispatchCoordinator(resourceManager, materialRegistry);
-        userInterface = new SandboxUiCoordinator(materialRegistry, font, resourceManager);
+        userInterface = new SandboxUiCoordinator(materialRegistry, fonts, resourceManager);
         UiLayoutRegressionTests.RunAllTests(materialRegistry);
         SimulationWorldSnapshot? initialAcceptanceWorld = acceptance.CreateInitialWorld(
             settings.Width,
@@ -145,7 +148,11 @@ public sealed class PhyxelGame : Game
             return;
         }
         ProcessSerializationCompletion();
-        UiFrameActions actions = userInterface.Update(input, GraphicsDevice.Viewport, settings);
+        UiFrameActions actions = userInterface.Update(
+            input,
+            GraphicsDevice.Viewport,
+            UiDisplayScale.GetDpiScale(Window.Handle),
+            settings);
         ProcessUiActions(actions);
         acceptance.ConfigureSettings(frameIndex, settings);
         acceptance.ApplyRuntimeControls(
@@ -266,6 +273,12 @@ public sealed class PhyxelGame : Game
             dispatchCoordinator.ClearCurrentWorld(settings);
             temperatureProbe.Reset();
             SetStatus("Сцена очищена");
+        }
+        if (actions.ResetRequested)
+        {
+            dispatchCoordinator.ResetCurrentSimulation(settings);
+            temperatureProbe.Reset();
+            SetStatus("Симуляция перезапущена");
         }
         if (actions.GravityChanged)
         {

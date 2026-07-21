@@ -57,6 +57,7 @@ public sealed class UiPropertiesPanel
         HydraulicsToggled = false;
         ResetRequested = false;
         ClearRequested = false;
+        ScaleChanged = false;
         clearConfirmTimer = Math.Max(0f, clearConfirmTimer - input.DeltaSeconds);
 
         int padding = 12;
