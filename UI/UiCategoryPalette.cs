@@ -206,6 +206,7 @@ public sealed class UiCategoryPalette
         SpriteFont font,
         UiPanelBackdropRenderer backdrop,
         Texture2D pixel,
+        UiIconTextureCache iconCache,
         Rectangle bounds,
         ushort selectedMaterial,
         bool isTemperatureActive)
@@ -244,7 +245,15 @@ public sealed class UiCategoryPalette
             // Icon + Label
             int iconSize = Math.Clamp(tabHeight - 18, 14, 22);
             Rectangle dotRect = new(tabBounds.X + 10, tabBounds.Center.Y - iconSize / 2, iconSize, iconSize);
-            UiIconRenderer.DrawCategoryIcon(spriteBatch, pixel, cat.Type, dotRect, cat.AccentColor);
+            string iconKey = GetCategoryIconKey(cat.Type);
+            if (iconCache.TryGet(iconKey, out Texture2D iconTexture))
+            {
+                UiIconRenderer.DrawIcon(spriteBatch, iconTexture, dotRect, cat.AccentColor);
+            }
+            else
+            {
+                UiIconRenderer.DrawCategoryIcon(spriteBatch, pixel, cat.Type, dotRect, cat.AccentColor);
+            }
 
             Vector2 textPos = new(dotRect.Right + 6, tabBounds.Y + (tabHeight - font.LineSpacing) / 2);
                 string tabLabel = TruncateToWidth(font, cat.DisplayName, tabBounds.Right - (int)textPos.X - 8);
@@ -274,8 +283,8 @@ public sealed class UiCategoryPalette
 
         if (overflow)
         {
-            leftArrowButton.Draw(spriteBatch, font, backdrop, pixel);
-            rightArrowButton.Draw(spriteBatch, font, backdrop, pixel);
+            leftArrowButton.Draw(spriteBatch, font, backdrop, pixel, iconCache);
+            rightArrowButton.Draw(spriteBatch, font, backdrop, pixel, iconCache);
         }
 
         int cardX = cardsStripBounds.X - scrollOffset;
@@ -355,6 +364,16 @@ public sealed class UiCategoryPalette
     }
 
     private int GetTabHeight() => Math.Clamp(font.LineSpacing + 13, 32, 45);
+
+    private static string GetCategoryIconKey(MaterialCategoryType category) => category switch
+    {
+        MaterialCategoryType.Powders => "category_powders",
+        MaterialCategoryType.Liquids => "category_liquids",
+        MaterialCategoryType.Gases => "category_gases",
+        MaterialCategoryType.Solids => "category_solids",
+        MaterialCategoryType.Combustion => "category_combustion",
+        _ => "category_tools"
+    };
 
     private int[] GetTabWidths(int availableWidth, int gap)
     {

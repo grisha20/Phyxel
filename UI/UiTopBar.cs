@@ -91,6 +91,7 @@ public sealed class UiTopBar
         SpriteFont font,
         UiPanelBackdropRenderer backdrop,
         Texture2D pixel,
+        UiIconTextureCache iconCache,
         Rectangle bounds,
         double displayedFps,
         bool isPaused)
@@ -108,10 +109,10 @@ public sealed class UiTopBar
         spriteBatch.DrawString(font, "PHYXEL", titlePos, UiTheme.TextPrimary);
 
         // Buttons
-        saveButton.Draw(spriteBatch, font, backdrop, pixel);
-        loadButton.Draw(spriteBatch, font, backdrop, pixel);
-        pauseButton.Draw(spriteBatch, font, backdrop, pixel);
-        settingsButton.Draw(spriteBatch, font, backdrop, pixel);
+        saveButton.Draw(spriteBatch, font, backdrop, pixel, iconCache);
+        loadButton.Draw(spriteBatch, font, backdrop, pixel, iconCache);
+        pauseButton.Draw(spriteBatch, font, backdrop, pixel, iconCache);
+        settingsButton.Draw(spriteBatch, font, backdrop, pixel, iconCache);
 
         // Performance info on right
         float frameMs = displayedFps > 0 ? (float)(1000.0 / displayedFps) : 16.6f;

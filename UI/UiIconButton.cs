@@ -54,6 +54,7 @@ public sealed class UiIconButton
         SpriteFont font,
         UiPanelBackdropRenderer renderer,
         Texture2D pixel,
+        UiIconTextureCache iconCache,
         bool showSwatch = false)
     {
         Color background = VisualState switch
@@ -85,12 +86,15 @@ public sealed class UiIconButton
                 Bounds.Center.Y - iconSize / 2,
                 iconSize,
                 iconSize);
-            UiIconRenderer.DrawActionIcon(
-                spriteBatch,
-                pixel,
-                IconKey,
-                iconBounds,
-                Enabled ? (Danger ? UiTheme.Danger : UiTheme.TextSecondary) : UiTheme.TextDisabled);
+            Color iconColor = Enabled ? (Danger ? UiTheme.Danger : UiTheme.TextSecondary) : UiTheme.TextDisabled;
+            if (iconCache.TryGet(IconKey, out Texture2D iconTexture))
+            {
+                UiIconRenderer.DrawIcon(spriteBatch, iconTexture, iconBounds, iconColor);
+            }
+            else
+            {
+                UiIconRenderer.DrawActionIcon(spriteBatch, pixel, IconKey, iconBounds, iconColor);
+            }
             textOffset = iconBounds.Right - Bounds.X + 8;
         }
         if (showSwatch)

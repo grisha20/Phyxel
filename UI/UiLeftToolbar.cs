@@ -99,6 +99,7 @@ public sealed class UiLeftToolbar
         SpriteFont font,
         UiPanelBackdropRenderer backdrop,
         Texture2D pixel,
+        UiIconTextureCache iconCache,
         Rectangle bounds)
     {
         backdrop.Draw(spriteBatch, bounds, 8);
@@ -150,7 +151,14 @@ public sealed class UiLeftToolbar
             // Icon
             int iconSize = Math.Clamp(itemHeight - 14, 22, 30);
             Rectangle iconBox = new(itemBounds.X + 11, itemBounds.Center.Y - iconSize / 2, iconSize, iconSize);
-            UiIconRenderer.DrawToolIcon(spriteBatch, pixel, tool.Key, iconBox, iconColor);
+            if (iconCache.TryGet(tool.Key, out Texture2D iconTexture))
+            {
+                UiIconRenderer.DrawIcon(spriteBatch, iconTexture, iconBox, iconColor);
+            }
+            else
+            {
+                UiIconRenderer.DrawToolIcon(spriteBatch, pixel, tool.Key, iconBox, iconColor);
+            }
 
             // Title — measure available width to prevent overlap with "Скоро" tag
             if (!tool.Enabled)

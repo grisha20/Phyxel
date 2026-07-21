@@ -52,6 +52,7 @@ public sealed class SandboxUiCoordinator : IDisposable
     private readonly Texture2D brushOutline;
     private readonly UiPanelBackdropRenderer panelRenderer;
     private readonly MaterialCardPreviewCache materialCardPreviews;
+    private readonly UiIconTextureCache iconTextures;
 
     private readonly UiTopBar topBar;
     private readonly UiLeftToolbar leftToolbar = new();
@@ -76,6 +77,9 @@ public sealed class SandboxUiCoordinator : IDisposable
         materialCardPreviews = new MaterialCardPreviewCache(
             resources.PixelTexture.GraphicsDevice,
             System.IO.Path.Combine(AppContext.BaseDirectory, "Content", "UI", "MaterialCards"));
+        iconTextures = new UiIconTextureCache(
+            resources.PixelTexture.GraphicsDevice,
+            System.IO.Path.Combine(AppContext.BaseDirectory, "Content", "UI", "Icons"));
         topBar = new UiTopBar(font);
         categoryPalette = new UiCategoryPalette(materialRegistry, font, materialCardPreviews);
 
@@ -209,6 +213,7 @@ public sealed class SandboxUiCoordinator : IDisposable
             font,
             panelRenderer,
             pixel,
+            iconTextures,
             currentLayout.TopBar,
             framesPerSecond,
             settings.Paused);
@@ -219,6 +224,7 @@ public sealed class SandboxUiCoordinator : IDisposable
             font,
             panelRenderer,
             pixel,
+            iconTextures,
             currentLayout.LeftToolbar);
 
         // 3. Properties Panel
@@ -236,6 +242,7 @@ public sealed class SandboxUiCoordinator : IDisposable
             leftToolbar.ActiveTool,
             currentMatDef,
             materialCardPreviews,
+            iconTextures,
             CameraZoom);
 
         // 4. Bottom Category Palette
@@ -244,6 +251,7 @@ public sealed class SandboxUiCoordinator : IDisposable
             font,
             panelRenderer,
             pixel,
+            iconTextures,
             currentLayout.BottomPalette,
             SelectedMaterial,
             TemperatureToolActive);
@@ -303,5 +311,6 @@ public sealed class SandboxUiCoordinator : IDisposable
     public void Dispose()
     {
         materialCardPreviews.Dispose();
+        iconTextures.Dispose();
     }
 }

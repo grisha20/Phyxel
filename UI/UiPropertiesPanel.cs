@@ -199,12 +199,13 @@ public sealed class UiPropertiesPanel
         PhyxelToolId activeTool,
         MaterialDefinition selectedMaterial,
         MaterialCardPreviewCache previewCache,
+        UiIconTextureCache iconCache,
         float cameraZoom)
     {
         backdrop.Draw(spriteBatch, bounds, 10);
         DrawSectionLabel(spriteBatch, font, "СВОЙСТВА", bounds.X + 14, bounds.Y + 10, 0.78f);
 
-        DrawToolCard(spriteBatch, font, backdrop, pixel, activeTool);
+        DrawToolCard(spriteBatch, font, backdrop, pixel, iconCache, activeTool);
         if (activeTool != PhyxelToolId.Pan)
         {
             DrawMaterialCard(spriteBatch, font, backdrop, pixel, selectedMaterial, previewCache);
@@ -226,7 +227,7 @@ public sealed class UiPropertiesPanel
             Vector2 zoomSize = font.MeasureString(zoomText);
             spriteBatch.DrawString(font, zoomText, new Vector2(cameraInfoBounds.Right - zoomSize.X - 10,
                 cameraInfoBounds.Center.Y - font.LineSpacing / 2f), UiTheme.TextPrimary);
-            resetViewButton.Draw(spriteBatch, font, backdrop, pixel);
+            resetViewButton.Draw(spriteBatch, font, backdrop, pixel, iconCache);
         }
 
         DrawSectionLabel(spriteBatch, font, "СИМУЛЯЦИЯ", bounds.X + 14, simulationHeaderY, 0.68f);
@@ -235,8 +236,8 @@ public sealed class UiPropertiesPanel
         hydraulicsToggle.Draw(spriteBatch, font, backdrop, pixel, settings.HydraulicPressure);
 
         spriteBatch.Draw(pixel, new Rectangle(bounds.X + 14, restartPhysicsButton.Bounds.Y - 9, bounds.Width - 28, 1), UiTheme.BorderColor);
-        restartPhysicsButton.Draw(spriteBatch, font, backdrop, pixel);
-        clearButton.Draw(spriteBatch, font, backdrop, pixel);
+        restartPhysicsButton.Draw(spriteBatch, font, backdrop, pixel, iconCache);
+        clearButton.Draw(spriteBatch, font, backdrop, pixel, iconCache);
     }
 
     private void DrawToolCard(
@@ -244,6 +245,7 @@ public sealed class UiPropertiesPanel
         SpriteFont font,
         UiPanelBackdropRenderer backdrop,
         Texture2D pixel,
+        UiIconTextureCache iconCache,
         PhyxelToolId activeTool)
     {
         backdrop.DrawRoundedRectangle(spriteBatch, toolCardBounds, UiTheme.CardBackground, 7);
@@ -265,7 +267,14 @@ public sealed class UiPropertiesPanel
         };
         int iconSize = Math.Clamp(toolCardBounds.Height - 18, 24, 32);
         Rectangle icon = new(toolCardBounds.X + 11, toolCardBounds.Center.Y - iconSize / 2, iconSize, iconSize);
-        UiIconRenderer.DrawToolIcon(spriteBatch, pixel, toolKey, icon, UiTheme.PrimaryAccent);
+        if (iconCache.TryGet(toolKey, out Texture2D iconTexture))
+        {
+            UiIconRenderer.DrawIcon(spriteBatch, iconTexture, icon, UiTheme.PrimaryAccent);
+        }
+        else
+        {
+            UiIconRenderer.DrawToolIcon(spriteBatch, pixel, toolKey, icon, UiTheme.PrimaryAccent);
+        }
         spriteBatch.DrawString(font, toolName,
             new Vector2(icon.Right + 10, toolCardBounds.Center.Y - font.LineSpacing / 2f), UiTheme.TextPrimary);
     }

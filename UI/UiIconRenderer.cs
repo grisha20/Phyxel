@@ -6,6 +6,23 @@ namespace Phyxel.UI;
 
 public static class UiIconRenderer
 {
+    public static void DrawIcon(
+        SpriteBatch spriteBatch,
+        Texture2D texture,
+        Rectangle bounds,
+        Color tint)
+    {
+        float scale = Math.Min(bounds.Width / (float)Math.Max(1, texture.Width), bounds.Height / (float)Math.Max(1, texture.Height));
+        int width = Math.Max(1, (int)MathF.Round(texture.Width * scale));
+        int height = Math.Max(1, (int)MathF.Round(texture.Height * scale));
+        Rectangle destination = new(
+            bounds.Center.X - width / 2,
+            bounds.Center.Y - height / 2,
+            width,
+            height);
+        spriteBatch.Draw(texture, destination, tint);
+    }
+
     public static void DrawActionIcon(
         SpriteBatch spriteBatch,
         Texture2D pixel,

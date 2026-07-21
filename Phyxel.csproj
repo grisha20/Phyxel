@@ -32,6 +32,7 @@
     <KniContentReference Include="Content\PhyxelContent.mgcb" />
     <None Update="Content\Shaders\**\*.*" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Content\UI\MaterialCards\sand.png;Content\UI\MaterialCards\water.png;Content\UI\MaterialCards\steam.png;Content\UI\MaterialCards\co2.png;Content\UI\MaterialCards\ice.png;Content\UI\MaterialCards\metal.png;Content\UI\MaterialCards\stone.png;Content\UI\MaterialCards\wood.png;Content\UI\MaterialCards\fire.png;Content\UI\MaterialCards\charcoal.png;Content\UI\MaterialCards\stone_coal.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Content\UI\Icons\**\*.*" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Materials\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

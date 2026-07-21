@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Core;
@@ -41,6 +42,7 @@ public static class UiLayoutRegressionTests
         TestMaterialCategorization(registry);
         TestExternalCategoryValidation();
         TestMaterialPreviewMapping();
+        TestIconAssets();
         TestPauseContinueLogic();
 
         Console.WriteLine("=== All UI Layout & Input Regression Tests Passed Successfully ===");
@@ -708,6 +710,30 @@ public static class UiLayoutRegressionTests
         Require(MaterialCardPreviewCache.GetPreviewFileName("external:custom") is null,
             "External material unexpectedly received a core preview.");
         Console.WriteLine("[PASS] Material preview mapping and external fallback.");
+    }
+
+    private static void TestIconAssets()
+    {
+        string[] keys =
+        [
+            "save", "load", "pause", "play", "settings",
+            "brush", "eraser", "temperature", "line", "rectangle", "circle", "fill", "eyedropper", "pan",
+            "category_powders", "category_liquids", "category_gases", "category_solids", "category_combustion", "category_tools",
+            "reset", "clear"
+        ];
+        string iconDirectory = Path.Combine(AppContext.BaseDirectory, "Content", "UI", "Icons");
+        HashSet<string> fileNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string key in keys)
+        {
+            string fileName = UiIconTextureCache.GetFileName(key) ?? string.Empty;
+            Require(!string.IsNullOrWhiteSpace(fileName), $"Icon key '{key}' has no file mapping.");
+            Require(fileNames.Add(fileName), $"Icon file '{fileName}' is mapped more than once.");
+            string path = Path.Combine(iconDirectory, fileName);
+            Require(File.Exists(path) && new FileInfo(path).Length > 0,
+                $"Icon asset '{path}' is missing or empty.");
+        }
+        Require(File.Exists(Path.Combine(iconDirectory, "LICENSE.txt")), "Lucide icon license is missing.");
+        Console.WriteLine($"[PASS] {keys.Length} unified PNG icon assets and license are available.");
     }
 
     private static RawInputSnapshot Input(
