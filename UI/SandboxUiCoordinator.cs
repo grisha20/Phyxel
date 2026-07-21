@@ -105,6 +105,7 @@ public sealed class SandboxUiCoordinator : IDisposable
         set => leftToolbar.ActiveTool = value;
     }
     internal UiLayoutBounds CurrentLayout => currentLayout;
+    internal UiCategoryPalette CategoryPalette => categoryPalette;
 
     public Rectangle CanvasBounds => currentLayout.SimulationCanvas;
     public Rectangle SidePanelBounds => currentLayout.RightPanel;

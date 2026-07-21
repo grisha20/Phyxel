@@ -33,6 +33,7 @@ public static class UiLayoutRegressionTests
         TestPanelControlBounds(registry, fonts);
         TestPropertiesActions(registry, fonts);
         TestToolAndMaterialPersistence(registry, fonts, coordinator);
+        TestCategoryFiltering(registry, coordinator);
         TestBrushToolModesAndInputBreaks(registry);
         TestCameraPanZoomAndInputIsolation();
         TestButtonVisualStates();
@@ -83,6 +84,8 @@ public static class UiLayoutRegressionTests
 
                 Require(layout.SimulationCanvas.Width >= 420 && layout.SimulationCanvas.Height >= 240,
                     $"Canvas too small at {width}x{height}, DPI {dpi:0.##}: {layout.SimulationCanvas}.");
+                Require(layout.SimulationCanvas.Bottom == layout.BottomPalette.Top,
+                    $"Canvas does not meet the palette at {width}x{height}, DPI {dpi:0.##}.");
                 Require(layout.Scale is >= 0.82f and <= 1.5f,
                     $"Layout scale out of range: {layout.Scale}.");
             }
@@ -316,6 +319,88 @@ public static class UiLayoutRegressionTests
         Console.WriteLine("[PASS] Tool/material persistence and enabled Camera behavior.");
     }
 
+    private static void TestCategoryFiltering(MaterialRegistry registry, SandboxUiCoordinator coordinator)
+    {
+        UiLayoutBounds layout = UiLayoutCalculator.Calculate(new Viewport(0, 0, 1920, 1080), 1f);
+        SimulationSettings settings = new();
+        ushort selectedMaterial = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
+        ushort previousMaterial = coordinator.SelectedMaterial;
+        PhyxelToolId previousTool = coordinator.ActiveTool;
+        coordinator.SelectedMaterial = selectedMaterial;
+        coordinator.ActiveTool = PhyxelToolId.Brush;
+        coordinator.Update(Input(new Point(-1, -1)), new Viewport(0, 0, 1920, 1080), 1f, settings);
+
+        Dictionary<MaterialCategoryType, string[]> expectedMaterials = new()
+        {
+            [MaterialCategoryType.Powders] = [CoreMaterialIds.Sand, CoreMaterialIds.Coal, CoreMaterialIds.StoneCoal],
+            [MaterialCategoryType.Liquids] = [CoreMaterialIds.Water],
+            [MaterialCategoryType.Gases] = [CoreMaterialIds.Steam, CoreMaterialIds.Co2],
+            [MaterialCategoryType.Solids] =
+                [CoreMaterialIds.Ice, CoreMaterialIds.Metal, CoreMaterialIds.Stone, CoreMaterialIds.Fixture, CoreMaterialIds.Wood],
+            [MaterialCategoryType.Combustion] = [CoreMaterialIds.Fire],
+            [MaterialCategoryType.Tools] = [CoreMaterialIds.Eraser]
+        };
+
+        foreach (MaterialCategoryDefinition category in MaterialCategoryResolver.AllCategories)
+        {
+            Rectangle tabBounds = coordinator.CategoryPalette.GetCategoryTabBounds(
+                layout.BottomPalette,
+                category.Type);
+            Require(tabBounds != Rectangle.Empty,
+                $"Category tab '{category.DisplayName}' has no bounds.");
+            ushort? categorySelection = coordinator.CategoryPalette.Update(
+                Input(tabBounds.Center, leftDown: true, leftPressed: true),
+                layout.BottomPalette,
+                selectedMaterial,
+                false,
+                out _);
+
+            Require(coordinator.CategoryPalette.ActiveCategory == category.Type,
+                $"Category tab '{category.DisplayName}' did not become active.");
+            Require(coordinator.CategoryPalette.ScrollOffset == 0,
+                $"Category tab '{category.DisplayName}' did not reset scroll offset.");
+            Require(coordinator.SelectedMaterial == selectedMaterial,
+                $"Category tab '{category.DisplayName}' changed selected material.");
+            Require(!categorySelection.HasValue,
+                $"Category tab '{category.DisplayName}' emitted a material selection.");
+            foreach (MaterialDefinition material in coordinator.CategoryPalette.ActiveMaterials)
+            {
+                Require(MaterialCategoryResolver.Resolve(material) == category.Type,
+                    $"Category '{category.DisplayName}' displayed material '{material.Id}' from another category.");
+            }
+            RequireMaterialIds(
+                coordinator.CategoryPalette.ActiveMaterials,
+                expectedMaterials[category.Type],
+                category.DisplayName);
+        }
+
+        coordinator.SelectedMaterial = previousMaterial;
+        coordinator.ActiveTool = previousTool;
+        Console.WriteLine("[PASS] Category tabs filter materials, reset scrolling, and preserve selection.");
+    }
+
+    private static void RequireMaterialIds(
+        IReadOnlyList<MaterialDefinition> actual,
+        IReadOnlyList<string> expected,
+        string categoryName)
+    {
+        Require(actual.Count == expected.Count,
+            $"Category '{categoryName}' contains {actual.Count} materials instead of {expected.Count}.");
+        foreach (string expectedId in expected)
+        {
+            bool found = false;
+            foreach (MaterialDefinition material in actual)
+            {
+                if (material.Id == expectedId)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            Require(found, $"Category '{categoryName}' is missing '{expectedId}'.");
+        }
+    }
+
     private static void TestBrushToolModesAndInputBreaks(MaterialRegistry registry)
     {
         SimulationSettings settings = new();
@@ -374,6 +459,15 @@ public static class UiLayoutRegressionTests
 
     private static void TestCameraPanZoomAndInputIsolation()
     {
+        Rectangle fitCanvas = new(100, 80, 1000, 700);
+        Rectangle fitted = PhyxelGame.FitWorldToCanvas(fitCanvas, 1920, 1080);
+        Require(fitted.Bottom == fitCanvas.Bottom,
+            "Fitted world is not anchored to the bottom of the simulation canvas.");
+        Require(fitted.Center.X == fitCanvas.Center.X,
+            "Fitted world is not centered horizontally in the simulation canvas.");
+        Require(Math.Abs(fitted.Width / (float)fitted.Height - 1920f / 1080f) < 0.01f,
+            "Fitted world aspect ratio was distorted.");
+
         CanvasCameraController camera = new();
         Rectangle canvas = new(100, 80, 800, 450);
         Rectangle fittedWorld = canvas;

@@ -65,7 +65,7 @@ public static class UiLayoutCalculator
         int canvasLeft = leftToolbar.Right + margin;
         int canvasTop = middleTop;
         int canvasRight = rightPanel.Left - margin;
-        int canvasBottom = bottomPalette.Top - margin;
+        int canvasBottom = bottomPalette.Top;
 
         Rectangle simulationCanvas = new(
             canvasLeft,

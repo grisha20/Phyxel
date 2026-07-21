@@ -598,14 +598,14 @@ public sealed class PhyxelGame : Game
         accumulatedFrames = 0;
     }
 
-    private static Rectangle FitWorldToCanvas(Rectangle canvas, int worldWidth, int worldHeight)
+    internal static Rectangle FitWorldToCanvas(Rectangle canvas, int worldWidth, int worldHeight)
     {
         float scale = MathF.Min(canvas.Width / (float)worldWidth, canvas.Height / (float)worldHeight);
         int width = Math.Max(1, (int)MathF.Round(worldWidth * scale));
         int height = Math.Max(1, (int)MathF.Round(worldHeight * scale));
         return new Rectangle(
             canvas.X + (canvas.Width - width) / 2,
-            canvas.Y + (canvas.Height - height) / 2,
+            canvas.Bottom - height,
             width,
             height);
     }

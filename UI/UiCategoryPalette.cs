@@ -21,8 +21,6 @@ public sealed class UiCategoryPalette
     private MaterialCategoryType? hoveredCategory;
     private bool hoveredCategoryPressed;
     private readonly Dictionary<MaterialCategoryType, List<MaterialDefinition>> categorizedMaterials = new();
-    private readonly List<MaterialDefinition> allMaterials = new();
-    private readonly Dictionary<MaterialCategoryType, int> categoryStartIndices = new();
 
     private readonly UiIconButton leftArrowButton = new("<");
     private readonly UiIconButton rightArrowButton = new(">");
@@ -40,6 +38,28 @@ public sealed class UiCategoryPalette
 
     public SpriteFont Font { set => font = value; }
 
+    internal MaterialCategoryType ActiveCategory => activeCategory;
+    internal int ScrollOffset => scrollOffset;
+    internal IReadOnlyList<MaterialDefinition> ActiveMaterials => categorizedMaterials[activeCategory];
+
+    internal Rectangle GetCategoryTabBounds(Rectangle bounds, MaterialCategoryType category)
+    {
+        const int gap = 6;
+        int x = bounds.X + 12;
+        int[] widths = GetTabWidths(bounds.Width - 24, gap);
+        for (int index = 0; index < MaterialCategoryResolver.AllCategories.Count; index++)
+        {
+            MaterialCategoryDefinition candidate = MaterialCategoryResolver.AllCategories[index];
+            Rectangle tabBounds = new(x, bounds.Y + 8, widths[index], GetTabHeight());
+            if (candidate.Type == category)
+            {
+                return tabBounds;
+            }
+            x += widths[index] + gap;
+        }
+        return Rectangle.Empty;
+    }
+
     internal static int ComputeCardWidth(int cardHeight) => Math.Clamp((int)(cardHeight * 1.55f), 96, 132);
 
     internal static int CalculateVisibleCardCapacity(Rectangle bounds, SpriteFont font)
@@ -55,8 +75,6 @@ public sealed class UiCategoryPalette
     public void RebuildCategoryCache()
     {
         categorizedMaterials.Clear();
-        allMaterials.Clear();
-        categoryStartIndices.Clear();
         foreach (MaterialCategoryDefinition cat in MaterialCategoryResolver.AllCategories)
         {
             categorizedMaterials[cat.Type] = new List<MaterialDefinition>();
@@ -67,12 +85,6 @@ public sealed class UiCategoryPalette
             if (mat.Hidden || mat.Id == CoreMaterialIds.Empty) continue;
             MaterialCategoryType category = MaterialCategoryResolver.Resolve(mat);
             categorizedMaterials[category].Add(mat);
-        }
-
-        foreach (MaterialCategoryDefinition category in MaterialCategoryResolver.AllCategories)
-        {
-            categoryStartIndices[category.Type] = allMaterials.Count;
-            allMaterials.AddRange(categorizedMaterials[category.Type]);
         }
     }
 
@@ -89,7 +101,6 @@ public sealed class UiCategoryPalette
         hoveredMaterialPressed = false;
         hoveredCategory = null;
         hoveredCategoryPressed = false;
-        MaterialCategoryType? jumpToCategory = null;
 
         int tabHeight = GetTabHeight();
         int tabY = bounds.Y + 8;
@@ -113,7 +124,7 @@ public sealed class UiCategoryPalette
             if (input.LeftPressed && tabBounds.Contains(input.MousePosition))
             {
                 activeCategory = cat.Type;
-                jumpToCategory = cat.Type;
+                scrollOffset = 0;
             }
 
             tabX += tabWidth + tabGap;
@@ -122,15 +133,10 @@ public sealed class UiCategoryPalette
         // 2. Material Cards Strip
         Rectangle fullCardsBounds = GetCardsStripBounds(bounds, false);
 
-        List<MaterialDefinition> currentList = allMaterials;
+        List<MaterialDefinition> currentList = categorizedMaterials[activeCategory];
         int cardHeight = fullCardsBounds.Height;
         int cardWidth = ComputeCardWidth(cardHeight);
         int gap = 6;
-
-        if (jumpToCategory.HasValue && categoryStartIndices.TryGetValue(jumpToCategory.Value, out int categoryIndex))
-        {
-            scrollOffset = categoryIndex * (cardWidth + gap);
-        }
 
         // Compute total cards width for scrolling
         int totalCardsWidth = 0;
@@ -250,7 +256,7 @@ public sealed class UiCategoryPalette
             bounds.Height);
 
         // Arrows if needed
-        List<MaterialDefinition> currentList = allMaterials;
+        List<MaterialDefinition> currentList = categorizedMaterials[activeCategory];
         int gap = 6;
         Rectangle fullCardsBounds = GetCardsStripBounds(bounds, false);
         int cardWidth = ComputeCardWidth(fullCardsBounds.Height);
