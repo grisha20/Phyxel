@@ -249,6 +249,7 @@ public sealed class PhyxelGame : Game
 
     protected override void UnloadContent()
     {
+        userInterface?.Dispose();
         resourceManager?.Dispose();
         spriteBatch?.Dispose();
         base.UnloadContent();

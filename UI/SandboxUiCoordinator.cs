@@ -17,7 +17,7 @@ public readonly record struct UiFrameActions(
     bool GravityChanged,
     bool HydraulicsChanged);
 
-public sealed class SandboxUiCoordinator
+public sealed class SandboxUiCoordinator : IDisposable
 {
     public static string FormatTemperatureProbe(
         MaterialRegistry materialRegistry,
@@ -48,6 +48,7 @@ public sealed class SandboxUiCoordinator
     private readonly Texture2D pixel;
     private readonly Texture2D brushOutline;
     private readonly UiPanelBackdropRenderer panelRenderer;
+    private readonly MaterialCardPreviewCache materialCardPreviews;
 
     private readonly UiTopBar topBar;
     private readonly UiLeftToolbar leftToolbar = new();
@@ -68,8 +69,11 @@ public sealed class SandboxUiCoordinator
         pixel = resources.PixelTexture;
         brushOutline = resources.BrushOutlineTexture;
         panelRenderer = new UiPanelBackdropRenderer(resources.PixelTexture, resources.CircleTexture);
+        materialCardPreviews = new MaterialCardPreviewCache(
+            resources.PixelTexture.GraphicsDevice,
+            System.IO.Path.Combine(AppContext.BaseDirectory, "Content", "UI", "MaterialCards"));
         topBar = new UiTopBar(font);
-        categoryPalette = new UiCategoryPalette(materialRegistry, font);
+        categoryPalette = new UiCategoryPalette(materialRegistry, font, materialCardPreviews);
 
         SelectedMaterial = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
     }
@@ -261,5 +265,10 @@ public sealed class SandboxUiCoordinator
                 : new Color(210, 235, 255, 175);
 
         spriteBatch.Draw(brushOutline, bounds, color);
+    }
+
+    public void Dispose()
+    {
+        materialCardPreviews.Dispose();
     }
 }

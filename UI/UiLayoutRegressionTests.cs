@@ -17,6 +17,7 @@ public static class UiLayoutRegressionTests
         TestLayoutResolutions();
         TestMaterialCategorization(registry);
         TestExternalCategoryValidation();
+        TestMaterialPreviewMapping();
         TestPauseContinueLogic();
 
         Console.WriteLine("=== All UI Layout Regression Tests Passed Successfully ===");
@@ -113,5 +114,42 @@ public static class UiLayoutRegressionTests
         }
 
         Console.WriteLine("[PASS] Pause / Continue Toggle Logic.");
+    }
+
+    private static void TestMaterialPreviewMapping()
+    {
+        Dictionary<string, string> expected = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [CoreMaterialIds.Sand] = "sand.png",
+            [CoreMaterialIds.Water] = "water.png",
+            [CoreMaterialIds.Steam] = "steam.png",
+            [CoreMaterialIds.Co2] = "co2.png",
+            [CoreMaterialIds.Ice] = "ice.png",
+            [CoreMaterialIds.Metal] = "metal.png",
+            [CoreMaterialIds.Stone] = "stone.png",
+            [CoreMaterialIds.Wood] = "wood.png",
+            [CoreMaterialIds.Fire] = "fire.png",
+            [CoreMaterialIds.Coal] = "charcoal.png",
+            [CoreMaterialIds.StoneCoal] = "stone_coal.png"
+        };
+
+        foreach ((string materialId, string fileName) in expected)
+        {
+            if (!string.Equals(
+                MaterialCardPreviewCache.GetPreviewFileName(materialId),
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Material preview mapping mismatch for '{materialId}'.");
+            }
+        }
+
+        if (MaterialCardPreviewCache.GetPreviewFileName("external:custom") is not null)
+        {
+            throw new InvalidOperationException("External material unexpectedly received a core preview mapping.");
+        }
+
+        Console.WriteLine("[PASS] Material Preview ID Mapping and External Fallback.");
     }
 }
