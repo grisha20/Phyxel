@@ -69,10 +69,7 @@ public sealed class UiLeftToolbar
         for (int index = 0; index < Tools.Count; index++)
         {
             ToolDefinition tool = Tools[index];
-            if (tool.Id == PhyxelToolId.Pan)
-            {
-                itemY += 8;
-            }
+            itemY += GetGroupGap(tool.Id);
             Rectangle itemBounds = new(bounds.X + padding, itemY, itemWidth, itemHeight);
             if (itemBounds.Contains(input.MousePosition))
             {
@@ -83,7 +80,7 @@ public sealed class UiLeftToolbar
                 }
             }
 
-            itemY += itemHeight + 5;
+            itemY += itemHeight + 6;
         }
 
         if (hoveredTool == previousHoveredTool && hoveredTool is not null)
@@ -122,10 +119,11 @@ public sealed class UiLeftToolbar
         for (int index = 0; index < Tools.Count; index++)
         {
             ToolDefinition tool = Tools[index];
-            if (tool.Id == PhyxelToolId.Pan)
+            int groupGap = GetGroupGap(tool.Id);
+            if (groupGap > 0)
             {
-                spriteBatch.Draw(pixel, new Rectangle(bounds.X + 14, itemY + 1, bounds.Width - 28, 1), UiTheme.BorderColor);
-                itemY += 8;
+                spriteBatch.Draw(pixel, new Rectangle(bounds.X + 14, itemY + groupGap / 2, bounds.Width - 28, 1), UiTheme.BorderColor);
+                itemY += groupGap;
             }
             Rectangle itemBounds = new(bounds.X + padding, itemY, itemWidth, itemHeight);
             bool isActive = tool.Id == activeTool && tool.Enabled;
@@ -150,35 +148,35 @@ public sealed class UiLeftToolbar
             }
 
             // Icon
-            int iconSize = Math.Clamp(itemHeight - 16, 18, 25);
-            Rectangle iconBox = new(itemBounds.X + 10, itemBounds.Center.Y - iconSize / 2, iconSize, iconSize);
+            int iconSize = Math.Clamp(itemHeight - 14, 22, 30);
+            Rectangle iconBox = new(itemBounds.X + 11, itemBounds.Center.Y - iconSize / 2, iconSize, iconSize);
             UiIconRenderer.DrawToolIcon(spriteBatch, pixel, tool.Key, iconBox, iconColor);
 
             // Title — measure available width to prevent overlap with "Скоро" tag
             float textY = itemBounds.Y + (itemHeight - font.LineSpacing) / 2f;
             if (!tool.Enabled)
             {
-                const float tagScale = 0.72f;
+                const float nameScale = 0.82f;
+                const float tagScale = 0.66f;
                 Vector2 tagSize = font.MeasureString("Скоро") * tagScale;
                 int badgeWidth = (int)tagSize.X + 12;
                 int badgeHeight = (int)(font.LineSpacing * tagScale) + 8;
-                Rectangle badge = new(itemBounds.Right - badgeWidth - 8, itemBounds.Center.Y - badgeHeight / 2, badgeWidth, badgeHeight);
-                float maxTextWidth = badge.X - (iconBox.Right + 9) - 6;
+                Rectangle badge = new(iconBox.Right + 8, itemBounds.Bottom - badgeHeight - 4, badgeWidth, badgeHeight);
+                float maxTextWidth = itemBounds.Right - iconBox.Right - 17;
 
                 // Truncate display name if it would overlap
                 string displayText = tool.DisplayName;
-                Vector2 nameSize = font.MeasureString(displayText);
-                if (nameSize.X > maxTextWidth && displayText.Length > 2)
+                if (font.MeasureString(displayText).X * nameScale > maxTextWidth && displayText.Length > 2)
                 {
-                    while (displayText.Length > 2 && font.MeasureString(displayText + "…").X > maxTextWidth)
+                    while (displayText.Length > 2 && font.MeasureString(displayText + "…").X * nameScale > maxTextWidth)
                     {
                         displayText = displayText[..^1];
                     }
                     displayText += "…";
                 }
 
-                Vector2 textPos = new(iconBox.Right + 8, textY);
-                spriteBatch.DrawString(font, displayText, textPos, textColor);
+                Vector2 textPos = new(iconBox.Right + 8, itemBounds.Y + 3);
+                spriteBatch.DrawString(font, displayText, textPos, textColor, 0, Vector2.Zero, nameScale, SpriteEffects.None, 0);
 
                 // "Скоро" tag
                 backdrop.DrawRoundedRectangle(spriteBatch, badge, UiTheme.FieldBackground, 4);
@@ -201,13 +199,13 @@ public sealed class UiLeftToolbar
                 spriteBatch.DrawString(font, tool.DisplayName, textPos, textColor);
             }
 
-            itemY += itemHeight + 5;
+            itemY += itemHeight + 6;
         }
 
         int footerHeight = font.LineSpacing * 2 + 18;
-        if (itemY + footerHeight + 10 < bounds.Bottom)
+        if (itemY + footerHeight + 8 < bounds.Bottom)
         {
-            Rectangle footer = new(bounds.X + 10, bounds.Bottom - footerHeight - 10, bounds.Width - 20, footerHeight);
+            Rectangle footer = new(bounds.X + 10, itemY + 4, bounds.Width - 20, footerHeight);
             backdrop.DrawRoundedRectangle(spriteBatch, footer, UiTheme.FieldBackground, 5);
             spriteBatch.DrawString(font, "ЛКМ  Рисовать", new Vector2(footer.X + 10, footer.Y + 6), UiTheme.TextMuted);
             spriteBatch.DrawString(font, "ПКМ  Стирать", new Vector2(footer.X + 10, footer.Y + 7 + font.LineSpacing), UiTheme.TextMuted);
@@ -234,16 +232,13 @@ public sealed class UiLeftToolbar
         for (int index = 0; index < Tools.Count; index++)
         {
             ToolDefinition tool = Tools[index];
-            if (tool.Id == PhyxelToolId.Pan)
-            {
-                itemY += 8;
-            }
+            itemY += GetGroupGap(tool.Id);
             Rectangle itemBounds = new(bounds.X + padding, itemY, bounds.Width - padding * 2, itemHeight);
             if (tool.Id == toolId)
             {
                 return itemBounds;
             }
-            itemY += itemHeight + 5;
+            itemY += itemHeight + 6;
         }
         return Rectangle.Empty;
     }
@@ -252,9 +247,16 @@ public sealed class UiLeftToolbar
 
     private static int GetItemHeight(SpriteFont font, Rectangle bounds)
     {
-        int desired = Math.Clamp(font.LineSpacing + 16, 38, 52);
-        int fixedSpacing = (Tools.Count - 1) * 5 + 8;
+        int desired = Math.Clamp(font.LineSpacing + 22, 40, 54);
+        int fixedSpacing = (Tools.Count - 1) * 6 + GetGroupGap(PhyxelToolId.Line) + GetGroupGap(PhyxelToolId.Pan);
         int available = Math.Max(Tools.Count * 34, bounds.Height - GetHeaderHeight(font) - fixedSpacing);
-        return Math.Clamp(Math.Min(desired, available / Tools.Count), 34, 52);
+        return Math.Clamp(Math.Min(desired, available / Tools.Count), 34, 54);
     }
+
+    private static int GetGroupGap(PhyxelToolId toolId) => toolId switch
+    {
+        PhyxelToolId.Line => 10,
+        PhyxelToolId.Pan => 12,
+        _ => 0
+    };
 }

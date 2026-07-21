@@ -276,10 +276,10 @@ public sealed class UiCategoryPalette
                         : isHovered ? UiTheme.CardHover : UiTheme.CardBackground;
                 Color cardBorder = isSelected ? UiTheme.CardSelectedBorder : UiTheme.BorderColor;
 
-                spriteBatch.Draw(pixel, cardBounds, cardBg);
+                backdrop.DrawRoundedRectangle(spriteBatch, cardBounds, cardBg, 7);
 
                 int inset = isSelected ? 3 : 2;
-                int labelHeight = Math.Clamp(font.LineSpacing + 8, 22, Math.Max(22, cardBounds.Height / 2));
+                int labelHeight = Math.Clamp(font.LineSpacing + 14, 30, Math.Max(30, cardBounds.Height / 2));
                 Rectangle previewBounds = new(
                     cardBounds.X + inset,
                     cardBounds.Y + inset,
@@ -294,16 +294,21 @@ public sealed class UiCategoryPalette
                     cardBounds.Bottom - inset - previewBounds.Bottom);
                 spriteBatch.Draw(pixel, labelBounds, new Color(13, 16, 21, 245));
 
-                string title = TruncateToWidth(font, mat.Name, labelBounds.Width - 12);
-                Vector2 titleSize = font.MeasureString(title);
+                (string title, float titleScale) = FitCardTitle(font, mat.Name, labelBounds.Width - 12);
+                Vector2 titleSize = font.MeasureString(title) * titleScale;
                 Vector2 namePos = new(
                     labelBounds.Center.X - titleSize.X * 0.5f,
-                    labelBounds.Center.Y - font.LineSpacing * 0.5f);
+                    labelBounds.Center.Y - titleSize.Y * 0.5f);
                 spriteBatch.DrawString(
                     font,
                     title,
                     namePos,
-                    isSelected ? UiTheme.TextPrimary : UiTheme.TextSecondary);
+                    isSelected ? UiTheme.CardSelectedBorder : UiTheme.TextSecondary,
+                    0,
+                    Vector2.Zero,
+                    titleScale,
+                    SpriteEffects.None,
+                    0);
 
                 UiIconRenderer.DrawStrokedRectangle(
                     spriteBatch,
@@ -410,6 +415,55 @@ public sealed class UiCategoryPalette
         {
             length--;
         }
+        return length == 0 ? ellipsis : text[..length] + ellipsis;
+    }
+
+    internal static (string Text, float Scale) FitCardTitle(SpriteFont font, string text, int maximumWidth)
+    {
+        if (font.MeasureString(text).X <= maximumWidth)
+        {
+            return (text, 1f);
+        }
+
+        string[] words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length >= 2)
+        {
+            int bestSplit = 1;
+            float bestWidth = float.MaxValue;
+            for (int split = 1; split < words.Length; split++)
+            {
+                string first = string.Join(' ', words, 0, split);
+                string second = string.Join(' ', words, split, words.Length - split);
+                float widest = Math.Max(font.MeasureString(first).X, font.MeasureString(second).X);
+                if (widest < bestWidth)
+                {
+                    bestWidth = widest;
+                    bestSplit = split;
+                }
+            }
+
+            string firstLine = string.Join(' ', words, 0, bestSplit);
+            string secondLine = string.Join(' ', words, bestSplit, words.Length - bestSplit);
+            float scale = Math.Clamp(maximumWidth / Math.Max(1f, bestWidth), 0.72f, 0.88f);
+            firstLine = TruncateToWidthScaled(font, firstLine, maximumWidth, scale);
+            secondLine = TruncateToWidthScaled(font, secondLine, maximumWidth, scale);
+            return ($"{firstLine}\n{secondLine}", scale);
+        }
+
+        const float minimumScale = 0.72f;
+        if (font.MeasureString(text).X * minimumScale <= maximumWidth)
+        {
+            return (text, minimumScale);
+        }
+        return (TruncateToWidthScaled(font, text, maximumWidth, minimumScale), minimumScale);
+    }
+
+    private static string TruncateToWidthScaled(SpriteFont font, string text, int maximumWidth, float scale)
+    {
+        if (font.MeasureString(text).X * scale <= maximumWidth) return text;
+        const string ellipsis = "…";
+        int length = text.Length;
+        while (length > 0 && font.MeasureString(text[..length] + ellipsis).X * scale > maximumWidth) length--;
         return length == 0 ? ellipsis : text[..length] + ellipsis;
     }
 }

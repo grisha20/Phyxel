@@ -95,16 +95,16 @@ public sealed class UiTopBar
         double displayedFps,
         bool isPaused)
     {
-        backdrop.Draw(spriteBatch, bounds, 0);
+        backdrop.Draw(spriteBatch, bounds, UiTheme.TopBarBackground, 0);
 
         spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Bottom - 1, bounds.Width, 1), UiTheme.BorderColor);
 
         // Logo & Title
-        int logoSize = Math.Clamp(bounds.Height - 18, 26, 38);
+        int logoSize = Math.Clamp(bounds.Height - 16, 28, 40);
         Rectangle logoBounds = new(bounds.X + 16, bounds.Center.Y - logoSize / 2, logoSize, logoSize);
         UiIconRenderer.DrawPhyxelLogo(spriteBatch, pixel, logoBounds, new Color(65, 178, 230));
 
-        Vector2 titlePos = new(logoBounds.Right + 10, bounds.Y + (bounds.Height - font.LineSpacing) / 2f);
+        Vector2 titlePos = new(logoBounds.Right + 11, bounds.Y + (bounds.Height - font.LineSpacing) / 2f);
         spriteBatch.DrawString(font, "PHYXEL", titlePos, UiTheme.TextPrimary);
 
         // Buttons

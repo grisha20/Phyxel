@@ -12,6 +12,7 @@ namespace Phyxel.UI;
 public readonly record struct UiFrameActions(
     bool ClearRequested,
     bool ResetRequested,
+    bool ResetViewRequested,
     bool SaveRequested,
     bool LoadRequested,
     bool ScaleChanged,
@@ -97,6 +98,7 @@ public sealed class SandboxUiCoordinator : IDisposable
     public bool TemperatureToolActive => leftToolbar.ActiveTool == PhyxelToolId.Temperature;
     public bool PanToolActive => leftToolbar.ActiveTool == PhyxelToolId.Pan;
     public float TargetTemperature => propertiesPanel.TargetTemperature;
+    public float CameraZoom { get; set; } = 1f;
     internal PhyxelToolId ActiveTool
     {
         get => leftToolbar.ActiveTool;
@@ -182,6 +184,7 @@ public sealed class SandboxUiCoordinator : IDisposable
         return new UiFrameActions(
             clearRequested,
             propertiesPanel.ResetRequested,
+            propertiesPanel.ResetViewRequested,
             saveRequested,
             loadRequested,
             propertiesPanel.ScaleChanged,
@@ -230,7 +233,9 @@ public sealed class SandboxUiCoordinator : IDisposable
             currentLayout.RightPanel,
             settings,
             leftToolbar.ActiveTool,
-            currentMatDef);
+            currentMatDef,
+            materialCardPreviews,
+            CameraZoom);
 
         // 4. Bottom Category Palette
         categoryPalette.Draw(

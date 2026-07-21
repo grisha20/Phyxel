@@ -178,6 +178,7 @@ public sealed class PhyxelGame : Game
             return;
         }
         ProcessSerializationCompletion();
+        userInterface.CameraZoom = cameraController.Zoom;
         UiFrameActions actions = userInterface.Update(
             input,
             GraphicsDevice.Viewport,
@@ -339,6 +340,12 @@ public sealed class PhyxelGame : Game
             temperatureProbe.Reset();
             SetStatus("Симуляция перезапущена");
         }
+        if (actions.ResetViewRequested)
+        {
+            cameraController.Reset();
+            userInterface.CameraZoom = cameraController.Zoom;
+            SetStatus("Вид камеры сброшен");
+        }
         if (actions.GravityChanged)
         {
             dispatchCoordinator.SetSolidGravityEnabled(settings.SolidGravity);
@@ -380,12 +387,29 @@ public sealed class PhyxelGame : Game
         int height = GraphicsDevice.PresentationParameters.BackBufferHeight;
         Color[] pixels = new Color[width * height];
         GraphicsDevice.GetBackBufferData(pixels);
-        using Texture2D capture = new(GraphicsDevice, width, height);
-        capture.SetData(pixels);
         string fullPath = Path.GetFullPath(uiScreenshotPath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-        using FileStream stream = File.Create(fullPath);
-        capture.SaveAsPng(stream, width, height);
+        using System.Drawing.Bitmap capture = new(
+            width,
+            height,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        System.Drawing.Imaging.BitmapData data = capture.LockBits(
+            new System.Drawing.Rectangle(0, 0, width, height),
+            System.Drawing.Imaging.ImageLockMode.WriteOnly,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        byte[] bgra = new byte[width * height * 4];
+        for (int index = 0; index < pixels.Length; index++)
+        {
+            Color color = pixels[index];
+            int offset = index * 4;
+            bgra[offset] = color.B;
+            bgra[offset + 1] = color.G;
+            bgra[offset + 2] = color.R;
+            bgra[offset + 3] = color.A;
+        }
+        System.Runtime.InteropServices.Marshal.Copy(bgra, 0, data.Scan0, bgra.Length);
+        capture.UnlockBits(data);
+        capture.Save(fullPath, System.Drawing.Imaging.ImageFormat.Png);
         uiScreenshotCaptured = true;
         Console.WriteLine($"PHYXEL_UI_SCREENSHOT {width}x{height} {fullPath}");
         Exit();

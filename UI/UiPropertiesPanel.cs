@@ -4,31 +4,42 @@ using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Core;
 using Phyxel.Input;
 using Phyxel.Materials;
-using Phyxel.Physics;
 
 namespace Phyxel.UI;
 
 public sealed class UiPropertiesPanel
 {
-    private readonly UiValueSlider brushSlider;
-    private readonly UiValueSlider densitySlider;
-    private readonly UiValueSlider temperatureSlider;
-    private readonly UiValueSlider scaleSlider;
-
+    private readonly UiValueSlider brushSlider = new("Размер кисти", 1, 96, 1, 18, " px");
+    private readonly UiValueSlider densitySlider = new("Плотность спавна", 5, 100, 1, 82, "%");
+    private readonly UiValueSlider temperatureSlider = new("Целевая температура", -200, 2000, 10, 500, " °C", "0");
+    private readonly UiValueSlider scaleSlider = new(
+        "Масштаб симуляции",
+        [25, 35, 50, 75, 85, 100],
+        SimulationSettings.DefaultScale * 100,
+        "%",
+        "0");
     private readonly UiToggleSwitch solidGravityToggle = new("Гравитация");
-    private readonly UiToggleSwitch hydraulicsToggle = new("Гидравлика");
-    private readonly UiIconButton resetButton = new("Сброс");
-    private readonly UiIconButton clearButton = new("Очистить");
+    private readonly UiToggleSwitch hydraulicsToggle = new("Гидравлика сосудов");
+    private readonly UiIconButton restartPhysicsButton = new("Перезапустить физику") { IconKey = "reset" };
+    private readonly UiIconButton resetViewButton = new("Сбросить вид") { IconKey = "reset" };
+    private readonly UiIconButton clearButton = new("Очистить всё") { IconKey = "clear", Danger = true };
 
+    private Rectangle toolCardBounds;
+    private Rectangle materialCardBounds;
+    private Rectangle cameraInfoBounds;
+    private int toolParametersHeaderY;
+    private int simulationHeaderY;
     private float clearConfirmTimer;
 
     public bool GravityToggled { get; private set; }
     public bool HydraulicsToggled { get; private set; }
     public bool ResetRequested { get; private set; }
+    public bool ResetViewRequested { get; private set; }
     public bool ClearRequested { get; private set; }
     public bool ScaleChanged { get; private set; }
     internal Rectangle ScaleSliderBounds => scaleSlider.Bounds;
-    internal Rectangle ResetButtonBounds => resetButton.Bounds;
+    internal Rectangle ResetButtonBounds => restartPhysicsButton.Bounds;
+    internal Rectangle ResetViewButtonBounds => resetViewButton.Bounds;
     internal Rectangle ClearButtonBounds => clearButton.Bounds;
     internal Rectangle BrushSliderBounds => brushSlider.Bounds;
     internal Rectangle DensitySliderBounds => densitySlider.Bounds;
@@ -39,22 +50,6 @@ public sealed class UiPropertiesPanel
     internal static bool ShowsTemperature(PhyxelToolId tool) => tool == PhyxelToolId.Temperature;
     internal static bool ShowsBrushControls(PhyxelToolId tool) =>
         tool is PhyxelToolId.Brush or PhyxelToolId.Eraser or PhyxelToolId.Temperature;
-
-    public UiPropertiesPanel()
-    {
-        brushSlider = new UiValueSlider("Размер", 1, 96, 1, 18, " px");
-        densitySlider = new UiValueSlider("Плотность", 5, 100, 1, 82, "%");
-        temperatureSlider = new UiValueSlider("Температура", -200, 2000, 10, 500, " °C", "0");
-        scaleSlider = new UiValueSlider(
-            "Масштаб",
-            [25, 35, 50, 75, 85, 100],
-            SimulationSettings.DefaultScale * 100,
-            "%",
-            "0");
-        resetButton.IconKey = "reset";
-        clearButton.IconKey = "clear";
-        clearButton.Danger = true;
-    }
 
     public void Update(
         RawInputSnapshot input,
@@ -72,22 +67,38 @@ public sealed class UiPropertiesPanel
         GravityToggled = false;
         HydraulicsToggled = false;
         ResetRequested = false;
+        ResetViewRequested = false;
         ClearRequested = false;
         ScaleChanged = false;
         clearConfirmTimer = Math.Max(0f, clearConfirmTimer - input.DeltaSeconds);
-        clearButton.Label = clearConfirmTimer > 0f ? "Точно?" : "Очистить";
+        clearButton.Label = clearConfirmTimer > 0f ? "Подтвердить очистку" : "Очистить всё";
 
         int padding = 14;
         int innerX = bounds.X + padding;
         int innerWidth = bounds.Width - padding * 2;
-        int infoHeight = font.LineSpacing * 2 + 26;
-        int cursorY = bounds.Y + font.LineSpacing + infoHeight + 34;
+        int cardHeight = Math.Clamp(font.LineSpacing + 24, 46, 58);
+        toolCardBounds = new Rectangle(innerX, bounds.Y + font.LineSpacing + 24, innerWidth, cardHeight);
+        int cursorY = toolCardBounds.Bottom + 8;
+
+        if (activeTool == PhyxelToolId.Pan)
+        {
+            materialCardBounds = Rectangle.Empty;
+        }
+        else
+        {
+            materialCardBounds = new Rectangle(innerX, cursorY, innerWidth, cardHeight);
+            cursorY = materialCardBounds.Bottom + 12;
+        }
+
+        toolParametersHeaderY = cursorY;
+        cursorY += Math.Max(20, (int)MathF.Round(font.LineSpacing * 0.82f)) + 8;
         int sliderHeight = font.LineSpacing + 30;
-        int sliderGap = 12;
+        int sliderGap = 10;
 
         if (ShowsBrushControls(activeTool))
         {
             brushSlider.Bounds = new Rectangle(innerX, cursorY, innerWidth, sliderHeight);
+            if (brushSlider.Update(input)) settings.BrushRadius = (int)brushSlider.Value;
             cursorY += sliderHeight + sliderGap;
         }
         else
@@ -106,10 +117,7 @@ public sealed class UiPropertiesPanel
         {
             temperatureSlider.CancelDrag();
             densitySlider.Bounds = new Rectangle(innerX, cursorY, innerWidth, sliderHeight);
-            if (densitySlider.Update(input))
-            {
-                settings.SpawnDensity = densitySlider.Value / 100f;
-            }
+            if (densitySlider.Update(input)) settings.SpawnDensity = densitySlider.Value / 100f;
             cursorY += sliderHeight + sliderGap;
         }
         else
@@ -118,31 +126,31 @@ public sealed class UiPropertiesPanel
             temperatureSlider.CancelDrag();
         }
 
-        if (ShowsBrushControls(activeTool))
+        if (activeTool == PhyxelToolId.Pan)
         {
-            scaleSlider.Bounds = new Rectangle(innerX, cursorY, innerWidth, sliderHeight);
-            if (scaleSlider.Update(input))
-            {
-                ScaleChanged = true;
-                settings.ApplyScale(scaleSlider.Value / 100f);
-            }
-            cursorY += sliderHeight + 16;
+            int cameraRowHeight = Math.Clamp(font.LineSpacing + 18, 40, 52);
+            cameraInfoBounds = new Rectangle(innerX, cursorY, innerWidth, cameraRowHeight);
+            cursorY += cameraRowHeight + 7;
+            resetViewButton.Bounds = new Rectangle(innerX, cursorY, innerWidth, cameraRowHeight);
+            if (resetViewButton.Update(input)) ResetViewRequested = true;
+            cursorY += cameraRowHeight + 14;
         }
         else
         {
-            scaleSlider.CancelDrag();
+            cameraInfoBounds = Rectangle.Empty;
+            resetViewButton.Bounds = Rectangle.Empty;
         }
 
-        if (ShowsBrushControls(activeTool) && brushSlider.Update(input))
+        simulationHeaderY = cursorY;
+        cursorY += Math.Max(20, (int)MathF.Round(font.LineSpacing * 0.82f)) + 8;
+        scaleSlider.Bounds = new Rectangle(innerX, cursorY, innerWidth, sliderHeight);
+        if (scaleSlider.Update(input))
         {
-            settings.BrushRadius = (int)brushSlider.Value;
+            settings.ApplyScale(scaleSlider.Value / 100f);
+            ScaleChanged = true;
         }
+        cursorY += sliderHeight + 10;
 
-        brushSlider.Value = settings.BrushRadius;
-        densitySlider.Value = settings.SpawnDensity * 100f;
-        scaleSlider.Value = settings.Scale * 100f;
-
-        // Toggle Buttons
         int toggleHeight = Math.Clamp(font.LineSpacing + 18, 40, 52);
         solidGravityToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (solidGravityToggle.Update(input))
@@ -151,7 +159,6 @@ public sealed class UiPropertiesPanel
             GravityToggled = true;
         }
         cursorY += toggleHeight + 4;
-
         hydraulicsToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (hydraulicsToggle.Update(input))
         {
@@ -159,24 +166,12 @@ public sealed class UiPropertiesPanel
             HydraulicsToggled = true;
         }
 
-        // Bottom Action Buttons
-        int buttonHeight = Math.Clamp(font.LineSpacing + 16, 38, 50);
-        int bottomY = bounds.Bottom - buttonHeight - padding;
-        int actionGap = 7;
-        int availableActionWidth = innerWidth - actionGap;
-        int resetDesiredWidth = (int)MathF.Ceiling(font.MeasureString(resetButton.Label).X) + 48;
-        int clearDesiredWidth = (int)MathF.Ceiling(font.MeasureString(clearButton.Label).X) + 48;
-        int actionWidth = Math.Clamp(
-            resetDesiredWidth,
-            availableActionWidth / 3,
-            Math.Max(availableActionWidth / 3, availableActionWidth - clearDesiredWidth));
-        resetButton.Bounds = new Rectangle(innerX, bottomY, actionWidth, buttonHeight);
-        if (resetButton.Update(input))
-        {
-            ResetRequested = true;
-        }
+        brushSlider.Value = settings.BrushRadius;
+        densitySlider.Value = settings.SpawnDensity * 100f;
+        scaleSlider.Value = settings.Scale * 100f;
 
-        clearButton.Bounds = new Rectangle(resetButton.Bounds.Right + actionGap, bottomY, innerWidth - actionWidth - actionGap, buttonHeight);
+        LayoutActions(bounds, font, innerX, innerWidth, padding);
+        if (restartPhysicsButton.Update(input)) ResetRequested = true;
         if (clearButton.Update(input))
         {
             if (clearConfirmTimer > 0f)
@@ -201,33 +196,65 @@ public sealed class UiPropertiesPanel
         Rectangle bounds,
         SimulationSettings settings,
         PhyxelToolId activeTool,
-        MaterialDefinition selectedMaterial)
+        MaterialDefinition selectedMaterial,
+        MaterialCardPreviewCache previewCache,
+        float cameraZoom)
     {
-        backdrop.Draw(spriteBatch, bounds, 8);
+        backdrop.Draw(spriteBatch, bounds, 10);
+        DrawSectionLabel(spriteBatch, font, "СВОЙСТВА", bounds.X + 14, bounds.Y + 10, 0.78f);
 
-        // Header
-        spriteBatch.DrawString(
-            font,
-            "СВОЙСТВА",
-            new Vector2(bounds.X + 12, bounds.Y + 8),
-            UiTheme.TextMuted);
+        DrawToolCard(spriteBatch, font, backdrop, pixel, activeTool);
+        if (activeTool != PhyxelToolId.Pan)
+        {
+            DrawMaterialCard(spriteBatch, font, backdrop, pixel, selectedMaterial, previewCache);
+        }
 
-        int padding = 14;
-        int infoHeight = font.LineSpacing * 2 + 26;
-        Rectangle infoBox = new(bounds.X + padding, bounds.Y + font.LineSpacing + 20, bounds.Width - padding * 2, infoHeight);
-        backdrop.DrawRoundedRectangle(spriteBatch, infoBox, UiTheme.CardBackground, 6);
-        UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, infoBox, 1, UiTheme.BorderColor);
+        DrawSectionLabel(spriteBatch, font, activeTool == PhyxelToolId.Pan ? "КАМЕРА" : "ПАРАМЕТРЫ ИНСТРУМЕНТА",
+            bounds.X + 14, toolParametersHeaderY, 0.68f);
+        if (ShowsBrushControls(activeTool)) brushSlider.Draw(spriteBatch, font, backdrop, pixel);
+        if (activeTool == PhyxelToolId.Temperature) temperatureSlider.Draw(spriteBatch, font, backdrop, pixel);
+        else if (ShowsDensity(activeTool)) densitySlider.Draw(spriteBatch, font, backdrop, pixel);
 
+        if (activeTool == PhyxelToolId.Pan)
+        {
+            backdrop.DrawRoundedRectangle(spriteBatch, cameraInfoBounds, UiTheme.CardBackground, 6);
+            UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, cameraInfoBounds, 1, UiTheme.BorderColor);
+            spriteBatch.DrawString(font, "Масштаб вида", new Vector2(cameraInfoBounds.X + 10,
+                cameraInfoBounds.Center.Y - font.LineSpacing / 2f), UiTheme.TextSecondary);
+            string zoomText = $"{cameraZoom:0.00}x";
+            Vector2 zoomSize = font.MeasureString(zoomText);
+            spriteBatch.DrawString(font, zoomText, new Vector2(cameraInfoBounds.Right - zoomSize.X - 10,
+                cameraInfoBounds.Center.Y - font.LineSpacing / 2f), UiTheme.TextPrimary);
+            resetViewButton.Draw(spriteBatch, font, backdrop, pixel);
+        }
+
+        DrawSectionLabel(spriteBatch, font, "СИМУЛЯЦИЯ", bounds.X + 14, simulationHeaderY, 0.68f);
+        scaleSlider.Draw(spriteBatch, font, backdrop, pixel);
+        solidGravityToggle.Draw(spriteBatch, font, backdrop, pixel, settings.SolidGravity);
+        hydraulicsToggle.Draw(spriteBatch, font, backdrop, pixel, settings.HydraulicPressure);
+
+        spriteBatch.Draw(pixel, new Rectangle(bounds.X + 14, restartPhysicsButton.Bounds.Y - 9, bounds.Width - 28, 1), UiTheme.BorderColor);
+        restartPhysicsButton.Draw(spriteBatch, font, backdrop, pixel);
+        clearButton.Draw(spriteBatch, font, backdrop, pixel);
+    }
+
+    private void DrawToolCard(
+        SpriteBatch spriteBatch,
+        SpriteFont font,
+        UiPanelBackdropRenderer backdrop,
+        Texture2D pixel,
+        PhyxelToolId activeTool)
+    {
+        backdrop.DrawRoundedRectangle(spriteBatch, toolCardBounds, UiTheme.CardBackground, 7);
+        UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, toolCardBounds, 1, UiTheme.BorderColor);
         string toolName = activeTool switch
         {
             PhyxelToolId.Brush => "Кисть",
             PhyxelToolId.Eraser => "Ластик",
             PhyxelToolId.Temperature => "Температура",
-            PhyxelToolId.Pan => "Панорама",
+            PhyxelToolId.Pan => "Камера / панорама",
             _ => "Инструмент"
         };
-
-        Rectangle toolIcon = new(infoBox.X + 10, infoBox.Y + 9, font.LineSpacing, font.LineSpacing);
         string toolKey = activeTool switch
         {
             PhyxelToolId.Brush => "brush",
@@ -235,70 +262,71 @@ public sealed class UiPropertiesPanel
             PhyxelToolId.Temperature => "temperature",
             _ => "pan"
         };
-        UiIconRenderer.DrawToolIcon(spriteBatch, pixel, toolKey, toolIcon, UiTheme.PrimaryAccent);
-        spriteBatch.DrawString(font, toolName, new Vector2(toolIcon.Right + 9, infoBox.Y + 7), UiTheme.TextPrimary);
+        int iconSize = Math.Clamp(toolCardBounds.Height - 18, 24, 32);
+        Rectangle icon = new(toolCardBounds.X + 11, toolCardBounds.Center.Y - iconSize / 2, iconSize, iconSize);
+        UiIconRenderer.DrawToolIcon(spriteBatch, pixel, toolKey, icon, UiTheme.PrimaryAccent);
+        spriteBatch.DrawString(font, toolName,
+            new Vector2(icon.Right + 10, toolCardBounds.Center.Y - font.LineSpacing / 2f), UiTheme.TextPrimary);
+    }
 
-        if (activeTool == PhyxelToolId.Pan)
+    private void DrawMaterialCard(
+        SpriteBatch spriteBatch,
+        SpriteFont font,
+        UiPanelBackdropRenderer backdrop,
+        Texture2D pixel,
+        MaterialDefinition material,
+        MaterialCardPreviewCache previewCache)
+    {
+        backdrop.DrawRoundedRectangle(spriteBatch, materialCardBounds, UiTheme.CardBackground, 7);
+        UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, materialCardBounds, 1, UiTheme.BorderColor);
+        int previewSize = materialCardBounds.Height - 12;
+        Rectangle previewBounds = new(materialCardBounds.X + 6, materialCardBounds.Y + 6, previewSize, previewSize);
+        spriteBatch.Draw(pixel, previewBounds, material.Color);
+        if (previewCache.TryGetPreview(material.Id, out Texture2D preview))
         {
-            spriteBatch.DrawString(
-                font,
-                TruncateToWidth(font, "ЛКМ: перемещение  •  Колесо: масштаб", infoBox.Width - 20),
-                new Vector2(infoBox.X + 10, infoBox.Bottom - font.LineSpacing - 9),
-                UiTheme.TextSecondary);
+            spriteBatch.Draw(preview, previewBounds, UiCategoryPalette.CalculateAspectFillSource(preview, previewBounds), Color.White);
         }
         else
         {
-            // Material color preview swatch
-            int swatchSize = Math.Clamp(font.LineSpacing - 3, 14, 22);
-            Rectangle swatch = new(infoBox.X + 10, infoBox.Bottom - swatchSize - 9, swatchSize, swatchSize);
-            spriteBatch.Draw(pixel, swatch, selectedMaterial.Color);
-            UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, swatch, 1, UiTheme.BorderColor);
+            spriteBatch.Draw(previewCache.FallbackTexture, previewBounds, Color.White);
+        }
+        UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, previewBounds, 1, UiTheme.BorderHighlight);
+        string name = TruncateToWidth(font, material.Name, materialCardBounds.Right - previewBounds.Right - 20);
+        spriteBatch.DrawString(font, name,
+            new Vector2(previewBounds.Right + 10, materialCardBounds.Center.Y - font.LineSpacing / 2f), UiTheme.TextPrimary);
+    }
 
-            spriteBatch.DrawString(
-                font,
-                TruncateToWidth(font, $"Материал: {selectedMaterial.Name}", infoBox.Right - swatch.Right - 18),
-                new Vector2(swatch.Right + 8, swatch.Center.Y - font.LineSpacing / 2f),
-                UiTheme.TextSecondary);
+    private void LayoutActions(Rectangle bounds, SpriteFont font, int innerX, int innerWidth, int padding)
+    {
+        int buttonHeight = Math.Clamp(font.LineSpacing + 16, 40, 50);
+        int gap = 7;
+        int restartWidth = (int)MathF.Ceiling(font.MeasureString(restartPhysicsButton.Label).X) + 46;
+        int clearWidth = (int)MathF.Ceiling(font.MeasureString(clearButton.Label).X) + 46;
+        if (restartWidth + clearWidth + gap <= innerWidth)
+        {
+            restartPhysicsButton.Bounds = new Rectangle(innerX, bounds.Bottom - buttonHeight - padding, restartWidth, buttonHeight);
+            clearButton.Bounds = new Rectangle(restartPhysicsButton.Bounds.Right + gap, restartPhysicsButton.Bounds.Y,
+                innerWidth - restartWidth - gap, buttonHeight);
         }
+        else
+        {
+            int firstY = bounds.Bottom - padding - buttonHeight * 2 - gap;
+            restartPhysicsButton.Bounds = new Rectangle(innerX, firstY, innerWidth, buttonHeight);
+            clearButton.Bounds = new Rectangle(innerX, firstY + buttonHeight + gap, innerWidth, buttonHeight);
+        }
+    }
 
-        // Draw Sliders
-        if (ShowsBrushControls(activeTool))
-        {
-            brushSlider.Draw(spriteBatch, font, backdrop, pixel);
-        }
-        if (activeTool == PhyxelToolId.Temperature)
-        {
-            temperatureSlider.Draw(spriteBatch, font, backdrop, pixel);
-        }
-        else if (ShowsDensity(activeTool))
-        {
-            densitySlider.Draw(spriteBatch, font, backdrop, pixel);
-        }
-        if (ShowsBrushControls(activeTool))
-        {
-            scaleSlider.Draw(spriteBatch, font, backdrop, pixel);
-        }
-
-        // Draw Toggles & Actions
-        spriteBatch.Draw(pixel, new Rectangle(bounds.X + padding, solidGravityToggle.Bounds.Y - 9, bounds.Width - padding * 2, 1), UiTheme.BorderColor);
-        solidGravityToggle.Draw(spriteBatch, font, backdrop, pixel, settings.SolidGravity);
-        hydraulicsToggle.Draw(spriteBatch, font, backdrop, pixel, settings.HydraulicPressure);
-        resetButton.Draw(spriteBatch, font, backdrop, pixel);
-        clearButton.Draw(spriteBatch, font, backdrop, pixel);
+    private static void DrawSectionLabel(SpriteBatch spriteBatch, SpriteFont font, string text, int x, int y, float scale)
+    {
+        spriteBatch.DrawString(font, text, new Vector2(x, y), UiTheme.TextMuted, 0, Vector2.Zero, scale, SpriteEffects.None, 0);
     }
 
     private static string TruncateToWidth(SpriteFont font, string text, int maximumWidth)
     {
-        if (font.MeasureString(text).X <= maximumWidth)
-        {
-            return text;
-        }
+        if (font.MeasureString(text).X <= maximumWidth) return text;
         const string ellipsis = "…";
         int length = text.Length;
-        while (length > 0 && font.MeasureString(text[..length] + ellipsis).X > maximumWidth)
-        {
-            length--;
-        }
+        while (length > 0 && font.MeasureString(text[..length] + ellipsis).X > maximumWidth) length--;
         return length == 0 ? ellipsis : text[..length] + ellipsis;
     }
 }

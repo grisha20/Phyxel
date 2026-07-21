@@ -6,28 +6,30 @@ public static class UiTheme
 {
     // Backgrounds & Surface Colors
     public static readonly Color WindowBackground = new(7, 11, 15);
-    public static readonly Color PanelBackground = new(19, 25, 32, 248);
-    public static readonly Color PanelHeader = new(24, 31, 40);
-    public static readonly Color CardBackground = new(27, 34, 43);
-    public static readonly Color CardHover = new(36, 45, 56);
-    public static readonly Color CardPressed = new(42, 52, 64);
-    public static readonly Color CardActive = new(39, 49, 61);
-    public static readonly Color CardSelectedBorder = new(242, 182, 85);
-    public static readonly Color BorderColor = new(47, 59, 72);
-    public static readonly Color BorderHighlight = new(72, 88, 104);
+    public static readonly Color TopBarBackground = new(13, 19, 26, 252);
+    public static readonly Color PanelBackground = new(17, 24, 32, 250);
+    public static readonly Color PanelHeader = new(24, 32, 42);
+    public static readonly Color CardBackground = new(29, 39, 51);
+    public static readonly Color CardHover = new(37, 49, 62);
+    public static readonly Color CardPressed = new(43, 57, 71);
+    public static readonly Color CardActive = new(39, 51, 65);
+    public static readonly Color CardSelectedBorder = new(255, 210, 118);
+    public static readonly Color BorderColor = new(43, 57, 71);
+    public static readonly Color BorderHighlight = new(67, 83, 101);
     public static readonly Color SubtlyTransparentBorder = new(61, 76, 91, 160);
     public static readonly Color FieldBackground = new(14, 19, 25);
     public static readonly Color LabelBackground = new(12, 16, 22, 248);
 
     // Text Colors
-    public static readonly Color TextPrimary = new(235, 240, 245);
-    public static readonly Color TextSecondary = new(155, 165, 178);
-    public static readonly Color TextMuted = new(100, 110, 125);
+    public static readonly Color TextPrimary = new(237, 242, 247);
+    public static readonly Color TextSecondary = new(157, 168, 183);
+    public static readonly Color TextMuted = new(105, 118, 135);
     public static readonly Color TextDisabled = new(75, 82, 95);
 
     // Accent Colors
-    public static readonly Color PrimaryAccent = new(235, 165, 60); // Phyxel Gold/Amber
-    public static readonly Color ActiveToolAccent = new(235, 165, 60);
+    public static readonly Color PrimaryAccent = new(242, 182, 85); // Phyxel Gold/Amber
+    public static readonly Color AccentPressed = new(216, 154, 53);
+    public static readonly Color ActiveToolAccent = new(242, 182, 85);
     public static readonly Color StatusGreen = new(72, 199, 142);
     public static readonly Color StatusRed = new(240, 90, 90);
     public static readonly Color TemperatureAccent = new(235, 120, 65);
