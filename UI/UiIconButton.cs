@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Input;
@@ -24,6 +25,8 @@ public sealed class UiIconButton
     public Rectangle Bounds { get; set; }
     public bool Active { get; set; }
     public bool Enabled { get; set; } = true;
+    public bool Danger { get; set; }
+    public string? IconKey { get; set; }
     public Color AccentColor { get; set; } = new(78, 132, 190);
     public UiButtonVisualState VisualState { get; private set; }
 
@@ -55,19 +58,41 @@ public sealed class UiIconButton
     {
         Color background = VisualState switch
         {
-            UiButtonVisualState.Hover => new Color(62, 62, 62, 235),
-            UiButtonVisualState.Pressed => new Color(46, 86, 122, 245),
-            UiButtonVisualState.Active => new Color(48, 88, 124, 245),
-            UiButtonVisualState.Disabled => new Color(32, 35, 40, 205),
-            _ => new Color(43, 43, 43, 230)
+            UiButtonVisualState.Hover => UiTheme.CardHover,
+            UiButtonVisualState.Pressed => UiTheme.CardPressed,
+            UiButtonVisualState.Active => UiTheme.CardActive,
+            UiButtonVisualState.Disabled => new Color(22, 28, 35, 210),
+            _ => UiTheme.CardBackground
         };
         renderer.DrawRoundedRectangle(spriteBatch, Bounds, background, 6);
+        Color border = Danger
+            ? UiTheme.Danger * (Enabled ? 0.75f : 0.3f)
+            : VisualState is UiButtonVisualState.Hover or UiButtonVisualState.Pressed
+                ? UiTheme.BorderHighlight
+                : UiTheme.BorderColor;
+        UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, Bounds, 1, border);
         if (Active)
         {
             renderer.DrawLine(spriteBatch, new Rectangle(Bounds.X, Bounds.Y + 5, 3, Bounds.Height - 10), AccentColor);
         }
 
         int textOffset = 12;
+        if (!string.IsNullOrEmpty(IconKey))
+        {
+            int iconSize = Math.Clamp(Bounds.Height - 16, 14, 22);
+            Rectangle iconBounds = new(
+                Bounds.X + 10,
+                Bounds.Center.Y - iconSize / 2,
+                iconSize,
+                iconSize);
+            UiIconRenderer.DrawActionIcon(
+                spriteBatch,
+                pixel,
+                IconKey,
+                iconBounds,
+                Enabled ? (Danger ? UiTheme.Danger : UiTheme.TextSecondary) : UiTheme.TextDisabled);
+            textOffset = iconBounds.Right - Bounds.X + 8;
+        }
         if (showSwatch)
         {
             spriteBatch.Draw(pixel, new Rectangle(Bounds.X + 11, Bounds.Y + 10, 18, 18), AccentColor);

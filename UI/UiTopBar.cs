@@ -18,6 +18,10 @@ public sealed class UiTopBar
     {
         this.font = font;
         settingsButton.Enabled = false;
+        saveButton.IconKey = "save";
+        loadButton.IconKey = "load";
+        pauseButton.IconKey = "pause";
+        settingsButton.IconKey = "settings";
     }
 
     public SpriteFont Font { set => font = value; }
@@ -35,24 +39,24 @@ public sealed class UiTopBar
         LoadRequested = false;
         SettingsRequested = false;
 
-        int buttonPadding = 24;
-        int buttonHeight = bounds.Height < 44 ? 26 : 30;
-        int startX = bounds.X + 140;
-        int startY = bounds.Y + (bounds.Height - buttonHeight) / 2;
-        int gap = 6;
+        pauseButton.Active = paused;
+        pauseButton.Label = paused ? "Продолжить" : "Пауза";
+        pauseButton.IconKey = paused ? "play" : "pause";
 
-        int saveW = (int)font.MeasureString(saveButton.Label).X + buttonPadding;
-        int loadW = (int)font.MeasureString(loadButton.Label).X + buttonPadding;
-        int pauseW = (int)font.MeasureString(pauseButton.Label).X + buttonPadding;
-        int settingsW = (int)font.MeasureString(settingsButton.Label).X + buttonPadding;
+        int buttonHeight = Math.Clamp(font.LineSpacing + 14, 34, bounds.Height - 12);
+        int startX = bounds.X + Math.Max(164, (int)font.MeasureString("PHYXEL").X + 72);
+        int startY = bounds.Y + (bounds.Height - buttonHeight) / 2;
+        int gap = Math.Max(6, bounds.Height / 10);
+
+        int saveW = MeasureButtonWidth(saveButton);
+        int loadW = MeasureButtonWidth(loadButton);
+        int pauseW = MeasureButtonWidth(pauseButton);
+        int settingsW = MeasureButtonWidth(settingsButton);
 
         saveButton.Bounds = new Rectangle(startX, startY, saveW, buttonHeight);
         loadButton.Bounds = new Rectangle(saveButton.Bounds.Right + gap, startY, loadW, buttonHeight);
         pauseButton.Bounds = new Rectangle(loadButton.Bounds.Right + gap, startY, pauseW, buttonHeight);
         settingsButton.Bounds = new Rectangle(pauseButton.Bounds.Right + gap, startY, settingsW, buttonHeight);
-
-        pauseButton.Active = paused;
-        pauseButton.Label = paused ? "Продолжить" : "Пауза";
 
         if (saveButton.Update(input)) SaveRequested = true;
         if (loadButton.Update(input)) LoadRequested = true;
@@ -62,6 +66,9 @@ public sealed class UiTopBar
             paused = !paused;
         }
     }
+
+    private int MeasureButtonWidth(UiIconButton button) =>
+        Math.Max(88, (int)MathF.Ceiling(font.MeasureString(button.Label).X) + 52);
 
     public void RecordFrameTime(float deltaSeconds)
     {
@@ -83,11 +90,14 @@ public sealed class UiTopBar
     {
         backdrop.Draw(spriteBatch, bounds, 0);
 
-        // Logo & Title
-        Rectangle logoBounds = new(bounds.X + 12, bounds.Y + (bounds.Height - 24) / 2, 24, 24);
-        UiIconRenderer.DrawPhyxelLogo(spriteBatch, pixel, logoBounds, UiTheme.PrimaryAccent);
+        spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Bottom - 1, bounds.Width, 1), UiTheme.BorderColor);
 
-        Vector2 titlePos = new(logoBounds.Right + 10, bounds.Y + (bounds.Height - font.LineSpacing) / 2);
+        // Logo & Title
+        int logoSize = Math.Clamp(bounds.Height - 18, 26, 38);
+        Rectangle logoBounds = new(bounds.X + 16, bounds.Center.Y - logoSize / 2, logoSize, logoSize);
+        UiIconRenderer.DrawPhyxelLogo(spriteBatch, pixel, logoBounds, new Color(65, 178, 230));
+
+        Vector2 titlePos = new(logoBounds.Right + 10, bounds.Y + (bounds.Height - font.LineSpacing) / 2f);
         spriteBatch.DrawString(font, "PHYXEL", titlePos, UiTheme.TextPrimary);
 
         // Buttons
@@ -104,7 +114,7 @@ public sealed class UiTopBar
         Vector2 msSize = font.MeasureString(msText);
         Vector2 fpsSize = font.MeasureString(fpsText);
 
-        int rightX = bounds.Right - 16;
+        int rightX = bounds.Right - 20;
         Vector2 msPos = new(rightX - msSize.X, bounds.Y + (bounds.Height - font.LineSpacing) / 2);
         spriteBatch.DrawString(font, msText, msPos, UiTheme.TextSecondary);
 
@@ -112,14 +122,15 @@ public sealed class UiTopBar
         spriteBatch.DrawString(font, fpsText, fpsPos, UiTheme.StatusGreen);
 
         // Mini sparkline graph
-        int graphWidth = 60;
-        int graphHeight = bounds.Height - 16;
+        int graphWidth = Math.Clamp(bounds.Width / 32, 64, 92);
+        int graphHeight = Math.Max(20, bounds.Height - 20);
         int graphX = (int)fpsPos.X - graphWidth - 16;
-        int graphY = bounds.Y + 8;
+        int graphY = bounds.Center.Y - graphHeight / 2;
 
         if (graphX > settingsButton.Bounds.Right + 20)
         {
             Rectangle graphBox = new(graphX, graphY, graphWidth, graphHeight);
+            spriteBatch.Draw(pixel, graphBox, UiTheme.FieldBackground);
             UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, graphBox, 1, UiTheme.BorderColor);
 
             int index = 0;

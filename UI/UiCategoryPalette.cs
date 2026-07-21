@@ -17,6 +17,9 @@ public sealed class UiCategoryPalette
     private MaterialCategoryType activeCategory = MaterialCategoryType.Powders;
     private int scrollOffset;
     private ushort? hoveredMaterial;
+    private bool hoveredMaterialPressed;
+    private MaterialCategoryType? hoveredCategory;
+    private bool hoveredCategoryPressed;
     private readonly Dictionary<MaterialCategoryType, List<MaterialDefinition>> categorizedMaterials = new();
 
     private readonly UiIconButton leftArrowButton = new("<");
@@ -63,20 +66,28 @@ public sealed class UiCategoryPalette
         pointerConsumed = bounds.Contains(input.MousePosition);
         ushort? newlySelectedMaterial = null;
         hoveredMaterial = null;
+        hoveredMaterialPressed = false;
+        hoveredCategory = null;
+        hoveredCategoryPressed = false;
 
-        int tabHeight = 30;
-        int tabY = bounds.Y + 6;
+        int tabHeight = GetTabHeight();
+        int tabY = bounds.Y + 8;
         int tabX = bounds.X + 12;
-        int numCategories = MaterialCategoryResolver.AllCategories.Count;
-        int tabGap = 4;
-        int tabAvailableWidth = bounds.Width - 24; // 12px padding on each side
-        int tabWidth = (tabAvailableWidth - (numCategories - 1) * tabGap) / numCategories;
+        int tabGap = 6;
+        int[] tabWidths = GetTabWidths(bounds.Width - 24, tabGap);
 
         // 1. Update Category Tabs
-        foreach (MaterialCategoryDefinition cat in MaterialCategoryResolver.AllCategories)
+        for (int index = 0; index < MaterialCategoryResolver.AllCategories.Count; index++)
         {
+            MaterialCategoryDefinition cat = MaterialCategoryResolver.AllCategories[index];
+            int tabWidth = tabWidths[index];
             Rectangle tabBounds = new(tabX, tabY, tabWidth, tabHeight);
-            bool isSelectedTab = cat.Type == activeCategory;
+
+            if (tabBounds.Contains(input.MousePosition))
+            {
+                hoveredCategory = cat.Type;
+                hoveredCategoryPressed = input.LeftDown;
+            }
 
             if (input.LeftPressed && tabBounds.Contains(input.MousePosition))
             {
@@ -88,19 +99,10 @@ public sealed class UiCategoryPalette
         }
 
         // 2. Material Cards Strip
-        Rectangle cardsStripBounds = new(
-            bounds.X + 36,
-            tabY + tabHeight + 6,
-            bounds.Width - 72,
-            bounds.Height - tabHeight - 18);
-
-        if (cardsStripBounds.Contains(input.MousePosition) && input.WheelDelta != 0)
-        {
-            scrollOffset = Math.Max(0, scrollOffset - Math.Sign(input.WheelDelta) * 40);
-        }
+        Rectangle fullCardsBounds = GetCardsStripBounds(bounds, false);
 
         List<MaterialDefinition> currentList = categorizedMaterials[activeCategory];
-        int cardHeight = cardsStripBounds.Height;
+        int cardHeight = fullCardsBounds.Height;
         int cardWidth = ComputeCardWidth(cardHeight);
         int gap = 6;
 
@@ -111,12 +113,21 @@ public sealed class UiCategoryPalette
             totalCardsWidth += cardWidth + gap;
         }
         if (currentList.Count > 0) totalCardsWidth -= gap;
+        bool overflow = totalCardsWidth > fullCardsBounds.Width;
+        Rectangle cardsStripBounds = GetCardsStripBounds(bounds, overflow);
         int maxScroll = Math.Max(0, totalCardsWidth - cardsStripBounds.Width);
         scrollOffset = Math.Clamp(scrollOffset, 0, maxScroll);
 
+        if (cardsStripBounds.Contains(input.MousePosition) && input.WheelDelta != 0)
+        {
+            scrollOffset = Math.Clamp(scrollOffset - Math.Sign(input.WheelDelta) * 80, 0, maxScroll);
+        }
+
         // Arrow Buttons
-        leftArrowButton.Bounds = new Rectangle(bounds.X + 8, cardsStripBounds.Y, 24, cardHeight);
-        rightArrowButton.Bounds = new Rectangle(cardsStripBounds.Right + 4, cardsStripBounds.Y, 24, cardHeight);
+        leftArrowButton.Enabled = overflow;
+        rightArrowButton.Enabled = overflow;
+        leftArrowButton.Bounds = new Rectangle(bounds.X + 8, cardsStripBounds.Y, 28, cardHeight);
+        rightArrowButton.Bounds = new Rectangle(cardsStripBounds.Right + 4, cardsStripBounds.Y, 28, cardHeight);
 
         if (leftArrowButton.Update(input))
         {
@@ -139,6 +150,7 @@ public sealed class UiCategoryPalette
                 if (cardBounds.Contains(input.MousePosition))
                 {
                     hoveredMaterial = mat.RuntimeIndex;
+                    hoveredMaterialPressed = input.LeftDown;
                 }
                 if (input.LeftPressed && cardBounds.Contains(input.MousePosition))
                 {
@@ -163,53 +175,66 @@ public sealed class UiCategoryPalette
     {
         backdrop.Draw(spriteBatch, bounds, 8);
 
-        int tabHeight = 30;
-        int tabY = bounds.Y + 6;
+        int tabHeight = GetTabHeight();
+        int tabY = bounds.Y + 8;
         int tabX = bounds.X + 12;
-        int numCategoriesDraw = MaterialCategoryResolver.AllCategories.Count;
-        int tabGapDraw = 4;
-        int tabAvailableWidthDraw = bounds.Width - 24;
-        int tabWidthDraw = (tabAvailableWidthDraw - (numCategoriesDraw - 1) * tabGapDraw) / numCategoriesDraw;
+        int tabGapDraw = 6;
+        int[] tabWidths = GetTabWidths(bounds.Width - 24, tabGapDraw);
 
         // Draw Category Tabs
-        foreach (MaterialCategoryDefinition cat in MaterialCategoryResolver.AllCategories)
+        for (int index = 0; index < MaterialCategoryResolver.AllCategories.Count; index++)
         {
+            MaterialCategoryDefinition cat = MaterialCategoryResolver.AllCategories[index];
+            int tabWidthDraw = tabWidths[index];
             Rectangle tabBounds = new(tabX, tabY, tabWidthDraw, tabHeight);
             bool isSelectedTab = cat.Type == activeCategory;
 
-            Color bgColor = isSelectedTab ? UiTheme.CardActive : UiTheme.CardBackground;
+            bool isHoveredTab = hoveredCategory == cat.Type;
+            Color bgColor = isSelectedTab
+                ? UiTheme.CardActive
+                : isHoveredTab && hoveredCategoryPressed
+                    ? UiTheme.CardPressed
+                    : isHoveredTab ? UiTheme.CardHover : UiTheme.CardBackground;
             Color borderColor = isSelectedTab ? cat.AccentColor : UiTheme.BorderColor;
 
-            backdrop.Draw(spriteBatch, tabBounds, 4);
-            UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, tabBounds, isSelectedTab ? 2 : 1, borderColor);
+            backdrop.DrawRoundedRectangle(spriteBatch, tabBounds, bgColor, 5);
+            UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, tabBounds, 1, borderColor);
+            if (isSelectedTab)
+            {
+                spriteBatch.Draw(pixel, new Rectangle(tabBounds.X + 6, tabBounds.Bottom - 3, tabBounds.Width - 12, 3), cat.AccentColor);
+            }
 
             // Icon + Label
-            Rectangle dotRect = new(tabBounds.X + 8, tabBounds.Y + (tabHeight - 8) / 2, 8, 8);
-            spriteBatch.Draw(pixel, dotRect, cat.AccentColor);
+            int iconSize = Math.Clamp(tabHeight - 18, 14, 22);
+            Rectangle dotRect = new(tabBounds.X + 10, tabBounds.Center.Y - iconSize / 2, iconSize, iconSize);
+            UiIconRenderer.DrawCategoryIcon(spriteBatch, pixel, cat.Type, dotRect, cat.AccentColor);
 
             Vector2 textPos = new(dotRect.Right + 6, tabBounds.Y + (tabHeight - font.LineSpacing) / 2);
-            spriteBatch.DrawString(font, cat.DisplayName, textPos, isSelectedTab ? UiTheme.TextPrimary : UiTheme.TextSecondary);
+            string tabLabel = TruncateToWidth(cat.DisplayName, tabBounds.Right - (int)textPos.X - 8);
+            spriteBatch.DrawString(font, tabLabel, textPos, isSelectedTab ? UiTheme.TextPrimary : UiTheme.TextSecondary);
 
             tabX += tabWidthDraw + tabGapDraw;
         }
 
         // Draw Material Cards Strip
         Rectangle cardsStripBounds = new(
-            bounds.X + 36,
-            tabY + tabHeight + 6,
-            bounds.Width - 72,
-            bounds.Height - tabHeight - 18);
+            bounds.X,
+            bounds.Y,
+            bounds.Width,
+            bounds.Height);
 
         // Arrows if needed
         List<MaterialDefinition> currentList = categorizedMaterials[activeCategory];
         int gap = 6;
-        int cardWidth = ComputeCardWidth(cardsStripBounds.Height);
+        Rectangle fullCardsBounds = GetCardsStripBounds(bounds, false);
+        int cardWidth = ComputeCardWidth(fullCardsBounds.Height);
         int totalCardsWidthDraw = 0;
         for (int i = 0; i < currentList.Count; i++)
         {
             totalCardsWidthDraw += cardWidth + gap;
         }
-        bool overflow = totalCardsWidthDraw > cardsStripBounds.Width + gap;
+        bool overflow = totalCardsWidthDraw - gap > fullCardsBounds.Width;
+        cardsStripBounds = GetCardsStripBounds(bounds, overflow);
 
         if (overflow)
         {
@@ -230,7 +255,9 @@ public sealed class UiCategoryPalette
                 bool isHovered = hoveredMaterial == mat.RuntimeIndex;
                 Color cardBg = isSelected
                     ? UiTheme.CardActive
-                    : isHovered ? UiTheme.CardHover : UiTheme.CardBackground;
+                    : isHovered && hoveredMaterialPressed
+                        ? UiTheme.CardPressed
+                        : isHovered ? UiTheme.CardHover : UiTheme.CardBackground;
                 Color cardBorder = isSelected ? UiTheme.CardSelectedBorder : UiTheme.BorderColor;
 
                 spriteBatch.Draw(pixel, cardBounds, cardBg);
@@ -272,6 +299,45 @@ public sealed class UiCategoryPalette
 
             cardX += cardWidth + gap;
         }
+    }
+
+    private int GetTabHeight() => Math.Clamp(font.LineSpacing + 13, 32, 45);
+
+    private int[] GetTabWidths(int availableWidth, int gap)
+    {
+        int count = MaterialCategoryResolver.AllCategories.Count;
+        int[] widths = new int[count];
+        int total = gap * (count - 1);
+        for (int index = 0; index < count; index++)
+        {
+            int desired = (int)MathF.Ceiling(font.MeasureString(MaterialCategoryResolver.AllCategories[index].DisplayName).X) + 48;
+            widths[index] = Math.Max(92, desired);
+            total += widths[index];
+        }
+
+        if (total <= availableWidth)
+        {
+            return widths;
+        }
+
+        int widthWithoutGaps = Math.Max(count, availableWidth - gap * (count - 1));
+        int equalWidth = widthWithoutGaps / count;
+        for (int index = 0; index < count; index++)
+        {
+            widths[index] = equalWidth;
+        }
+        return widths;
+    }
+
+    private Rectangle GetCardsStripBounds(Rectangle bounds, bool reserveArrows)
+    {
+        int inset = reserveArrows ? 40 : 12;
+        int top = bounds.Y + 8 + GetTabHeight() + 8;
+        return new Rectangle(
+            bounds.X + inset,
+            top,
+            bounds.Width - inset * 2,
+            Math.Max(1, bounds.Bottom - top - 10));
     }
 
     private void DrawPreview(

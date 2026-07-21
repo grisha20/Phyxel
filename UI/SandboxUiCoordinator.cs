@@ -119,7 +119,7 @@ public sealed class SandboxUiCoordinator : IDisposable
         settings.Paused = paused;
 
         // 2. Left toolbar update
-        leftToolbar.Update(input, currentLayout.LeftToolbar, out bool leftConsumed);
+        leftToolbar.Update(input, currentLayout.LeftToolbar, font, out bool leftConsumed);
 
         // 3. Properties panel update
         MaterialDefinition currentMatDef = materialRegistry.TryGet(SelectedMaterial, out MaterialDefinition mat)
@@ -129,6 +129,7 @@ public sealed class SandboxUiCoordinator : IDisposable
         propertiesPanel.Update(
             input,
             currentLayout.RightPanel,
+            font,
             settings,
             leftToolbar.ActiveTool,
             currentMatDef,
@@ -218,6 +219,7 @@ public sealed class SandboxUiCoordinator : IDisposable
             panelRenderer,
             pixel,
             currentLayout.RightPanel,
+            settings,
             leftToolbar.ActiveTool,
             currentMatDef);
 

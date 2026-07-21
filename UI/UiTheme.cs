@@ -5,15 +5,19 @@ namespace Phyxel.UI;
 public static class UiTheme
 {
     // Backgrounds & Surface Colors
-    public static readonly Color WindowBackground = new(13, 15, 18);
-    public static readonly Color PanelBackground = new(22, 25, 30, 240);
-    public static readonly Color PanelHeader = new(28, 32, 39);
-    public static readonly Color CardBackground = new(28, 32, 38);
-    public static readonly Color CardHover = new(38, 44, 53);
-    public static readonly Color CardActive = new(46, 54, 66);
+    public static readonly Color WindowBackground = new(7, 11, 15);
+    public static readonly Color PanelBackground = new(19, 25, 32, 248);
+    public static readonly Color PanelHeader = new(24, 31, 40);
+    public static readonly Color CardBackground = new(27, 34, 43);
+    public static readonly Color CardHover = new(36, 45, 56);
+    public static readonly Color CardPressed = new(42, 52, 64);
+    public static readonly Color CardActive = new(39, 49, 61);
     public static readonly Color CardSelectedBorder = new(242, 182, 85);
-    public static readonly Color BorderColor = new(44, 49, 59);
-    public static readonly Color SubtlyTransparentBorder = new(60, 68, 80, 160);
+    public static readonly Color BorderColor = new(47, 59, 72);
+    public static readonly Color BorderHighlight = new(72, 88, 104);
+    public static readonly Color SubtlyTransparentBorder = new(61, 76, 91, 160);
+    public static readonly Color FieldBackground = new(14, 19, 25);
+    public static readonly Color LabelBackground = new(12, 16, 22, 248);
 
     // Text Colors
     public static readonly Color TextPrimary = new(235, 240, 245);
@@ -27,6 +31,9 @@ public static class UiTheme
     public static readonly Color StatusGreen = new(72, 199, 142);
     public static readonly Color StatusRed = new(240, 90, 90);
     public static readonly Color TemperatureAccent = new(235, 120, 65);
+    public static readonly Color SliderAccent = new(70, 164, 225);
+    public static readonly Color ToggleOn = new(55, 199, 146);
+    public static readonly Color Danger = new(238, 82, 82);
 
     // Category Accent Colors
     public static readonly Color CategoryPowders = new(218, 184, 92);

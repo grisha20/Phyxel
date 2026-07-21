@@ -6,6 +6,97 @@ namespace Phyxel.UI;
 
 public static class UiIconRenderer
 {
+    public static void DrawActionIcon(
+        SpriteBatch spriteBatch,
+        Texture2D pixel,
+        string iconKey,
+        Rectangle bounds,
+        Color color)
+    {
+        int cx = bounds.Center.X;
+        int cy = bounds.Center.Y;
+        int inset = Math.Max(2, bounds.Width / 5);
+        switch (iconKey)
+        {
+            case "save":
+                DrawStrokedRectangle(spriteBatch, pixel, bounds, 2, color);
+                spriteBatch.Draw(pixel, new Rectangle(bounds.X + inset, bounds.Y + 2, bounds.Width - inset * 2, bounds.Height / 3), color);
+                spriteBatch.Draw(pixel, new Rectangle(bounds.X + inset, cy + 2, bounds.Width - inset * 2, bounds.Bottom - cy - 4), color * 0.7f);
+                break;
+            case "load":
+                DrawStrokedRectangle(spriteBatch, pixel, new Rectangle(bounds.X, cy, bounds.Width, bounds.Height / 2), 2, color);
+                DrawThickLine(spriteBatch, pixel, new Vector2(cx, bounds.Y), new Vector2(cx, cy + 2), 2, color);
+                DrawThickLine(spriteBatch, pixel, new Vector2(cx, bounds.Y), new Vector2(cx - 4, bounds.Y + 5), 2, color);
+                DrawThickLine(spriteBatch, pixel, new Vector2(cx, bounds.Y), new Vector2(cx + 4, bounds.Y + 5), 2, color);
+                break;
+            case "pause":
+                spriteBatch.Draw(pixel, new Rectangle(cx - 5, bounds.Y + 2, 3, bounds.Height - 4), color);
+                spriteBatch.Draw(pixel, new Rectangle(cx + 2, bounds.Y + 2, 3, bounds.Height - 4), color);
+                break;
+            case "play":
+                for (int row = 0; row < bounds.Height - 4; row++)
+                {
+                    int half = Math.Min(row, bounds.Height - 5 - row) / 2;
+                    spriteBatch.Draw(pixel, new Rectangle(bounds.X + inset, bounds.Y + 2 + row, Math.Max(1, half + 2), 1), color);
+                }
+                break;
+            case "settings":
+                DrawStrokedRectangle(spriteBatch, pixel, new Rectangle(cx - 5, cy - 5, 10, 10), 2, color);
+                spriteBatch.Draw(pixel, new Rectangle(cx - 2, cy - 2, 4, 4), color);
+                break;
+            case "reset":
+                DrawThickLine(spriteBatch, pixel, new Vector2(bounds.X + 3, cy), new Vector2(cx, bounds.Y + 3), 2, color);
+                DrawThickLine(spriteBatch, pixel, new Vector2(cx, bounds.Y + 3), new Vector2(bounds.Right - 3, cy), 2, color);
+                DrawThickLine(spriteBatch, pixel, new Vector2(bounds.Right - 3, cy), new Vector2(cx, bounds.Bottom - 3), 2, color);
+                break;
+            case "clear":
+                DrawStrokedRectangle(spriteBatch, pixel, new Rectangle(bounds.X + 4, bounds.Y + 6, bounds.Width - 8, bounds.Height - 8), 2, color);
+                spriteBatch.Draw(pixel, new Rectangle(bounds.X + 2, bounds.Y + 3, bounds.Width - 4, 2), color);
+                break;
+            default:
+                spriteBatch.Draw(pixel, new Rectangle(cx - 2, cy - 2, 4, 4), color);
+                break;
+        }
+    }
+
+    public static void DrawCategoryIcon(
+        SpriteBatch spriteBatch,
+        Texture2D pixel,
+        MaterialCategoryType type,
+        Rectangle bounds,
+        Color color)
+    {
+        int cx = bounds.Center.X;
+        int cy = bounds.Center.Y;
+        switch (type)
+        {
+            case MaterialCategoryType.Powders:
+                spriteBatch.Draw(pixel, new Rectangle(bounds.X + 2, cy + 2, 4, 4), color);
+                spriteBatch.Draw(pixel, new Rectangle(cx - 1, bounds.Y + 2, 4, 4), color);
+                spriteBatch.Draw(pixel, new Rectangle(bounds.Right - 6, cy + 1, 4, 4), color);
+                break;
+            case MaterialCategoryType.Liquids:
+                DrawThickLine(spriteBatch, pixel, new Vector2(bounds.X + 1, cy + 2), new Vector2(cx - 2, cy - 1), 2, color);
+                DrawThickLine(spriteBatch, pixel, new Vector2(cx - 2, cy - 1), new Vector2(bounds.Right - 2, cy + 2), 2, color);
+                break;
+            case MaterialCategoryType.Gases:
+                DrawStrokedRectangle(spriteBatch, pixel, new Rectangle(bounds.X + 1, bounds.Y + 2, 6, 6), 1, color);
+                DrawStrokedRectangle(spriteBatch, pixel, new Rectangle(cx, cy - 1, 7, 7), 1, color);
+                break;
+            case MaterialCategoryType.Solids:
+                DrawStrokedRectangle(spriteBatch, pixel, new Rectangle(bounds.X + 2, bounds.Y + 2, bounds.Width - 4, bounds.Height - 4), 2, color);
+                break;
+            case MaterialCategoryType.Combustion:
+                DrawThickLine(spriteBatch, pixel, new Vector2(cx, bounds.Y + 1), new Vector2(bounds.X + 3, bounds.Bottom - 3), 2, color);
+                DrawThickLine(spriteBatch, pixel, new Vector2(bounds.X + 3, bounds.Bottom - 3), new Vector2(bounds.Right - 3, bounds.Bottom - 3), 2, color);
+                DrawThickLine(spriteBatch, pixel, new Vector2(bounds.Right - 3, bounds.Bottom - 3), new Vector2(cx, bounds.Y + 1), 2, color);
+                break;
+            default:
+                DrawThickLine(spriteBatch, pixel, new Vector2(bounds.X + 2, bounds.Bottom - 2), new Vector2(bounds.Right - 2, bounds.Y + 2), 2, color);
+                break;
+        }
+    }
+
     public static void DrawPhyxelLogo(
         SpriteBatch spriteBatch,
         Texture2D pixel,

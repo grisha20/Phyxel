@@ -8,6 +8,7 @@ namespace Phyxel.UI;
 public sealed class UiValueSlider
 {
     private bool dragging;
+    private bool hovered;
     private readonly float[]? presets;
     private readonly string valueFormat;
 
@@ -70,10 +71,14 @@ public sealed class UiValueSlider
     public float Value { get; set; }
     public Rectangle Bounds { get; set; }
     public bool IsDragging => dragging;
+    public string FormattedValue => $"{Value.ToString(valueFormat)}{Suffix}";
+    public void CancelDrag() => dragging = false;
 
     public bool Update(RawInputSnapshot input)
     {
-        if (input.LeftPressed && Bounds.Contains(input.MousePosition))
+        Rectangle hitBounds = new(Bounds.X, Bounds.Bottom - 24, Bounds.Width, 24);
+        hovered = hitBounds.Contains(input.MousePosition);
+        if (input.LeftPressed && hovered)
         {
             dragging = true;
         }
@@ -88,7 +93,10 @@ public sealed class UiValueSlider
             return false;
         }
 
-        float normalized = Math.Clamp((input.MousePosition.X - Bounds.X) / (float)Math.Max(1, Bounds.Width), 0f, 1f);
+        float normalized = Math.Clamp(
+            (input.MousePosition.X - Bounds.X) / (float)Math.Max(1, Bounds.Width),
+            0f,
+            1f);
         float previous = Value;
         if (presets is not null)
         {
@@ -109,17 +117,42 @@ public sealed class UiValueSlider
 
     public void Draw(SpriteBatch spriteBatch, SpriteFont font, UiPanelBackdropRenderer renderer, Texture2D pixel)
     {
-        string text = $"{Label}: {Value.ToString(valueFormat)}{Suffix}";
-        spriteBatch.DrawString(font, text, new Vector2(Bounds.X, Bounds.Y - 24), new Color(225, 225, 225));
-        Rectangle track = new(Bounds.X, Bounds.Y + Bounds.Height / 2 - 2, Bounds.Width, 4);
-        renderer.DrawLine(spriteBatch, track, new Color(82, 82, 82));
+        spriteBatch.DrawString(font, Label, new Vector2(Bounds.X, Bounds.Y), UiTheme.TextSecondary);
+
+        string valueText = FormattedValue;
+        Vector2 valueSize = font.MeasureString(valueText);
+        Rectangle valueBox = new(
+            Bounds.Right - (int)valueSize.X - 16,
+            Bounds.Y - 2,
+            (int)valueSize.X + 16,
+            font.LineSpacing + 6);
+        renderer.DrawRoundedRectangle(spriteBatch, valueBox, UiTheme.FieldBackground, 4);
+        UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, valueBox, 1, UiTheme.BorderColor);
+        spriteBatch.DrawString(
+            font,
+            valueText,
+            new Vector2(valueBox.Center.X - valueSize.X / 2, valueBox.Center.Y - font.LineSpacing / 2f),
+            UiTheme.TextPrimary);
+
+        Rectangle track = new(Bounds.X, Bounds.Bottom - 11, Bounds.Width, 6);
+        renderer.DrawRoundedRectangle(spriteBatch, track, new Color(53, 64, 76), 3);
         float normalized = presets is null
             ? (Value - Minimum) / (Maximum - Minimum)
             : FindNearestPresetIndex(Value) / (float)(presets.Length - 1);
         int filledWidth = (int)(Bounds.Width * normalized);
-        renderer.DrawLine(spriteBatch, new Rectangle(track.X, track.Y, filledWidth, track.Height), new Color(76, 148, 207));
-        int handleX = Bounds.X + filledWidth - 5;
-        spriteBatch.Draw(pixel, new Rectangle(handleX, Bounds.Y + 2, 10, Bounds.Height - 4), new Color(230, 230, 230));
+        if (filledWidth > 0)
+        {
+            renderer.DrawRoundedRectangle(
+                spriteBatch,
+                new Rectangle(track.X, track.Y, filledWidth, track.Height),
+                UiTheme.SliderAccent,
+                3);
+        }
+        int handleSize = dragging ? 16 : hovered ? 15 : 14;
+        int handleX = Bounds.X + filledWidth;
+        Rectangle handle = new(handleX - handleSize / 2, track.Center.Y - handleSize / 2, handleSize, handleSize);
+        renderer.DrawRoundedRectangle(spriteBatch, handle, UiTheme.TextPrimary, handleSize / 2);
+        UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, handle, 1, UiTheme.BorderHighlight);
     }
 
     private float FindNearestPreset(float value) => presets![FindNearestPresetIndex(value)];

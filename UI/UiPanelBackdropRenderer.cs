@@ -16,9 +16,10 @@ public sealed class UiPanelBackdropRenderer
 
     public void Draw(SpriteBatch spriteBatch, Rectangle bounds, int radius = 10)
     {
-        Rectangle shadow = new(bounds.X + 3, bounds.Y + 4, bounds.Width, bounds.Height);
-        DrawRoundedRectangle(spriteBatch, shadow, new Color(0, 0, 0, 90), radius);
-        DrawRoundedRectangle(spriteBatch, bounds, new Color(30, 30, 30, 217), radius);
+        Rectangle shadow = new(bounds.X + 2, bounds.Y + 3, bounds.Width, bounds.Height);
+        DrawRoundedRectangle(spriteBatch, shadow, new Color(0, 0, 0, 105), radius);
+        DrawRoundedRectangle(spriteBatch, bounds, UiTheme.PanelBackground, radius);
+        UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, bounds, 1, UiTheme.BorderColor);
     }
 
     public void DrawRoundedRectangle(SpriteBatch spriteBatch, Rectangle bounds, Color color, int radius)

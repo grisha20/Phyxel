@@ -32,7 +32,7 @@ public static class UiLayoutCalculator
         int margin = Math.Max(6, (int)MathF.Round(8 * scale));
         int topBarHeight = Math.Max(44, (int)MathF.Round(52 * scale));
         int statusBarHeight = Math.Max(30, (int)MathF.Round(32 * scale));
-        int leftToolbarWidth = Math.Max(168, (int)MathF.Round(190 * scale));
+        int leftToolbarWidth = Math.Max(180, (int)MathF.Round(220 * scale));
         int rightPanelWidth = Math.Max(250, (int)MathF.Round(300 * scale));
         int bottomPaletteHeight = Math.Max(118, (int)MathF.Round(145 * scale));
 
@@ -59,7 +59,7 @@ public static class UiLayoutCalculator
             width - rightPanelWidth - margin,
             middleTop,
             rightPanelWidth,
-            middleHeight);
+            Math.Min(middleHeight, (int)MathF.Round(580 * scale)));
 
         int canvasLeft = leftToolbar.Right + margin;
         int canvasTop = middleTop;
