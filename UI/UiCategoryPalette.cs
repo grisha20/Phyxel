@@ -61,15 +61,8 @@ public sealed class UiCategoryPalette
         return Rectangle.Empty;
     }
 
-    internal static int ComputeCardWidth(int cardHeight) => Math.Clamp((int)(cardHeight * 1.55f), 116, 132);
-
-    internal static int ComputeCardWidth(SpriteFont font, string title, int cardHeight)
-    {
-        int baseWidth = ComputeCardWidth(cardHeight);
-        float titleScale = ComputeCardTitleScale(font, title, 210 - 24);
-        int textWidth = (int)MathF.Ceiling(font.MeasureString(title).X * titleScale) + 24;
-        return Math.Clamp(Math.Max(baseWidth, textWidth), 116, 210);
-    }
+    internal static int ComputeCardWidth(int cardHeight) =>
+        Math.Clamp((int)MathF.Round(cardHeight * 1.86f), 132, 240);
 
     internal static int ComputeMaterialLabelOverlayHeight(SpriteFont font) =>
         Math.Clamp(font.LineSpacing + 8, 28, 34);
@@ -153,7 +146,7 @@ public sealed class UiCategoryPalette
         int totalCardsWidth = 0;
         for (int i = 0; i < currentList.Count; i++)
         {
-            totalCardsWidth += ComputeCardWidth(font, currentList[i].Name, cardHeight) + gap;
+            totalCardsWidth += ComputeCardWidth(cardHeight) + gap;
         }
         if (currentList.Count > 0) totalCardsWidth -= gap;
         bool overflow = totalCardsWidth > fullCardsBounds.Width;
@@ -186,7 +179,7 @@ public sealed class UiCategoryPalette
         for (int i = 0; i < currentList.Count; i++)
         {
             MaterialDefinition mat = currentList[i];
-            int cardWidth = ComputeCardWidth(font, mat.Name, cardHeight);
+            int cardWidth = ComputeCardWidth(cardHeight);
             Rectangle cardBounds = new(cardX, cardsStripBounds.Y, cardWidth, cardHeight);
 
             if (cardBounds.Right >= cardsStripBounds.X && cardBounds.X <= cardsStripBounds.Right)
@@ -274,7 +267,7 @@ public sealed class UiCategoryPalette
         int totalCardsWidthDraw = 0;
         for (int i = 0; i < currentList.Count; i++)
         {
-            totalCardsWidthDraw += ComputeCardWidth(font, currentList[i].Name, fullCardsBounds.Height) + gap;
+            totalCardsWidthDraw += ComputeCardWidth(fullCardsBounds.Height) + gap;
         }
         bool overflow = totalCardsWidthDraw - gap > fullCardsBounds.Width;
         cardsStripBounds = GetCardsStripBounds(bounds, overflow);
@@ -289,7 +282,7 @@ public sealed class UiCategoryPalette
         for (int i = 0; i < currentList.Count; i++)
         {
             MaterialDefinition mat = currentList[i];
-            int cardWidth = ComputeCardWidth(font, mat.Name, cardsStripBounds.Height);
+            int cardWidth = ComputeCardWidth(cardsStripBounds.Height);
             Rectangle cardBounds = new(cardX, cardsStripBounds.Y, cardWidth, cardsStripBounds.Height);
 
             // Clip drawing inside strip bounds

@@ -603,20 +603,31 @@ public static class UiLayoutRegressionTests
         Require(Math.Abs(source.Width / (float)source.Height - destination.Width / (float)destination.Height) < 0.02f,
             "Aspect-fill crop distorted preview proportions.");
 
-        int sandWidth = UiCategoryPalette.ComputeCardWidth(font, "Песок", destination.Height);
-        int charcoalWidth = UiCategoryPalette.ComputeCardWidth(font, "Древесный уголь", destination.Height);
-        int stoneCoalWidth = UiCategoryPalette.ComputeCardWidth(font, "Каменный уголь", destination.Height);
-        Require(sandWidth is >= 116 and <= 210 && charcoalWidth > sandWidth && stoneCoalWidth > sandWidth,
-            "Material cards did not expand for full coal names.");
-        Require(charcoalWidth <= 210 && stoneCoalWidth <= 210,
-            "Dynamic material card width exceeded its maximum.");
+        UiLayoutBounds layout = UiLayoutCalculator.Calculate(new Viewport(0, 0, 1920, 1080), 1f);
+        int tabHeight = Math.Clamp(font.LineSpacing + 13, 32, 45);
+        int cardsTop = layout.BottomPalette.Y + 8 + tabHeight + 8;
+        int cardHeight = layout.BottomPalette.Bottom - cardsTop - 10;
+        int uniformCardWidth = UiCategoryPalette.ComputeCardWidth(cardHeight);
+        Require(uniformCardWidth is >= 180 and <= 190,
+            $"1920px material card width must be 180-190 px, got {uniformCardWidth}.");
+        foreach (string materialName in new[]
+                 {
+                     "Песок", "Вода", "Пар", "CO₂", "Лёд", "Металл", "Древесный уголь", "Каменный уголь"
+                 })
+        {
+            Require(UiCategoryPalette.ComputeCardWidth(cardHeight) == uniformCardWidth,
+                $"Material '{materialName}' did not use the uniform card width.");
+        }
         foreach (string coalName in new[] { "Древесный уголь", "Каменный уголь" })
         {
-            int cardWidth = UiCategoryPalette.ComputeCardWidth(font, coalName, destination.Height);
-            (string coalTitle, float coalScale) = UiCategoryPalette.FitCardTitle(font, coalName, cardWidth - 16);
+            (string coalTitle, float coalScale) = UiCategoryPalette.FitCardTitle(
+                font,
+                coalName,
+                uniformCardWidth - 16);
             Require(!coalTitle.Contains('\n') && !coalTitle.Contains('…') && coalTitle == coalName,
                 $"Material title '{coalName}' was not preserved in full on one line.");
-            Require(coalScale is >= 0.80f and <= 1f && font.MeasureString(coalTitle).X * coalScale <= cardWidth - 16,
+            Require(coalScale is >= 0.80f and <= 1f &&
+                    font.MeasureString(coalTitle).X * coalScale <= uniformCardWidth - 16,
                 $"Material title '{coalName}' does not fit horizontally inside its card.");
         }
         int overlayHeight = UiCategoryPalette.ComputeMaterialLabelOverlayHeight(font);
@@ -625,11 +636,11 @@ public static class UiLayoutRegressionTests
         Require(UiCategoryPalette.MaterialLabelOverlayAlpha is >= 150 and <= 185,
             "Material label overlay is not translucent enough to reveal the preview.");
 
-        UiLayoutBounds layout = UiLayoutCalculator.Calculate(new Viewport(0, 0, 1920, 1080), 1f);
         int capacity = UiCategoryPalette.CalculateVisibleCardCapacity(layout.BottomPalette, font);
-        Require(capacity is >= 8 and <= 11,
-            $"1920px material palette capacity must stay within 8-11 cards, got {capacity}.");
-        Console.WriteLine($"[PASS] Material titles, aspect-fill crop, and 1920px capacity ({capacity} cards).");
+        Require(capacity is >= 7 and <= 9,
+            $"1920px material palette capacity must stay within 7-9 uniform cards, got {capacity}.");
+        Console.WriteLine(
+            $"[PASS] Uniform material cards ({uniformCardWidth}px), one-line titles, overlay, and capacity ({capacity}).");
     }
 
     private static void TestMaterialCategorization(MaterialRegistry registry)
