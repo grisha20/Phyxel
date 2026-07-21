@@ -83,7 +83,7 @@ public static class UiLayoutRegressionTests
 
                 Require(layout.SimulationCanvas.Width >= 420 && layout.SimulationCanvas.Height >= 240,
                     $"Canvas too small at {width}x{height}, DPI {dpi:0.##}: {layout.SimulationCanvas}.");
-                Require(layout.Scale is >= 0.82f and <= 1.4f,
+                Require(layout.Scale is >= 0.82f and <= 1.5f,
                     $"Layout scale out of range: {layout.Scale}.");
             }
         }

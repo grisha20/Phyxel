@@ -134,7 +134,13 @@ public sealed class PhyxelGame : Game
         resourceManager.PrepareSimulation(settings);
         dispatchCoordinator = new SimulationDispatchCoordinator(resourceManager, materialRegistry);
         userInterface = new SandboxUiCoordinator(materialRegistry, fonts, resourceManager);
-        UiLayoutRegressionTests.RunAllTests(materialRegistry, fonts, userInterface);
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_UI") == "1")
+        {
+            UiLayoutRegressionTests.RunAllTests(materialRegistry, fonts, userInterface);
+            Console.WriteLine("PHYXEL_UI_REGRESSION_SUCCESS");
+            Exit();
+            return;
+        }
         SimulationWorldSnapshot? initialAcceptanceWorld = acceptance.CreateInitialWorld(
             settings.Width,
             settings.Height);

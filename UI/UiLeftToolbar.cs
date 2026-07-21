@@ -62,7 +62,7 @@ public sealed class UiLeftToolbar
         hoveredTool = null;
 
         int padding = 10;
-        int itemHeight = GetItemHeight(font);
+        int itemHeight = GetItemHeight(font, bounds);
         int itemY = bounds.Y + GetHeaderHeight(font);
         int itemWidth = bounds.Width - padding * 2;
 
@@ -115,7 +115,7 @@ public sealed class UiLeftToolbar
         spriteBatch.Draw(pixel, new Rectangle(bounds.X + 12, bounds.Y + GetHeaderHeight(font) - 7, bounds.Width - 24, 1), UiTheme.BorderColor);
 
         int padding = 10;
-        int itemHeight = GetItemHeight(font);
+        int itemHeight = GetItemHeight(font, bounds);
         int itemY = bounds.Y + GetHeaderHeight(font);
         int itemWidth = bounds.Width - padding * 2;
 
@@ -229,7 +229,7 @@ public sealed class UiLeftToolbar
     internal Rectangle GetToolBounds(Rectangle bounds, SpriteFont font, PhyxelToolId toolId)
     {
         int padding = 10;
-        int itemHeight = GetItemHeight(font);
+        int itemHeight = GetItemHeight(font, bounds);
         int itemY = bounds.Y + GetHeaderHeight(font);
         for (int index = 0; index < Tools.Count; index++)
         {
@@ -250,5 +250,11 @@ public sealed class UiLeftToolbar
 
     private static int GetHeaderHeight(SpriteFont font) => font.LineSpacing + 28;
 
-    private static int GetItemHeight(SpriteFont font) => Math.Clamp(font.LineSpacing + 16, 38, 52);
+    private static int GetItemHeight(SpriteFont font, Rectangle bounds)
+    {
+        int desired = Math.Clamp(font.LineSpacing + 16, 38, 52);
+        int fixedSpacing = (Tools.Count - 1) * 5 + 8;
+        int available = Math.Max(Tools.Count * 34, bounds.Height - GetHeaderHeight(font) - fixedSpacing);
+        return Math.Clamp(Math.Min(desired, available / Tools.Count), 34, 52);
+    }
 }
