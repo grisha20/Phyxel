@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "core:gunpowder",
+  "name": { "ru": "Порох", "en": "Gunpowder" },
+  "kind": "solid",
+  "color": "#505358",
+  "physics": { "density": 1.4, "friction": 0.80, "flowRate": 0.15 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.25, "heatCapacity": 0.90 },
+  "combustion": {
+    "ignitionTemperature": 250.0,
+    "burnRate": 15.0,
+    "heatPerMass": 25000.0,
+    "burnedInto": "core:empty",
+    "spreadRate": 12.0,
+    "maximumTemperature": 1800.0
+  },
+  "emissions": {
+    "smokeInto": "core:smoke",
+    "smokeRate": 0.50,
+    "gasInto": "core:co2",
+    "gasRate": 0.30,
+    "flameInto": "core:fire",
+    "flameRate": 10.0
+  },
+  "ui": { "order": 15, "hidden": false }
+}

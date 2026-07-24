@@ -41,6 +41,7 @@ public static class CoreMaterialIds
     public const string Smoke = "core:smoke";
     public const string Co2 = "core:co2";
     public const string Fire = "core:fire";
+    public const string Gunpowder = "core:gunpowder";
     public static IReadOnlyList<string> Required { get; } =
     [
         Empty,

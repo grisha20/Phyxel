@@ -21,7 +21,8 @@ public sealed class MaterialCardPreviewCache : IDisposable
             ["core:wood"] = "wood.png",
             ["core:fire"] = "fire.png",
             ["core:coal"] = "charcoal.png",
-            ["core:stone_coal"] = "stone_coal.png"
+            ["core:stone_coal"] = "stone_coal.png",
+            ["core:gunpowder"] = "gunpowder.png"
         };
 
     private readonly Dictionary<string, Texture2D> previews =

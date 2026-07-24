@@ -1,4 +1,3 @@
-PHYXEL_COAL_TYPES dry=2/2,000/y=90,0/span=54/run=1 wet=262/262,000/y=222,9/span=139/run=12 stone=132/132,000/y=221,3/span=21/run=12 externalLight=0/0,000/y=0,0/span=0/run=0 externalHeavy=0/0,000/y=0,0/span=0/run=0 charcoalMass=264,000/264,000 roundTrip=True
-PHYXEL_COAL_TYPES_FAILURE acceptance light/heavy granular materials are missing
-PHYXEL_ACCEPTANCE_METRICS size=480x270 fps=358,9 thermalGpuMs=0,0961/0,0911/0,1004 samples=51 contactGpuMs=0,0297/0,0287/0,0307 contactSamples=51 gasGpuMs=0,1034/0,1024/0,1157 gasSamples=49 phaseGpuMs=0,0293/0,0287/0,0328 phaseSamples=51 phaseDispatches=247 phaseMaxPerFrame=1 phaseSummaryReadbacks=183 phaseFallbackWakeUps=61 combustionGpuMs=0,0658/0,0645/0,0727 combustionSamples=51 combustionDispatches=247 combustionSummaryReadbacks=183 probeGpuMs=0,0000/0,0000/0,0000 probeSamples=0
-PHYXEL_ACCEPTANCE_FAILED
+PHYXEL_M_BUOYANCY waterTop=169 drafts=25/38 bottoms=194/207/249 metal=3590/2338 sandLoad=3325 sunkBlock=2961 closedWater=0 openWater=0 deepHull=0 water=32359 movingSolids=0 fps=144,0
+PHYXEL_ACCEPTANCE_METRICS size=480x270 fps=144,0 thermalGpuMs=0,0736/0,0573/0,0983 samples=39 contactGpuMs=0,0000/0,0000/0,0000 contactSamples=0 gasGpuMs=0,0000/0,0000/0,0000 gasSamples=0 phaseGpuMs=0,0292/0,0276/0,0328 phaseSamples=38 phaseDispatches=78 phaseMaxPerFrame=1 phaseSummaryReadbacks=78 phaseFallbackWakeUps=0 combustionGpuMs=0,0651/0,0625/0,0707 combustionSamples=38 combustionDispatches=78 combustionSummaryReadbacks=78 probeGpuMs=0,0055/0,0029/0,0087 probeSamples=37
+PHYXEL_ACCEPTANCE_SUCCESS
