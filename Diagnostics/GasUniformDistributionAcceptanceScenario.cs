@@ -42,7 +42,7 @@ internal static class GasUniformDistributionAcceptanceScenario
         }
 
         byte[] bytes = new byte[checked(width * height * Marshal.SizeOf<GridCell>())];
-        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes);
+        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes.AsSpan());
         uint fixture = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Fixture);
 
         BuildChamber(cells, width, SingleLeft, SingleTop, SingleRight, SingleBottom, fixture);

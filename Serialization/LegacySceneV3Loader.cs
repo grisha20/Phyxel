@@ -78,7 +78,7 @@ internal static class LegacySceneV3Loader
         }
 
         bool warned = false;
-        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(world.Grid);
+        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(world.Grid.AsSpan());
         for (int index = 0; index < cells.Length; index++)
         {
             if (cells[index].IsActive == 0)

@@ -346,7 +346,7 @@ public sealed class SimulationStateSerializer
         }
 
         byte[] encodedGrid = (byte[])world.Grid.Clone();
-        Span<GridCell> encodedCells = MemoryMarshal.Cast<byte, GridCell>(encodedGrid);
+        Span<GridCell> encodedCells = MemoryMarshal.Cast<byte, GridCell>(encodedGrid.AsSpan());
         for (int index = 0; index < encodedCells.Length; index++)
         {
             if (encodedCells[index].IsActive == 0)
@@ -396,7 +396,7 @@ public sealed class SimulationStateSerializer
             }
         }
 
-        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(world.Grid);
+        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(world.Grid.AsSpan());
         for (int index = 0; index < cells.Length; index++)
         {
             if (cells[index].IsActive == 0)

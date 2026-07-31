@@ -49,7 +49,7 @@ internal static class PhaseAcceptanceScenario
         }
 
         byte[] bytes = new byte[checked(width * height * Marshal.SizeOf<GridCell>())];
-        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes);
+        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes.AsSpan());
         if (CorePhaseAcceptanceScenario.IsCorePhaseMode(mode))
         {
             CorePhaseAcceptanceScenario.Populate(mode, cells, width, materials);

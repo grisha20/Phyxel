@@ -124,7 +124,7 @@ internal static class WorldCellCodec
         ReadOnlySpan<LegacyGridCellV3V4> legacyCells =
             MemoryMarshal.Cast<byte, LegacyGridCellV3V4>(world.CellBytes);
         byte[] currentBytes = new byte[checked(legacyCells.Length * CurrentCellStride)];
-        Span<GridCell> currentCells = MemoryMarshal.Cast<byte, GridCell>(currentBytes);
+        Span<GridCell> currentCells = MemoryMarshal.Cast<byte, GridCell>(currentBytes.AsSpan());
         for (int index = 0; index < legacyCells.Length; index++)
         {
             LegacyGridCellV3V4 source = legacyCells[index];
@@ -148,7 +148,7 @@ internal static class WorldCellCodec
     private static SimulationWorldSnapshot DecodeCurrent(RawWorldFile world)
     {
         byte[] currentBytes = (byte[])world.CellBytes.Clone();
-        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(currentBytes);
+        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(currentBytes.AsSpan());
         for (int index = 0; index < cells.Length; index++)
         {
             if (cells[index].IsActive == 0)
@@ -179,7 +179,7 @@ internal static class WorldCellCodec
         ReadOnlySpan<LegacyGridCellV5> oldCells =
             MemoryMarshal.Cast<byte, LegacyGridCellV5>(world.CellBytes);
         byte[] currentBytes = new byte[checked(oldCells.Length * CurrentCellStride)];
-        Span<GridCell> currentCells = MemoryMarshal.Cast<byte, GridCell>(currentBytes);
+        Span<GridCell> currentCells = MemoryMarshal.Cast<byte, GridCell>(currentBytes.AsSpan());
         for (int index = 0; index < oldCells.Length; index++)
         {
             LegacyGridCellV5 source = oldCells[index];

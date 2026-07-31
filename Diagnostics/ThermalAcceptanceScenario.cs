@@ -40,7 +40,7 @@ internal static class ThermalAcceptanceScenario
         }
 
         byte[] bytes = new byte[checked(width * height * Marshal.SizeOf<GridCell>())];
-        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes);
+        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes.AsSpan());
         switch (mode)
         {
             case AcceptanceScenarioMode.ThermalUniform:

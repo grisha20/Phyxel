@@ -31,7 +31,7 @@ internal static class SteamDistributionAndCoolingAcceptanceScenario
         }
 
         byte[] bytes = new byte[checked(width * height * Marshal.SizeOf<GridCell>())];
-        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes);
+        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes.AsSpan());
         uint fixture = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Fixture);
         uint steam = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
         Fill(cells, width, Left, Top, Right, Top + 3, fixture, 20);

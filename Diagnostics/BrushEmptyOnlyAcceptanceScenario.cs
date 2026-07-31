@@ -50,7 +50,7 @@ internal static class BrushEmptyOnlyAcceptanceScenario
         }
 
         byte[] bytes = new byte[checked(width * height * Marshal.SizeOf<GridCell>())];
-        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes);
+        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes.AsSpan());
         for (int blockIndex = 0; blockIndex < PreservationBlocks.Length; blockIndex++)
         {
             (string id, int centerX, int centerY) = PreservationBlocks[blockIndex];

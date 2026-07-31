@@ -578,14 +578,14 @@ internal static class WorldCellCodecRegressionVerifier
     private static byte[] EncodeCurrentCells(params GridCell[] cells)
     {
         byte[] bytes = new byte[checked(cells.Length * WorldCellCodec.CurrentCellStride)];
-        cells.AsSpan().CopyTo(MemoryMarshal.Cast<byte, GridCell>(bytes));
+        cells.AsSpan().CopyTo(MemoryMarshal.Cast<byte, GridCell>(bytes.AsSpan()));
         return bytes;
     }
 
     private static byte[] EncodeV5Cells(params LegacyGridCellV5[] cells)
     {
         byte[] bytes = new byte[checked(cells.Length * WorldCellCodec.V5CellStride)];
-        cells.AsSpan().CopyTo(MemoryMarshal.Cast<byte, LegacyGridCellV5>(bytes));
+        cells.AsSpan().CopyTo(MemoryMarshal.Cast<byte, LegacyGridCellV5>(bytes.AsSpan()));
         return bytes;
     }
 
@@ -633,7 +633,7 @@ internal static class WorldCellCodecRegressionVerifier
     private static SimulationWorldSnapshot CreateSnapshot(int width, int height, params GridCell[] cells)
     {
         byte[] bytes = new byte[checked(cells.Length * WorldCellCodec.CurrentCellStride)];
-        cells.AsSpan().CopyTo(MemoryMarshal.Cast<byte, GridCell>(bytes));
+        cells.AsSpan().CopyTo(MemoryMarshal.Cast<byte, GridCell>(bytes.AsSpan()));
         return new SimulationWorldSnapshot(width, height, bytes);
     }
 

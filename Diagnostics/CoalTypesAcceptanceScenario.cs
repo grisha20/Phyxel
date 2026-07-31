@@ -42,7 +42,7 @@ internal static class CoalTypesAcceptanceScenario
         }
 
         byte[] bytes = new byte[checked(width * height * Marshal.SizeOf<GridCell>())];
-        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes);
+        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes.AsSpan());
         uint fixture = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Fixture);
         uint water = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
         foreach ((int left, int right, string materialId) in Chambers)

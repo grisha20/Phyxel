@@ -1,6 +1,55 @@
+# --- Build output ---
 bin/
 obj/
 Content/bin/
 Content/obj/
+*.dll
+*.pdb
+*.exe
+
+# --- Diagnostic output ---
+# Acceptance runs write PNG snapshots, recordings, console logs and reports
+# here. They are reproducible from source and must never be committed.
+artifacts/
+*.log
+acceptance-report.txt
+
+# --- IDE and editor ---
 .vs/
+.idea/
+.vscode/
 *.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+
+# --- Temporary files ---
+*.tmp
+*.temp
+*.cache
+*.bak
+*~
+Thumbs.db
+desktop.ini
+
+# --- Local settings and secrets ---
+# Never commit credentials, signing keys or machine-specific configuration.
+.env
+.env.*
+*.local.json
+appsettings.Local.json
+appsettings.Development.json
+secrets.json
+*.pfx
+*.snk
+*.keystore
+
+# --- The Powder Toy reference sources ---
+# TPT is used strictly as a read-only reference for physics behaviour.
+# Its source must never enter this repository for licensing reasons.
+/Исходник The Powder Toy/
+/source code the powder toy/
+/the powder toy/
+/The Powder Toy/
+**/powder-toy-source/

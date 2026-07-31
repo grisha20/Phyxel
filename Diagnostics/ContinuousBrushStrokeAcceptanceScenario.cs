@@ -37,7 +37,7 @@ internal static class ContinuousBrushStrokeAcceptanceScenario
         }
 
         byte[] bytes = new byte[checked(width * height * Marshal.SizeOf<GridCell>())];
-        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes);
+        Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(bytes.AsSpan());
         FillLane(cells, width, TemperatureY, materials[CoreMaterialIds.Water]);
         FillLane(cells, width, InvisibleSteamY, materials[CoreMaterialIds.Steam], 0.02f);
         FillLane(cells, width, EraserY, materials[CoreMaterialIds.Sand]);
