@@ -17,6 +17,76 @@ public struct GridCell
     public float Lifetime;
 }
 
+/// <summary>
+/// Одна клетка грубого поля воздуха. <c>Blocked</c> объявлен float, а не bool
+/// или uint, чтобы структура оставалась 16 байт с естественным выравниванием
+/// одинаково в HLSL и C#. Зеркало <c>AirCell</c> из PhysicsShared.hlsli —
+/// менять только вместе с ним.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct AirCell
+{
+    public float Pressure;
+    public float VelocityX;
+    public float VelocityY;
+    public float Blocked;
+}
+
+/// <summary>
+/// Per-particle motion state for the deterministic FIRE/SMKE carrier.
+/// This deliberately lives outside <see cref="GridCell"/>: saved worlds retain
+/// their 40-byte cell format and water/solid velocity fields remain unchanged.
+/// </summary>
+public struct GasMotionState
+{
+    public float VelocityX;
+    public float VelocityY;
+    public float OffsetX;
+    public float OffsetY;
+}
+
+/// <summary>
+/// Клетка накопительного светового поля огня. Зеркало <c>FireGlowCell</c>
+/// из PhysicsShared.hlsli — менять только вместе с ним.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct FireGlowCell
+{
+    public float Red;
+    public float Green;
+    public float Blue;
+    // Separate SMKE coverage.  The field remains 16 bytes and mirrors the
+    // HLSL FireGlowCell exactly; smoke is alpha-blended rather than added as
+    // white fire light.
+    public float Smoke;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct FireGlowConstants
+{
+    public uint FireGlowWidth;
+    public uint FireGlowHeight;
+    public uint FireGlowGridWidth;
+    public uint FireGlowGridHeight;
+    public float FireGlowDeposit;
+    public float FireGlowDecay;
+    public float FireGlowEmberStrength;
+    public uint FireGlowReserved0;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct AirSimulationConstants
+{
+    public uint AirWidth;
+    public uint AirHeight;
+    public uint AirGridWidth;
+    public uint AirGridHeight;
+    public float AirAmbientTemperature;
+    public float AirHotScale;
+    public uint AirTickIndex;
+    public uint AirReserved0;
+}
+
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct MaterialProperties
 {
@@ -103,6 +173,30 @@ public struct SimulationFrameConstants
     public uint DispatchExtentX;
     public uint DispatchExtentY;
     public uint HydraulicPressure;
+
+    /// <summary>
+    /// Диагностический режим отрисовки: 0 — сцена, 1 — поле воздуха.
+    /// Три следующих поля добиты для выравнивания: константный буфер D3D11
+    /// обязан быть кратен 16 байтам, иначе он просто не создастся.
+    /// Зеркало cbuffer в PhysicsShared.hlsli — менять только вместе с ним.
+    /// </summary>
+    public uint DebugView;
+
+    /// <summary>
+    /// Открытые границы: всё, что доходит до левого, правого или верхнего края,
+    /// исчезает, как в The Powder Toy. Пол остаётся сплошным. В acceptance-тестах
+    /// выключено — их сцены опираются на замкнутый мир.
+    /// </summary>
+    public uint OpenBoundaries;
+
+    /// <summary>
+    /// Номер подшага движения газа. Обязан входить в seed случайности: без него
+    /// все проходы за кадр получают одно и то же число, и восемь независимых
+    /// попыток вырождаются в одну, повторённую восемь раз, — при том что
+    /// вероятность уже поделена на восемь. Газ двигался в восемь раз медленнее.
+    /// </summary>
+    public uint GasSubStep;
+    public uint DebugReserved2;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

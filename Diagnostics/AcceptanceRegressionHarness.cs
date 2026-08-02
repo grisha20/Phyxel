@@ -94,6 +94,8 @@ public sealed class AcceptanceRegressionHarness
             "water_ice_steam_v5_roundtrip" => AcceptanceScenarioMode.WaterIceSteamV5RoundTrip,
             "combustion" or "combustion_chain" => AcceptanceScenarioMode.CombustionChain,
             "combustion_quench" or "water_quench" => AcceptanceScenarioMode.CombustionQuench,
+            "fire_obstacle" or "fire_plate" => AcceptanceScenarioMode.FireObstacle,
+            "furnace" or "fire_furnace" => AcceptanceScenarioMode.Furnace,
             "steam_self_cooling" => AcceptanceScenarioMode.SteamSelfCooling,
             "brush_empty_only" => AcceptanceScenarioMode.BrushEmptyOnly,
             "continuous_brush_stroke" => AcceptanceScenarioMode.ContinuousBrushStroke,
@@ -183,6 +185,8 @@ public sealed class AcceptanceRegressionHarness
                 // than after all transient flame/smoke has naturally expired.
                 AcceptanceScenarioMode.CombustionChain => 900,
                 AcceptanceScenarioMode.CombustionQuench => 900,
+                AcceptanceScenarioMode.FireObstacle => 360,
+                AcceptanceScenarioMode.Furnace => 600,
                 AcceptanceScenarioMode.SteamSelfCooling => uint.MaxValue,
                 AcceptanceScenarioMode.BrushEmptyOnly => 7,
                 AcceptanceScenarioMode.ContinuousBrushStroke => 3,
@@ -453,6 +457,20 @@ public sealed class AcceptanceRegressionHarness
             "1" => true,
             _ => scenarioHydraulics
         };
+        // Позволяет изолировать поле воздуха при разборе регрессии: прогон с
+        // PHYXEL_ACCEPTANCE_AIR=0 и без него отвечает на вопрос «виновато ли
+        // поле» одной парой запусков вместо перебора коммитов.
+        settings.AirSimulation = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_AIR") switch
+        {
+            "0" => false,
+            "1" => true,
+            _ => settings.AirSimulation
+        };
+        settings.ShowAirField = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_SHOW_AIR") == "1";
+        // Сцены acceptance-набора построены в замкнутом мире: вода стоит в
+        // сосудах, песок опирается на стенки. С открытыми границами всё это
+        // вытечет за край, поэтому здесь границы всегда сплошные.
+        settings.OpenBoundaries = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_OPEN_BOUNDARIES") == "1";
         if (Mode is AcceptanceScenarioMode.SolidGravity or AcceptanceScenarioMode.Buoyancy or
             AcceptanceScenarioMode.ExternalSolids)
         {
@@ -538,6 +556,8 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.GranularWaterDisplacement when frame == 12 => "V_granular_displacement",
             AcceptanceScenarioMode.GranularBarrier when frame == 899 => "W_granular_barrier_off",
             AcceptanceScenarioMode.GranularBarrierHydraulic when frame == 899 => "X_granular_barrier_on",
+            AcceptanceScenarioMode.FireObstacle when frame == 359 => "Y_fire_obstacle",
+            AcceptanceScenarioMode.Furnace when frame == 599 => "Z_furnace",
             _ => null
         };
         if (label is null)

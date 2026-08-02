@@ -356,7 +356,12 @@ public static class UiLayoutRegressionTests
 
         Dictionary<MaterialCategoryType, string[]> expectedMaterials = new()
         {
-            [MaterialCategoryType.Powders] = [CoreMaterialIds.Sand, CoreMaterialIds.Coal, CoreMaterialIds.StoneCoal],
+            // Порядок соответствует ui.order: sand 10, gunpowder 15, coal 90,
+            // stone_coal 91. Порох переехал из Solids в Powders вместе с
+            // переводом на kind 'granular' — до этого он был твёрдым только
+            // затем, чтобы обойти ограничение горения, и висел в воздухе.
+            [MaterialCategoryType.Powders] =
+                [CoreMaterialIds.Sand, CoreMaterialIds.Gunpowder, CoreMaterialIds.Coal, CoreMaterialIds.StoneCoal],
             [MaterialCategoryType.Liquids] = [CoreMaterialIds.Water],
             [MaterialCategoryType.Gases] = [CoreMaterialIds.Steam, CoreMaterialIds.Co2],
             [MaterialCategoryType.Solids] =

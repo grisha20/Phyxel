@@ -43,7 +43,15 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float strokeCoreRadius = max(0.75, command.Radius * 0.18);
     bool insideStrokeCore = command.Shape == BrushCommandShapeSegment &&
         dot(distanceFromStroke, distanceFromStroke) <= strokeCoreRadius * strokeCoreRadius;
-    if (command.Mode == BrushCommandModeMaterial && !insideStrokeCore &&
+    // Spawn density thins out a stroke so a powder lands as a loose scatter
+    // rather than a solid slab. That is wrong for structural materials: metal,
+    // stone and supports are drawn to build with, and a wall pitted with holes
+    // is simply a broken wall. A fast stroke made it obvious, leaving the
+    // scattered gaps visible right through the finished bar.
+    // The Powder Toy has no density control at all; its brush always fills.
+    MaterialProperties brushMaterial = Materials[command.MaterialIndex];
+    bool solidStructure = brushMaterial.SimulationKind == SimulationKindSolid;
+    if (command.Mode == BrushCommandModeMaterial && !insideStrokeCore && !solidStructure &&
         HashUnitFloat(index ^ command.Seed ^ FrameIndex) > command.Density)
     {
         return;

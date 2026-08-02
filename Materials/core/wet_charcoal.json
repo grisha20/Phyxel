@@ -5,6 +5,6 @@
   "kind": "granular",
   "color": "#202020",
   "physics": { "density": 1.15, "friction": 0.62, "flowRate": 0.32 },
-  "thermal": { "initialTemperature": 20.0, "conductivity": 0.78, "heatCapacity": 1.0 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.22, "heatCapacity": 1.0 },
   "ui": { "order": 90, "hidden": true }
 }

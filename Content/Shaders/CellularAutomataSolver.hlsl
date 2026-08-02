@@ -1,6 +1,7 @@
 #include "PhysicsShared.hlsli"
 
 StructuredBuffer<MaterialProperties> Materials : register(t0);
+StructuredBuffer<AirCell> Air : register(t1);
 RWStructuredBuffer<GridCell> Grid : register(u0);
 struct WaterPressureRouteData
 {
@@ -14,6 +15,7 @@ RWStructuredBuffer<uint> PathBlockerMasks : register(u2);
 RWStructuredBuffer<uint> CellMaterials : register(u3);
 RWStructuredBuffer<WaterPressureRouteData> WaterPressureRoutes : register(u4);
 RWStructuredBuffer<WaterPressureRouteData> WaterPressureRouteScratch : register(u5);
+RWStructuredBuffer<GasMotionState> GasMotion : register(u6);
 
 static const uint SandRestThreshold = 30;
 static const uint FluidRestThreshold = 60;
@@ -46,6 +48,88 @@ uint FarColumnMoveCounterIndex()
 uint PressurePlanCounterIndex()
 {
     return FarColumnMoveCounterIndex() + 1;
+}
+
+// --- Flame carried by the air field -----------------------------------------
+// A flame cell on its own can only guess where to go, which is why it used to
+// rise by an independent coin flip and looked like a swarm of sparks. The air
+// field is smooth across neighbouring cells, so once every flame reads its
+// drift from the same field they move as one body and the plume grows tongues.
+// The Powder Toy does the same thing through Advection: part.vx += 0.9 * vx.
+
+// These are The Powder Toy's own numbers rather than coefficients picked by
+// eye, because every coefficient invented here so far has been wrong by an
+// order of magnitude in one direction or the other.
+//
+// A particle there ends each frame at
+//     v = v * Loss + Advection * v_air + Gravity
+// with FIRE and SMKE both using Advection = 0.9 and Loss = 0.20, and FIRE
+// carrying Gravity = -0.1, a negative value meaning it floats. Since Loss keeps
+// only a fifth of the previous velocity, v settles at roughly
+//     0.9 * v_air + Gravity / (1 - Loss)
+// measured in cells per frame. Our cells move in whole steps, so that value
+// becomes the probability of stepping one cell this frame -- the two agree on
+// average, and no arbitrary scale factor is needed anywhere.
+static const float GasAdvection = 0.9;
+
+// Equal to the vertical response, as in The Powder Toy, where both axes share
+// Advection 0.9.
+//
+// This was held far lower for a while, down to 0.06, in an attempt to keep the
+// plume narrow. That was a mistake: the width being measured belonged to the
+// glow field, which had no upper bound and bled its surplus outward, and a
+// leftover diagonal pass was moving flame sideways without consulting this
+// value at all. With the glow clamped, that pass removed, the substep seed
+// fixed and convection cut fourfold, none of those reasons survive.
+//
+// Keeping it low also produced a plainly wrong behaviour. When a plume meets an
+// obstacle the pressure underneath drives the air sideways and downward. At a
+// fifteen to one split the flame could barely follow the sideways flow yet
+// followed the downward one at full strength, so it dived under the plate
+// instead of spreading along it. Air is isotropic; the response to it has to be
+// isotropic too.
+static const float GasLateralAdvection = 0.9;
+
+// Gravity -0.1 divided by (1 - Loss) = 0.8. What a candle does in still air.
+static const float FlameOwnRise = 0.125;
+// One simulation cell per 60 Hz tick is the largest meaningful velocity for
+// this one-slot carrier.  The former 7.2 cap was inherited from the number of
+// checkerboard passes, not from TPT's particle velocity; it made FIRE cross a
+// plate before its lifetime colour could age and read as a white plasma jet.
+static const float GasMaximumSpeed = 1.0;
+// A cellular row has one slot per pixel, unlike TPT's particles with
+// independent fractional coordinates.  At a solid surface a compact FIRE
+// column therefore needs a very short queue transfer to hand its leading
+// particle to the first available slot instead of remaining a jammed ruler.
+static const uint GasSurfaceQueueSearch = 3;
+// Gas velocity is measured directly in simulation cells per fixed tick, the
+// same unit used by the air field and TPT's particle update.  Do not use a
+// visual speed multiplier here: it makes FIRE look like a plasma jet and
+// hides, rather than fixes, missing surface flow.
+static const float GasAirVelocityScale = 1.0;
+
+// FIRE and SMKE both have Gravity = -0.1 in The Powder Toy.  The registry's
+// buoyancy sign is also used by the continuum pass, so use its positive sign
+// only as the compact marker for the two light, rising gases.  CO2 remains a
+// passive/heavy gas and is still moved by the air field and density ordering.
+float GasOwnRise(uint materialId)
+{
+    if ((Materials[materialId].Flags & MaterialFlagFlame) != 0)
+    {
+        return FlameOwnRise;
+    }
+    return Materials[materialId].GasBuoyancy > 0 ? FlameOwnRise : 0.0;
+}
+
+float2 FlameAirDrift(uint2 coordinate)
+{
+    uint airWidth = (Width + AirCellSize - 1) / AirCellSize;
+    uint airHeight = (Height + AirCellSize - 1) / AirCellSize;
+    uint2 airCoordinate = min(
+        coordinate / AirCellSize,
+        uint2(airWidth - 1, airHeight - 1));
+    AirCell air = Air[airCoordinate.y * airWidth + airCoordinate.x];
+    return float2(air.VelocityX, air.VelocityY);
 }
 
 uint CellKind(GridCell cell)
@@ -101,6 +185,28 @@ bool IsSolid(GridCell cell)
     return CellKind(cell) == 2;
 }
 
+// Weight bands from The Powder Toy: FIRE is 2, SMKE, WTRV and CO2 are 1.
+// can_move is zero when the mover's weight does not exceed the target's, so
+// flame displaces any ordinary gas while gases never displace each other --
+// their layering by density stays the gas solver's responsibility.
+// Declared here rather than beside the flame constants because it needs
+// CellKindFromMaterial, and HLSL resolves functions strictly top to bottom.
+bool GasCanEnter(uint moverMaterial, uint targetMaterial)
+{
+    uint targetKind = CellKindFromMaterial(targetMaterial);
+    if (targetKind == SimulationKindNone)
+    {
+        return true;
+    }
+    if (targetKind != SimulationKindGas)
+    {
+        return false;
+    }
+    bool moverFlame = (Materials[moverMaterial].Flags & MaterialFlagFlame) != 0;
+    bool targetFlame = (Materials[targetMaterial].Flags & MaterialFlagFlame) != 0;
+    return moverFlame && !targetFlame;
+}
+
 void MarkMovement(inout GridCell first, inout GridCell second, float horizontal, float vertical)
 {
     first.RestFrames = 0;
@@ -126,6 +232,37 @@ void SwapCells(uint firstIndex, uint secondIndex, float horizontal, float vertic
     uint firstMaterial = CellMaterials[firstIndex];
     CellMaterials[firstIndex] = CellMaterials[secondIndex];
     CellMaterials[secondIndex] = firstMaterial;
+}
+
+// Gas passes know which cell is the mover. The generic SwapCells API predates
+// them and stores the supplied velocity on its first argument before swapping;
+// gas calls supplied (target, source), so the moved particle received the
+// opposite marker. A right-moving FIRE consequently inherited "move left" and
+// returned on the next tick, making obstacle bypass visually cancel itself.
+// Keep the generic helper untouched for water/granular physics and give gas an
+// explicit source -> target operation.
+void MoveGasCell(
+    uint sourceIndex,
+    uint targetIndex)
+{
+    GridCell mover = Grid[sourceIndex];
+    GridCell displaced = Grid[targetIndex];
+    GasMotionState moverMotion = GasMotion[sourceIndex];
+    GasMotionState displacedMotion = GasMotion[targetIndex];
+
+    mover.RestFrames = 0;
+    displaced.RestFrames = 0;
+
+    Grid[sourceIndex] = displaced;
+    Grid[targetIndex] = mover;
+    GasMotion[sourceIndex] = displacedMotion;
+    GasMotion[targetIndex] = moverMotion;
+    // Publish from the authoritative cells instead of swapping possibly stale
+    // cache entries. Later gas phases in this same tick must see the move.
+    CellMaterials[sourceIndex] = displaced.IsActive != 0
+        ? displaced.MaterialIndex
+        : 0;
+    CellMaterials[targetIndex] = mover.MaterialIndex;
 }
 
 void ExchangeGranularWithLiquid(
@@ -291,6 +428,20 @@ bool GranularCanMoveTo(
         return false;
     }
 
+    // Powders never sink through other powders, even a much lighter one.
+    // The Powder Toy achieves this by quantising Weight into bands and giving
+    // every powder the same band (SAND 90, BCOL 90, STNE 90), because
+    // can_move is 0 whenever the mover's weight is not greater than the
+    // target's. Comparing continuous density instead made stone coal (1.4)
+    // drop straight through a charcoal pile (0.2) the instant it was poured,
+    // which is not how a heap of grains behaves without vibration.
+    // Powder versus liquid and gas stays density-driven: that is what keeps
+    // sand sinking, dry charcoal floating, and the whole water gate intact.
+    if (targetKind == SimulationKindGranular)
+    {
+        return false;
+    }
+
     bool diagonal = source.x != destination.x;
     if (diagonal)
     {
@@ -346,7 +497,12 @@ uint SolidDistanceBelow(uint2 coordinate)
 
 bool SandCanRoll(uint2 source, uint2 destination, uint sandMaterial, uint targetMaterial)
 {
-    if (CellKindFromMaterial(targetMaterial) == SimulationKindLiquid ||
+    uint targetKind = CellKindFromMaterial(targetMaterial);
+    // Same rule as GranularCanMoveTo: a grain never rolls into another powder,
+    // only into empty space. Without this a heavy powder would burrow sideways
+    // through a lighter heap instead of resting on its slope.
+    if (targetKind == SimulationKindLiquid ||
+        targetKind == SimulationKindGranular ||
         CellRankFromMaterial(sandMaterial) <= CellRankFromMaterial(targetMaterial))
     {
         return false;
@@ -820,6 +976,364 @@ void PlanWaterColumnMove(
     WaterColumnState[Width * 2 + sourceX] = destinationIndex + 1;
 }
 
+// --- Gas and flame motion -----------------------------------------------
+// Fire and the ordinary gases are one medium, not separate effects. In The
+// Powder Toy SMKE carries Advection 0.9, exactly the same as FIRE, and CO2
+// carries 2.0: the air moves the whole gas layer as a single body, which is why
+// a plume reads as one tongue rather than a spray of grains.
+//
+// TPT particles retain a fractional position and update their velocity once
+// per frame.  A stochastic neighbour hop cannot reproduce that: it turns a
+// smooth, symmetric air field into a random walk.  The separate GasMotion
+// buffer is the missing per-particle state while GridCell remains the stable
+// serialized 40-byte world format.
+
+void IntegrateGasMotion(uint2 coordinate)
+{
+    uint index = FlattenCoordinate(coordinate);
+    GridCell cell = Grid[index];
+    if (cell.IsActive == 0 || Materials[cell.MaterialIndex].SimulationKind != SimulationKindGas)
+    {
+        GasMotion[index] = (GasMotionState)0;
+        return;
+    }
+
+    GasMotionState state = GasMotion[index];
+    // A cell which has already collided with the underside of a solid carries
+    // a pending normal segment (OffsetY == -1).  Letting the coarse air field
+    // overwrite its just-selected tangent on the very next tick made the
+    // direction flip toward the centre of a symmetric plume: a one-cell
+    // right-hand escape was immediately pulled left again, so the front never
+    // travelled along the plate.  A particle in TPT keeps its collision
+    // fallback direction until it has cleared the surface.  Retain that
+    // tangent only while the immediate upper cell is still solid, then return
+    // to ordinary air advection at the plate edge.
+    // OffsetY==0.5 is an internal, one-tick surface-carrier marker.  It is
+    // deliberately neither a pending upward nor downward cell step, so the
+    // four checkerboard collision phases cannot move the same particle twice
+    // in one 60 Hz tick after it changes parity.
+    bool surfaceCarrierMarker = abs(state.OffsetY - 0.5) < 0.001 &&
+        abs(state.VelocityX) >= GasAdvection;
+    bool carriesAlongSurface = coordinate.y > 0 &&
+        (state.OffsetY <= -1.0 || surfaceCarrierMarker);
+    if (carriesAlongSurface)
+    {
+        GridCell aboveCell = Grid[index - Width];
+        carriesAlongSurface = aboveCell.IsActive != 0 &&
+            Materials[aboveCell.MaterialIndex].SimulationKind == SimulationKindSolid;
+    }
+    if (carriesAlongSurface && abs(state.VelocityX) > 0.0001)
+    {
+        state.VelocityX = state.VelocityX > 0 ? GasAdvection : -GasAdvection;
+        state.VelocityY = 0;
+        state.OffsetX = 0;
+        state.OffsetY = -1.0;
+        GasMotion[index] = state;
+        return;
+    }
+
+    float2 drift = FlameAirDrift(coordinate);
+    float2 gravity = float2(0, -GasOwnRise(cell.MaterialIndex));
+    state.VelocityX = clamp(
+        state.VelocityX * 0.20 + drift.x * GasAdvection * GasAirVelocityScale + gravity.x,
+        -GasMaximumSpeed,
+        GasMaximumSpeed);
+    state.VelocityY = clamp(
+        state.VelocityY * 0.20 + drift.y * GasAdvection * GasAirVelocityScale + gravity.y,
+        -GasMaximumSpeed,
+        GasMaximumSpeed);
+    state.OffsetX = clamp(
+        state.OffsetX + state.VelocityX,
+        -float(GasMotionSubSteps),
+        float(GasMotionSubSteps));
+    state.OffsetY = clamp(
+        state.OffsetY + state.VelocityY,
+        -float(GasMotionSubSteps),
+        float(GasMotionSubSteps));
+    GasMotion[index] = state;
+}
+
+void ConsumeGasOffset(uint index, int stepX, int stepY)
+{
+    GasMotionState state = GasMotion[index];
+    state.OffsetX -= float(stepX);
+    state.OffsetY -= float(stepY);
+    GasMotion[index] = state;
+}
+
+void StopGasMotion(uint index)
+{
+    GasMotion[index] = (GasMotionState)0;
+}
+
+bool GasPairBranch(uint upperKind, uint lowerKind)
+{
+    return (upperKind == SimulationKindNone || upperKind == SimulationKindGas) &&
+        (lowerKind == SimulationKindNone || lowerKind == SimulationKindGas) &&
+        (upperKind == SimulationKindGas || lowerKind == SimulationKindGas);
+}
+
+void ResolveGasVerticalPair(uint2 upperCoordinate)
+{
+    if (upperCoordinate.y + 1 >= Height)
+    {
+        return;
+    }
+    uint upperIndex = FlattenCoordinate(upperCoordinate);
+    uint lowerIndex = upperIndex + Width;
+    GridCell upperCell = Grid[upperIndex];
+    GridCell lowerCell = Grid[lowerIndex];
+    uint upperMaterial = upperCell.IsActive != 0 ? upperCell.MaterialIndex : 0;
+    uint lowerMaterial = lowerCell.IsActive != 0 ? lowerCell.MaterialIndex : 0;
+    uint upperKind = CellKindFromMaterial(upperMaterial);
+    uint lowerKind = CellKindFromMaterial(lowerMaterial);
+    if (!GasPairBranch(upperKind, lowerKind))
+    {
+        return;
+    }
+
+    // Each cell reads the air where it actually is. Sampling one fixed cell of
+    // the pair looked harmless but was not: four simulation cells share one air
+    // cell, so roughly every fourth pair straddles a boundary and the mover
+    // ended up steered by its neighbour's flow instead of its own. The error
+    // always favoured the same side, which is enough to curl a plume into a
+    // hook rather than letting it spread evenly.
+    uint2 lowerCoordinate = uint2(upperCoordinate.x, upperCoordinate.y + 1);
+
+    if (lowerKind == SimulationKindGas && GasCanEnter(lowerMaterial, upperMaterial))
+    {
+        GasMotionState lowerMotion = GasMotion[lowerIndex];
+        if (lowerMotion.OffsetY <= -1.0)
+        {
+            ConsumeGasOffset(lowerIndex, 0, -1);
+            MoveGasCell(lowerIndex, upperIndex);
+        }
+        return;
+    }
+    if (upperKind == SimulationKindGas && GasCanEnter(upperMaterial, lowerMaterial))
+    {
+        GasMotionState upperMotion = GasMotion[upperIndex];
+        if (upperMotion.OffsetY >= 1.0)
+        {
+            ConsumeGasOffset(upperIndex, 0, 1);
+            MoveGasCell(upperIndex, lowerIndex);
+        }
+    }
+}
+
+// Обход препятствия. Частица в The Powder Toy, которой перекрыли путь, не
+// останавливается: она выбирает сторону случайным r = +-1 и пробует два
+// повёрнутых диагональных направления (Simulation.cpp, MovementPhase).
+// Это не диффузия — в свободном пространстве случайности нет вовсе, выбор
+// возникает только при столкновении.
+//
+// Без этого пламя, упёршееся в пластину снизу, могло растечься вдоль неё лишь
+// за счёт бокового ветра грубой сетки: вертикальная пара видела solid,
+// отклоняла ход и на этом останавливалась. В TPT же множество частиц у
+// препятствия статистически делится в обе стороны, и получается тот самый
+// симметричный веер вдоль пластины.
+void ResolveGasObstacleBypass(uint2 coordinate)
+{
+    if (coordinate.y == 0)
+    {
+        return;
+    }
+    uint index = FlattenCoordinate(coordinate);
+    // Grid is authoritative here. CellMaterials is a shared acceleration map
+    // and can legitimately be repurposed/one pass behind after brushing or a
+    // solid-body pass; using it as the collision source made this function
+    // return before it ever saw the FIRE particle.
+    GridCell sourceCell = Grid[index];
+    if (sourceCell.IsActive == 0)
+    {
+        return;
+    }
+    uint material = sourceCell.MaterialIndex;
+    if (Materials[material].SimulationKind != SimulationKindGas)
+    {
+        return;
+    }
+
+    // Collision is a local event.  The previous scan through an entire gas
+    // plug made every cell below the plate believe it had already struck the
+    // metal; that manufactured a shelf rather than TPT's surface flow.
+    GasMotionState motion = GasMotion[index];
+    if (motion.OffsetY > -1.0)
+    {
+        return;
+    }
+    uint aboveIndex = index - Width;
+    GridCell aboveCell = Grid[aboveIndex];
+    if (aboveCell.IsActive == 0 ||
+        Materials[aboveCell.MaterialIndex].SimulationKind != SimulationKindSolid)
+    {
+        return;
+    }
+
+    // MovementPhase first preserves Y and applies the horizontal component of
+    // the planned vector.  The pressure field chooses that direction; the
+    // centred cell (where vx is exactly zero) uses TPT's unbiased diagonal
+    // fallback below.
+    int firstDirection = motion.VelocityX > 0.0001 ? 1 :
+        motion.VelocityX < -0.0001 ? -1 :
+        (HashUnitFloat(index ^ (FrameIndex * 0x9e3779b9u)) < 0.5 ? -1 : 1);
+
+    [unroll]
+    for (int attempt = 0; attempt < 2; attempt++)
+    {
+        int direction = attempt == 0 ? firstDirection : -firstDirection;
+        int targetX = int(coordinate.x) + direction;
+        if (targetX < 0 || targetX >= int(Width))
+        {
+            continue;
+        }
+
+        uint sideIndex = FlattenCoordinate(uint2(uint(targetX), coordinate.y));
+        GridCell sideCell = Grid[sideIndex];
+        uint sideMaterial = sideCell.IsActive != 0 ? sideCell.MaterialIndex : 0;
+        uint diagonalIndex = FlattenCoordinate(uint2(uint(targetX), coordinate.y - 1));
+        GridCell diagonalCell = Grid[diagonalIndex];
+        uint diagonalMaterial = diagonalCell.IsActive != 0 ? diagonalCell.MaterialIndex : 0;
+        if (GasCanEnter(material, diagonalMaterial))
+        {
+            StopGasMotion(index); // The rotated fallback also consumes velocity.
+            MoveGasCell(index, diagonalIndex);
+            return;
+        }
+
+        if (GasCanEnter(material, sideMaterial))
+        {
+            // A TPT particle keeps trying to complete its blocked upward
+            // segment on every following frame.  In a pixel world that
+            // fractional normal displacement survives the collision; in our
+            // one-slot cellular world StopGasMotion erased it, so a packed
+            // fire front could take only one side-step and then wait eight
+            // ticks to acquire its -0.125 buoyancy again.  Keep the pending
+            // normal segment as OffsetY=-1 and redirect only its tangential
+            // carrier.  This is not a global speed multiplier: it applies
+            // solely while the cell immediately above is solid, and releases
+            // as soon as the flame reaches a plate edge.
+            // Mark the particle as already handled this tick. IntegrateGasMotion
+            // restores the pending normal segment on the next 60 Hz tick only.
+            motion.OffsetY = 0.5;
+            motion.OffsetX = 0.0;
+            motion.VelocityY = 0.0;
+            motion.VelocityX = float(direction) * GasAdvection;
+            GasMotion[index] = motion;
+            MoveGasCell(index, sideIndex);
+            return;
+        }
+
+        // The immediate side slot can be occupied by another FIRE cell from
+        // the same compact plume.  TPT's continuous particles pass that
+        // crowded position on subsequent movement segments; a one-slot CA
+        // otherwise leaves every inner cell permanently blocked behind the
+        // edge cell. Transfer to the first short, unobstructed gap along the
+        // *same* surface. This is mass-conserving (MoveGasCell swaps with the
+        // empty slot), cannot cross a solid, and is used only by the collision
+        // fallback -- it is not a general gas teleport or a speed multiplier.
+        for (uint distance = 2; distance <= GasSurfaceQueueSearch; distance++)
+        {
+            int queueX = int(coordinate.x) + direction * int(distance);
+            if (queueX < 0 || queueX >= int(Width))
+            {
+                break;
+            }
+            uint queueIndex = FlattenCoordinate(uint2(uint(queueX), coordinate.y));
+            GridCell queueCell = Grid[queueIndex];
+            uint queueMaterial = queueCell.IsActive != 0 ? queueCell.MaterialIndex : 0;
+            uint queueKind = CellKindFromMaterial(queueMaterial);
+            if (queueKind == SimulationKindSolid)
+            {
+                break;
+            }
+            if (!GasCanEnter(material, queueMaterial))
+            {
+                continue;
+            }
+
+            motion.OffsetY = 0.5;
+            motion.OffsetX = 0.0;
+            motion.VelocityY = 0.0;
+            motion.VelocityX = float(direction) * GasAdvection;
+            GasMotion[index] = motion;
+            MoveGasCell(index, queueIndex);
+            return;
+        }
+    }
+}
+
+void ResolveGasHorizontalPair(uint2 leftCoordinate)
+{
+    if (leftCoordinate.x + 1 >= Width)
+    {
+        return;
+    }
+    uint leftIndex = FlattenCoordinate(leftCoordinate);
+    uint rightIndex = leftIndex + 1;
+    GridCell leftCell = Grid[leftIndex];
+    GridCell rightCell = Grid[rightIndex];
+    uint leftMaterial = leftCell.IsActive != 0 ? leftCell.MaterialIndex : 0;
+    uint rightMaterial = rightCell.IsActive != 0 ? rightCell.MaterialIndex : 0;
+    uint leftKind = CellKindFromMaterial(leftMaterial);
+    uint rightKind = CellKindFromMaterial(rightMaterial);
+    if (!GasPairBranch(leftKind, rightKind))
+    {
+        return;
+    }
+
+    // Sideways drift comes purely from the air, so nothing moves sideways
+    // unless something is actually pushing it. This applies to every gas, not
+    // only flame: smoke that stayed put while the fire blew sideways was the
+    // clearest sign the two were not being treated as one medium.
+    // Same rule as the vertical pass: each cell reads the air under itself.
+    bool leftMoves = leftKind == SimulationKindGas &&
+        GasCanEnter(leftMaterial, rightMaterial) &&
+        GasMotion[leftIndex].OffsetX >= 1.0;
+    if (leftMoves)
+    {
+        ConsumeGasOffset(leftIndex, 1, 0);
+        MoveGasCell(leftIndex, rightIndex);
+        return;
+    }
+    if (rightKind == SimulationKindGas && GasCanEnter(rightMaterial, leftMaterial))
+    {
+        if (GasMotion[rightIndex].OffsetX > -1.0)
+        {
+            return;
+        }
+        ConsumeGasOffset(rightIndex, -1, 0);
+        MoveGasCell(rightIndex, leftIndex);
+    }
+}
+
+// Anything that reaches the left, right or top edge is swallowed, so a plume
+// leaves the world instead of piling up against an invisible lid. Without this
+// the scene simply filled with fire and nothing could be judged. The floor is
+// deliberately left alone: a sandbox needs a ground to build on.
+void ClearOpenBoundary(uint2 coordinate)
+{
+    if (OpenBoundaries == 0)
+    {
+        return;
+    }
+    bool onBoundary =
+        coordinate.x < OpenBoundaryMargin ||
+        coordinate.x + OpenBoundaryMargin >= Width ||
+        coordinate.y < OpenBoundaryMargin;
+    if (!onBoundary)
+    {
+        return;
+    }
+    uint index = FlattenCoordinate(coordinate);
+    if (Grid[index].IsActive == 0)
+    {
+        return;
+    }
+    Grid[index] = CreateEmptyCell();
+    CellMaterials[index] = 0;
+}
+
 void ResolveVerticalPair(uint2 upperCoordinate)
 {
     uint upperIndex = FlattenCoordinate(upperCoordinate);
@@ -841,24 +1355,9 @@ void ResolveVerticalPair(uint2 upperCoordinate)
         (lowerKind == 0 || lowerKind == 5) &&
         (upperKind == 5 || lowerKind == 5))
     {
-        if ((upperKind == SimulationKindGas &&
-            (Materials[upperMaterial].Flags & MaterialFlagFlame) != 0) ||
-            (lowerKind == SimulationKindGas &&
-            (Materials[lowerMaterial].Flags & MaterialFlagFlame) != 0))
-        {
-            // A flame rises as an intact cell; only a lower flame may swap
-            // into an empty upper cell. The inverse direction is handled by
-            // the pair above it, preventing horizontal/random drift.
-            if (lowerKind == SimulationKindGas &&
-                (Materials[lowerMaterial].Flags & MaterialFlagFlame) != 0 &&
-                upperKind == SimulationKindNone &&
-                HashUnitFloat(lowerIndex ^ (FrameIndex * 0x9e3779b9u) ^ 0x51ed270bu) <
-                    saturate(6.0 * DeltaTime))
-            {
-                SwapCells(upperIndex, lowerIndex, 0, -36);
-            }
-            return;
-        }
+        // Gas motion is handled by its own passes, which run several times per
+        // frame. Doing it here as well would move a gas cell an extra step and
+        // tie its speed to the water schedule.
         return;
     }
     bool canMove = upperKind == SimulationKindGranular
@@ -907,22 +1406,14 @@ void ResolveDiagonalPair(uint2 upperCoordinate, uint2 lowerCoordinate)
         (lowerKind == 0 || lowerKind == 5) &&
         (upperKind == 5 || lowerKind == 5))
     {
-        float direction = lowerCoordinate.x > upperCoordinate.x ? 24 : -24;
-        if ((upperKind == SimulationKindGas &&
-            (Materials[upperMaterial].Flags & MaterialFlagFlame) != 0) ||
-            (lowerKind == SimulationKindGas &&
-            (Materials[lowerMaterial].Flags & MaterialFlagFlame) != 0))
-        {
-            if (lowerKind == SimulationKindGas &&
-                (Materials[lowerMaterial].Flags & MaterialFlagFlame) != 0 &&
-                upperKind == SimulationKindNone &&
-                HashUnitFloat(lowerIndex ^ (FrameIndex * 0x85ebca6bu) ^ 0xc2b2ae35u) <
-                    saturate(2.0 * DeltaTime))
-            {
-                SwapCells(upperIndex, lowerIndex, direction, -28);
-            }
-            return;
-        }
+        // Gas motion, flame included, belongs to the dedicated gas passes.
+        //
+        // This branch used to keep its own random diagonal hop for flame, left
+        // behind when the vertical and horizontal branches were moved out. It
+        // ran in parallel with the new passes, moved flame up and sideways at
+        // once, and never consulted GasLateralAdvection -- which is why
+        // lowering that value from 0.9 to 0.22 and then to 0.06 barely changed
+        // the width of the plume. The sideways spread was coming through here.
         return;
     }
     bool canMove = upperKind == SimulationKindGranular
@@ -993,13 +1484,7 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
         (rightKind == 0 || rightKind == 5) &&
         (leftKind == 5 || rightKind == 5))
     {
-        if ((leftKind == SimulationKindGas &&
-            (Materials[leftMaterial].Flags & MaterialFlagFlame) != 0) ||
-            (rightKind == SimulationKindGas &&
-            (Materials[rightMaterial].Flags & MaterialFlagFlame) != 0))
-        {
-            return;
-        }
+        // Handled by the dedicated gas passes, see ResolveGasHorizontalPair.
         return;
     }
     if (leftKind == 4 && WaterCanFlowSide(
@@ -2407,12 +2892,59 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         coordinate = uint2(DispatchOffsetX, DispatchOffsetY) + dispatchThreadId.xy * 2;
     }
+    else if (SimulationPhase == 80 || SimulationPhase == 81)
+    {
+        // Gas vertical pairs, same row parity as phases 0 and 1.
+        coordinate = uint2(
+            DispatchOffsetX + dispatchThreadId.x,
+            DispatchOffsetY + dispatchThreadId.y * 2);
+    }
+    else if (SimulationPhase == 82 || SimulationPhase == 83)
+    {
+        // Gas horizontal pairs, same column parity as phases 2 and 3.
+        coordinate = uint2(
+            DispatchOffsetX + dispatchThreadId.x * 2,
+            DispatchOffsetY + dispatchThreadId.y);
+    }
+    else if (SimulationPhase >= 85 && SimulationPhase <= 88)
+    {
+        // Обход препятствия: та же чётность строк, что у вертикальных пар,
+        // иначе две соседние клетки могли бы шагнуть в одну и ту же цель.
+        coordinate = uint2(
+            DispatchOffsetX + dispatchThreadId.x * 2,
+            DispatchOffsetY + dispatchThreadId.y * 2);
+    }
     else
     {
         coordinate = dispatchThreadId.xy + uint2(DispatchOffsetX, DispatchOffsetY);
     }
     if (coordinate.x >= Width || coordinate.y >= Height)
     {
+        return;
+    }
+    if (SimulationPhase == 89)
+    {
+        IntegrateGasMotion(coordinate);
+        return;
+    }
+    if (SimulationPhase == 84)
+    {
+        ClearOpenBoundary(coordinate);
+        return;
+    }
+    if (SimulationPhase == 80 || SimulationPhase == 81)
+    {
+        ResolveGasVerticalPair(coordinate);
+        return;
+    }
+    if (SimulationPhase == 82 || SimulationPhase == 83)
+    {
+        ResolveGasHorizontalPair(coordinate);
+        return;
+    }
+    if (SimulationPhase >= 85 && SimulationPhase <= 88)
+    {
+        ResolveGasObstacleBypass(coordinate);
         return;
     }
     if (SimulationPhase <= 1)

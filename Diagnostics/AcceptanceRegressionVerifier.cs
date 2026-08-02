@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using Phyxel.Core;
 using Phyxel.Graphics;
 using Phyxel.Materials;
 using Phyxel.Physics;
@@ -203,6 +204,16 @@ public static class AcceptanceRegressionVerifier
                 combustionGpuTiming,
                 combustionDispatches,
                 out report),
+            AcceptanceScenarioMode.FireObstacle => ValidateFireObstacle(
+                snapshot,
+                materialRegistry,
+                artifactDirectory,
+                out report),
+            AcceptanceScenarioMode.Furnace => ValidateFurnace(
+                snapshot,
+                materialRegistry,
+                artifactDirectory,
+                out report),
             AcceptanceScenarioMode.BrushEmptyOnly => BrushEmptyOnlyAcceptanceVerifier.Validate(
                 snapshot,
                 materialRegistry,
@@ -335,16 +346,26 @@ public static class AcceptanceRegressionVerifier
                 smokeCount++;
             }
         }
+        // Уголь больше не инертный остаток: он сыпучий и горючий. Свежий уголь
+        // рождается внутри горящего дерева при ~900 °C, что выше его точки
+        // воспламенения, поэтому он продолжает гореть после прогорания дерева.
+        // Проверяем не инертность, а согласованность: уголь горит в пустоту и
+        // не может превысить собственный температурный потолок.
+        MaterialProperties coalProperties = registry[CoreMaterialIds.Coal].Properties;
+        bool coalBurnsAway = coalProperties.BurnedIntoMaterialIndex ==
+            registry.GetRequiredRuntimeIndex(CoreMaterialIds.Empty);
+        bool coalTemperatureSane = coalCount == 0 ||
+            maximumCoalTemperature <= coalProperties.MaximumCombustionTemperature + 0.5f;
         bool passed = partiallyBurnedWood > 100 &&
             flameCount > 0 && smokeCount > 0 && invalidFlameLifetime == 0 &&
             maximumWoodTemperature <= registry[CoreMaterialIds.Wood].Properties.MaximumCombustionTemperature + 0.5f &&
-            registry[CoreMaterialIds.Coal].Properties.BurnedIntoMaterialIndex == uint.MaxValue &&
+            coalBurnsAway && coalTemperatureSane &&
             dispatches > 0 && timing.Samples > 0;
         report = $"PHYXEL_COMBUSTION_ACCEPTANCE coal={coalCount} wood={woodCount} " +
             $"partialWood={partiallyBurnedWood} minimumWoodMass={minimumWoodMass:0.0000} " +
             $"hotWood={hotWoodCount} maxWoodTemp={maximumWoodTemperature:0.0} " +
-            $"maxCoalTemp={maximumCoalTemperature:0.0} coalInert=" +
-            $"{registry[CoreMaterialIds.Coal].Properties.BurnedIntoMaterialIndex == uint.MaxValue} " +
+            $"maxCoalTemp={maximumCoalTemperature:0.0} coalBurnsAway={coalBurnsAway} " +
+            $"coalTempSane={coalTemperatureSane} " +
             $"flame={flameCount} smoke={smokeCount} invalidFlameLifetime={invalidFlameLifetime} " +
             $"dispatches={dispatches} summaryReadbacks={summaryReadbacks} " +
             $"gpuMs={timing.AverageMilliseconds:0.0000}/{timing.MinimumMilliseconds:0.0000}/" +
@@ -394,6 +415,290 @@ public static class AcceptanceRegressionVerifier
             $"averageMass={averageMass:0.000} averageTemperature={averageTemperature:0.0} " +
             $"water={waterCount} steam={steamCount} dispatches={dispatches} " +
             $"gpuSamples={timing.Samples}";
+        return passed;
+    }
+
+    private static bool ValidateFireObstacle(
+        SimulationWorldSnapshot snapshot,
+        MaterialRegistry registry,
+        string artifactDirectory,
+        out string report)
+    {
+        const int plateLeft = 140;
+        const int plateRight = 340;
+        const int plateCentre = (plateLeft + plateRight) / 2;
+        const int surfaceTop = 107;
+        const int surfaceBottom = 135;
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        uint fire = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire);
+        uint smoke = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke);
+        uint metal = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal);
+        int leftCells = 0;
+        int rightCells = 0;
+        int centreCells = 0;
+        double leftMass = 0;
+        double rightMass = 0;
+        double centreMass = 0;
+        int minimumX = snapshot.Width;
+        int maximumX = -1;
+        int minimumY = snapshot.Height;
+        int contactGas = 0;
+        int lateralLeft = 0;
+        int lateralRight = 0;
+        int blockedGas = 0;
+        int globalMinimumX = snapshot.Width;
+        int globalMaximumX = -1;
+        int globalSmoke = 0;
+        int globalFire = 0;
+        int smokeMinimumY = snapshot.Height;
+        int smokeMaximumY = -1;
+        int contactFire = 0;
+        int contactSmoke = 0;
+        int smokeAboveLeft = 0;
+        int smokeAboveRight = 0;
+        int[] fireHistogram = new int[snapshot.Width];
+        for (int index = 0; index < grid.Length; index++)
+        {
+            GridCell cell = grid[index];
+            if (cell.IsActive == 0 ||
+                (cell.MaterialIndex != fire && cell.MaterialIndex != smoke))
+            {
+                continue;
+            }
+            int x = index % snapshot.Width;
+            globalMinimumX = Math.Min(globalMinimumX, x);
+            globalMaximumX = Math.Max(globalMaximumX, x);
+            if (cell.MaterialIndex == smoke)
+            {
+                globalSmoke++;
+                int y = index / snapshot.Width;
+                smokeMinimumY = Math.Min(smokeMinimumY, y);
+                smokeMaximumY = Math.Max(smokeMaximumY, y);
+                if (y < 100)
+                {
+                    if (x < 225) smokeAboveLeft++;
+                    if (x > 255) smokeAboveRight++;
+                }
+            }
+            else if (cell.MaterialIndex == fire)
+            {
+                globalFire++;
+            }
+        }
+
+        // The plate occupies y=94..106.  This deliberately scans the entire
+        // world width: the former x=140..340 measuring window could itself
+        // become the reported flame width.  Glow is excluded because it can
+        // look wide while every physical gas cell remains in the centre column.
+        for (int y = surfaceTop; y <= surfaceBottom; y++)
+        {
+            for (int x = 0; x < snapshot.Width; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive == 0 ||
+                    (cell.MaterialIndex != fire && cell.MaterialIndex != smoke))
+                {
+                    continue;
+                }
+                minimumX = Math.Min(minimumX, x);
+                maximumX = Math.Max(maximumX, x);
+                minimumY = Math.Min(minimumY, y);
+                if (cell.MaterialIndex == fire)
+                {
+                    contactFire++;
+                    fireHistogram[x]++;
+                    if (x < plateCentre)
+                    {
+                        leftCells++;
+                        leftMass += cell.Mass;
+                    }
+                    else if (x > plateCentre)
+                    {
+                        rightCells++;
+                        rightMass += cell.Mass;
+                    }
+                    else
+                    {
+                        centreCells++;
+                        centreMass += cell.Mass;
+                    }
+                }
+                else if (cell.MaterialIndex == smoke) contactSmoke++;
+                if (y <= 108)
+                {
+                    contactGas++;
+                    if (cell.VelocityX < -0.01f) lateralLeft++;
+                    if (cell.VelocityX > 0.01f) lateralRight++;
+                }
+                GridCell above = grid[(y - 1) * snapshot.Width + x];
+                if (above.IsActive != 0 && above.MaterialIndex == metal)
+                {
+                    blockedGas++;
+                }
+            }
+        }
+
+        int peakCount = fireHistogram.Max();
+        double halfMaximum = peakCount * 0.5;
+        int peakX = FindCentralPeak(fireHistogram, peakCount, plateCentre);
+        (int halfLeft, int halfRight) = FindHalfMaximumSpan(fireHistogram, peakX, halfMaximum);
+        double halfWidth = halfLeft >= 0 && halfRight >= halfLeft
+            ? (halfRight - halfLeft + 1) * 0.5
+            : 0;
+        double symmetryMass = Math.Min(leftMass, rightMass) / Math.Max(0.000001, Math.Max(leftMass, rightMass));
+        double symmetryCells = Math.Min(leftCells, rightCells) / (double)Math.Max(1, Math.Max(leftCells, rightCells));
+        string histogram = FormatHistogram(fireHistogram);
+        string pressureProfile = FormatAirPressureProfile(snapshot, surfaceTop, plateLeft, plateRight);
+        int supportWidth = maximumX >= minimumX ? maximumX - minimumX + 1 : 0;
+        bool image = File.Exists(Path.Combine(artifactDirectory, "Y_fire_obstacle.png"));
+        // This remains only a liveness gate for the diagnostic scenario.  The
+        // half-maximum width is the reported shape metric, not a threshold to
+        // tune the simulation against.
+        bool passed = leftCells >= 8 && rightCells >= 8 && supportWidth >= 70 && image;
+        report = $"PHYXEL_FIRE_OBSTACLE fireCellsLeft={leftCells} fireCellsRight={rightCells} " +
+            $"fireCellsCentre={centreCells} fireMassLeft={leftMass:0.000} fireMassRight={rightMass:0.000} " +
+            $"fireMassCentre={centreMass:0.000} symmetryMass={symmetryMass:0.000} symmetryCells={symmetryCells:0.000} " +
+            $"minX={minimumX} maxX={maximumX} minY={minimumY} contactGas={contactGas} " +
+            $"blockedGas={blockedGas} lateralLeft={lateralLeft} lateralRight={lateralRight} " +
+            $"contactFire={contactFire} contactSmoke={contactSmoke} " +
+            $"smokeAboveLeft={smokeAboveLeft} smokeAboveRight={smokeAboveRight} " +
+            $"peakCount={peakCount} peakX={peakX} halfMaximum={halfMaximum:0.0} " +
+            $"halfMaximumLeft={halfLeft} halfMaximumRight={halfRight} halfWidth={halfWidth:0.0} " +
+            $"supportWidth={supportWidth} fireHistogram={histogram} airPressure={pressureProfile} globalMinX={globalMinimumX} " +
+            $"globalMaxX={globalMaximumX} globalSmoke={globalSmoke} " +
+            $"globalFire={globalFire} smokeMinY={smokeMinimumY} smokeMaxY={smokeMaximumY} image={image}";
+        return passed;
+    }
+
+    private static int FindCentralPeak(int[] histogram, int peakCount, int centreX)
+    {
+        int peakX = centreX;
+        int nearestDistance = int.MaxValue;
+        for (int x = 0; x < histogram.Length; x++)
+        {
+            if (histogram[x] != peakCount)
+            {
+                continue;
+            }
+            int distance = Math.Abs(x - centreX);
+            if (distance < nearestDistance)
+            {
+                peakX = x;
+                nearestDistance = distance;
+            }
+        }
+        return peakX;
+    }
+
+    private static (int Left, int Right) FindHalfMaximumSpan(
+        int[] histogram,
+        int peakX,
+        double halfMaximum)
+    {
+        if (histogram.Length == 0 || peakX < 0 || peakX >= histogram.Length || halfMaximum <= 0)
+        {
+            return (-1, -1);
+        }
+
+        int left = peakX;
+        while (left > 0 && histogram[left - 1] >= halfMaximum)
+        {
+            left--;
+        }
+        int right = peakX;
+        while (right + 1 < histogram.Length && histogram[right + 1] >= halfMaximum)
+        {
+            right++;
+        }
+        return (left, right);
+    }
+
+    private static string FormatHistogram(int[] histogram)
+    {
+        const int firstX = 20;
+        const int lastX = 459;
+        int start = Math.Min(firstX, histogram.Length - 1);
+        int end = Math.Min(lastX, histogram.Length - 1);
+        return $"x{start}-{end}:" + string.Join(',', histogram[start..(end + 1)]);
+    }
+
+    private static string FormatAirPressureProfile(
+        SimulationWorldSnapshot snapshot,
+        int fineY,
+        int fineLeft,
+        int fineRight)
+    {
+        if (snapshot.Air is null || snapshot.Air.Length == 0)
+        {
+            return "unavailable";
+        }
+
+        ReadOnlySpan<AirCell> air = MemoryMarshal.Cast<byte, AirCell>(snapshot.Air);
+        int airWidth = Math.Max(1, (snapshot.Width + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize);
+        int airHeight = Math.Max(1, (snapshot.Height + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize);
+        if (air.Length != airWidth * airHeight)
+        {
+            return "invalid";
+        }
+
+        int airY = Math.Clamp(fineY / SimulationSettings.AirCellSize, 0, airHeight - 1);
+        int airLeft = Math.Clamp(fineLeft / SimulationSettings.AirCellSize, 0, airWidth - 1);
+        int airRight = Math.Clamp(fineRight / SimulationSettings.AirCellSize, 0, airWidth - 1);
+        string[] samples = new string[airRight - airLeft + 1];
+        for (int airX = airLeft; airX <= airRight; airX++)
+        {
+            float pressure = air[airY * airWidth + airX].Pressure;
+            samples[airX - airLeft] = $"{airX}:{pressure:0.000}";
+        }
+        return $"y{airY};" + string.Join(';', samples);
+    }
+
+    private static bool ValidateFurnace(
+        SimulationWorldSnapshot snapshot,
+        MaterialRegistry registry,
+        string artifactDirectory,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        uint fire = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire);
+        uint smoke = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke);
+        int chimneySmoke = 0;
+        int chimneyFire = 0;
+        int chamberFire = 0;
+        int chamberSmoke = 0;
+        int topSmoke = 0;
+        for (int y = 20; y <= 134; y++)
+        {
+            for (int x = 111; x <= 179; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive == 0) continue;
+                if (cell.MaterialIndex == smoke)
+                {
+                    chimneySmoke++;
+                    if (y < 70) topSmoke++;
+                }
+                else if (cell.MaterialIndex == fire)
+                {
+                    chimneyFire++;
+                }
+            }
+        }
+        for (int y = 140; y <= 214; y++)
+        {
+            for (int x = 226; x <= 374; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                if (cell.IsActive == 0) continue;
+                if (cell.MaterialIndex == smoke) chamberSmoke++;
+                else if (cell.MaterialIndex == fire) chamberFire++;
+            }
+        }
+        bool image = File.Exists(Path.Combine(artifactDirectory, "Z_furnace.png"));
+        bool passed = chimneySmoke >= 8 && topSmoke >= 2 && chimneySmoke > chimneyFire * 3 &&
+            chamberFire > 0 && image;
+        report = $"PHYXEL_FURNACE chimneySmoke={chimneySmoke} chimneyFire={chimneyFire} " +
+            $"topSmoke={topSmoke} chamberFire={chamberFire} chamberSmoke={chamberSmoke} image={image}";
         return passed;
     }
 

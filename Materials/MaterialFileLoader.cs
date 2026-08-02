@@ -333,11 +333,12 @@ internal static partial class MaterialFileLoader
         MaterialLifecycleDefinition? lifecycle = ParseLifecycle(document.Lifecycle, id, kind);
         MaterialLiquidContactTransitionDefinition? liquidContactTransition =
             ParseContactTransitions(document.ContactTransitions, id, kind);
-        if (combustion is not null && (flags & MaterialFlags.MovableSolid) != 0)
-        {
-            throw new InvalidDataException(
-                $"Горение материала '{id}' с flag 'movable-solid' пока не поддерживается.");
-        }
+        // Запрет на combustion + movable-solid снят вместе с разрешением
+        // горения для granular: шейдер обрабатывает подвижную клетку так же,
+        // как неподвижную, потому что проход горения выполняется отдельным
+        // диспатчем уже после клеточного движения в кадре.
+        // Запрет combustion + thermal.transitions намеренно сохранён до
+        // введения общей таблицы реакций (этап 7 дорожной карты).
         if (combustion is not null && transitions is not null)
         {
             throw new InvalidDataException(
@@ -566,10 +567,16 @@ internal static partial class MaterialFileLoader
         {
             throw new InvalidDataException("combustion должен быть объектом.");
         }
-        if (sourceKind != MaterialSimulationKind.Solid)
+        // Горение доступно твёрдым телам и сыпучим материалам. Ограничение
+        // только на solid заставляло объявлять любой горючий порошок твёрдым,
+        // из-за чего порох висел в воздухе вместо того, чтобы сыпаться, а уголь
+        // вообще не мог гореть. Жидкости и газы сохраняют собственные модели.
+        if (sourceKind != MaterialSimulationKind.Solid &&
+            sourceKind != MaterialSimulationKind.Granular)
         {
             throw new InvalidDataException(
-                $"Материал '{sourceId}' с kind '{sourceKind.ToString().ToLowerInvariant()}' не может быть source combustion v1; требуется fixed solid.");
+                $"Материал '{sourceId}' с kind '{sourceKind.ToString().ToLowerInvariant()}' " +
+                "не может быть source combustion; требуются kind 'solid' или 'granular'.");
         }
 
         JsonElement ignitionElement = default;
@@ -1025,6 +1032,9 @@ internal static partial class MaterialFileLoader
             {
                 "movable-solid" => MaterialFlags.MovableSolid,
                 "flame" => MaterialFlags.Flame,
+                "self-oxidizing" => MaterialFlags.SelfOxidizing,
+                "blocks-air" => MaterialFlags.BlocksAir,
+                "smoke" => MaterialFlags.Smoke,
                 _ => throw new InvalidDataException($"Неизвестный flag '{value}'.")
             };
             if ((flags & flag) != 0)
@@ -1036,6 +1046,20 @@ internal static partial class MaterialFileLoader
         if ((flags & MaterialFlags.MovableSolid) != 0 && kind != MaterialSimulationKind.Solid)
         {
             throw new InvalidDataException("Flag 'movable-solid' разрешён только для kind 'solid'.");
+        }
+        if ((flags & MaterialFlags.SelfOxidizing) != 0 &&
+            kind is not (MaterialSimulationKind.Solid or MaterialSimulationKind.Granular))
+        {
+            throw new InvalidDataException(
+                "Flag 'self-oxidizing' разрешён только для kind 'solid' или 'granular'.");
+        }
+        if ((flags & MaterialFlags.BlocksAir) != 0 && kind != MaterialSimulationKind.Solid)
+        {
+            throw new InvalidDataException("Flag 'blocks-air' разрешён только для kind 'solid'.");
+        }
+        if ((flags & MaterialFlags.Smoke) != 0 && kind != MaterialSimulationKind.Gas)
+        {
+            throw new InvalidDataException("Flag 'smoke' разрешён только для kind 'gas'.");
         }
         return flags;
     }

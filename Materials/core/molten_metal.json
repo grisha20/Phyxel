@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "core:molten_metal",
+  "name": { "ru": "Расплавленный металл", "en": "Molten Metal" },
+  "kind": "liquid",
+  "color": "#FF7A1E",
+  "physics": { "density": 7.0, "friction": 0.55, "flowRate": 0.34 },
+  "thermal": {
+    "initialTemperature": 1050.0,
+    "conductivity": 0.60,
+    "heatCapacity": 0.50,
+    "transitions": {
+      "below": { "temperature": 950.0, "into": "core:metal" }
+    }
+  },
+  "ui": { "order": 31, "hidden": true }
+}

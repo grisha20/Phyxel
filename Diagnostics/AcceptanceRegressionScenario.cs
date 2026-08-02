@@ -69,6 +69,8 @@ public enum AcceptanceScenarioMode
     WaterIceSteamV5RoundTrip,
     CombustionChain,
     CombustionQuench,
+    FireObstacle,
+    Furnace,
     SteamSelfCooling,
     BrushEmptyOnly,
     ContinuousBrushStroke,
@@ -132,6 +134,8 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.TemperatureProbeGpu => [],
             AcceptanceScenarioMode.CombustionChain => CreateCombustionChain(frame),
             AcceptanceScenarioMode.CombustionQuench => CreateCombustionQuench(frame),
+            AcceptanceScenarioMode.FireObstacle => CreateFireObstacle(frame),
+            AcceptanceScenarioMode.Furnace => CreateFurnace(frame),
             AcceptanceScenarioMode.SteamSelfCooling => [],
             AcceptanceScenarioMode.SteamCloudTemperature =>
                 SteamCloudTemperatureAcceptanceScenario.CreateCommands(frame, materialRegistry),
@@ -199,6 +203,61 @@ public static class AcceptanceRegressionScenario
         if (frame is 100 or 110 or 120)
         {
             return AddFill(175, 75, 245, 105, 8, 5, materials.Water, 0);
+        }
+        return [];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateFireObstacle(uint frame)
+    {
+        List<BrushDrawCommand> commands = [];
+        if (frame == 0)
+        {
+            // The manual reproduction: a broad metal plate with a centred
+            // flame source below it. The plate is deliberately ordinary metal,
+            // not an air-blocking fixture, matching the user scene and TPT.
+            AddLine(commands, 140, 100, 340, 100, 5, 6, materials.Metal, 19101);
+        }
+        if (frame < 360)
+        {
+            // Holding the brush is part of the experiment. A one-frame puff can
+            // expire before reaching the plate and does not test a furnace.
+            BrushDrawCommand flame = Create(240, 170, 5, materials.Fire, 0, 0);
+            flame.Density = 0.82f;
+            commands.Add(flame);
+        }
+        return commands;
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateFurnace(uint frame)
+    {
+        if (frame == 0)
+        {
+            List<BrushDrawCommand> commands = [];
+            // A compact two-chamber furnace with a left chimney. Fixture is the
+            // only material marked blocks-air, matching TPT's wall map rather
+            // than making every ordinary solid an airtight wall.
+            AddLine(commands, 90, 220, 380, 220, 5, 6, materials.Fixture, 19201);
+            AddLine(commands, 90, 90, 90, 220, 5, 6, materials.Fixture, 19201);
+            AddLine(commands, 380, 90, 380, 220, 5, 6, materials.Fixture, 19201);
+            // Leave a wide opening over the left side of the firebox so the
+            // plume can reach the chimney throat instead of sealing the roof
+            // against the chimney wall.
+            AddLine(commands, 220, 90, 380, 90, 5, 6, materials.Fixture, 19201);
+            // Chimney walls and its throat.
+            AddLine(commands, 110, 25, 110, 135, 5, 6, materials.Fixture, 19202);
+            AddLine(commands, 180, 25, 180, 135, 5, 6, materials.Fixture, 19202);
+            AddLine(commands, 90, 135, 110, 135, 5, 6, materials.Fixture, 19202);
+            AddLine(commands, 180, 135, 205, 135, 5, 6, materials.Fixture, 19202);
+            // Staggered baffles make the route through the chamber nontrivial.
+            AddLine(commands, 250, 150, 250, 205, 5, 6, materials.Fixture, 19203);
+            AddLine(commands, 290, 95, 290, 165, 5, 6, materials.Fixture, 19204);
+            return commands;
+        }
+        if (frame < 600)
+        {
+            BrushDrawCommand flame = Create(320, 185, 7, materials.Fire, 0, 0);
+            flame.Density = 0.82f;
+            return [flame];
         }
         return [];
     }

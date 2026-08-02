@@ -29,6 +29,16 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuUploadBuffer<MaterialEmissionProperties> Emissions { get; init; }
     public required Buffer FrameConstants { get; init; }
     public required Buffer ThermalConstants { get; init; }
+    public required int AirWidth { get; init; }
+    public required int AirHeight { get; init; }
+    public required Buffer AirConstants { get; init; }
+    public required GpuStructuredBuffer<AirCell> Air { get; init; }
+    public required GpuStructuredBuffer<AirCell> AirScratch { get; init; }
+    public required Buffer AirStaging { get; init; }
+    public required GpuStructuredBuffer<GasMotionState> GasMotion { get; init; }
+    public required Buffer FireGlowConstants { get; init; }
+    public required GpuStructuredBuffer<FireGlowCell> FireGlow { get; init; }
+    public required GpuStructuredBuffer<FireGlowCell> FireGlowScratch { get; init; }
     public required Buffer ContactTransitionConstants { get; init; }
     public required Buffer PhaseConstants { get; init; }
     public required GpuStructuredBuffer<uint> PhaseSummary { get; init; }
@@ -86,6 +96,16 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? SolidDisplacementApplyShader { get; init; }
     public ComputeShader? CompositionShader { get; init; }
     public ComputeShader? ThermalDiffusionShader { get; init; }
+    public ComputeShader? AirInjectShader { get; init; }
+    public ComputeShader? AirPressureShader { get; init; }
+    public ComputeShader? AirVelocityShader { get; init; }
+    public ComputeShader? AirAdvectShader { get; init; }
+    public ComputeShader? AirCommitShader { get; init; }
+    public ComputeShader? AirClearShader { get; init; }
+    public ComputeShader? FireGlowDepositShader { get; init; }
+    public ComputeShader? FireGlowDiffuseShader { get; init; }
+    public ComputeShader? FireGlowCommitShader { get; init; }
+    public ComputeShader? FireGlowClearShader { get; init; }
     public ComputeShader? ContactTransitionShader { get; init; }
     public ComputeShader? PhaseTransitionShader { get; init; }
     public ComputeShader? CombustionShader { get; init; }
@@ -105,6 +125,16 @@ public sealed class GpuSimulationResources : IDisposable
         EmissionResolveShader?.Dispose();
         TransientLifecycleShader?.Dispose();
         ThermalDiffusionShader?.Dispose();
+        AirInjectShader?.Dispose();
+        AirPressureShader?.Dispose();
+        AirVelocityShader?.Dispose();
+        AirAdvectShader?.Dispose();
+        AirCommitShader?.Dispose();
+        AirClearShader?.Dispose();
+        FireGlowDepositShader?.Dispose();
+        FireGlowDiffuseShader?.Dispose();
+        FireGlowCommitShader?.Dispose();
+        FireGlowClearShader?.Dispose();
         ContactTransitionShader?.Dispose();
         SolidDisplacementApplyShader?.Dispose();
         SolidMoveShader?.Dispose();
@@ -151,6 +181,14 @@ public sealed class GpuSimulationResources : IDisposable
         TemperatureProbeResult.Dispose();
         TemperatureProbeConstants.Dispose();
         ThermalConstants.Dispose();
+        FireGlowScratch.Dispose();
+        FireGlow.Dispose();
+        FireGlowConstants.Dispose();
+        AirScratch.Dispose();
+        Air.Dispose();
+        AirStaging.Dispose();
+        GasMotion.Dispose();
+        AirConstants.Dispose();
         ContactTransitionConstants.Dispose();
         foreach (GpuPhaseSummaryReadbackSlot slot in PhaseSummaryReadbackSlots)
         {

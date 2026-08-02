@@ -28,7 +28,11 @@ public sealed record SimulationSceneState(
     DateTimeOffset SavedAt,
     bool HydraulicPressure = false);
 
-public sealed record SimulationWorldSnapshot(int Width, int Height, byte[] Grid);
+// Air is an optional diagnostic readback.  It is deliberately not part of the
+// persisted world format: saved worlds still contain only the 40-byte GridCell
+// grid.  Acceptance scenarios use it to report the coarse pressure field that
+// was present at the same capture point as the grid.
+public sealed record SimulationWorldSnapshot(int Width, int Height, byte[] Grid, byte[]? Air = null);
 
 public sealed record LoadedSimulationScene(
     SimulationSceneState State,
@@ -80,6 +84,7 @@ public sealed class SimulationStateSerializer
             return;
         }
         resources.Context.CopyResource(resources.Grid.ReadBuffer, resources.GridStaging);
+        resources.Context.CopyResource(resources.Air.Buffer, resources.AirStaging);
         resources.Context.End(resources.SceneTransferQuery);
         resources.Context.Flush();
         capturePending = true;
@@ -112,7 +117,8 @@ public sealed class SimulationStateSerializer
         snapshot = new SimulationWorldSnapshot(
             resources.Width,
             resources.Height,
-            ReadBuffer(resources.Context, resources.GridStaging));
+            ReadBuffer(resources.Context, resources.GridStaging),
+            ReadBuffer(resources.Context, resources.AirStaging));
         capturePending = false;
         return true;
     }

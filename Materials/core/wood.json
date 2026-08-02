@@ -20,7 +20,7 @@
     "gasInto": "core:co2",
     "gasRate": 0.10,
     "flameInto": "core:fire",
-    "flameRate": 8.0
+    "flameRate": 30.0
   },
   "ui": { "order": 80, "hidden": false }
 }

@@ -34,7 +34,12 @@ param(
     [string]$SavedScenePath = '',
     [string]$Scale = '0.25',
     [int]$TargetFps = 60,
-    [switch]$KeepGoingOnCrash
+    [switch]$KeepGoingOnCrash,
+    # 'on' / 'off' force the air field, 'default' leaves the game setting alone.
+    # Running the same scenario both ways answers whether a regression comes
+    # from the air field without bisecting commits.
+    [ValidateSet('default', 'on', 'off')]
+    [string]$Air = 'default'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -132,6 +137,15 @@ function Invoke-WaterGateCase {
     Remove-Item Env:PHYXEL_CORE_MATERIALS_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:PHYXEL_ACCEPTANCE_HYDRAULICS -ErrorAction SilentlyContinue
     Remove-Item Env:PHYXEL_ACCEPTANCE_CAPTURE_FRAME -ErrorAction SilentlyContinue
+    if ($Air -eq 'off') {
+        $env:PHYXEL_ACCEPTANCE_AIR = '0'
+    }
+    elseif ($Air -eq 'on') {
+        $env:PHYXEL_ACCEPTANCE_AIR = '1'
+    }
+    else {
+        Remove-Item Env:PHYXEL_ACCEPTANCE_AIR -ErrorAction SilentlyContinue
+    }
     if ($Case.Saved) {
         $env:PHYXEL_VERIFY_SCENE_PATH = $SavedScenePath
     }
@@ -311,6 +325,7 @@ finally {
         'PHYXEL_ACCEPTANCE_TARGET_FPS',
         'PHYXEL_ACCEPTANCE_HYDRAULICS',
         'PHYXEL_ACCEPTANCE_CAPTURE_FRAME',
+        'PHYXEL_ACCEPTANCE_AIR',
         'PHYXEL_ARTIFACT_DIR',
         'PHYXEL_MATERIALS_PATH',
         'PHYXEL_CORE_MATERIALS_PATH',

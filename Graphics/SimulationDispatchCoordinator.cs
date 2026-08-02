@@ -13,6 +13,68 @@ public sealed class SimulationDispatchCoordinator
 {
     public const float FixedThermalStep = 0.05f;
     public const double FixedGasStep = 1d / 120d;
+
+    /// <summary>
+    /// Поле воздуха идёт на фиксированных 60 Гц: константы решателя взяты из
+    /// SimulationConfig.h The Powder Toy и заданы на тик, а не на секунду.
+    /// </summary>
+    public const double FixedAirStep = 1d / 60d;
+
+    public const int MaximumAirTicksPerFrame = 4;
+    private const float AirAmbientTemperature = 20f;
+
+    /// <summary>
+    /// Множитель перегрева перед нормировкой в шейдере. Единица означает
+    /// «клетка на 1500 градусов выше комнатной считается полностью горячей».
+    /// Крутить здесь, если тяга слишком слабая или слишком резкая.
+    /// </summary>
+    private const float AirHotScale = 1.0f;
+
+    /// <summary>
+    /// Вклад одной клетки пламени в световое поле за кадр. В The Powder Toy это
+    /// <c>firea/8</c> от 255, то есть около 12% цвета частицы — но там вклад
+    /// идёт от частицы, и шестнадцать частиц в одной грубой клетке одновременно
+    /// оказываются редко. У нас клетка агрегирует до шестнадцати клеток пламени,
+    /// и при 0.12 поле мгновенно упиралось в единицу по всей длине столба:
+    /// пламя выходило белым от основания до конца, без перехода в жёлтый и
+    /// красный. При 0.06 насыщается только плотное ядро, как и должно быть.
+    /// </summary>
+    // FIRE graphics leaves firea at 255; Renderer.cpp divides it by eight
+    // with integer arithmetic before adding the flame-table colour.
+    private const float FireGlowDeposit = 31f / 255f;
+
+    /// <summary>
+    /// Затухание за кадр: −4 из 255, как в Renderer::render_fire.
+    /// Ускоренное затухание раньше маскировало отсутствие зажима поля; теперь
+    /// поле ограничено единицей после каждого вклада, и компенсация не нужна.
+    /// </summary>
+    private const float FireGlowDecay = 0.0157f;
+
+    /// <summary>Насколько ярко светятся раскалённые угли под пламенем.</summary>
+    private const float FireGlowEmberStrength = 0.45f;
+
+    /// <summary>
+    /// Зеркало <c>GasMotionSubSteps</c> из PhysicsShared.hlsli — менять только
+    /// вместе с ним, иначе средняя скорость газа разъедется с вероятностью,
+    /// на которую шейдер делит свой шанс шага.
+    /// </summary>
+    private const int GasMotionSubSteps = 8;
+
+    /// <summary>
+    /// Порядок газовых фаз чередуется между подшагами.
+    ///
+    /// При постоянном порядке 82 → 83 газ на чётной координате мог сдвинуться
+    /// вправо в первой фазе, оказаться на нечётной и сдвинуться ещё раз во
+    /// второй — то есть две клетки за подшаг. Движению влево двойной ход
+    /// доставался на противоположной чётности. У симметричного очага одна
+    /// сторона попадала на «быструю полосу», другая на медленную, и струя
+    /// сворачивалась крюком. Сдвиг сцены на клетку менял сторону крюка.
+    /// </summary>
+    private static readonly uint[][] GasMotionPhaseOrders =
+    [
+        [80, 81, 82, 83],
+        [81, 80, 83, 82]
+    ];
     // A larger fixed-step exchange keeps thermal fronts visible at gameplay
     // scale while remaining stable with the 0.05 s Jacobi step.
     public const float ThermalExchangeRate = 16f;
@@ -113,6 +175,15 @@ public sealed class SimulationDispatchCoordinator
     private bool cellMaterialsDirty;
     private bool thermalActive;
     private readonly FixedStepThermalScheduler thermalScheduler = new();
+    private double airAccumulator;
+    private double gasMotionAccumulator;
+    private double combustionAccumulator;
+    // Renderer::render_fire in TPT advances together with its 60 Hz particle
+    // simulation.  Keeping this accumulator separate from presentation avoids
+    // fading FIRE/SMKE 100 times per second on a 100 FPS Phyxel window.
+    private double fireGlowAccumulator;
+    private ulong airTickIndex;
+    private bool airFieldPopulated;
     private bool thermalTimingPending;
     private int thermalTimingSamples;
     private double thermalTimingTotalMilliseconds;
@@ -505,6 +576,66 @@ public sealed class SimulationDispatchCoordinator
             presentationDirty = true;
         }
 
+        if (settings.OpenBoundaries && resources.IsSimulationAllocated && !settings.Paused)
+        {
+            DispatchOpenBoundary(resources, ref constants);
+            cellMaterialsDirty = false;
+            presentationDirty = true;
+        }
+
+        // TPT advances the air field before particles consume it.  Therefore
+        // this pass reads the particle state left by the previous tick, and
+        // the gas carrier below moves through the freshly solved flow.
+        if (settings.AirSimulation && resources.IsSimulationAllocated && !settings.Paused)
+        {
+            airAccumulator = Math.Min(
+                airAccumulator + Math.Clamp(elapsedSeconds, 0, FixedAirStep * MaximumAirTicksPerFrame),
+                FixedAirStep * MaximumAirTicksPerFrame);
+            int airTicks = 0;
+            while (airAccumulator + 1e-9 >= FixedAirStep && airTicks < MaximumAirTicksPerFrame)
+            {
+                airAccumulator -= FixedAirStep;
+                airTicks++;
+                airTickIndex++;
+                DispatchAirSimulation(resources, unchecked((uint)airTickIndex));
+            }
+            if (airTicks > 0)
+            {
+                presentationDirty = true;
+            }
+        }
+        else if (airFieldPopulated && resources.IsSimulationAllocated)
+        {
+            // Выключили на ходу — стереть поле, иначе застывший шлейф останется
+            // висеть в режиме отображения давления.
+            DispatchAirClear(resources);
+            airAccumulator = 0;
+            presentationDirty = true;
+        }
+        airFieldPopulated = settings.AirSimulation && resources.IsSimulationAllocated;
+
+        // Fixed 60 Hz deterministic gas carrier.  This deliberately follows
+        // air: FIRE and SMKE are tracers of the just-solved field, as in TPT's
+        // BeforeSim -> UpdateParticles order.
+        if (gasMatter && resources.IsSimulationAllocated && !settings.Paused)
+        {
+            gasMotionAccumulator = Math.Min(
+                gasMotionAccumulator + Math.Clamp(elapsedSeconds, 0, FixedAirStep * MaximumAirTicksPerFrame),
+                FixedAirStep * MaximumAirTicksPerFrame);
+            int gasMotionTicks = 0;
+            while (gasMotionAccumulator + 1e-9 >= FixedAirStep && gasMotionTicks < MaximumAirTicksPerFrame)
+            {
+                gasMotionAccumulator -= FixedAirStep;
+                gasMotionTicks++;
+                DispatchGasMotion(resources, ref constants);
+            }
+            if (gasMotionTicks > 0)
+            {
+                cellMaterialsDirty = false;
+                presentationDirty = true;
+            }
+        }
+
         PollThermalTiming(resources);
         PollContactTiming(resources);
         int thermalTicks = thermalScheduler.Advance(
@@ -534,18 +665,36 @@ public sealed class SimulationDispatchCoordinator
             }
         }
 
-        int combustionDispatchCount = CombustionDispatchPolicy.GetDispatchCount(
-            materialRegistry.RegistryHasCombustibleMaterials || materialRegistry.RegistryHasTransientMaterials,
-            resources.IsSimulationAllocated,
-            thermalActive,
-            settings.Paused,
-            thermalTicks);
-        if (combustionDispatchCount != 0)
+        // Горение идёт на 60 Гц, в одном темпе с движением газа, а не на 20 Гц
+        // вместе с теплопроводностью.
+        //
+        // Воспламенение соседа проверяется по наличию живого пламени в
+        // окрестности 5x5. Пока горение шло раз в 0.05 с, а пламя за это время
+        // успевало пролететь до двадцати клеток, к моменту проверки рядом уже
+        // никого не было: порох горел, только пока по нему водили кистью, и
+        // гас сразу после. В The Powder Toy воспламенение и движение происходят
+        // в одном и том же проходе по частицам, поэтому огонь всегда успевает
+        // поджечь то, мимо чего пролетает.
+        bool combustionActive = (materialRegistry.RegistryHasCombustibleMaterials ||
+            materialRegistry.RegistryHasTransientMaterials) &&
+            resources.IsSimulationAllocated && thermalActive && !settings.Paused;
+        if (combustionActive)
         {
-            bool measure = combustionDispatches >= 40 && !combustionTimingPending;
-            DispatchCombustion(resources, thermalTicks * FixedThermalStep, measure);
-            combustionDispatches++;
-            presentationDirty = true;
+            combustionAccumulator = Math.Min(
+                combustionAccumulator + Math.Clamp(elapsedSeconds, 0, FixedAirStep * MaximumAirTicksPerFrame),
+                FixedAirStep * MaximumAirTicksPerFrame);
+            while (combustionAccumulator + 1e-9 >= FixedAirStep)
+            {
+                combustionAccumulator -= FixedAirStep;
+                bool measure = combustionDispatches >= 40 && !combustionTimingPending;
+                DispatchCombustion(resources, (float)FixedAirStep, measure);
+                combustionDispatches++;
+                presentationDirty = true;
+            }
+        }
+        else
+        {
+            combustionAccumulator = 0;
         }
 
         int phaseDispatchCount = PhaseTransitionDispatchPolicy.GetDispatchCount(
@@ -574,10 +723,28 @@ public sealed class SimulationDispatchCoordinator
             }
         }
 
+        int fireGlowTicks = 0;
+        if (resources.IsSimulationAllocated && !settings.Paused)
+        {
+            fireGlowAccumulator = Math.Min(
+                fireGlowAccumulator + Math.Clamp(elapsedSeconds, 0, FixedAirStep * MaximumAirTicksPerFrame),
+                FixedAirStep * MaximumAirTicksPerFrame);
+            while (fireGlowAccumulator + 1e-9 >= FixedAirStep &&
+                fireGlowTicks < MaximumAirTicksPerFrame)
+            {
+                fireGlowAccumulator -= FixedAirStep;
+                fireGlowTicks++;
+            }
+            if (fireGlowTicks > 0)
+            {
+                presentationDirty = true;
+            }
+        }
+
         constants.SolidGravity = settings.SolidGravity ? 1u : 0u;
         if (presentationDirty && resources.IsSimulationAllocated)
         {
-            DispatchComposition(resources, ref constants);
+            DispatchComposition(resources, ref constants, fireGlowTicks);
             lastCompositionFrame = frameIndex;
             presentationDirty = false;
         }
@@ -956,7 +1123,11 @@ public sealed class SimulationDispatchCoordinator
         // Bind common compute states once before the loop
         context.ComputeShader.Set(resources.CellularAutomataShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResource(0, resources.Materials.View);
+        // Air is bound read-only: flame cells take their drift from it.
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Materials.View,
+            resources.Air.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Grid.ReadUnorderedView,
@@ -964,7 +1135,8 @@ public sealed class SimulationDispatchCoordinator
             resources.PathBlockerMasks.UnorderedView,
             resources.CellMaterials.UnorderedView,
             resources.WaterPressureRoutes.UnorderedView,
-            resources.WaterPressureRouteScratch.UnorderedView);
+            resources.WaterPressureRouteScratch.UnorderedView,
+            resources.GasMotion.UnorderedView);
 
         foreach (uint phase in phases)
         {
@@ -1063,7 +1235,7 @@ public sealed class SimulationDispatchCoordinator
         }
 
         // Unbind once at the end
-        Unbind(context, 1, 6);
+        Unbind(context, 2, 7);
         constants.SimulationPhase = 0;
     }
 
@@ -1090,28 +1262,45 @@ public sealed class SimulationDispatchCoordinator
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.CellularAutomataShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResource(0, resources.Materials.View);
+        // Air is bound read-only: flame cells take their drift from it.
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Materials.View,
+            resources.Air.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Grid.ReadUnorderedView,
             resources.BodyFlags.UnorderedView,
             resources.PathBlockerMasks.UnorderedView,
             resources.CellMaterials.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(6, resources.GasMotion.UnorderedView);
 
         context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
-        Unbind(context, 1, 4);
+        Unbind(context, 2, 7);
         constants.SimulationPhase = 0;
     }
 
     private void DispatchComposition(
         GpuSimulationResources resources,
-        ref SimulationFrameConstants constants)
+        ref SimulationFrameConstants constants,
+        int fireGlowTicks)
     {
         DeviceContext context = resources.Context;
         bool collect = frameIndex % 10 == 0;
         if (collect)
         {
             context.ClearUnorderedAccessView(resources.Statistics.WriteUnorderedView, new RawInt4(0, 0, 0, 0));
+        }
+        // Renderer::render_fire displays the freshly deposited field, then
+        // applies neighbour bleed and the -4 fade. Keep that ordering here.
+        for (int tick = 0; tick + 1 < fireGlowTicks; tick++)
+        {
+            DispatchFireGlowDeposit(resources);
+            DispatchFireGlowDiffuse(resources);
+        }
+        if (fireGlowTicks > 0)
+        {
+            DispatchFireGlowDeposit(resources);
         }
         constants.SimulationPhase = collect ? 1u : 0u;
         UpdateConstants(context, resources, ref constants);
@@ -1122,13 +1311,15 @@ public sealed class SimulationDispatchCoordinator
             resources.Grid.ReadView,
             resources.Materials.View,
             resources.BodyFlags.View,
-            resources.PathBlockerMasks.View);
+            resources.PathBlockerMasks.View,
+            resources.FireGlow.View,
+            resources.Air.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.CompositionTargets.WriteView,
             resources.Statistics.WriteUnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 4, 2);
+        Unbind(context, 6, 2);
         if (collect)
         {
             resources.Statistics.Swap();
@@ -1137,6 +1328,10 @@ public sealed class SimulationDispatchCoordinator
         context.CopyResource(resources.CompositionTargets.WriteTexture, resources.NativePresentationTexture);
         resources.PresentationIndex = 1 - resources.PresentationIndex;
         resources.CompositionTargets.Swap();
+        if (fireGlowTicks > 0)
+        {
+            DispatchFireGlowDiffuse(resources);
+        }
     }
 
     private static void Clear(GpuSimulationResources resources)
@@ -1152,11 +1347,18 @@ public sealed class SimulationDispatchCoordinator
         resources.Context.ClearUnorderedAccessView(resources.BodyFlags.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.PathBlockerMasks.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.CellMaterials.UnorderedView, zero);
+        resources.Context.ClearUnorderedAccessView(resources.GasMotion.UnorderedView, zero);
         foreach (UnorderedAccessView view in resources.Statistics.UnorderedAccessViews)
         {
             resources.Context.ClearUnorderedAccessView(view, zero);
         }
         resources.Context.ClearUnorderedAccessView(resources.CombustionSummary.UnorderedView, zero);
+        // Свет огня и поле воздуха переживают кадры по построению, поэтому при
+        // сбросе мира их надо гасить явно. Иначе от прошлой сцены остаётся
+        // висеть зарево, а новый мазок огня попадает в остаточный воздушный
+        // вихрь и разлетается ещё до того, как создаст собственный поток.
+        DispatchFireGlowClear(resources);
+        DispatchAirClear(resources);
     }
 
     private SimulationFrameConstants CreateConstants(
@@ -1179,7 +1381,9 @@ public sealed class SimulationDispatchCoordinator
             MaximumBrushDiameter = (uint)(MathF.Ceiling(maximumRadius) * 2 + 1),
             MaximumVelocity = 2200,
             SolidGravity = settings.SolidGravity ? 1u : 0u,
-            HydraulicPressure = settings.HydraulicPressure ? 1u : 0u
+            HydraulicPressure = settings.HydraulicPressure ? 1u : 0u,
+            DebugView = settings.ShowAirField ? 1u : 0u,
+            OpenBoundaries = settings.OpenBoundaries ? 1u : 0u
         };
     }
 
@@ -1263,6 +1467,11 @@ public sealed class SimulationDispatchCoordinator
         gasMatter = false;
         gasScheduler.Reset();
         ResetGasTiming();
+        airAccumulator = 0;
+        gasMotionAccumulator = 0;
+        combustionAccumulator = 0;
+        fireGlowAccumulator = 0;
+        airFieldPopulated = false;
         solidMatter = false;
         cellularSleeping = false;
         solidSleeping = false;
@@ -1323,6 +1532,352 @@ public sealed class SimulationDispatchCoordinator
         }
         Unbind(context, 2, 1);
         resources.Grid.Swap();
+    }
+
+    /// <summary>
+    /// Один тик поля воздуха. Пять проходов подряд, каждый читает один буфер и
+    /// пишет в другой: чтение и запись одного буфера были бы гонкой, потому что
+    /// на GPU соседняя клетка может быть уже обновлена, а может и нет.
+    /// Порядок повторяет Air::update_air из The Powder Toy.
+    /// </summary>
+    private static void DispatchAirSimulation(
+        GpuSimulationResources resources,
+        uint tickIndex)
+    {
+        AirSimulationConstants constants = new()
+        {
+            AirWidth = (uint)resources.AirWidth,
+            AirHeight = (uint)resources.AirHeight,
+            AirGridWidth = (uint)resources.Width,
+            AirGridHeight = (uint)resources.Height,
+            AirAmbientTemperature = AirAmbientTemperature,
+            AirHotScale = AirHotScale,
+            AirTickIndex = tickIndex,
+            AirReserved0 = 0
+        };
+        DeviceContext context = resources.Context;
+        context.UpdateSubresource(ref constants, resources.AirConstants);
+        context.ComputeShader.SetConstantBuffer(0, resources.AirConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Materials.View,
+            resources.Grid.ReadView,
+            resources.GasMotion.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Air.UnorderedView,
+            resources.AirScratch.UnorderedView);
+
+        int groupsX = DivideRoundUp(resources.AirWidth, 8);
+        int groupsY = DivideRoundUp(resources.AirHeight, 8);
+
+        RunAirPass(context, resources.AirInjectShader, groupsX, groupsY);
+        RunAirPass(context, resources.AirPressureShader, groupsX, groupsY);
+        RunAirPass(context, resources.AirVelocityShader, groupsX, groupsY);
+        RunAirPass(context, resources.AirAdvectShader, groupsX, groupsY);
+        RunAirPass(context, resources.AirCommitShader, groupsX, groupsY);
+
+        Unbind(context, 3, 2);
+    }
+
+    private static void RunAirPass(
+        DeviceContext context,
+        ComputeShader? shader,
+        int groupsX,
+        int groupsY)
+    {
+        if (shader is null)
+        {
+            return;
+        }
+        context.ComputeShader.Set(shader);
+        context.Dispatch(groupsX, groupsY, 1);
+    }
+
+    /// <summary>
+    /// Накопительное световое поле огня. Повторяет Renderer::render_fire из
+    /// The Powder Toy: вклад, размытие по соседям, затухание. Идёт каждый кадр,
+    /// а не по фиксированному расписанию, потому что это визуальный эффект и
+    /// его сглаживание должно совпадать с частотой отрисовки.
+    /// </summary>
+    private static void DispatchFireGlowDeposit(GpuSimulationResources resources)
+    {
+        FireGlowConstants constants = new()
+        {
+            FireGlowWidth = (uint)resources.AirWidth,
+            FireGlowHeight = (uint)resources.AirHeight,
+            FireGlowGridWidth = (uint)resources.Width,
+            FireGlowGridHeight = (uint)resources.Height,
+            FireGlowDeposit = FireGlowDeposit,
+            FireGlowDecay = FireGlowDecay,
+            FireGlowEmberStrength = FireGlowEmberStrength,
+            FireGlowReserved0 = 0
+        };
+        DeviceContext context = resources.Context;
+        context.UpdateSubresource(ref constants, resources.FireGlowConstants);
+        context.ComputeShader.SetConstantBuffer(0, resources.FireGlowConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Materials.View,
+            resources.Grid.ReadView);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.FireGlow.UnorderedView,
+            resources.FireGlowScratch.UnorderedView);
+
+        int groupsX = DivideRoundUp(resources.AirWidth, 8);
+        int groupsY = DivideRoundUp(resources.AirHeight, 8);
+        RunAirPass(context, resources.FireGlowDepositShader, groupsX, groupsY);
+        Unbind(context, 2, 2);
+    }
+
+    private static void DispatchFireGlowDiffuse(GpuSimulationResources resources)
+    {
+        FireGlowConstants constants = new()
+        {
+            FireGlowWidth = (uint)resources.AirWidth,
+            FireGlowHeight = (uint)resources.AirHeight,
+            FireGlowGridWidth = (uint)resources.Width,
+            FireGlowGridHeight = (uint)resources.Height,
+            FireGlowDeposit = FireGlowDeposit,
+            FireGlowDecay = FireGlowDecay,
+            FireGlowEmberStrength = FireGlowEmberStrength,
+            FireGlowReserved0 = 0
+        };
+        DeviceContext context = resources.Context;
+        context.UpdateSubresource(ref constants, resources.FireGlowConstants);
+        context.ComputeShader.SetConstantBuffer(0, resources.FireGlowConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Materials.View,
+            resources.Grid.ReadView);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.FireGlow.UnorderedView,
+            resources.FireGlowScratch.UnorderedView);
+
+        int groupsX = DivideRoundUp(resources.AirWidth, 8);
+        int groupsY = DivideRoundUp(resources.AirHeight, 8);
+        RunAirPass(context, resources.FireGlowDiffuseShader, groupsX, groupsY);
+        RunAirPass(context, resources.FireGlowCommitShader, groupsX, groupsY);
+        Unbind(context, 2, 2);
+    }
+
+    private static void DispatchFireGlowClear(GpuSimulationResources resources)
+    {
+        if (resources.FireGlowClearShader is null)
+        {
+            return;
+        }
+        FireGlowConstants constants = new()
+        {
+            FireGlowWidth = (uint)resources.AirWidth,
+            FireGlowHeight = (uint)resources.AirHeight,
+            FireGlowGridWidth = (uint)resources.Width,
+            FireGlowGridHeight = (uint)resources.Height,
+            FireGlowDeposit = FireGlowDeposit,
+            FireGlowDecay = FireGlowDecay,
+            FireGlowEmberStrength = FireGlowEmberStrength,
+            FireGlowReserved0 = 0
+        };
+        DeviceContext context = resources.Context;
+        context.UpdateSubresource(ref constants, resources.FireGlowConstants);
+        context.ComputeShader.Set(resources.FireGlowClearShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FireGlowConstants);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.FireGlow.UnorderedView,
+            resources.FireGlowScratch.UnorderedView);
+        context.Dispatch(
+            DivideRoundUp(resources.AirWidth, 8),
+            DivideRoundUp(resources.AirHeight, 8),
+            1);
+        Unbind(context, 0, 2);
+    }
+
+    /// <summary>
+    /// Движение газов и пламени. Вынесено из общего клеточного прохода и идёт
+    /// <see cref="GasMotionSubSteps"/> раз за кадр: одна клетка за проход — это
+    /// потолок 54 клетки в секунду, а частица в The Powder Toy при Advection
+    /// 0.9 и потоке 5-10 проходит 4-9 клеток за кадр. Из-за этого приток огня
+    /// у источника опережал отток вверх, и точка разрасталась в шар вместо
+    /// узкой струи. Вероятность внутри шейдера поделена на то же число, так
+    /// что средняя скорость не меняется — растёт только достижимый максимум.
+    /// </summary>
+    /// <summary>
+    /// Съедает всё, что дошло до левого, правого или верхнего края. Идёт каждый
+    /// кадр отдельным проходом, потому что дойти до края может что угодно и
+    /// каким угодно путём — привязывать это к конкретному солверу неверно.
+    /// </summary>
+    private static void DispatchOpenBoundary(
+        GpuSimulationResources resources,
+        ref SimulationFrameConstants constants)
+    {
+        DeviceContext context = resources.Context;
+        uint previousPhase = constants.SimulationPhase;
+        constants.SimulationPhase = 84;
+        constants.DispatchOffsetX = 0;
+        constants.DispatchOffsetY = 0;
+        constants.DispatchExtentX = (uint)resources.Width;
+        constants.DispatchExtentY = (uint)resources.Height;
+        UpdateConstants(context, resources, ref constants);
+        context.ComputeShader.Set(resources.CellularAutomataShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Materials.View,
+            resources.Air.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Grid.ReadUnorderedView,
+            resources.BodyFlags.UnorderedView,
+            resources.PathBlockerMasks.UnorderedView,
+            resources.CellMaterials.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(6, resources.GasMotion.UnorderedView);
+        context.Dispatch(
+            DivideRoundUp(resources.Width, 16),
+            DivideRoundUp(resources.Height, 16),
+            1);
+        Unbind(context, 2, 7);
+        constants.SimulationPhase = previousPhase;
+    }
+
+    private void DispatchGasMotion(
+        GpuSimulationResources resources,
+        ref SimulationFrameConstants constants)
+    {
+        DeviceContext context = resources.Context;
+        context.ComputeShader.Set(resources.CellularAutomataShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Materials.View,
+            resources.Air.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Grid.ReadUnorderedView,
+            resources.BodyFlags.UnorderedView,
+            resources.PathBlockerMasks.UnorderedView,
+            resources.CellMaterials.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(6, resources.GasMotion.UnorderedView);
+
+        uint previousPhase = constants.SimulationPhase;
+        // TPT updates vx/vy once per frame, then its fractional position is
+        // consumed by MovementPhase.  Do the equivalent once before the eight
+        // checkerboard passes; repeating it per pass would multiply velocity.
+        constants.SimulationPhase = 89;
+        constants.GasSubStep = 0;
+        constants.DispatchOffsetX = 0;
+        constants.DispatchOffsetY = 0;
+        constants.DispatchExtentX = (uint)resources.Width;
+        constants.DispatchExtentY = (uint)resources.Height;
+        UpdateConstants(context, resources, ref constants);
+        context.Dispatch(
+            DivideRoundUp(resources.Width, 16),
+            DivideRoundUp(resources.Height, 16),
+            1);
+
+        for (int step = 0; step < GasMotionSubSteps; step++)
+        {
+            // Номер подшага уходит в шейдер и входит в seed случайности.
+            constants.GasSubStep = unchecked((uint)step) + 1u;
+            uint[] order = GasMotionPhaseOrders[(step + (int)(frameIndex & 1u)) % GasMotionPhaseOrders.Length];
+            foreach (uint phase in order)
+            {
+                constants.SimulationPhase = phase;
+                // Vertical pairs halve the row count, horizontal pairs the
+                // columns, matching the parity layout of phases 0 to 3.
+                bool vertical = phase is 80 or 81;
+                bool obstacleBypass = phase is >= 85 and <= 88;
+                int parity = (int)(phase & 1);
+                int startX = obstacleBypass
+                    ? (int)((phase - 85) & 1u)
+                    : vertical ? 0 : parity;
+                int startY = obstacleBypass
+                    ? (int)((phase - 85) >> 1)
+                    : vertical ? parity : 0;
+                int dispatchW = vertical
+                    ? resources.Width
+                    : DivideRoundUp(Math.Max(0, resources.Width - startX), 2);
+                int dispatchH = vertical
+                    ? DivideRoundUp(Math.Max(0, resources.Height - startY), 2)
+                    : obstacleBypass
+                        ? DivideRoundUp(Math.Max(0, resources.Height - startY), 2)
+                        : resources.Height;
+                if (dispatchW <= 0 || dispatchH <= 0)
+                {
+                    continue;
+                }
+                constants.DispatchOffsetX = (uint)startX;
+                constants.DispatchOffsetY = (uint)startY;
+                constants.DispatchExtentX = (uint)dispatchW;
+                constants.DispatchExtentY = (uint)dispatchH;
+                UpdateConstants(context, resources, ref constants);
+                context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
+            }
+        }
+        // TPT evaluates collision fallback once in MovementPhase after the
+        // particle has consumed its velocity for the frame. Its sub-pixel
+        // movement may cross several cells, but it does not retry the rotated
+        // obstacle branch eight times. Doing so here made FIRE teleport along
+        // the whole plate and left only a thin, old red shelf.
+        constants.GasSubStep = 0;
+        uint[] collisionOrder = (frameIndex & 1u) == 0
+            ? [85, 86, 87, 88]
+            : [88, 87, 86, 85];
+        foreach (uint phase in collisionOrder)
+        {
+            constants.SimulationPhase = phase;
+            int startX = (int)((phase - 85) & 1u);
+            int startY = (int)((phase - 85) >> 1);
+            int dispatchW = DivideRoundUp(Math.Max(0, resources.Width - startX), 2);
+            int dispatchH = DivideRoundUp(Math.Max(0, resources.Height - startY), 2);
+            if (dispatchW <= 0 || dispatchH <= 0)
+            {
+                continue;
+            }
+            constants.DispatchOffsetX = (uint)startX;
+            constants.DispatchOffsetY = (uint)startY;
+            constants.DispatchExtentX = (uint)dispatchW;
+            constants.DispatchExtentY = (uint)dispatchH;
+            UpdateConstants(context, resources, ref constants);
+            context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
+        }
+        constants.SimulationPhase = previousPhase;
+        constants.GasSubStep = 0;
+        Unbind(context, 2, 7);
+    }
+
+    private static void DispatchAirClear(GpuSimulationResources resources)
+    {
+        if (resources.AirClearShader is null)
+        {
+            return;
+        }
+        AirSimulationConstants constants = new()
+        {
+            AirWidth = (uint)resources.AirWidth,
+            AirHeight = (uint)resources.AirHeight,
+            AirGridWidth = (uint)resources.Width,
+            AirGridHeight = (uint)resources.Height,
+            AirAmbientTemperature = AirAmbientTemperature,
+            AirHotScale = AirHotScale,
+            AirTickIndex = 0,
+            AirReserved0 = 0
+        };
+        DeviceContext context = resources.Context;
+        context.UpdateSubresource(ref constants, resources.AirConstants);
+        context.ComputeShader.Set(resources.AirClearShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.AirConstants);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Air.UnorderedView,
+            resources.AirScratch.UnorderedView);
+        context.Dispatch(
+            DivideRoundUp(resources.AirWidth, 8),
+            DivideRoundUp(resources.AirHeight, 8),
+            1);
+        Unbind(context, 0, 2);
     }
 
     private void PollThermalTiming(GpuSimulationResources resources)
@@ -1394,7 +1949,8 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Grid.ReadUnorderedView,
-            resources.CellMaterials.UnorderedView);
+            resources.CellMaterials.UnorderedView,
+            resources.GasMotion.UnorderedView);
         context.Dispatch(
             DivideRoundUp(resources.Width, 16),
             DivideRoundUp(resources.Height, 16),
@@ -1405,7 +1961,7 @@ public sealed class SimulationDispatchCoordinator
             context.End(resources.ContactTimestampDisjointQuery);
             contactTimingPending = true;
         }
-        Unbind(context, 1, 2);
+        Unbind(context, 1, 3);
     }
 
     private void PollContactTiming(GpuSimulationResources resources)
@@ -1538,6 +2094,7 @@ public sealed class SimulationDispatchCoordinator
             0,
             resources.Grid.ReadUnorderedView,
             resources.CellMaterials.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(2, resources.GasMotion.UnorderedView);
         // Gas packets move only across disjoint adjacent pairs. Vertical edges
         // alternate parity; both horizontal parities and one diagonal pairing
         // run every fixed tick without long-range mass splitting.
@@ -1563,7 +2120,7 @@ public sealed class SimulationDispatchCoordinator
             context.End(resources.GasTimestampDisjointQuery);
             gasTimingPending = true;
         }
-        Unbind(context, 1, 2);
+        Unbind(context, 1, 3);
         constants.FrameIndex = previousFrame;
         constants.SimulationPhase = previousPhase;
     }

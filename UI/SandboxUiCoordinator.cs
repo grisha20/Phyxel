@@ -299,13 +299,20 @@ public sealed class SandboxUiCoordinator : IDisposable
             (MaterialSimulationKind)materialRegistry[SelectedMaterial].Properties.SimulationKind ==
                 MaterialSimulationKind.Tool);
 
-        Color color = erasing
-            ? new Color(255, 96, 96, 190)
+        // Двойное кольцо: тёмный контур снаружи, светлый внутри. Одноцветный
+        // курсор тонул либо в чёрном фоне, либо в раскалённом добела пламени,
+        // и по скриншоту нельзя было понять, насколько огонь шире кисти.
+        // Пара контрастных колец читается на любом фоне без инверсии цвета.
+        Color inner = erasing
+            ? new Color(255, 150, 150, 230)
             : TemperatureToolActive
-                ? new Color(255, 154, 86, 190)
-                : new Color(210, 235, 255, 175);
+                ? new Color(255, 200, 150, 230)
+                : new Color(235, 245, 255, 225);
+        Color outer = new(8, 10, 14, 220);
 
-        spriteBatch.Draw(brushOutline, bounds, color);
+        Rectangle halo = new(bounds.X - 1, bounds.Y - 1, bounds.Width + 2, bounds.Height + 2);
+        spriteBatch.Draw(brushOutline, halo, outer);
+        spriteBatch.Draw(brushOutline, bounds, inner);
     }
 
     public void Dispose()

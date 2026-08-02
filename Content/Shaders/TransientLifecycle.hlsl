@@ -19,6 +19,9 @@ RWStructuredBuffer<uint> CombustionSummary : register(u1);
 static const uint CombustionOccurred = 1u << 0;
 static const uint TargetCellular = 1u << 2;
 static const uint TargetGas = 1u << 4;
+// FIRE.cpp converts expired FIRE to SMKE only below 625 K.  Phyxel stores
+// temperatures in Celsius, hence this exact equivalent threshold.
+static const float FireToSmokeTemperature = 351.85;
 
 [numthreads(16, 16, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -43,19 +46,20 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     bool flame = (material.Flags & MaterialFlagFlame) != 0;
-    // Temperature can shorten a flame only when it is almost cooled to the
-    // ambient range. Normal flame lifetime remains the Powder-Toy-style
-    // 2–3 second visual timer; hot wood must not extinguish it immediately.
-    cell.Lifetime = flame && cell.Temperature < material.InitialTemperature * 0.15
-        ? 0
-        : max(0, cell.Lifetime - TransientDeltaTime);
+    cell.Lifetime = max(0, cell.Lifetime - TransientDeltaTime);
     if (cell.Lifetime > 0)
     {
-        if (flame)
-        {
-            cell.VelocityY = min(cell.VelocityY, -8.0);
-        }
         Grid[index] = cell;
+        return;
+    }
+
+    // Hot FIRE is killed when its resource expires.  Only cooled FIRE becomes
+    // SMKE; converting every expired flame made smoke originate at the brush
+    // rather than at the cooled perimeter of the flow.
+    if (flame && cell.Temperature >= FireToSmokeTemperature)
+    {
+        Grid[index] = CreateEmptyCell();
+        InterlockedOr(CombustionSummary[0], CombustionOccurred | TargetCellular);
         return;
     }
 

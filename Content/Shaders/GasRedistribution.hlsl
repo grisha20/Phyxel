@@ -3,6 +3,7 @@
 StructuredBuffer<MaterialProperties> Materials : register(t0);
 RWStructuredBuffer<GridCell> Grid : register(u0);
 RWStructuredBuffer<uint> CellMaterials : register(u1);
+RWStructuredBuffer<GasMotionState> GasMotion : register(u2);
 
 static const float MinimumGasMass = 0.0005;
 
@@ -17,10 +18,18 @@ bool IsContinuumGas(GridCell cell)
         (material.Flags & MaterialFlagFlame) == 0;
 }
 
-void StorePair(uint firstIndex, GridCell first, uint secondIndex, GridCell second)
+void StorePair(
+    uint firstIndex,
+    GridCell first,
+    GasMotionState firstMotion,
+    uint secondIndex,
+    GridCell second,
+    GasMotionState secondMotion)
 {
     Grid[firstIndex] = first;
     Grid[secondIndex] = second;
+    GasMotion[firstIndex] = firstMotion;
+    GasMotion[secondIndex] = secondMotion;
     CellMaterials[firstIndex] = first.IsActive != 0 ? first.MaterialIndex : 0;
     CellMaterials[secondIndex] = second.IsActive != 0 ? second.MaterialIndex : 0;
 }
@@ -75,7 +84,9 @@ void ResolveDifferentGases(
     }
     first.RestFrames = 0;
     second.RestFrames = 0;
-    StorePair(firstIndex, second, secondIndex, first);
+    GasMotionState firstMotion = GasMotion[firstIndex];
+    GasMotionState secondMotion = GasMotion[secondIndex];
+    StorePair(firstIndex, second, secondMotion, secondIndex, first, firstMotion);
 }
 
 void RedistributeSameGas(
@@ -95,6 +106,16 @@ void RedistributeSameGas(
     MaterialProperties material = Materials[templateCell.MaterialIndex];
     float firstMass = firstGas ? first.Mass : 0;
     float secondMass = IsContinuumGas(second) ? second.Mass : 0;
+    GasMotionState firstMotion = (GasMotionState)0;
+    GasMotionState secondMotion = (GasMotionState)0;
+    if (firstGas)
+    {
+        firstMotion = GasMotion[firstIndex];
+    }
+    if (secondMass > 0)
+    {
+        secondMotion = GasMotion[secondIndex];
+    }
     float totalMass = firstMass + secondMass;
     if (totalMass < MinimumGasMass)
     {
@@ -162,7 +183,23 @@ void RedistributeSameGas(
         newSecondMass > 0 ? max(0, secondLifetimeAmount / newSecondMass) : 0,
         directionX * 8,
         directionY * 8);
-    StorePair(firstIndex, newFirst, secondIndex, newSecond);
+    // Redistribution may create a gas cell in an empty slot.  Carry the state
+    // of the mass that occupied that slot (or of the donor when it was empty)
+    // so SMKE remains a tracer instead of resetting to a random walk every
+    // fixed tick.
+    GasMotionState newFirstMotion = secondMotion;
+    GasMotionState newSecondMotion = firstMotion;
+    if (firstMass > 0)
+    {
+        newFirstMotion = firstMotion;
+    }
+    if (secondMass > 0)
+    {
+        newSecondMotion = secondMotion;
+    }
+    StorePair(
+        firstIndex, newFirst, newFirstMotion,
+        secondIndex, newSecond, newSecondMotion);
 }
 
 void ResolveContinuumPair(

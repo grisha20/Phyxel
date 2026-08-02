@@ -3,6 +3,7 @@
   "id": "core:fixture",
   "name": { "ru": "Опора", "en": "Fixture" },
   "kind": "solid",
+  "flags": ["blocks-air"],
   "color": "#525B63",
   "physics": { "density": 100.0, "friction": 0.9, "flowRate": 0.0 },
   "thermal": { "initialTemperature": 20.0, "conductivity": 0.25, "heatCapacity": 0.84 },

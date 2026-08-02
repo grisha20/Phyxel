@@ -265,9 +265,16 @@ internal static class CombustionMaterialRegressionVerifier
             Same(wood.Properties.HeatPerMass, 1800f) &&
             Same(wood.Properties.MaximumCombustionTemperature, 900f),
             "Combustion numeric properties were not copied to GPU properties.");
-        Require(registry[CoreMaterialIds.Coal].Combustion is null &&
-            registry[CoreMaterialIds.Coal].Properties.BurnedIntoMaterialIndex == uint.MaxValue,
-            "Bundled coal must be an inert hot residue in combustion v1.");
+        // Уголь перестал быть инертным остатком: он сыпучий и теперь горит.
+        // До разрешения горения для granular он был просто чёрным песком.
+        MaterialDefinition bundledCoal = registry[CoreMaterialIds.Coal];
+        Require(bundledCoal.Combustion is not null,
+            "Bundled coal must be combustible once granular combustion is enabled.");
+        Require(bundledCoal.Properties.SimulationKind == (uint)MaterialSimulationKind.Granular,
+            "Bundled coal must stay granular so it can pour.");
+        Require(bundledCoal.Properties.BurnedIntoMaterialIndex ==
+            registry[CoreMaterialIds.Empty].RuntimeIndex,
+            "Bundled coal must burn away completely.");
         Require(wood.Properties.BurnedIntoMaterialIndex == registry["test:coal"].RuntimeIndex,
             "Combustion target was not resolved after runtime ordering.");
         Require(registry["test:coal"].Properties.BurnedIntoMaterialIndex == uint.MaxValue,
@@ -281,6 +288,46 @@ internal static class CombustionMaterialRegressionVerifier
         MaterialDefinition ash = registry["test:ash"];
         Require(ash.Properties.BurnedIntoMaterialIndex == registry[CoreMaterialIds.Empty].RuntimeIndex,
             "core:empty is not accepted as an explicit combustion target.");
+
+        await VerifyMovableAndGranularSourcesAsync(root, coreDirectory);
+    }
+
+    /// <summary>
+    /// Горение больше не ограничено неподвижными твёрдыми телами. Сыпучий
+    /// источник и источник с flag 'movable-solid' обязаны загружаться: без
+    /// этого порох приходилось объявлять твёрдым, и он висел в воздухе.
+    /// </summary>
+    private static async Task VerifyMovableAndGranularSourcesAsync(string root, string coreDirectory)
+    {
+        string directory = CreateDirectory(root, "movable-and-granular-sources");
+        await WriteMaterialAsync(directory, "granular-fuel.json", MaterialJson(
+            "test:granular_fuel",
+            "granular",
+            1.40f,
+            CombustionJson(250f, 15f, 25000f, CoreMaterialIds.Empty)));
+        await WriteMaterialAsync(directory, "movable-fuel.json", MaterialJson(
+            "test:movable_fuel",
+            "solid",
+            0.80f,
+            CombustionJson(300f, 0.1f, 1000f, CoreMaterialIds.Empty),
+            flags: "movable-solid"));
+
+        MaterialRegistry registry = new(coreDirectory, directory);
+
+        MaterialDefinition granularFuel = registry["test:granular_fuel"];
+        Require(granularFuel.Combustion is not null,
+            "Granular combustion source was rejected.");
+        Require(granularFuel.Properties.SimulationKind == (uint)MaterialSimulationKind.Granular,
+            "Granular combustion source lost its granular kind.");
+        Require(granularFuel.Properties.BurnedIntoMaterialIndex ==
+            registry[CoreMaterialIds.Empty].RuntimeIndex,
+            "Granular combustion source did not resolve its burn target.");
+
+        MaterialDefinition movableFuel = registry["test:movable_fuel"];
+        Require(movableFuel.Combustion is not null,
+            "Movable solid combustion source was rejected.");
+        Require((movableFuel.Properties.Flags & (uint)MaterialFlags.MovableSolid) != 0,
+            "Movable solid combustion source lost its movable-solid flag.");
     }
 
     private static async Task VerifyRuntimeReorderAsync(string root, string coreDirectory)
@@ -325,9 +372,9 @@ internal static class CombustionMaterialRegressionVerifier
         await ExpectRejectedAsync(root, coreDirectory, "liquid-source", "test:liquid_source",
             MaterialJson("test:liquid_source", "liquid", 0.8f,
                 CombustionJson(300f, 0.1f, 1000f, "core:empty")));
-        await ExpectRejectedAsync(root, coreDirectory, "movable-source", "test:movable_source",
-            MaterialJson("test:movable_source", "solid", 0.8f,
-                CombustionJson(300f, 0.1f, 1000f, "core:empty"), "movable-solid"));
+        await ExpectRejectedAsync(root, coreDirectory, "gas-source", "test:gas_source",
+            MaterialJson("test:gas_source", "gas", 0.05f,
+                CombustionJson(300f, 0.1f, 1000f, "core:empty")));
         await ExpectRejectedAsync(root, coreDirectory, "phase-source", "test:phase_source",
             MaterialJson("test:phase_source", "solid", 0.8f,
                 CombustionJson(300f, 0.1f, 1000f, "core:empty"),

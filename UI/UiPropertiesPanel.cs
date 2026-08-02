@@ -20,6 +20,19 @@ public sealed class UiPropertiesPanel
         "0");
     private readonly UiToggleSwitch solidGravityToggle = new("Гравитация");
     private readonly UiToggleSwitch hydraulicsToggle = new("Гидравлика сосудов");
+
+    /// <summary>
+    /// Показать поле воздуха вместо сцены. Без этого настройка огня велась
+    /// вслепую: скорость потока не видна, и каждая оценка её величины
+    /// промахивалась на порядок.
+    /// </summary>
+    private readonly UiToggleSwitch airFieldToggle = new("Показать воздух");
+
+    /// <summary>
+    /// Сплошные стены по краям. Выключено — всё улетающее за левый, правый и
+    /// верхний край исчезает, как в The Powder Toy. Пол остаётся всегда.
+    /// </summary>
+    private readonly UiToggleSwitch boundariesToggle = new("Стены по краям");
     private readonly UiIconButton restartPhysicsButton = new("Перезапустить физику") { IconKey = "reset" };
     private readonly UiIconButton resetViewButton = new("Сбросить вид") { IconKey = "reset" };
     private readonly UiIconButton clearButton = new("Очистить всё") { IconKey = "clear", Danger = true };
@@ -166,6 +179,18 @@ public sealed class UiPropertiesPanel
             settings.HydraulicPressure = !settings.HydraulicPressure;
             HydraulicsToggled = true;
         }
+        cursorY += toggleHeight + 4;
+        boundariesToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
+        if (boundariesToggle.Update(input))
+        {
+            settings.OpenBoundaries = !settings.OpenBoundaries;
+        }
+        cursorY += toggleHeight + 4;
+        airFieldToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
+        if (airFieldToggle.Update(input))
+        {
+            settings.ShowAirField = !settings.ShowAirField;
+        }
 
         brushSlider.Value = settings.BrushRadius;
         densitySlider.Value = settings.SpawnDensity * 100f;
@@ -234,6 +259,10 @@ public sealed class UiPropertiesPanel
         scaleSlider.Draw(spriteBatch, font, backdrop, pixel);
         solidGravityToggle.Draw(spriteBatch, font, backdrop, pixel, settings.SolidGravity);
         hydraulicsToggle.Draw(spriteBatch, font, backdrop, pixel, settings.HydraulicPressure);
+        // Тумблер показывает «стены есть», поэтому значение инвертировано
+        // относительно OpenBoundaries.
+        boundariesToggle.Draw(spriteBatch, font, backdrop, pixel, !settings.OpenBoundaries);
+        airFieldToggle.Draw(spriteBatch, font, backdrop, pixel, settings.ShowAirField);
 
         spriteBatch.Draw(pixel, new Rectangle(bounds.X + 14, restartPhysicsButton.Bounds.Y - 9, bounds.Width - 28, 1), UiTheme.BorderColor);
         restartPhysicsButton.Draw(spriteBatch, font, backdrop, pixel, iconCache);

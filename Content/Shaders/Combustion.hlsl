@@ -41,7 +41,13 @@ float ResidueMass(MaterialProperties target, uint targetIndex)
 uint TargetFlags(MaterialProperties source, MaterialProperties target)
 {
     uint flags = 0;
-    if (IsCellularMaterial(target.SimulationKind)) flags |= TargetCellular;
+    // TargetCellular drives the cellular wake-up on the CPU side. It must be
+    // raised when the SOURCE is cellular too, not only the target: a burning
+    // powder that turns into empty space leaves a hole its neighbours have to
+    // fall into. Looking at the target alone, granular -> empty produced no
+    // flag at all, so the pile above a burnt-out cell stayed asleep in mid-air.
+    if (IsCellularMaterial(source.SimulationKind) ||
+        IsCellularMaterial(target.SimulationKind)) flags |= TargetCellular;
     if (target.SimulationKind == SimulationKindLiquid) flags |= TargetLiquid;
     if (target.SimulationKind == SimulationKindGas) flags |= TargetGas;
     if (source.SimulationKind == SimulationKindLiquid || target.SimulationKind == SimulationKindLiquid)
@@ -193,6 +199,47 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
     }
 }
 
+// Number of neighbouring cells that can supply air: empty space or any gas.
+// Fuel packed on all eight sides has no oxygen and cannot burn, which is why a
+// heap burns inward from its surface instead of igniting all at once. Without
+// this the whole pile reached its combustion ceiling simultaneously and glowed
+// uniformly, because every buried cell was heated past its ignition point by
+// conduction and then started burning on its own.
+uint CountOpenNeighbours(uint2 coordinate)
+{
+    uint open = 0;
+    [unroll]
+    for (int offsetY = -1; offsetY <= 1; offsetY++)
+    {
+        [unroll]
+        for (int offsetX = -1; offsetX <= 1; offsetX++)
+        {
+            if (offsetX == 0 && offsetY == 0)
+            {
+                continue;
+            }
+            int2 sample = int2(coordinate) + int2(offsetX, offsetY);
+            if (sample.x < 0 || sample.y < 0 ||
+                sample.x >= int(CombustionWidth) || sample.y >= int(CombustionHeight))
+            {
+                continue;
+            }
+            GridCell neighbor = Grid[uint(sample.y) * CombustionWidth + uint(sample.x)];
+            if (neighbor.IsActive == 0)
+            {
+                open++;
+                continue;
+            }
+            if (neighbor.MaterialIndex < CombustionMaterialCount &&
+                Materials[neighbor.MaterialIndex].SimulationKind == SimulationKindGas)
+            {
+                open++;
+            }
+        }
+    }
+    return open;
+}
+
 bool HasLiveFlame(uint2 coordinate)
 {
     [unroll]
@@ -242,7 +289,16 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     MaterialProperties source = Materials[cell.MaterialIndex];
     uint sourceMaterialIndex = cell.MaterialIndex;
     uint targetIndex = source.BurnedIntoMaterialIndex;
-    if (source.SimulationKind != SimulationKindSolid ||
+
+    // Combustion is available to solids and to granular powders. Restricting it
+    // to solids forced every combustible powder to be declared as a solid,
+    // which made gunpowder hang in mid-air instead of pouring, and left coal
+    // unable to burn at all. Liquids and gases keep their own models: liquid
+    // fuel needs a separate spread rule and flame is a transient gas.
+    bool combustibleKind =
+        source.SimulationKind == SimulationKindSolid ||
+        source.SimulationKind == SimulationKindGranular;
+    if (!combustibleKind ||
         targetIndex == 0xffffffffu || targetIndex >= CombustionMaterialCount)
     {
         return;
@@ -271,7 +327,22 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    float burnedMass = min(availableFuel, source.BurnRate * CombustionDeltaTime);
+    // Air supply. Self-oxidising fuel such as gunpowder ignores it entirely:
+    // it carries its own oxidiser and detonates even when fully buried.
+    float exposure = 1.0;
+    if ((source.Flags & MaterialFlagSelfOxidizing) == 0)
+    {
+        uint openNeighbours = CountOpenNeighbours(coordinate);
+        if (openNeighbours == 0)
+        {
+            return;
+        }
+        // Three open sides already give a fully developed flame; a single
+        // exposed corner smoulders at a third of the rate.
+        exposure = saturate(float(openNeighbours) / 3.0);
+    }
+
+    float burnedMass = min(availableFuel, source.BurnRate * exposure * CombustionDeltaTime);
     if (burnedMass <= 0)
     {
         return;
@@ -285,6 +356,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         cell.Temperature + min(generatedRise, permittedRise),
         MinimumCombustionTemperature,
         MaximumCombustionTemperature);
+    float burnoutTemperature = cell.Temperature;
     cell.Mass = max(residueMass, cell.Mass - burnedMass);
     uint flags = CombustionOccurred | TargetFlags(source, target);
     if (availableFuel - burnedMass <= CombustionMassEpsilon)
@@ -292,6 +364,41 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         cell.Mass = residueMass;
         flags |= BurnoutOccurred;
         NormalizeBurnout(cell, source, target, targetIndex);
+
+        // Fuel that leaves no residue becomes a flame in its own cell instead
+        // of vanishing. This is what The Powder Toy does: COAL turns into
+        // PT_FIRE when its life runs out, and an ignited GUNP grain is
+        // converted straight to PT_FIRE rather than being deleted.
+        // Zeroing the cell threw away all the heat the reaction had just
+        // produced, so a chain reaction died wherever there was no adjacent
+        // empty cell for a flame to be emitted into: scattered grains lying on
+        // the ground would heat up, consume themselves and quietly disappear
+        // without ever igniting their neighbours.
+        if (targetIndex == 0)
+        {
+            uint flameIndex = Emissions[sourceMaterialIndex].FlameIntoMaterialIndex;
+            if (flameIndex != 0xffffffffu && flameIndex < CombustionMaterialCount)
+            {
+                MaterialProperties flame = Materials[flameIndex];
+                if (flame.SimulationKind == SimulationKindGas &&
+                    (flame.Flags & MaterialFlagFlame) != 0 && flame.Density > 0)
+                {
+                    cell.MaterialIndex = flameIndex;
+                    cell.IsActive = 1;
+                    cell.Mass = flame.Density;
+                    cell.Temperature = max(burnoutTemperature, flame.InitialTemperature);
+                    cell.Lifetime = InitialMaterialLifetime(
+                        flame,
+                        index ^ (CombustionTickIndex * 0x9e3779b9u));
+                    cell.RestFrames = 0;
+                    cell.BodyId = 0;
+                    cell.VelocityX = 0;
+                    cell.VelocityY = 0;
+                    cell.Pressure = 0;
+                    flags |= TargetGas | TargetCellular;
+                }
+            }
+        }
     }
     Grid[index] = cell;
     InterlockedOr(CombustionSummary[0], flags);

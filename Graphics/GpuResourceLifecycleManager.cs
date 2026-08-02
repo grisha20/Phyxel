@@ -135,6 +135,27 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             StructureByteStride = 0
         });
         Buffer thermalConstants = CreateConstantBuffer<ThermalSimulationConstants>();
+        // The air field is solved on a coarse grid: one air cell covers
+        // AirCellSize x AirCellSize simulation cells, as CELL = 4 does in
+        // The Powder Toy. DivideRoundUp so the right and bottom edges of a
+        // world whose size is not a multiple of the cell size are still covered.
+        int airWidth = allocateSimulation
+            ? Math.Max(1, (width + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize)
+            : 1;
+        int airHeight = allocateSimulation
+            ? Math.Max(1, (height + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize)
+            : 1;
+        int airCellCount = checked(airWidth * airHeight);
+        Buffer airConstants = CreateConstantBuffer<AirSimulationConstants>();
+        GpuStructuredBuffer<AirCell> air = new(Device, airCellCount);
+        GpuStructuredBuffer<AirCell> airScratch = new(Device, airCellCount);
+        Buffer airStaging = CreateStagingBuffer(air.Buffer.Description.SizeInBytes);
+        GpuStructuredBuffer<GasMotionState> gasMotion = new(Device, cellCount);
+        // The fire light field shares the air resolution: one coarse cell per
+        // AirCellSize square, exactly like fire_r/g/b in The Powder Toy.
+        Buffer fireGlowConstants = CreateConstantBuffer<FireGlowConstants>();
+        GpuStructuredBuffer<FireGlowCell> fireGlow = new(Device, airCellCount);
+        GpuStructuredBuffer<FireGlowCell> fireGlowScratch = new(Device, airCellCount);
         Buffer contactTransitionConstants = CreateConstantBuffer<ContactTransitionConstants>();
         Buffer phaseConstants = CreateConstantBuffer<PhaseTransitionConstants>();
         GpuStructuredBuffer<uint> phaseSummary = new(Device, 1);
@@ -329,6 +350,16 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Emissions = emissions,
             FrameConstants = constants,
             ThermalConstants = thermalConstants,
+            AirWidth = airWidth,
+            AirHeight = airHeight,
+            AirConstants = airConstants,
+            Air = air,
+            AirScratch = airScratch,
+            AirStaging = airStaging,
+            GasMotion = gasMotion,
+            FireGlowConstants = fireGlowConstants,
+            FireGlow = fireGlow,
+            FireGlowScratch = fireGlowScratch,
             ContactTransitionConstants = contactTransitionConstants,
             PhaseConstants = phaseConstants,
             PhaseSummary = phaseSummary,
@@ -382,6 +413,16 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SolidDisplacementApplyShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "ApplyHullWaterDisplacement") : null,
             CompositionShader = allocateSimulation ? CompileShader("RenderComposition.hlsl") : null,
             ThermalDiffusionShader = allocateSimulation ? CompileShader("ThermalDiffusion.hlsl") : null,
+            AirInjectShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSInject") : null,
+            AirPressureShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSPressure") : null,
+            AirVelocityShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSVelocity") : null,
+            AirAdvectShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSAdvect") : null,
+            AirCommitShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSCommit") : null,
+            AirClearShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSClear") : null,
+            FireGlowDepositShader = allocateSimulation ? CompileShader("FireGlow.hlsl", "CSDeposit") : null,
+            FireGlowDiffuseShader = allocateSimulation ? CompileShader("FireGlow.hlsl", "CSDiffuse") : null,
+            FireGlowCommitShader = allocateSimulation ? CompileShader("FireGlow.hlsl", "CSCommitGlow") : null,
+            FireGlowClearShader = allocateSimulation ? CompileShader("FireGlow.hlsl", "CSClearGlow") : null,
             ContactTransitionShader = allocateSimulation ? CompileShader("ContactTransitions.hlsl") : null,
             PhaseTransitionShader = allocateSimulation ? CompileShader("PhaseTransitions.hlsl") : null,
             CombustionShader = allocateSimulation ? CompileShader("Combustion.hlsl") : null,

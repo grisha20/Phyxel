@@ -5,7 +5,23 @@
   "kind": "granular",
   "color": "#292929",
   "physics": { "density": 0.2, "friction": 0.6, "flowRate": 0.35 },
-  "thermal": { "initialTemperature": 20.0, "conductivity": 0.78, "heatCapacity": 1.0 },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.08, "heatCapacity": 1.0 },
+  "combustion": {
+    "ignitionTemperature": 400.0,
+    "burnRate": 0.012,
+    "heatPerMass": 2000.0,
+    "burnedInto": "core:empty",
+    "spreadRate": 1.5,
+    "maximumTemperature": 1100.0
+  },
+  "emissions": {
+    "smokeInto": "core:smoke",
+    "smokeRate": 0.05,
+    "gasInto": "core:co2",
+    "gasRate": 0.20,
+    "flameInto": "core:fire",
+    "flameRate": 25.0
+  },
   "contactTransitions": {
     "liquid": {
       "into": "core:wet_charcoal",

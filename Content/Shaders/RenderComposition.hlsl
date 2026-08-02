@@ -4,6 +4,8 @@ StructuredBuffer<GridCell> Grid : register(t0);
 StructuredBuffer<MaterialProperties> Materials : register(t1);
 StructuredBuffer<uint> WaterActivity : register(t2);
 StructuredBuffer<uint> WaterDiagnostics : register(t3);
+StructuredBuffer<FireGlowCell> FireGlowField : register(t4);
+StructuredBuffer<AirCell> AirField : register(t5);
 RWTexture2D<unorm float4> OutputTexture : register(u0);
 RWStructuredBuffer<SimulationStatistics> Statistics : register(u1);
 
@@ -59,6 +61,72 @@ float3 FlameSourceColor(GridCell cell, uint seed)
         max(1.0, material.IgnitionTemperature * 0.45));
     float flicker = 0.75 + 0.25 * HashUnitFloat(seed + FrameIndex * 17);
     return lerp(float3(1.0, 0.06, 0.005), float3(1.0, 0.62, 0.03), heat) * flicker;
+}
+
+// Splat the coarse light field over the fine grid. The Powder Toy spreads each
+// coarse cell across 12x12 pixels with a gaussian kernel built from
+// exp(-0.1 * (i*i + j*j)); gathering the neighbourhood per pixel is the same
+// thing computed from the other side, and avoids any scatter or atomics.
+// Renderer::prepare_alpha starts with fireIntensity = 1.0.  A 1.35 multiplier
+// was compensating for the old weak deposit and drove a packed collision front
+// to white before the flame table could age it through orange and red.
+static const float FireGlowIntensity = 1.0;
+
+float3 ReadFireGlow(int2 coordinate, uint glowWidth)
+{
+    FireGlowCell glow = FireGlowField[coordinate.y * glowWidth + coordinate.x];
+    return float3(glow.Red, glow.Green, glow.Blue);
+}
+
+bool IsSmokeCell(GridCell cell)
+{
+    return cell.IsActive != 0 &&
+        (Materials[cell.MaterialIndex].Flags & MaterialFlagSmoke) != 0;
+}
+
+float3 SampleFireGlow(uint2 coordinate, out float smokeCoverage)
+{
+    uint glowWidth = (Width + AirCellSize - 1) / AirCellSize;
+    uint glowHeight = (Height + AirCellSize - 1) / AirCellSize;
+    // This is Renderer::prepare_alpha + render_fire expressed as a gather.
+    // TPT builds fire_alpha by summing exp(-0.1*(i*i+j*j)) for all 4x4 pixels
+    // in the source cell, divides by CELL*CELL, then *adds* every overlapping
+    // coarse fire value.  It is a sum, not a normalized interpolation; the
+    // latter was responsible for an unrelated gain knob and for smoke dots.
+    int2 base = int2(coordinate / AirCellSize);
+    float3 total = 0;
+    float smokeTotal = 0;
+    for (int offsetY = -1; offsetY <= 1; offsetY++)
+    {
+        for (int offsetX = -1; offsetX <= 1; offsetX++)
+        {
+            int2 sample = base + int2(offsetX, offsetY);
+            if (sample.x < 0 || sample.y < 0 ||
+                sample.x >= int(glowWidth) || sample.y >= int(glowHeight))
+            {
+                continue;
+            }
+            float2 delta = float2(int(coordinate.x), int(coordinate.y)) -
+                float2(sample * int(AirCellSize));
+            float weight = 0;
+            [unroll]
+            for (int localY = 0; localY < int(AirCellSize); localY++)
+            {
+                [unroll]
+                for (int localX = 0; localX < int(AirCellSize); localX++)
+                {
+                    float2 kernelOffset = delta - float2(localX, localY);
+                    weight += exp(-0.1 * dot(kernelOffset, kernelOffset));
+                }
+            }
+            weight /= float(AirCellSize * AirCellSize);
+            FireGlowCell glow = FireGlowField[sample.y * glowWidth + sample.x];
+            total += float3(glow.Red, glow.Green, glow.Blue) * weight;
+            smokeTotal += glow.Smoke * weight;
+        }
+    }
+    smokeCoverage = smokeTotal;
+    return total;
 }
 
 float3 FlameGlow(uint2 coordinate)
@@ -151,8 +219,13 @@ float3 HotMaterialIncandescence(GridCell cell)
     {
         return 0;
     }
-    float redHeat = saturate((cell.Temperature - 400.0) / 500.0);
-    float yellowHeat = saturate((cell.Temperature - 700.0) / 500.0);
+    // Накал начинается примерно с 200 градусов, как в The Powder Toy: там
+    // PROP_HOT_GLOW включается при HighTemperature минус 800 K, что для металла
+    // с плавлением около 1000 C даёт ровно 200. Порог в 400 означал, что при
+    // одинаковой фактической температуре TPT уже показывает красный металл,
+    // а у нас он ещё обычный серый.
+    float redHeat = saturate((cell.Temperature - 200.0) / 400.0);
+    float yellowHeat = saturate((cell.Temperature - 600.0) / 500.0);
     return lerp(float3(0.72, 0.015, 0.002), float3(1.0, 0.42, 0.025), yellowHeat) *
         redHeat * 0.48;
 }
@@ -199,7 +272,7 @@ void FluidCoverage(
     GridCell gasCell = Grid[FlattenCoordinate(coordinate)];
     bool visibleGas = gasCell.IsActive != 0 &&
         Materials[gasCell.MaterialIndex].SimulationKind == SimulationKindGas &&
-        !IsFlameCell(gasCell);
+        !IsFlameCell(gasCell) && !IsSmokeCell(gasCell);
     float4 directGasColor = visibleGas ? MaterialColor(gasCell.MaterialIndex) : 0;
     gasCoverage = visibleGas
         ? saturate(gasCell.Mass) * directGasColor.a
@@ -247,23 +320,50 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
+    // Диагностический режим. Каждая попытка настроить огонь на глаз промахивалась
+    // на порядок именно потому, что поле скоростей не видно.
+    if (DebugView == DebugViewAir)
+    {
+        uint airWidth = (Width + AirCellSize - 1) / AirCellSize;
+        uint airHeight = (Height + AirCellSize - 1) / AirCellSize;
+        uint2 airCoordinate = min(
+            coordinate / AirCellSize,
+            uint2(airWidth - 1, airHeight - 1));
+        AirCell air = AirField[airCoordinate.y * airWidth + airCoordinate.x];
+        float up = max(0.0, -air.VelocityY);
+        float down = max(0.0, air.VelocityY);
+        float sideways = abs(air.VelocityX);
+        // Логарифмическая шкала: интересен диапазон от сотых до десятков.
+        float3 debug = float3(
+            saturate(log2(1.0 + up * 8.0) / 6.0),
+            saturate(log2(1.0 + sideways * 8.0) / 6.0),
+            saturate(log2(1.0 + down * 8.0) / 6.0));
+        if (air.Blocked > 0.5)
+        {
+            debug = float3(0.25, 0.25, 0.25);
+        }
+        OutputTexture[coordinate] = float4(debug, 1);
+        return;
+    }
+
     GridCell cell = Grid[FlattenCoordinate(coordinate)];
     float4 color = float4(0.035, 0.041, 0.047, 1);
     bool continuumGas = cell.IsActive != 0 &&
         Materials[cell.MaterialIndex].SimulationKind == SimulationKindGas &&
         !IsFlameCell(cell);
-    if (cell.IsActive != 0 && !continuumGas)
+    // A flame cell is never painted as a pixel of its own. The Powder Toy sets
+    // pixel_mode = PMODE_NONE for FIRE and draws nothing but the accumulated
+    // light field, which is exactly why its flame has no visible grain: what
+    // you see is the glow, not the particles. Painting the cells as well left
+    // a lattice of hard dots showing through the glow.
+    bool flameCell = cell.IsActive != 0 && IsFlameCell(cell);
+    if (cell.IsActive != 0 && !continuumGas && !flameCell)
     {
         color = MaterialColor(cell.MaterialIndex);
         color.rgb += CombustionHeatGlow(cell);
         color.rgb += HotMaterialIncandescence(cell);
-        if (IsFlameCell(cell))
-        {
-            float3 flame = FlameColor(cell, coordinate.x * 17 + coordinate.y * 131);
-            color.rgb = flame + float3(0.28, 0.06, 0.0);
-        }
     }
-    if (cell.IsActive == 0 || continuumGas)
+    if (cell.IsActive == 0 || continuumGas || flameCell)
     {
         float liquidCoverage;
         float3 liquidColor;
@@ -282,15 +382,48 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             // without turning fractional mass into a wide translucent halo.
             float edgeNoise = (HashUnitFloat(
                 FlattenCoordinate(coordinate) ^ 0x6d2b79f5u) - 0.5) * 0.016;
-            float gasOpacity = smoothstep(
+            float gasOpacity = saturate(smoothstep(
                 GasVisibleMassThreshold - 0.02 + edgeNoise,
                 GasVisibleMassThreshold + 0.04 + edgeNoise,
-                gasCoverage) * 0.94;
+                gasCoverage) * 1.35);
             color.rgb = lerp(color.rgb, gasColor, gasOpacity);
         }
     }
-    float3 glow = max(FlameGlow(coordinate), FlameTrail(coordinate));
-    color.rgb = saturate(color.rgb + glow * 0.78);
+    float smokeCoverage;
+    float3 fireGlow = SampleFireGlow(coordinate, smokeCoverage);
+    // SMKE uses FIRE_BLEND to write charcoal RGB into TPT's fire buffer, and
+    // render_fire() then adds that buffer to the video.  SmokeCoverage is this
+    // already blended luminance, not an alpha; treating it as one made dense
+    // smoke converge to a pale opaque blob instead of a soft dark trail.
+    // Solid material still occludes this layer.
+    bool smokeVisibleHere = cell.IsActive == 0 ||
+        Materials[cell.MaterialIndex].SimulationKind == SimulationKindGas;
+    if (smokeVisibleHere && smokeCoverage > 0)
+    {
+        color.rgb += smokeCoverage.xxx;
+    }
+
+    // The flame itself: a gaussian splat of the accumulated light field, added
+    // rather than blended, so overlapping tongues sum towards a white core.
+    // The old FlameGlow/FlameTrail pair is gone. Both painted a fixed shape
+    // around each cell and combined with max(), so two flames were exactly as
+    // bright as one and the result could only ever look like separate sparks.
+    // A FIRE splat is emitted from the gas side of a solid surface.  Letting
+    // the complete additive value pass through the occupied cell made a metal
+    // plate turn into a featureless white ruler even though its own thermal
+    // The plate's colour must be its own temperature-driven hot glow, not a
+    // translucent copy of the saturated FIRE field.  Transmitting 28 percent
+    // through every solid turned a cold metal bar into a white ruler.  TPT's
+    // physical heat transfer warms METL first; that local temperature is what
+    // makes its underside red and then lets it cool again.
+    float fireGlowTransmission = 1.0;
+    if (cell.IsActive != 0 &&
+        Materials[cell.MaterialIndex].SimulationKind == SimulationKindSolid)
+    {
+        fireGlowTransmission = 0.0;
+    }
+    color.rgb += fireGlow * FireGlowIntensity * fireGlowTransmission;
+    color.rgb = saturate(color.rgb);
     OutputTexture[coordinate] = color;
     if (SimulationPhase != 0)
     {
