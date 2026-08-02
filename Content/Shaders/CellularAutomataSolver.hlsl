@@ -1170,10 +1170,10 @@ void ResolveGasObstacleBypass(uint2 coordinate)
         return;
     }
 
-    // MovementPhase first preserves Y and applies the horizontal component of
-    // the planned vector.  The pressure field chooses that direction; the
-    // centred cell (where vx is exactly zero) uses TPT's unbiased diagonal
-    // fallback below.
+    // Ordered collision staircase: X-only first, then the original Y step,
+    // then both rotated diagonals.  A neutral horizontal direction receives
+    // an unbiased ordering; an existing X velocity is otherwise preserved as
+    // the first preference.
     int firstDirection = motion.VelocityX > 0.0001 ? 1 :
         motion.VelocityX < -0.0001 ? -1 :
         (HashUnitFloat(index ^ (FrameIndex * 0x9e3779b9u)) < 0.5 ? -1 : 1);
@@ -1191,73 +1191,44 @@ void ResolveGasObstacleBypass(uint2 coordinate)
         uint sideIndex = FlattenCoordinate(uint2(uint(targetX), coordinate.y));
         GridCell sideCell = Grid[sideIndex];
         uint sideMaterial = sideCell.IsActive != 0 ? sideCell.MaterialIndex : 0;
+        if (GasCanEnter(material, sideMaterial))
+        {
+            StopGasMotion(index);
+            MoveGasCell(index, sideIndex);
+            return;
+        }
+    }
+
+    // Keep the Y-only retry explicit in the staircase.  For an upward solid
+    // collision it normally fails, but it must precede the diagonal turns.
+    if (GasCanEnter(material, aboveCell.MaterialIndex))
+    {
+        StopGasMotion(index);
+        MoveGasCell(index, aboveIndex);
+        return;
+    }
+
+    // Diagonal ordering is random and equiprobable.  The second side is still
+    // tested if the first is occupied, so packing cannot impose a permanent
+    // left/right preference.
+    int firstDiagonalDirection = HashUnitFloat((index * 0x85ebca6bu) ^
+        (FrameIndex * 0xc2b2ae35u)) < 0.5 ? -1 : 1;
+    [unroll]
+    for (int attempt = 0; attempt < 2; attempt++)
+    {
+        int direction = attempt == 0 ? firstDiagonalDirection : -firstDiagonalDirection;
+        int targetX = int(coordinate.x) + direction;
+        if (targetX < 0 || targetX >= int(Width))
+        {
+            continue;
+        }
         uint diagonalIndex = FlattenCoordinate(uint2(uint(targetX), coordinate.y - 1));
         GridCell diagonalCell = Grid[diagonalIndex];
         uint diagonalMaterial = diagonalCell.IsActive != 0 ? diagonalCell.MaterialIndex : 0;
         if (GasCanEnter(material, diagonalMaterial))
         {
-            StopGasMotion(index); // The rotated fallback also consumes velocity.
+            StopGasMotion(index);
             MoveGasCell(index, diagonalIndex);
-            return;
-        }
-
-        if (GasCanEnter(material, sideMaterial))
-        {
-            // A TPT particle keeps trying to complete its blocked upward
-            // segment on every following frame.  In a pixel world that
-            // fractional normal displacement survives the collision; in our
-            // one-slot cellular world StopGasMotion erased it, so a packed
-            // fire front could take only one side-step and then wait eight
-            // ticks to acquire its -0.125 buoyancy again.  Keep the pending
-            // normal segment as OffsetY=-1 and redirect only its tangential
-            // carrier.  This is not a global speed multiplier: it applies
-            // solely while the cell immediately above is solid, and releases
-            // as soon as the flame reaches a plate edge.
-            // Mark the particle as already handled this tick. IntegrateGasMotion
-            // restores the pending normal segment on the next 60 Hz tick only.
-            motion.OffsetY = 0.5;
-            motion.OffsetX = 0.0;
-            motion.VelocityY = 0.0;
-            motion.VelocityX = float(direction) * GasAdvection;
-            GasMotion[index] = motion;
-            MoveGasCell(index, sideIndex);
-            return;
-        }
-
-        // The immediate side slot can be occupied by another FIRE cell from
-        // the same compact plume.  TPT's continuous particles pass that
-        // crowded position on subsequent movement segments; a one-slot CA
-        // otherwise leaves every inner cell permanently blocked behind the
-        // edge cell. Transfer to the first short, unobstructed gap along the
-        // *same* surface. This is mass-conserving (MoveGasCell swaps with the
-        // empty slot), cannot cross a solid, and is used only by the collision
-        // fallback -- it is not a general gas teleport or a speed multiplier.
-        for (uint distance = 2; distance <= GasSurfaceQueueSearch; distance++)
-        {
-            int queueX = int(coordinate.x) + direction * int(distance);
-            if (queueX < 0 || queueX >= int(Width))
-            {
-                break;
-            }
-            uint queueIndex = FlattenCoordinate(uint2(uint(queueX), coordinate.y));
-            GridCell queueCell = Grid[queueIndex];
-            uint queueMaterial = queueCell.IsActive != 0 ? queueCell.MaterialIndex : 0;
-            uint queueKind = CellKindFromMaterial(queueMaterial);
-            if (queueKind == SimulationKindSolid)
-            {
-                break;
-            }
-            if (!GasCanEnter(material, queueMaterial))
-            {
-                continue;
-            }
-
-            motion.OffsetY = 0.5;
-            motion.OffsetX = 0.0;
-            motion.VelocityY = 0.0;
-            motion.VelocityX = float(direction) * GasAdvection;
-            GasMotion[index] = motion;
-            MoveGasCell(index, queueIndex);
             return;
         }
     }

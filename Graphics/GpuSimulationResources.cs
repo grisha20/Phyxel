@@ -36,6 +36,7 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuStructuredBuffer<AirCell> AirScratch { get; init; }
     public required Buffer AirStaging { get; init; }
     public required GpuStructuredBuffer<GasMotionState> GasMotion { get; init; }
+    public required Buffer GasMotionStaging { get; init; }
     public required Buffer FireGlowConstants { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlow { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlowScratch { get; init; }
@@ -188,6 +189,7 @@ public sealed class GpuSimulationResources : IDisposable
         Air.Dispose();
         AirStaging.Dispose();
         GasMotion.Dispose();
+        GasMotionStaging.Dispose();
         AirConstants.Dispose();
         ContactTransitionConstants.Dispose();
         foreach (GpuPhaseSummaryReadbackSlot slot in PhaseSummaryReadbackSlots)

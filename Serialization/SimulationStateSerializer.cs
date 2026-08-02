@@ -32,7 +32,12 @@ public sealed record SimulationSceneState(
 // persisted world format: saved worlds still contain only the 40-byte GridCell
 // grid.  Acceptance scenarios use it to report the coarse pressure field that
 // was present at the same capture point as the grid.
-public sealed record SimulationWorldSnapshot(int Width, int Height, byte[] Grid, byte[]? Air = null);
+public sealed record SimulationWorldSnapshot(
+    int Width,
+    int Height,
+    byte[] Grid,
+    byte[]? Air = null,
+    byte[]? GasMotion = null);
 
 public sealed record LoadedSimulationScene(
     SimulationSceneState State,
@@ -85,6 +90,7 @@ public sealed class SimulationStateSerializer
         }
         resources.Context.CopyResource(resources.Grid.ReadBuffer, resources.GridStaging);
         resources.Context.CopyResource(resources.Air.Buffer, resources.AirStaging);
+        resources.Context.CopyResource(resources.GasMotion.Buffer, resources.GasMotionStaging);
         resources.Context.End(resources.SceneTransferQuery);
         resources.Context.Flush();
         capturePending = true;
@@ -118,7 +124,8 @@ public sealed class SimulationStateSerializer
             resources.Width,
             resources.Height,
             ReadBuffer(resources.Context, resources.GridStaging),
-            ReadBuffer(resources.Context, resources.AirStaging));
+            ReadBuffer(resources.Context, resources.AirStaging),
+            ReadBuffer(resources.Context, resources.GasMotionStaging));
         capturePending = false;
         return true;
     }

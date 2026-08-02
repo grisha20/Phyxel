@@ -24,7 +24,9 @@ public sealed class AcceptanceRegressionHarness
     private MaterialRegistry? materialRegistry;
     private readonly List<ThermalAcceptanceCheckpoint> thermalCheckpoints = [];
     private readonly TemperatureProbeAcceptanceTrace temperatureProbeTrace = new();
+    private readonly AirPressureTimeSeries airPressureTrace = new();
     private readonly PhaseAcceptanceController phaseAcceptance;
+    private readonly uint scenarioSeed;
 
     public AcceptanceRegressionHarness()
     {
@@ -95,6 +97,7 @@ public sealed class AcceptanceRegressionHarness
             "combustion" or "combustion_chain" => AcceptanceScenarioMode.CombustionChain,
             "combustion_quench" or "water_quench" => AcceptanceScenarioMode.CombustionQuench,
             "fire_obstacle" or "fire_plate" => AcceptanceScenarioMode.FireObstacle,
+            "fire_open" or "fire_no_plate" => AcceptanceScenarioMode.FireOpen,
             "furnace" or "fire_furnace" => AcceptanceScenarioMode.Furnace,
             "steam_self_cooling" => AcceptanceScenarioMode.SteamSelfCooling,
             "brush_empty_only" => AcceptanceScenarioMode.BrushEmptyOnly,
@@ -107,6 +110,10 @@ public sealed class AcceptanceRegressionHarness
             "steam_cloud_temperature" or "steam_smooth_cloud" => AcceptanceScenarioMode.SteamCloudTemperature,
             _ => AcceptanceScenarioMode.None
         };
+        scenarioSeed = uint.TryParse(Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_RUN_SEED"),
+            out uint parsedScenarioSeed)
+            ? parsedScenarioSeed
+            : 0;
         phaseAcceptance = new PhaseAcceptanceController(Mode);
     }
 
@@ -186,6 +193,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.CombustionChain => 900,
                 AcceptanceScenarioMode.CombustionQuench => 900,
                 AcceptanceScenarioMode.FireObstacle => 360,
+                AcceptanceScenarioMode.FireOpen => 360,
                 AcceptanceScenarioMode.Furnace => 600,
                 AcceptanceScenarioMode.SteamSelfCooling => uint.MaxValue,
                 AcceptanceScenarioMode.BrushEmptyOnly => 7,
@@ -208,7 +216,7 @@ public sealed class AcceptanceRegressionHarness
 
     public IReadOnlyList<BrushDrawCommand> CreateCommands(uint frame)
     {
-        return AcceptanceRegressionScenario.CreateCommands(Mode, frame, materialRegistry);
+        return AcceptanceRegressionScenario.CreateCommands(Mode, frame, materialRegistry, scenarioSeed);
     }
 
     public SimulationWorldSnapshot? CreateInitialWorld(int width, int height) =>
@@ -282,6 +290,23 @@ public sealed class AcceptanceRegressionHarness
         else if (Mode == AcceptanceScenarioMode.TemperatureTool)
         {
             temperatureProbeTrace.ObserveTemperatureTool(frame, result);
+        }
+    }
+
+    public void RecordAirPressureTrace(uint frame, GpuSimulationResources resources)
+    {
+        int airY = Mode switch
+        {
+            // Fine y=107 directly below the plate maps to coarse y=26.
+            AcceptanceScenarioMode.FireObstacle => 26,
+            // Source centre is y=170; coarse y=41 (fine 164..167) is the
+            // cell immediately above its brush footprint.
+            AcceptanceScenarioMode.FireOpen => 41,
+            _ => -1
+        };
+        if (airY >= 0)
+        {
+            airPressureTrace.Record(frame, resources, airY);
         }
     }
 
@@ -614,6 +639,18 @@ public sealed class AcceptanceRegressionHarness
             phaseAcceptance.Checkpoints,
             ArtifactDirectory,
             out report);
+        string? traceName = Mode switch
+        {
+            AcceptanceScenarioMode.FireObstacle => "fire-obstacle-pressure-trace.csv",
+            AcceptanceScenarioMode.FireOpen => "fire-open-pressure-trace.csv",
+            _ => null
+        };
+        if (traceName is not null)
+        {
+            string tracePath = airPressureTrace.WriteCsv(ArtifactDirectory, traceName);
+            report += Environment.NewLine +
+                $"PHYXEL_AIR_PRESSURE_TRACE samples=300 path={tracePath}";
+        }
         report += Environment.NewLine +
             $"PHYXEL_ACCEPTANCE_METRICS size={snapshot.Width}x{snapshot.Height} fps={framesPerSecond:0.0} " +
             $"thermalGpuMs={thermalGpuTiming.AverageMilliseconds:0.0000}/" +

@@ -70,6 +70,7 @@ public enum AcceptanceScenarioMode
     CombustionChain,
     CombustionQuench,
     FireObstacle,
+    FireOpen,
     Furnace,
     SteamSelfCooling,
     BrushEmptyOnly,
@@ -87,7 +88,8 @@ public static class AcceptanceRegressionScenario
     public static IReadOnlyList<BrushDrawCommand> CreateCommands(
         AcceptanceScenarioMode mode,
         uint frame,
-        MaterialRegistry? materialRegistry = null)
+        MaterialRegistry? materialRegistry = null,
+        uint scenarioSeed = 0)
     {
         if (materialRegistry is null)
         {
@@ -134,7 +136,8 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.TemperatureProbeGpu => [],
             AcceptanceScenarioMode.CombustionChain => CreateCombustionChain(frame),
             AcceptanceScenarioMode.CombustionQuench => CreateCombustionQuench(frame),
-            AcceptanceScenarioMode.FireObstacle => CreateFireObstacle(frame),
+            AcceptanceScenarioMode.FireObstacle => CreateFireObstacle(frame, scenarioSeed),
+            AcceptanceScenarioMode.FireOpen => CreateFireOpen(frame),
             AcceptanceScenarioMode.Furnace => CreateFurnace(frame),
             AcceptanceScenarioMode.SteamSelfCooling => [],
             AcceptanceScenarioMode.SteamCloudTemperature =>
@@ -207,7 +210,7 @@ public static class AcceptanceRegressionScenario
         return [];
     }
 
-    private static IReadOnlyList<BrushDrawCommand> CreateFireObstacle(uint frame)
+    private static IReadOnlyList<BrushDrawCommand> CreateFireObstacle(uint frame, uint scenarioSeed)
     {
         List<BrushDrawCommand> commands = [];
         if (frame == 0)
@@ -223,9 +226,24 @@ public static class AcceptanceRegressionScenario
             // expire before reaching the plate and does not test a furnace.
             BrushDrawCommand flame = Create(240, 170, 5, materials.Fire, 0, 0);
             flame.Density = 0.82f;
+            flame.Seed ^= scenarioSeed;
             commands.Add(flame);
         }
         return commands;
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateFireOpen(uint frame)
+    {
+        if (frame >= 360)
+        {
+            return [];
+        }
+
+        // Intentionally identical source to fire_obstacle, without any plate
+        // or other solid.  This isolates the source/air feedback loop.
+        BrushDrawCommand flame = Create(240, 170, 5, materials.Fire, 0, 0);
+        flame.Density = 0.82f;
+        return [flame];
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateFurnace(uint frame)

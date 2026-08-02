@@ -358,7 +358,7 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
         // its incidental one-sided hop back into x velocity created a runaway
         // hook.  Keep lateral air sourced by the pressure gradient below; it
         // is the deterministic, mirror-symmetric part of Air::update_air.
-        float targetX = 0.0;
+        float targetX = meanVelocityX * (AirParticleDrag / (1.0 - AirParticleLoss));
         float targetY = meanVelocityY * (AirParticleDrag / (1.0 - AirParticleLoss));
         cell.VelocityX = clamp(
             cell.VelocityX * retained + targetX * (1.0 - retained),

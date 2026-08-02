@@ -222,6 +222,7 @@ public sealed class PhyxelGame : Game
                 settings,
                 commandEncoder.Encode(commands),
                 acceptance.AdjustElapsedSeconds(input.DeltaSeconds));
+            acceptance.RecordAirPressureTrace(acceptanceFrame, currentResources);
             acceptance.CaptureScreenshot(currentResources, frameIndex);
             debugProbe.Update(currentResources, frameIndex++);
             Point? probeCoordinate = acceptance.OwnsTemperatureProbe
