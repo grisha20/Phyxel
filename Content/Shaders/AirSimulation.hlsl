@@ -119,7 +119,7 @@ static const float AirConvectionMaximum = 0.01;
 static const float AirParticleLoss = 0.97;
 // Must match GasMaximumSpeed in CellularAutomataSolver.hlsl. Air only receives
 // the velocity the cellular FIRE/SMKE carrier can actually realise.
-static const float AirGasMaximumSpeed = 1.0;
+static const float AirGasMaximumSpeed = 7.2;
 
 // The same carrier has a stronger feedback loop than TPT's independent
 // particles, so keep this just below the literal 0.04 to avoid a pulse/ball.
@@ -140,7 +140,7 @@ static const float GasAdvectionResponse = 0.9;
 // entire world. Fire in a saturated field is pushed every which way, which is
 // exactly the ball that would not go away. A cell cannot outrun its own passes,
 // so neither can the air it drags.
-static const float FlameMaximumSpeed = 1.0;
+static const float FlameMaximumSpeed = 7.2;
 static const float AirMaximumPressure = 256.0;
 static const float AirMaximumVelocity = 64.0;
 static const float AirMaximumAdvectionDistance = 2.0;

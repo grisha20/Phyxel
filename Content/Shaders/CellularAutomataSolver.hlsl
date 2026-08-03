@@ -94,11 +94,10 @@ static const float GasLateralAdvection = 0.9;
 
 // Gravity -0.1 divided by (1 - Loss) = 0.8. What a candle does in still air.
 static const float FlameOwnRise = 0.125;
-// One simulation cell per 60 Hz tick is the largest meaningful velocity for
-// this one-slot carrier.  The former 7.2 cap was inherited from the number of
-// checkerboard passes, not from TPT's particle velocity; it made FIRE cross a
-// plate before its lifetime colour could age and read as a white plasma jet.
-static const float GasMaximumSpeed = 1.0;
+// The carrier can consume one cell in each of eight motion passes. Each pass
+// admits its intended move with a maximum 0.9 probability, so 8 * 0.9 = 7.2
+// cells per fixed tick is the structural ceiling. This is not a visual cap.
+static const float GasMaximumSpeed = 7.2;
 // A cellular row has one slot per pixel, unlike TPT's particles with
 // independent fractional coordinates.  At a solid surface a compact FIRE
 // column therefore needs a very short queue transfer to hand its leading
