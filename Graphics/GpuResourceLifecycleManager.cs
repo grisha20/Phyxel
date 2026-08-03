@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -149,6 +149,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         Buffer airConstants = CreateConstantBuffer<AirSimulationConstants>();
         GpuStructuredBuffer<AirCell> air = new(Device, airCellCount);
         GpuStructuredBuffer<AirCell> airScratch = new(Device, airCellCount);
+        GpuStructuredBuffer<GasAirImpulse> gasAirImpulse = new(Device, airCellCount);
         Buffer airStaging = CreateStagingBuffer(air.Buffer.Description.SizeInBytes);
         GpuStructuredBuffer<GasMotionState> gasMotion = new(Device, cellCount);
         Buffer gasMotionStaging = CreateStagingBuffer(gasMotion.Buffer.Description.SizeInBytes);
@@ -359,6 +360,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             AirConstants = airConstants,
             Air = air,
             AirScratch = airScratch,
+            GasAirImpulse = gasAirImpulse,
             AirStaging = airStaging,
             GasMotion = gasMotion,
             GasMotionStaging = gasMotionStaging,

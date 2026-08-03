@@ -33,6 +33,14 @@ struct GasMotionState
     float OffsetY;
 };
 
+// Fixed-point, per-air-cell momentum produced by actual gas-cell steps during
+// the previous gas tick.  One integer unit is AirParticleDrag (0.04).
+struct GasAirImpulse
+{
+    int X;
+    int Y;
+};
+
 // One cell of the persistent fire light field, on the same coarse grid as the
 // air. Kept at 16 bytes for the same alignment reasons as AirCell.
 struct FireGlowCell

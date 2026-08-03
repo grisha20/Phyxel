@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace Phyxel.Physics;
 
@@ -43,6 +43,18 @@ public struct GasMotionState
     public float VelocityY;
     public float OffsetX;
     public float OffsetY;
+}
+
+/// <summary>
+/// Fixed-point impulse written for every successful gas-cell step and consumed
+/// by the coarse air solver on its following tick. One unit is an AirDrag of
+/// 0.04; keeping it integral permits atomic writes from the cellular shader.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct GasAirImpulse
+{
+    public int X;
+    public int Y;
 }
 
 /// <summary>

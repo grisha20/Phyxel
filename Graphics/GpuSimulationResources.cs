@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Physics;
 using SharpDX.Direct3D11;
@@ -34,6 +34,7 @@ public sealed class GpuSimulationResources : IDisposable
     public required Buffer AirConstants { get; init; }
     public required GpuStructuredBuffer<AirCell> Air { get; init; }
     public required GpuStructuredBuffer<AirCell> AirScratch { get; init; }
+    public required GpuStructuredBuffer<GasAirImpulse> GasAirImpulse { get; init; }
     public required Buffer AirStaging { get; init; }
     public required GpuStructuredBuffer<GasMotionState> GasMotion { get; init; }
     public required Buffer GasMotionStaging { get; init; }
@@ -189,6 +190,7 @@ public sealed class GpuSimulationResources : IDisposable
         FireGlowConstants.Dispose();
         AirScratch.Dispose();
         Air.Dispose();
+        GasAirImpulse.Dispose();
         AirStaging.Dispose();
         GasMotion.Dispose();
         GasMotionStaging.Dispose();

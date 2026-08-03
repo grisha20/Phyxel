@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Runtime.InteropServices;
 using Phyxel.Core;
 using Phyxel.Materials;
@@ -627,7 +627,7 @@ public sealed class SimulationDispatchCoordinator
             {
                 gasMotionAccumulator -= FixedAirStep;
                 gasMotionTicks++;
-                DispatchGasMotion(resources, ref constants);
+                DispatchGasMotion(resources, ref constants, settings.AirSimulation);
             }
             if (gasMotionTicks > 0)
             {
@@ -1348,6 +1348,7 @@ public sealed class SimulationDispatchCoordinator
         resources.Context.ClearUnorderedAccessView(resources.PathBlockerMasks.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.CellMaterials.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.GasMotion.UnorderedView, zero);
+        resources.Context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, zero);
         foreach (UnorderedAccessView view in resources.Statistics.UnorderedAccessViews)
         {
             resources.Context.ClearUnorderedAccessView(view, zero);
@@ -1561,12 +1562,12 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetShaderResources(
             0,
             resources.Materials.View,
-            resources.Grid.ReadView,
-            resources.GasMotion.View);
+            resources.Grid.ReadView);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Air.UnorderedView,
-            resources.AirScratch.UnorderedView);
+            resources.AirScratch.UnorderedView,
+            resources.GasAirImpulse.UnorderedView);
 
         int groupsX = DivideRoundUp(resources.AirWidth, 8);
         int groupsY = DivideRoundUp(resources.AirHeight, 8);
@@ -1577,7 +1578,7 @@ public sealed class SimulationDispatchCoordinator
         RunAirPass(context, resources.AirAdvectShader, groupsX, groupsY);
         RunAirPass(context, resources.AirCommitShader, groupsX, groupsY);
 
-        Unbind(context, 3, 2);
+        Unbind(context, 2, 3);
     }
 
     private static void RunAirPass(
@@ -1744,7 +1745,8 @@ public sealed class SimulationDispatchCoordinator
 
     private void DispatchGasMotion(
         GpuSimulationResources resources,
-        ref SimulationFrameConstants constants)
+        ref SimulationFrameConstants constants,
+        bool airSimulationEnabled)
     {
         DeviceContext context = resources.Context;
         context.ComputeShader.Set(resources.CellularAutomataShader);
@@ -1764,6 +1766,11 @@ public sealed class SimulationDispatchCoordinator
             resources.GasObstacleBypassStatistics.UnorderedView,
             new RawInt4(0, 0, 0, 0));
         context.ComputeShader.SetUnorderedAccessView(7, resources.GasObstacleBypassStatistics.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(8, resources.GasAirImpulse.UnorderedView);
+        if (!airSimulationEnabled)
+        {
+            context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, new RawInt4(0, 0, 0, 0));
+        }
 
         uint previousPhase = constants.SimulationPhase;
         // TPT updates vx/vy once per frame, then its fractional position is
@@ -1849,7 +1856,7 @@ public sealed class SimulationDispatchCoordinator
         }
         constants.SimulationPhase = previousPhase;
         constants.GasSubStep = 0;
-        Unbind(context, 2, 7);
+        Unbind(context, 2, 9);
     }
 
     private static void DispatchAirClear(GpuSimulationResources resources)
@@ -1877,6 +1884,7 @@ public sealed class SimulationDispatchCoordinator
             0,
             resources.Air.UnorderedView,
             resources.AirScratch.UnorderedView);
+        context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, new RawInt4(0, 0, 0, 0));
         context.Dispatch(
             DivideRoundUp(resources.AirWidth, 8),
             DivideRoundUp(resources.AirHeight, 8),

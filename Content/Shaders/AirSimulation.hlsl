@@ -32,9 +32,9 @@ cbuffer AirSimulationConstants : register(b0)
 
 StructuredBuffer<MaterialProperties> AirMaterials : register(t0);
 StructuredBuffer<GridCell> AirGrid : register(t1);
-StructuredBuffer<GasMotionState> AirGasMotion : register(t2);
 RWStructuredBuffer<AirCell> Air : register(u0);
 RWStructuredBuffer<AirCell> AirScratch : register(u1);
+RWStructuredBuffer<GasAirImpulse> AirGasImpulse : register(u2);
 
 // Air::make_kernel builds a normalised 3x3 gaussian with exp(-2*(i*i+j*j)).
 // Precomputed here so the shader does not recompute it per cell.
@@ -215,6 +215,10 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     uint index = AirIndex(coordinate);
     AirCell cell = Air[index];
+    GasAirImpulse gasImpulse = AirGasImpulse[index];
+    // The cellular pass writes impulses after this air pass. Consume the prior
+    // tick exactly once, including when this cell has since become empty.
+    AirGasImpulse[index] = (GasAirImpulse)0;
 
     uint left = coordinate.x * AirCellSize;
     uint top = coordinate.y * AirCellSize;
@@ -223,8 +227,6 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint flameCount = 0;
     uint fireOrSmokeCount = 0;
     uint gasCount = 0;
-    float gasVelocityX = 0;
-    float gasVelocityY = 0;
     float heat = 0;
 
     for (uint offsetY = 0; offsetY < AirCellSize; offsetY++)
@@ -250,16 +252,7 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
             MaterialProperties material = AirMaterials[source.MaterialIndex];
             if (material.SimulationKind == SimulationKindGas)
             {
-                // The deterministic carrier owns the actual gas velocity.
-                // TPT applies AirLoss/AirDrag to FIRE and SMKE alike, so the
-                // air must see that persistent velocity rather than a one-shot
-                // cellular move marker.
-                GasMotionState motion = AirGasMotion[y * AirGridWidth + x];
                 gasCount++;
-                gasVelocityX += clamp(motion.VelocityX,
-                    -AirGasMaximumSpeed, AirGasMaximumSpeed);
-                gasVelocityY += clamp(motion.VelocityY,
-                    -AirGasMaximumSpeed, AirGasMaximumSpeed);
                 if ((material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0)
                 {
                     fireOrSmokeCount++;
@@ -332,43 +325,18 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
         -AirMaximumVelocity,
         AirMaximumVelocity);
 
-    // Drag: a rising flame pulls the air along with it. The Powder Toy applies
-    //     vy = vy*AirLoss + AirDrag*vy_particle
-    // once per particle, with AirLoss 0.97 and AirDrag 0.04 for FIRE. Applying
-    // it N times in closed form gives the expressions below.
-    //
-    // This is the feedback that builds a column, and leaving it out is why the
-    // flame stayed a ball. Convection alone cannot win: the gaussian kernel in
-    // the advection pass keeps only 0.619 of an isolated cell's velocity each
-    // tick, a 38 percent loss, while the capped convection term adds at most
-    // 0.01 -- so velocity settled near 0.026 and the air never moved. Drag
-    // instead grows with the flame's own speed, so the column feeds itself.
-    if (gasCount > 0)
-    {
-        float retained = pow(AirParticleLoss, float(gasCount));
-        float meanVelocityX = gasVelocityX / float(gasCount);
-        float meanVelocityY = gasVelocityY / float(gasCount);
-        // Closed form of TPT's per-particle AirLoss/AirDrag update.  Do not
-        // add a separate "flame rise" target here: that created vertical
-        // velocity even after a particle had collided with the plate, erased
-        // the below/above discontinuity, and therefore erased the pressure
-        // gradient that turns the flow sideways.
-        // On TPT's sub-pixel particle set this term averages to zero for a
-        // centred brush.  A Phyxel 4x4 slot is a packed occupancy cell: feeding
-        // its incidental one-sided hop back into x velocity created a runaway
-        // hook.  Keep lateral air sourced by the pressure gradient below; it
-        // is the deterministic, mirror-symmetric part of Air::update_air.
-        float targetX = meanVelocityX * (AirParticleDrag / (1.0 - AirParticleLoss));
-        float targetY = meanVelocityY * (AirParticleDrag / (1.0 - AirParticleLoss));
-        cell.VelocityX = clamp(
-            cell.VelocityX * retained + targetX * (1.0 - retained),
-            -AirMaximumVelocity,
-            AirMaximumVelocity);
-        cell.VelocityY = clamp(
-            cell.VelocityY * retained + targetY * (1.0 - retained),
-            -AirMaximumVelocity,
-            AirMaximumVelocity);
-    }
+    // Apply TPT-style drag only for a successful particle displacement.  Each
+    // fine-cell step contributes the fixed AirDrag 0.04 in its actual direction;
+    // a particle stalled against metal therefore cannot drive the air forever.
+    float retained = pow(AirParticleLoss, float(gasCount));
+    cell.VelocityX = clamp(
+        cell.VelocityX * retained + float(gasImpulse.X) * AirParticleDrag,
+        -AirMaximumVelocity,
+        AirMaximumVelocity);
+    cell.VelocityY = clamp(
+        cell.VelocityY * retained + float(gasImpulse.Y) * AirParticleDrag,
+        -AirMaximumVelocity,
+        AirMaximumVelocity);
 
     cell.Pressure = clamp(cell.Pressure, -AirMaximumPressure, AirMaximumPressure);
     Air[index] = cell;

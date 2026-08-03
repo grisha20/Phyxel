@@ -1,4 +1,4 @@
-#include "PhysicsShared.hlsli"
+﻿#include "PhysicsShared.hlsli"
 
 StructuredBuffer<MaterialProperties> Materials : register(t0);
 StructuredBuffer<AirCell> Air : register(t1);
@@ -17,6 +17,7 @@ RWStructuredBuffer<WaterPressureRouteData> WaterPressureRoutes : register(u4);
 RWStructuredBuffer<WaterPressureRouteData> WaterPressureRouteScratch : register(u5);
 RWStructuredBuffer<GasMotionState> GasMotion : register(u6);
 RWStructuredBuffer<uint> GasObstacleBypassStatistics : register(u7);
+RWStructuredBuffer<GasAirImpulse> GasAirImpulses : register(u8);
 
 static const uint SandRestThreshold = 30;
 static const uint FluidRestThreshold = 60;
@@ -242,6 +243,35 @@ void SwapCells(uint firstIndex, uint secondIndex, float horizontal, float vertic
 // returned on the next tick, making obstacle bypass visually cancel itself.
 // Keep the generic helper untouched for water/granular physics and give gas an
 // explicit source -> target operation.
+// TPT's AirDrag is applied when a particle actually traverses space. Record
+// the successful one-cell carrier step in the source air slot; CSInject
+// consumes this fixed-point impulse on the following air tick.
+void RecordGasAirStep(uint sourceIndex, uint targetIndex)
+{
+    int sourceX = int(sourceIndex % Width);
+    int sourceY = int(sourceIndex / Width);
+    int targetX = int(targetIndex % Width);
+    int targetY = int(targetIndex / Width);
+    int stepX = targetX - sourceX;
+    int stepY = targetY - sourceY;
+    if (stepX == 0 && stepY == 0)
+    {
+        return;
+    }
+
+    uint airWidth = (Width + AirCellSize - 1) / AirCellSize;
+    uint airIndex = (uint(sourceY) / AirCellSize) * airWidth + uint(sourceX) / AirCellSize;
+    int ignored;
+    if (stepX != 0)
+    {
+        InterlockedAdd(GasAirImpulses[airIndex].X, stepX, ignored);
+    }
+    if (stepY != 0)
+    {
+        InterlockedAdd(GasAirImpulses[airIndex].Y, stepY, ignored);
+    }
+}
+
 void MoveGasCell(
     uint sourceIndex,
     uint targetIndex)
@@ -250,6 +280,8 @@ void MoveGasCell(
     GridCell displaced = Grid[targetIndex];
     GasMotionState moverMotion = GasMotion[sourceIndex];
     GasMotionState displacedMotion = GasMotion[targetIndex];
+
+    RecordGasAirStep(sourceIndex, targetIndex);
 
     mover.RestFrames = 0;
     displaced.RestFrames = 0;
