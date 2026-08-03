@@ -1173,33 +1173,25 @@ void ResolveGasObstacleBypass(uint2 coordinate)
     uint ignored;
     InterlockedAdd(GasObstacleBypassStatistics[0], 1, ignored);
 
-    // Ordered collision staircase: X-only first, then the original Y step,
-    // then both rotated diagonals.  A neutral horizontal direction receives
-    // an unbiased ordering; an existing X velocity is otherwise preserved as
-    // the first preference.
-    int firstDirection = motion.VelocityX > 0.0001 ? 1 :
-        motion.VelocityX < -0.0001 ? -1 :
-        (HashUnitFloat(index ^ (FrameIndex * 0x9e3779b9u)) < 0.5 ? -1 : 1);
-
-    [unroll]
-    for (int attempt = 0; attempt < 2; attempt++)
+    // TPT only attempts the X leg when the blocked particle actually had an
+    // X intention.  A purely vertical collision must not acquire a random
+    // sideways move here; its sign is exactly the sign of VelocityX.
+    if (abs(motion.VelocityX) > 0.0001)
     {
-        int direction = attempt == 0 ? firstDirection : -firstDirection;
+        int direction = motion.VelocityX > 0.0 ? 1 : -1;
         int targetX = int(coordinate.x) + direction;
-        if (targetX < 0 || targetX >= int(Width))
+        if (targetX >= 0 && targetX < int(Width))
         {
-            continue;
-        }
-
-        uint sideIndex = FlattenCoordinate(uint2(uint(targetX), coordinate.y));
-        GridCell sideCell = Grid[sideIndex];
-        uint sideMaterial = sideCell.IsActive != 0 ? sideCell.MaterialIndex : 0;
-        if (GasCanEnter(material, sideMaterial))
-        {
-            InterlockedAdd(GasObstacleBypassStatistics[1], 1, ignored);
-            StopGasMotion(index);
-            MoveGasCell(index, sideIndex);
-            return;
+            uint sideIndex = FlattenCoordinate(uint2(uint(targetX), coordinate.y));
+            GridCell sideCell = Grid[sideIndex];
+            uint sideMaterial = sideCell.IsActive != 0 ? sideCell.MaterialIndex : 0;
+            if (GasCanEnter(material, sideMaterial))
+            {
+                InterlockedAdd(GasObstacleBypassStatistics[1], 1, ignored);
+                StopGasMotion(index);
+                MoveGasCell(index, sideIndex);
+                return;
+            }
         }
     }
 
