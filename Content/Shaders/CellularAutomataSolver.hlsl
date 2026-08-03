@@ -16,6 +16,7 @@ RWStructuredBuffer<uint> CellMaterials : register(u3);
 RWStructuredBuffer<WaterPressureRouteData> WaterPressureRoutes : register(u4);
 RWStructuredBuffer<WaterPressureRouteData> WaterPressureRouteScratch : register(u5);
 RWStructuredBuffer<GasMotionState> GasMotion : register(u6);
+RWStructuredBuffer<uint> GasObstacleBypassStatistics : register(u7);
 
 static const uint SandRestThreshold = 30;
 static const uint FluidRestThreshold = 60;
@@ -1169,6 +1170,8 @@ void ResolveGasObstacleBypass(uint2 coordinate)
     {
         return;
     }
+    uint ignored;
+    InterlockedAdd(GasObstacleBypassStatistics[0], 1, ignored);
 
     // Ordered collision staircase: X-only first, then the original Y step,
     // then both rotated diagonals.  A neutral horizontal direction receives
@@ -1193,6 +1196,7 @@ void ResolveGasObstacleBypass(uint2 coordinate)
         uint sideMaterial = sideCell.IsActive != 0 ? sideCell.MaterialIndex : 0;
         if (GasCanEnter(material, sideMaterial))
         {
+            InterlockedAdd(GasObstacleBypassStatistics[1], 1, ignored);
             StopGasMotion(index);
             MoveGasCell(index, sideIndex);
             return;
@@ -1203,6 +1207,7 @@ void ResolveGasObstacleBypass(uint2 coordinate)
     // collision it normally fails, but it must precede the diagonal turns.
     if (GasCanEnter(material, aboveCell.MaterialIndex))
     {
+        InterlockedAdd(GasObstacleBypassStatistics[2], 1, ignored);
         StopGasMotion(index);
         MoveGasCell(index, aboveIndex);
         return;
@@ -1227,11 +1232,13 @@ void ResolveGasObstacleBypass(uint2 coordinate)
         uint diagonalMaterial = diagonalCell.IsActive != 0 ? diagonalCell.MaterialIndex : 0;
         if (GasCanEnter(material, diagonalMaterial))
         {
+            InterlockedAdd(GasObstacleBypassStatistics[3], 1, ignored);
             StopGasMotion(index);
             MoveGasCell(index, diagonalIndex);
             return;
         }
     }
+    InterlockedAdd(GasObstacleBypassStatistics[4], 1, ignored);
 }
 
 void ResolveGasHorizontalPair(uint2 leftCoordinate)

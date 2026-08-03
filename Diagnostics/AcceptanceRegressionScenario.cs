@@ -137,7 +137,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.CombustionChain => CreateCombustionChain(frame),
             AcceptanceScenarioMode.CombustionQuench => CreateCombustionQuench(frame),
             AcceptanceScenarioMode.FireObstacle => CreateFireObstacle(frame, scenarioSeed),
-            AcceptanceScenarioMode.FireOpen => CreateFireOpen(frame),
+            AcceptanceScenarioMode.FireOpen => CreateFireOpen(frame, scenarioSeed),
             AcceptanceScenarioMode.Furnace => CreateFurnace(frame),
             AcceptanceScenarioMode.SteamSelfCooling => [],
             AcceptanceScenarioMode.SteamCloudTemperature =>
@@ -232,7 +232,7 @@ public static class AcceptanceRegressionScenario
         return commands;
     }
 
-    private static IReadOnlyList<BrushDrawCommand> CreateFireOpen(uint frame)
+    private static IReadOnlyList<BrushDrawCommand> CreateFireOpen(uint frame, uint scenarioSeed)
     {
         if (frame >= 360)
         {
@@ -243,6 +243,7 @@ public static class AcceptanceRegressionScenario
         // or other solid.  This isolates the source/air feedback loop.
         BrushDrawCommand flame = Create(240, 170, 5, materials.Fire, 0, 0);
         flame.Density = 0.82f;
+        flame.Seed ^= scenarioSeed;
         return [flame];
     }
 

@@ -152,6 +152,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         Buffer airStaging = CreateStagingBuffer(air.Buffer.Description.SizeInBytes);
         GpuStructuredBuffer<GasMotionState> gasMotion = new(Device, cellCount);
         Buffer gasMotionStaging = CreateStagingBuffer(gasMotion.Buffer.Description.SizeInBytes);
+        GpuStructuredBuffer<GasObstacleBypassStatistics> gasObstacleBypassStatistics = new(Device, 1);
+        Buffer gasObstacleBypassStatisticsStaging =
+            CreateStagingBuffer(gasObstacleBypassStatistics.Buffer.Description.SizeInBytes);
         // The fire light field shares the air resolution: one coarse cell per
         // AirCellSize square, exactly like fire_r/g/b in The Powder Toy.
         Buffer fireGlowConstants = CreateConstantBuffer<FireGlowConstants>();
@@ -359,6 +362,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             AirStaging = airStaging,
             GasMotion = gasMotion,
             GasMotionStaging = gasMotionStaging,
+            GasObstacleBypassStatistics = gasObstacleBypassStatistics,
+            GasObstacleBypassStatisticsStaging = gasObstacleBypassStatisticsStaging,
             FireGlowConstants = fireGlowConstants,
             FireGlow = fireGlow,
             FireGlowScratch = fireGlowScratch,

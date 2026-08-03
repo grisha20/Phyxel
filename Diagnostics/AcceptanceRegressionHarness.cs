@@ -25,6 +25,7 @@ public sealed class AcceptanceRegressionHarness
     private readonly List<ThermalAcceptanceCheckpoint> thermalCheckpoints = [];
     private readonly TemperatureProbeAcceptanceTrace temperatureProbeTrace = new();
     private readonly AirPressureTimeSeries airPressureTrace = new();
+    private readonly GasObstacleBypassTrace gasObstacleBypassTrace = new();
     private readonly PhaseAcceptanceController phaseAcceptance;
     private readonly uint scenarioSeed;
 
@@ -310,6 +311,16 @@ public sealed class AcceptanceRegressionHarness
         }
     }
 
+    public void RecordGasObstacleBypassTrace(uint frame, GpuSimulationResources resources)
+    {
+        if (Environment.GetEnvironmentVariable("PHYXEL_GAS_BYPASS_TRACE") != "1" ||
+            Mode is not (AcceptanceScenarioMode.FireObstacle or AcceptanceScenarioMode.FireOpen))
+        {
+            return;
+        }
+        gasObstacleBypassTrace.Record(frame, resources);
+    }
+
     public bool TryBeginAcceptanceCheckpoint(
         uint frame,
         SimulationDispatchCoordinator dispatchCoordinator,
@@ -582,6 +593,7 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.GranularBarrier when frame == 899 => "W_granular_barrier_off",
             AcceptanceScenarioMode.GranularBarrierHydraulic when frame == 899 => "X_granular_barrier_on",
             AcceptanceScenarioMode.FireObstacle when frame == 359 => "Y_fire_obstacle",
+            AcceptanceScenarioMode.FireOpen when frame == 359 => "Y_fire_open",
             AcceptanceScenarioMode.Furnace when frame == 599 => "Z_furnace",
             _ => null
         };
@@ -650,6 +662,17 @@ public sealed class AcceptanceRegressionHarness
             string tracePath = airPressureTrace.WriteCsv(ArtifactDirectory, traceName);
             report += Environment.NewLine +
                 $"PHYXEL_AIR_PRESSURE_TRACE samples=300 path={tracePath}";
+        }
+        if (gasObstacleBypassTrace.Count > 0)
+        {
+            string bypassTracePath = gasObstacleBypassTrace.WriteCsv(
+                ArtifactDirectory,
+                "gas-obstacle-bypass-trace.csv");
+            GasObstacleBypassStatistics total = gasObstacleBypassTrace.Sum();
+            report += Environment.NewLine +
+                $"PHYXEL_GAS_OBSTACLE_BYPASS samples={gasObstacleBypassTrace.Count} " +
+                $"blocked={total.Blocked} xOnly={total.XOnly} yOnly={total.YOnly} " +
+                $"diagonal={total.Diagonal} stayed={total.Stayed} path={bypassTracePath}";
         }
         report += Environment.NewLine +
             $"PHYXEL_ACCEPTANCE_METRICS size={snapshot.Width}x{snapshot.Height} fps={framesPerSecond:0.0} " +

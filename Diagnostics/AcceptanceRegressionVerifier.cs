@@ -27,6 +27,11 @@ public static class AcceptanceRegressionVerifier
         int MinimumY,
         int MaximumY);
 
+    private readonly record struct OpenFlameSliceMetrics(
+        int Components,
+        int Width,
+        int Occupied);
+
     internal static bool Validate(
         AcceptanceScenarioMode mode,
         MaterialRegistry? materialRegistry,
@@ -214,6 +219,7 @@ public static class AcceptanceRegressionVerifier
             AcceptanceScenarioMode.FireOpen => ValidateFireOpen(
                 snapshot,
                 materialRegistry,
+                artifactDirectory,
                 out report),
             AcceptanceScenarioMode.Furnace => ValidateFurnace(
                 snapshot,
@@ -926,6 +932,58 @@ public static class AcceptanceRegressionVerifier
         File.WriteAllText(Path.Combine(artifactDirectory, "fire-obstacle-ascii.txt"), map.ToString());
     }
 
+    private static void WriteFireOpenStateDump(
+        SimulationWorldSnapshot snapshot,
+        MaterialRegistry registry,
+        string artifactDirectory,
+        uint fire,
+        uint smoke)
+    {
+        Directory.CreateDirectory(artifactDirectory);
+        WriteAirFieldDump(snapshot, artifactDirectory, "air-pressure.txt", cell => cell.Pressure);
+        WriteAirFieldDump(snapshot, artifactDirectory, "air-velocity-x.txt", cell => cell.VelocityX);
+        WriteAirFieldDump(snapshot, artifactDirectory, "air-velocity-y.txt", cell => cell.VelocityY);
+
+        const int left = 100;
+        const int right = 380;
+        const int top = 30;
+        const int bottom = 200;
+        int firstX = Math.Clamp(left, 0, snapshot.Width - 1);
+        int lastX = Math.Clamp(right, 0, snapshot.Width - 1);
+        int firstY = Math.Clamp(top, 0, snapshot.Height - 1);
+        int lastY = Math.Clamp(bottom, 0, snapshot.Height - 1);
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        StringBuilder map = new();
+        map.AppendLine($"# x={firstX}..{lastX}; y={firstY}..{lastY}; .=empty F=fire S=smoke #=solid");
+        for (int y = firstY; y <= lastY; y++)
+        {
+            for (int x = firstX; x <= lastX; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                char glyph = '.';
+                if (cell.IsActive != 0)
+                {
+                    if (cell.MaterialIndex == fire)
+                    {
+                        glyph = 'F';
+                    }
+                    else if (cell.MaterialIndex == smoke)
+                    {
+                        glyph = 'S';
+                    }
+                    else if ((MaterialSimulationKind)registry[cell.MaterialIndex].Properties.SimulationKind ==
+                        MaterialSimulationKind.Solid)
+                    {
+                        glyph = '#';
+                    }
+                }
+                map.Append(glyph);
+            }
+            map.AppendLine();
+        }
+        File.WriteAllText(Path.Combine(artifactDirectory, "fire-open-ascii.txt"), map.ToString());
+    }
+
     private static void WriteAirFieldDump(
         SimulationWorldSnapshot snapshot,
         string artifactDirectory,
@@ -967,10 +1025,12 @@ public static class AcceptanceRegressionVerifier
     private static bool ValidateFireOpen(
         SimulationWorldSnapshot snapshot,
         MaterialRegistry registry,
+        string artifactDirectory,
         out string report)
     {
         ReadOnlySpan<GridCell> grid = Cells(snapshot);
         uint fire = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire);
+        uint smoke = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke);
         int fireCells = 0;
         int minimumX = snapshot.Width;
         int maximumX = -1;
@@ -987,11 +1047,287 @@ public static class AcceptanceRegressionVerifier
             maximumX = Math.Max(maximumX, x);
         }
 
+        const int brushWidth = 11;
+        const int sourceX = 240;
+        const int sourceY = 170;
+        int[] heightsAboveSource = [20, 40, 60, 80];
+        StringBuilder slices = new();
+        foreach (int heightAboveSource in heightsAboveSource)
+        {
+            int y = sourceY - heightAboveSource;
+            OpenFlameSliceMetrics fireSlice = MeasureOpenFlameSlice(
+                grid, snapshot.Width, snapshot.Height, y, fire, smoke, false);
+            OpenFlameSliceMetrics fireSmokeSlice = MeasureOpenFlameSlice(
+                grid, snapshot.Width, snapshot.Height, y, fire, smoke, true);
+            slices.Append($" fireComponentsH{heightAboveSource}={fireSlice.Components}" +
+                $" fireWidthH{heightAboveSource}={fireSlice.Width}" +
+                $" fireWidthBrushRatioH{heightAboveSource}={fireSlice.Width / (double)brushWidth:0.000}" +
+                $" fireOccupiedH{heightAboveSource}={fireSlice.Occupied}" +
+                $" fireSmokeComponentsH{heightAboveSource}={fireSmokeSlice.Components}" +
+                $" fireSmokeWidthH{heightAboveSource}={fireSmokeSlice.Width}" +
+                $" fireSmokeWidthBrushRatioH{heightAboveSource}={fireSmokeSlice.Width / (double)brushWidth:0.000}" +
+                $" fireSmokeOccupiedH{heightAboveSource}={fireSmokeSlice.Occupied}");
+        }
+
+        GasMotionRatioMetrics fireGasRatio = MeasureFireGasMotionRatio(
+            snapshot, grid, fire, sourceY - 40);
+        SignedGasVelocityMetrics fireVelocityH20 = MeasureSignedFireVelocity(
+            snapshot, grid, fire, sourceX, sourceY - 20);
+        SignedGasVelocityMetrics fireVelocityH40 = MeasureSignedFireVelocity(
+            snapshot, grid, fire, sourceX, sourceY - 40);
+        string fireColumnsH20 = FormatFireSliceColumns(snapshot, grid, fire, sourceY - 20);
+        string fireColumnsH40 = FormatFireSliceColumns(snapshot, grid, fire, sourceY - 40);
+        string airProfiles = FormatOpenAirProfiles(snapshot, sourceX, sourceY, [5, 10, 20, 40]);
+        WriteFireOpenStateDump(snapshot, registry, artifactDirectory, fire, smoke);
+        bool image = File.Exists(Path.Combine(artifactDirectory, "Y_fire_open.png"));
         // Fine y=164 is the coarse cell immediately above the source brush.
         string pressureProfile = FormatAirPressureProfile(snapshot, 164, 140, 340);
         report = $"PHYXEL_FIRE_OPEN fireCells={fireCells} minX={minimumX} maxX={maximumX} " +
-            $"airPressure={pressureProfile}";
+            $"brushWidth={brushWidth}{slices} " +
+            $"fireGasRatioH40Count={fireGasRatio.Count} " +
+            $"fireGasRatioH40Mean={fireGasRatio.Mean:0.000000} " +
+            $"fireGasRatioH40StdDev={fireGasRatio.StandardDeviation:0.000000} " +
+            $"fireGasRatioH40Min={fireGasRatio.Minimum:0.000000} " +
+            $"fireGasRatioH40Max={fireGasRatio.Maximum:0.000000} " +
+            $"fireSignedVelocityXH20Left={fireVelocityH20.LeftMean:0.000000} " +
+            $"fireSignedVelocityXH20Right={fireVelocityH20.RightMean:0.000000} " +
+            $"fireSignedVelocityXH20LeftCount={fireVelocityH20.LeftCount} " +
+            $"fireSignedVelocityXH20RightCount={fireVelocityH20.RightCount} " +
+            $"fireSignedVelocityXH40Left={fireVelocityH40.LeftMean:0.000000} " +
+            $"fireSignedVelocityXH40Right={fireVelocityH40.RightMean:0.000000} " +
+            $"fireSignedVelocityXH40LeftCount={fireVelocityH40.LeftCount} " +
+            $"fireSignedVelocityXH40RightCount={fireVelocityH40.RightCount} " +
+            $"fireColumnsH20={fireColumnsH20} fireColumnsH40={fireColumnsH40} " +
+            $"image={image} airProfiles={airProfiles} airPressure={pressureProfile}";
         return fireCells > 0 && pressureProfile is not "unavailable" and not "invalid";
+    }
+
+    private readonly record struct GasMotionRatioMetrics(
+        int Count,
+        double Mean,
+        double StandardDeviation,
+        double Minimum,
+        double Maximum);
+
+    private readonly record struct SignedGasVelocityMetrics(
+        int LeftCount,
+        int RightCount,
+        double LeftMean,
+        double RightMean);
+
+    private static SignedGasVelocityMetrics MeasureSignedFireVelocity(
+        SimulationWorldSnapshot snapshot,
+        ReadOnlySpan<GridCell> grid,
+        uint fire,
+        int axisX,
+        int y)
+    {
+        ReadOnlySpan<GasMotionState> motion = snapshot.GasMotion is null
+            ? []
+            : MemoryMarshal.Cast<byte, GasMotionState>(snapshot.GasMotion);
+        if (motion.Length != grid.Length || y < 0 || y >= snapshot.Height)
+        {
+            return new SignedGasVelocityMetrics(0, 0, 0, 0);
+        }
+
+        int leftCount = 0;
+        int rightCount = 0;
+        double leftSum = 0;
+        double rightSum = 0;
+        for (int x = 0; x < snapshot.Width; x++)
+        {
+            int index = y * snapshot.Width + x;
+            if (grid[index].IsActive == 0 || grid[index].MaterialIndex != fire)
+            {
+                continue;
+            }
+            if (x < axisX)
+            {
+                leftCount++;
+                leftSum += motion[index].VelocityX;
+            }
+            else if (x > axisX)
+            {
+                rightCount++;
+                rightSum += motion[index].VelocityX;
+            }
+        }
+        return new SignedGasVelocityMetrics(
+            leftCount,
+            rightCount,
+            leftSum / Math.Max(1, leftCount),
+            rightSum / Math.Max(1, rightCount));
+    }
+
+    private static string FormatFireSliceColumns(
+        SimulationWorldSnapshot snapshot,
+        ReadOnlySpan<GridCell> grid,
+        uint fire,
+        int y)
+    {
+        ReadOnlySpan<GasMotionState> motion = snapshot.GasMotion is null
+            ? []
+            : MemoryMarshal.Cast<byte, GasMotionState>(snapshot.GasMotion);
+        if (motion.Length != grid.Length || y < 0 || y >= snapshot.Height)
+        {
+            return "unavailable";
+        }
+
+        List<string> columns = [];
+        for (int x = 0; x < snapshot.Width; x++)
+        {
+            int index = y * snapshot.Width + x;
+            if (grid[index].IsActive != 0 && grid[index].MaterialIndex == fire)
+            {
+                GasMotionState velocity = motion[index];
+                columns.Add($"{x}:{velocity.VelocityX:0.000000}/{velocity.VelocityY:0.000000}");
+            }
+        }
+        return columns.Count == 0 ? "none" : string.Join(';', columns);
+    }
+
+    private static GasMotionRatioMetrics MeasureFireGasMotionRatio(
+        SimulationWorldSnapshot snapshot,
+        ReadOnlySpan<GridCell> grid,
+        uint fire,
+        int y)
+    {
+        ReadOnlySpan<GasMotionState> motion = snapshot.GasMotion is null
+            ? []
+            : MemoryMarshal.Cast<byte, GasMotionState>(snapshot.GasMotion);
+        if (motion.Length != grid.Length || y < 0 || y >= snapshot.Height)
+        {
+            return new GasMotionRatioMetrics(0, 0, 0, 0, 0);
+        }
+
+        List<double> ratios = [];
+        for (int x = 0; x < snapshot.Width; x++)
+        {
+            int index = y * snapshot.Width + x;
+            GridCell cell = grid[index];
+            if (cell.IsActive == 0 || cell.MaterialIndex != fire)
+            {
+                continue;
+            }
+
+            GasMotionState velocity = motion[index];
+            double absY = Math.Abs(velocity.VelocityY);
+            if (absY > 0.0001)
+            {
+                ratios.Add(Math.Abs(velocity.VelocityX) / absY);
+            }
+        }
+
+        if (ratios.Count == 0)
+        {
+            return new GasMotionRatioMetrics(0, 0, 0, 0, 0);
+        }
+
+        double mean = ratios.Average();
+        double variance = ratios.Sum(ratio => Math.Pow(ratio - mean, 2)) / ratios.Count;
+        return new GasMotionRatioMetrics(
+            ratios.Count,
+            mean,
+            Math.Sqrt(variance),
+            ratios.Min(),
+            ratios.Max());
+    }
+
+    private static string FormatOpenAirProfiles(
+        SimulationWorldSnapshot snapshot,
+        int sourceFineX,
+        int sourceFineY,
+        IReadOnlyList<int> heightsAboveSource)
+    {
+        if (snapshot.Air is null || snapshot.Air.Length == 0)
+        {
+            return "unavailable";
+        }
+
+        ReadOnlySpan<AirCell> air = MemoryMarshal.Cast<byte, AirCell>(snapshot.Air);
+        int airWidth = Math.Max(1, (snapshot.Width + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize);
+        int airHeight = Math.Max(1, (snapshot.Height + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize);
+        if (air.Length != airWidth * airHeight)
+        {
+            return "invalid";
+        }
+
+        int axisX = Math.Clamp(sourceFineX / SimulationSettings.AirCellSize, 0, airWidth - 1);
+        const int profileRadius = 15;
+        StringBuilder profiles = new();
+        for (int heightIndex = 0; heightIndex < heightsAboveSource.Count; heightIndex++)
+        {
+            int heightAboveSource = heightsAboveSource[heightIndex];
+            int airY = Math.Clamp(
+                (sourceFineY - heightAboveSource) / SimulationSettings.AirCellSize,
+                0,
+                airHeight - 1);
+            if (heightIndex > 0)
+            {
+                profiles.Append('|');
+            }
+            profiles.Append($"h{heightAboveSource}[y{airY}](");
+            bool first = true;
+            for (int distance = -profileRadius; distance <= profileRadius; distance++)
+            {
+                int airX = axisX + distance;
+                if (airX < 0 || airX >= airWidth)
+                {
+                    continue;
+                }
+                if (!first)
+                {
+                    profiles.Append(',');
+                }
+                AirCell cell = air[airY * airWidth + airX];
+                profiles.Append($"d{distance}:{cell.VelocityX:0.000000}/" +
+                    $"{cell.VelocityY:0.000000}/{cell.Pressure:0.000000}");
+                first = false;
+            }
+            profiles.Append(')');
+        }
+        return profiles.ToString();
+    }
+
+    private static OpenFlameSliceMetrics MeasureOpenFlameSlice(
+        ReadOnlySpan<GridCell> grid,
+        int width,
+        int height,
+        int y,
+        uint fire,
+        uint smoke,
+        bool includeSmoke)
+    {
+        if (y < 0 || y >= height)
+        {
+            return new OpenFlameSliceMetrics(0, 0, 0);
+        }
+
+        int components = 0;
+        int occupied = 0;
+        int minimumX = width;
+        int maximumX = -1;
+        bool wasOccupied = false;
+        int row = y * width;
+        for (int x = 0; x < width; x++)
+        {
+            GridCell cell = grid[row + x];
+            bool isOccupied = cell.IsActive != 0 &&
+                (cell.MaterialIndex == fire || (includeSmoke && cell.MaterialIndex == smoke));
+            if (isOccupied)
+            {
+                if (!wasOccupied)
+                {
+                    components++;
+                }
+                occupied++;
+                minimumX = Math.Min(minimumX, x);
+                maximumX = Math.Max(maximumX, x);
+            }
+            wasOccupied = isOccupied;
+        }
+        int sliceWidth = maximumX >= minimumX ? maximumX - minimumX + 1 : 0;
+        return new OpenFlameSliceMetrics(components, sliceWidth, occupied);
     }
 
     private static bool ValidateFurnace(

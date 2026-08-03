@@ -1760,6 +1760,10 @@ public sealed class SimulationDispatchCoordinator
             resources.PathBlockerMasks.UnorderedView,
             resources.CellMaterials.UnorderedView);
         context.ComputeShader.SetUnorderedAccessView(6, resources.GasMotion.UnorderedView);
+        context.ClearUnorderedAccessView(
+            resources.GasObstacleBypassStatistics.UnorderedView,
+            new RawInt4(0, 0, 0, 0));
+        context.ComputeShader.SetUnorderedAccessView(7, resources.GasObstacleBypassStatistics.UnorderedView);
 
         uint previousPhase = constants.SimulationPhase;
         // TPT updates vx/vy once per frame, then its fractional position is

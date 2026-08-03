@@ -46,6 +46,20 @@ public struct GasMotionState
 }
 
 /// <summary>
+/// Diagnostic-only counters for the obstacle fallback ladder during one fixed
+/// gas tick. This buffer is not world state and is cleared before each tick.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct GasObstacleBypassStatistics
+{
+    public uint Blocked;
+    public uint XOnly;
+    public uint YOnly;
+    public uint Diagonal;
+    public uint Stayed;
+}
+
+/// <summary>
 /// Клетка накопительного светового поля огня. Зеркало <c>FireGlowCell</c>
 /// из PhysicsShared.hlsli — менять только вместе с ним.
 /// </summary>
