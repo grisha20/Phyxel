@@ -102,6 +102,10 @@ public static class AcceptanceRegressionScenario
     // about 249 and is the intended diagnostic source.
     public const int SteamPuffBrushRadius = 10;
     public const float SteamPuffSpawnDensity = 0.82f;
+    // The TPT steam-jet reference was drawn with eight linear wheel steps.
+    // Unlike steam_puff, this continuously held source is intentionally a
+    // dense radius-8 brush, one command every frame.
+    public const int SteamJetBrushRadius = 8;
     private const int FireObstacleSourceX = 240;
     private const int DefaultFireObstaclePlateWidth = 201;
 
@@ -295,30 +299,7 @@ public static class AcceptanceRegressionScenario
 
     private static IReadOnlyList<BrushDrawCommand> CreateSteamJet(uint frame, uint scenarioSeed)
     {
-        if (frame >= 600)
-        {
-            return [];
-        }
-
-        if (UsesFixedSteamJetInflow())
-        {
-            return CreateFixedSteamJetInflow(frame, scenarioSeed);
-        }
-
-        // Same single-command brush as the radius-10 steam_puff reference,
-        // submitted on every frame to reproduce a held mouse button. Like
-        // fire_open, this is a source definition only; it does not alter gas
-        // transport, materials, or the air solver.
-        BrushDrawCommand steam = Create(
-            GetSteamJetSourceX(),
-            GetSteamJetSourceY(),
-            SteamPuffBrushRadius,
-            materials.Steam,
-            0,
-            0);
-        steam.Density = SteamPuffSpawnDensity;
-        steam.Seed ^= scenarioSeed;
-        return [steam];
+        return CreateSteamJetSource(frame, scenarioSeed, 600);
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateSteamObstacle(uint frame, uint scenarioSeed)
@@ -336,9 +317,39 @@ public static class AcceptanceRegressionScenario
         }
         if (frame < 1200)
         {
-            commands.AddRange(CreateFixedSteamJetInflow(frame, scenarioSeed, 306));
+            commands.AddRange(CreateSteamJetSource(frame, scenarioSeed, 1200, 306));
         }
         return commands;
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateSteamJetSource(
+        uint frame,
+        uint scenarioSeed,
+        uint duration,
+        int? forcedSourceX = null)
+    {
+        if (frame >= duration)
+        {
+            return [];
+        }
+        if (UsesFixedSteamJetInflow())
+        {
+            return CreateFixedSteamJetInflow(frame, scenarioSeed, forcedSourceX);
+        }
+
+        // Match the measured TPT held-brush input: radius 8, full density,
+        // one ordinary empty-only material brush per frame. This is source
+        // geometry only; gas and air simulation are not changed here.
+        BrushDrawCommand steam = Create(
+            forcedSourceX ?? GetSteamJetSourceX(),
+            GetSteamJetSourceY(),
+            SteamJetBrushRadius,
+            materials.Steam,
+            0,
+            0);
+        steam.Density = 1;
+        steam.Seed ^= scenarioSeed;
+        return [steam];
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateFixedSteamJetInflow(
@@ -349,8 +360,8 @@ public static class AcceptanceRegressionScenario
         // frames of each five-frame cycle (5.4 sites/frame) produce the
         // required *measured* 4.2-cell
         // influx without writing over an occupied particle. Points are
-        // selected without replacement from the same radius-10 disk as the
-        // normal held-brush source. The normal brush remains the default.
+        // selected without replacement from its radius-10 compatibility disk.
+        // The ordinary radius-8 held brush remains the default source.
         int requestedCells = 5 + (frame % 5 is 3 or 4 ? 1 : 0);
         List<BrushDrawCommand> commands = new(requestedCells);
         int radius = GetFixedSteamJetInflowRadius();
