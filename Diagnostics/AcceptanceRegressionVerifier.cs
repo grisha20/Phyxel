@@ -1256,18 +1256,83 @@ public static class AcceptanceRegressionVerifier
         uint metal = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal);
         ReadOnlySpan<GridCell> cells = Cells(snapshot);
         int steamCount = 0, waterCount = 0, above = 0, min = int.MaxValue, max = -1, midN = 0, edgeN = 0;
+        int outsideLeft = 0, outsideRight = 0;
+        SteamObstacleLayerMetrics contactLayer = new(bottom + 1, bottom + 6);
+        SteamObstacleLayerMetrics nearLayer = new(bottom + 7, bottom + 20);
+        SteamObstacleLayerMetrics lowerLayer = new(bottom + 21, bottom + 40);
         double steamX = 0, waterY = 0, midT = 0, edgeT = 0;
         for (int i = 0; i < cells.Length; i++)
         {
             GridCell cell = cells[i]; if (cell.IsActive == 0) continue;
             int x = i % snapshot.Width, y = i / snapshot.Width;
-            if (cell.MaterialIndex == steam) { steamCount++; steamX += x; if (y < top) above++; if (y > bottom && y <= bottom + 6) { min = Math.Min(min, x); max = Math.Max(max, x); } }
+            if (cell.MaterialIndex == steam)
+            {
+                steamCount++;
+                steamX += x;
+                if (y < top) above++;
+                if (x < left) outsideLeft++;
+                if (x > right) outsideRight++;
+                if (y > bottom && y <= bottom + 6)
+                {
+                    min = Math.Min(min, x);
+                    max = Math.Max(max, x);
+                }
+                contactLayer.Add(x, y);
+                nearLayer.Add(x, y);
+                lowerLayer.Add(x, y);
+            }
             else if (cell.MaterialIndex == water) { waterCount++; waterY += y; }
             else if (cell.MaterialIndex == metal && x >= left && x <= right && y >= top && y <= bottom)
             { if (x >= left + 44 && x <= right - 44) { midT += cell.Temperature; midN++; } else if (x < left + 22 || x > right - 22) { edgeT += cell.Temperature; edgeN++; } }
         }
         int coverage = max < min ? 0 : Math.Max(0, Math.Min(right, max) - Math.Max(left, min) + 1);
-        fields.Append($" obstacleSteamCells{frame}={steamCount} obstacleCoverage{frame}={coverage / 131.0:0.000000} obstacleSteamAboveFraction{frame}={above / (double)Math.Max(1, steamCount):0.000000} obstacleWaterCells{frame}={waterCount} obstacleWaterCentreY{frame}={waterY / Math.Max(1, waterCount):0.000000} obstacleSteamCentreOffsetX{frame}={steamX / Math.Max(1, steamCount) - axis:0.000000} obstaclePlateMiddleTemperature{frame}={midT / Math.Max(1, midN):0.000000} obstaclePlateEdgeTemperature{frame}={edgeT / Math.Max(1, edgeN):0.000000}");
+        // The historical coverage metric is only a clipped min..max range. A
+        // single outlier can make it look full, so retain it for continuity
+        // but flag it as unsuitable for assessing steam spreading.
+        fields.Append($" obstacleSteamCells{frame}={steamCount} obstacleCoverage{frame}={coverage / 131.0:0.000000} obstacleCoverageRangeOnly{frame}=1 obstacleCoverageUnsuitable{frame}=1 obstacleSteamAboveFraction{frame}={above / (double)Math.Max(1, steamCount):0.000000} obstacleWaterCells{frame}={waterCount} obstacleWaterCentreY{frame}={waterY / Math.Max(1, waterCount):0.000000} obstacleSteamCentreOffsetX{frame}={steamX / Math.Max(1, steamCount) - axis:0.000000} obstaclePlateMiddleTemperature{frame}={midT / Math.Max(1, midN):0.000000} obstaclePlateEdgeTemperature{frame}={edgeT / Math.Max(1, edgeN):0.000000}");
+        AppendSteamObstacleLayerMetrics(fields, frame, "0to6", contactLayer);
+        AppendSteamObstacleLayerMetrics(fields, frame, "6to20", nearLayer);
+        AppendSteamObstacleLayerMetrics(fields, frame, "20to40", lowerLayer);
+        fields.Append($" obstacleContactLayerWidth{frame}={contactLayer.Width} obstacleSteamOutsideLeftFraction{frame}={outsideLeft / (double)Math.Max(1, steamCount):0.000000} obstacleSteamOutsideRightFraction{frame}={outsideRight / (double)Math.Max(1, steamCount):0.000000}");
+    }
+
+    private static void AppendSteamObstacleLayerMetrics(
+        StringBuilder fields,
+        int frame,
+        string name,
+        SteamObstacleLayerMetrics layer)
+    {
+        fields.Append($" obstacleLayer{name}Width{frame}={layer.Width} obstacleLayer{name}Occupancy{frame}={layer.Occupancy:0.000000} obstacleLayer{name}SteamCells{frame}={layer.Count}");
+    }
+
+    private sealed class SteamObstacleLayerMetrics
+    {
+        private readonly int minimumY;
+        private readonly int maximumY;
+        private int minimumX = int.MaxValue;
+        private int maximumX = -1;
+
+        public SteamObstacleLayerMetrics(int minimumY, int maximumY)
+        {
+            this.minimumY = minimumY;
+            this.maximumY = maximumY;
+        }
+
+        public int Count { get; private set; }
+        public int Height => maximumY - minimumY + 1;
+        public int Width => maximumX < minimumX ? 0 : maximumX - minimumX + 1;
+        public double Occupancy => Count / (double)Math.Max(1, Width * Height);
+
+        public void Add(int x, int y)
+        {
+            if (y < minimumY || y > maximumY)
+            {
+                return;
+            }
+            Count++;
+            minimumX = Math.Min(minimumX, x);
+            maximumX = Math.Max(maximumX, x);
+        }
     }
 
     private static void AppendSteamJetProfileSummary(
