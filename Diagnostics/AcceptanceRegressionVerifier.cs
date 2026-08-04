@@ -1083,7 +1083,10 @@ public static class AcceptanceRegressionVerifier
         double SigmaY,
         double AspectSigma,
         double OffsetXClampFraction,
-        double OffsetYClampFraction);
+        double OffsetYClampFraction,
+        int MinimumY,
+        int MaximumY,
+        bool ClippedTop);
 
     private static bool ValidateSteamPuff(
         SimulationWorldSnapshot finalSnapshot,
@@ -1095,7 +1098,7 @@ public static class AcceptanceRegressionVerifier
         uint steam = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
         const int sourceX = AcceptanceRegressionScenario.SteamPuffSourceX;
         const int sourceY = AcceptanceRegressionScenario.SteamPuffSourceY;
-        int[] requestedFrames = [1, 60, 150, 300];
+        int[] requestedFrames = [1, 30, 60, 90, 120, 150, 300];
 
         StringBuilder fields = new();
         bool hasInitialSample = checkpoints.Count > 0;
@@ -1125,6 +1128,8 @@ public static class AcceptanceRegressionVerifier
             sourceY);
         AppendSteamPuffMetrics(fields, 600, 600, finalMetrics);
         AppendSteamPuffAirProfile(fields, finalSnapshot, finalMetrics, 600);
+        double riseRate = CalculateSteamPuffRiseRate(checkpoints, steam, sourceX, sourceY);
+        fields.Append($" riseRate={riseRate:0.000000}");
         WriteSteamPuffStateDump(finalSnapshot, registry, artifactDirectory, steam);
         bool image = File.Exists(Path.Combine(artifactDirectory, "AA_steam_puff.png"));
         report = $"PHYXEL_STEAM_PUFF checkpoints={checkpoints.Count} image={image}{fields}";
@@ -1162,6 +1167,9 @@ public static class AcceptanceRegressionVerifier
         fields.Append($" aspectSigma{suffix}={metrics.AspectSigma:0.000000}");
         fields.Append($" offsetXClampFraction{suffix}={metrics.OffsetXClampFraction:0.000000}");
         fields.Append($" offsetYClampFraction{suffix}={metrics.OffsetYClampFraction:0.000000}");
+        fields.Append($" minimumY{suffix}={metrics.MinimumY}");
+        fields.Append($" maximumY{suffix}={metrics.MaximumY}");
+        fields.Append($" clippedTop{suffix}={(metrics.ClippedTop ? 1 : 0)}");
     }
 
     private static SteamPuffMetrics MeasureSteamPuff(
@@ -1224,7 +1232,7 @@ public static class AcceptanceRegressionVerifier
 
         if (cells == 0)
         {
-            return new SteamPuffMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            return new SteamPuffMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, false);
         }
 
         double centreX = totalMass > 0 ? sumX / totalMass : sourceX;
@@ -1308,7 +1316,54 @@ public static class AcceptanceRegressionVerifier
             sigmaY,
             sigmaY > 0 ? sigmaX / sigmaY : 0,
             offsetXClamped / (double)cells,
-            offsetYClamped / (double)cells);
+            offsetYClamped / (double)cells,
+            minimumY,
+            maximumY,
+            minimumY <= 2);
+    }
+
+    private static double CalculateSteamPuffRiseRate(
+        IReadOnlyList<ThermalAcceptanceCheckpoint> checkpoints,
+        uint steam,
+        int sourceX,
+        int sourceY)
+    {
+        const uint firstFrame = 60;
+        const uint lastFrame = 150;
+        double count = 0;
+        double sumFrame = 0;
+        double sumOffsetY = 0;
+        double sumFrameSquared = 0;
+        double sumFrameOffsetY = 0;
+        foreach (ThermalAcceptanceCheckpoint checkpoint in checkpoints)
+        {
+            if (checkpoint.Frame < firstFrame || checkpoint.Frame > lastFrame)
+            {
+                continue;
+            }
+
+            SteamPuffMetrics metrics = MeasureSteamPuff(
+                checkpoint.Snapshot,
+                steam,
+                sourceX,
+                sourceY);
+            double frame = checkpoint.Frame;
+            count++;
+            sumFrame += frame;
+            sumOffsetY += metrics.CentreOffsetY;
+            sumFrameSquared += frame * frame;
+            sumFrameOffsetY += frame * metrics.CentreOffsetY;
+        }
+
+        double denominator = count * sumFrameSquared - sumFrame * sumFrame;
+        if (count < 2 || Math.Abs(denominator) < double.Epsilon)
+        {
+            return double.NaN;
+        }
+
+        // Screen/world Y grows downward, so a negative centre-of-mass slope
+        // is reported as a positive upward rate in simulation cells per frame.
+        return -(count * sumFrameOffsetY - sumFrame * sumOffsetY) / denominator;
     }
 
     private static void AppendSteamPuffAirProfile(

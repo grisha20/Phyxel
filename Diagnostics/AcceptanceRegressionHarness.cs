@@ -18,7 +18,7 @@ public sealed class AcceptanceRegressionHarness
     private static readonly ulong[] CoalCheckpointTicks = [0, 20, 120, 240];
     private static readonly ulong[] GasCheckpointTicks = [120];
     private static readonly ulong[] SteamDistributionCheckpointTicks = [20, 40, 80, 200];
-    private static readonly uint[] SteamPuffCheckpointFrames = [1, 60, 150, 300];
+    private static readonly uint[] SteamPuffCheckpointFrames = [1, 30, 60, 90, 120, 150, 300];
     private const ulong SteamDistributionFinalTick = 400;
     private static readonly ulong[] SteamCloudCheckpointTicks =
         [0, 20, 40, 80, 200, 400, 800, 1200, 1300, 1400, 1500];
