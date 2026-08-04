@@ -75,6 +75,7 @@ public enum AcceptanceScenarioMode
     Furnace,
     MetalChimney,
     SteamPuff,
+    SteamJet,
     SteamSelfCooling,
     BrushEmptyOnly,
     ContinuousBrushStroke,
@@ -89,7 +90,11 @@ public static class AcceptanceRegressionScenario
     public const int FireBrushRadius = 5;
     public const int FireBrushWidth = FireBrushRadius * 2 + 1;
     public const int SteamPuffSourceX = 240;
-    public const int SteamPuffSourceY = 135;
+    // Previously y=135. A radius-10 puff reached the world ceiling before
+    // frame 600, making its late-shape measurements unusable. Keeping the
+    // source just above the lower boundary leaves the same physics intact
+    // while retaining vertical room for the 600-frame diagnostic.
+    public const int SteamPuffSourceY = 250;
     // Previous radius 2 produced a 13-cell sparse probe. Radius 10 and 82%
     // density mirror one UI brush command. The observed 347 particles in the
     // game can span several mouse-hold frames; a single disk command yields
@@ -157,6 +162,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.Furnace => CreateFurnace(frame),
             AcceptanceScenarioMode.MetalChimney => CreateMetalChimney(frame, scenarioSeed),
             AcceptanceScenarioMode.SteamPuff => CreateSteamPuff(frame, scenarioSeed),
+            AcceptanceScenarioMode.SteamJet => CreateSteamJet(frame, scenarioSeed),
             AcceptanceScenarioMode.SteamSelfCooling => [],
             AcceptanceScenarioMode.SteamCloudTemperature =>
                 SteamCloudTemperatureAcceptanceScenario.CreateCommands(frame, materialRegistry),
@@ -285,6 +291,29 @@ public static class AcceptanceRegressionScenario
         return [steam];
     }
 
+    private static IReadOnlyList<BrushDrawCommand> CreateSteamJet(uint frame, uint scenarioSeed)
+    {
+        if (frame >= 600)
+        {
+            return [];
+        }
+
+        // Same single-command brush as the radius-10 steam_puff reference,
+        // submitted on every frame to reproduce a held mouse button. Like
+        // fire_open, this is a source definition only; it does not alter gas
+        // transport, materials, or the air solver.
+        BrushDrawCommand steam = Create(
+            GetSteamJetSourceX(),
+            GetSteamJetSourceY(),
+            SteamPuffBrushRadius,
+            materials.Steam,
+            0,
+            0);
+        steam.Density = SteamPuffSpawnDensity;
+        steam.Seed ^= scenarioSeed;
+        return [steam];
+    }
+
     private static int GetSteamPuffBrushRadius()
     {
         string? value = Environment.GetEnvironmentVariable("PHYXEL_STEAM_PUFF_BRUSH_RADIUS");
@@ -301,6 +330,27 @@ public static class AcceptanceRegressionScenario
             density is > 0 and <= 1
             ? density
             : SteamPuffSpawnDensity;
+    }
+
+    public static int GetSteamJetSourceY()
+    {
+        string? value = Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_SOURCE_Y");
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int sourceY) &&
+            // This is a diagnostic coordinate. A full-resolution acceptance
+            // world is 1080 cells tall, so 1000 would silently reject a
+            // legitimate near-bottom source and invalidate the no-clip run.
+            sourceY is >= 1 and <= 4096
+            ? sourceY
+            : SteamPuffSourceY;
+    }
+
+    public static int GetSteamJetSourceX()
+    {
+        string? value = Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_SOURCE_X");
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int sourceX) &&
+            sourceX is >= 1 and <= 1000
+            ? sourceX
+            : SteamPuffSourceX;
     }
 
     /// <summary>

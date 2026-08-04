@@ -101,10 +101,10 @@ public struct GasPipeBandMotionStatistics
 }
 
 /// <summary>
-/// Per-fixed-tick movement counters for the steam-puff diagnostic. They are
-/// written after a successful gas move only and never participate in a
-/// simulation decision. A "no Y" (or "no X") event is a successful move whose
-/// displacement on that axis is zero.
+/// Cumulative movement counters for the steam diagnostic. They reset with the
+/// world, are written after a successful gas move only, and never participate
+/// in a simulation decision. A "no Y" (or "no X") event is a successful move
+/// whose displacement on that axis is zero.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct SteamGasStepStatistics
@@ -115,6 +115,16 @@ public struct SteamGasStepStatistics
     public uint LeftSteps;
     public uint RightSteps;
     public uint NoXSteps;
+}
+
+/// <summary>
+/// Cumulative number of WTRV cells actually created by the held-brush source
+/// in steam_jet. This is an observer result, not simulation state.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SteamJetInjectionStatistics
+{
+    public uint CreatedSteamCells;
 }
 
 /// <summary>

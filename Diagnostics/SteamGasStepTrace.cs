@@ -11,8 +11,8 @@ using SharpDX.Direct3D11;
 namespace Phyxel.Diagnostics;
 
 /// <summary>
-/// Reads the successful WTRV moves from one fixed gas tick at each requested
-/// steam-puff frame. This diagnostic counter is never read by the simulation.
+/// Reads cumulative successful WTRV moves at each requested steam frame. This
+/// diagnostic counter is never read by the simulation.
 /// </summary>
 public sealed class SteamGasStepTrace
 {

@@ -49,6 +49,8 @@ public sealed class GpuSimulationResources : IDisposable
     public required Buffer SteamGasStepStatisticsStaging { get; init; }
     public required GpuStructuredBuffer<GridCell> SteamGasStepPreviousGrid { get; init; }
     public required GpuStructuredBuffer<GasMotionState> SteamGasStepPreviousMotion { get; init; }
+    public required GpuStructuredBuffer<SteamJetInjectionStatistics> SteamJetInjectionStatistics { get; init; }
+    public required Buffer SteamJetInjectionStatisticsStaging { get; init; }
     public required Buffer FireGlowConstants { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlow { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlowScratch { get; init; }
@@ -99,6 +101,7 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? CellularAutomataShader { get; init; }
     public ComputeShader? GasRedistributionShader { get; init; }
     public ComputeShader? SteamGasStepObserverShader { get; init; }
+    public ComputeShader? SteamJetInjectionObserverShader { get; init; }
     public ComputeShader? ComponentInitializeShader { get; init; }
     public ComputeShader? ComponentUnionShader { get; init; }
     public ComputeShader? ComponentCompressShader { get; init; }
@@ -162,6 +165,7 @@ public sealed class GpuSimulationResources : IDisposable
         CellularAutomataShader?.Dispose();
         GasRedistributionShader?.Dispose();
         SteamGasStepObserverShader?.Dispose();
+        SteamJetInjectionObserverShader?.Dispose();
         BrushShader?.Dispose();
         foreach (KniTexture2D texture in PresentationTextures)
         {
@@ -216,6 +220,8 @@ public sealed class GpuSimulationResources : IDisposable
         SteamGasStepStatisticsStaging.Dispose();
         SteamGasStepPreviousGrid.Dispose();
         SteamGasStepPreviousMotion.Dispose();
+        SteamJetInjectionStatistics.Dispose();
+        SteamJetInjectionStatisticsStaging.Dispose();
         AirConstants.Dispose();
         ContactTransitionConstants.Dispose();
         foreach (GpuPhaseSummaryReadbackSlot slot in PhaseSummaryReadbackSlots)

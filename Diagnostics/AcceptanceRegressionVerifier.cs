@@ -227,6 +227,12 @@ public static class AcceptanceRegressionVerifier
                 thermalCheckpoints,
                 artifactDirectory,
                 out report),
+            AcceptanceScenarioMode.SteamJet => ValidateSteamJet(
+                snapshot,
+                materialRegistry,
+                thermalCheckpoints,
+                artifactDirectory,
+                out report),
             AcceptanceScenarioMode.Furnace => ValidateFurnace(
                 snapshot,
                 materialRegistry,
@@ -1088,6 +1094,12 @@ public static class AcceptanceRegressionVerifier
         int MaximumY,
         bool ClippedTop);
 
+    private readonly record struct SteamJetProfileSummary(
+        int UpperEdgeY,
+        int CandidateCapTransitionY,
+        double CandidateSigmaXCurvature,
+        int OccupiedBands);
+
     private static bool ValidateSteamPuff(
         SimulationWorldSnapshot finalSnapshot,
         MaterialRegistry registry,
@@ -1132,10 +1144,230 @@ public static class AcceptanceRegressionVerifier
         AppendSteamPuffAirProfile(fields, finalSnapshot, finalMetrics, 600);
         double riseRate = CalculateSteamPuffRiseRate(checkpoints, steam, sourceX, sourceY);
         fields.Append($" riseRate={riseRate:0.000000}");
-        WriteSteamPuffStateDump(finalSnapshot, registry, artifactDirectory, steam);
+        WriteSteamStateDump(finalSnapshot, registry, artifactDirectory, steam, "steam-puff-ascii.txt", false);
         bool image = File.Exists(Path.Combine(artifactDirectory, "AA_steam_puff.png"));
         report = $"PHYXEL_STEAM_PUFF checkpoints={checkpoints.Count} image={image}{fields}";
         return hasInitialSample && finalMetrics.SteamCells > 0;
+    }
+
+    private static bool ValidateSteamJet(
+        SimulationWorldSnapshot finalSnapshot,
+        MaterialRegistry registry,
+        IReadOnlyList<ThermalAcceptanceCheckpoint> checkpoints,
+        string artifactDirectory,
+        out string report)
+    {
+        uint steam = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
+        int sourceX = AcceptanceRegressionScenario.GetSteamJetSourceX();
+        int sourceY = AcceptanceRegressionScenario.GetSteamJetSourceY();
+        int[] requestedFrames = [120, 300];
+        StringBuilder fields = new();
+        bool hasCheckpoints = checkpoints.Count >= requestedFrames.Length;
+
+        for (int sample = 0; sample < requestedFrames.Length; sample++)
+        {
+            int targetFrame = requestedFrames[sample];
+            if (sample >= checkpoints.Count)
+            {
+                fields.Append($" checkpoint{targetFrame}Missing=1");
+                continue;
+            }
+
+            ThermalAcceptanceCheckpoint checkpoint = checkpoints[sample];
+            SteamPuffMetrics metrics = MeasureSteamPuff(
+                checkpoint.Snapshot,
+                steam,
+                sourceX,
+                sourceY);
+            AppendSteamPuffMetrics(fields, targetFrame, checkpoint.Frame, metrics);
+            SteamJetProfileSummary profile = WriteSteamJetProfile(
+                checkpoint.Snapshot,
+                steam,
+                artifactDirectory,
+                targetFrame,
+                sourceY);
+            AppendSteamJetProfileSummary(fields, targetFrame, profile);
+            WriteSteamStateDump(
+                checkpoint.Snapshot,
+                registry,
+                artifactDirectory,
+                steam,
+                $"steam-jet-ascii-{targetFrame}.txt",
+                true);
+        }
+
+        SteamPuffMetrics finalMetrics = MeasureSteamPuff(finalSnapshot, steam, sourceX, sourceY);
+        AppendSteamPuffMetrics(fields, 600, 600, finalMetrics);
+        SteamJetProfileSummary finalProfile = WriteSteamJetProfile(
+            finalSnapshot,
+            steam,
+            artifactDirectory,
+            600,
+            sourceY);
+        AppendSteamJetProfileSummary(fields, 600, finalProfile);
+        WriteSteamStateDump(
+            finalSnapshot,
+            registry,
+            artifactDirectory,
+            steam,
+            "steam-jet-ascii-600.txt",
+            true);
+        double frontRiseRate = CalculateSteamJetFrontRiseRate(
+            checkpoints,
+            finalSnapshot,
+            steam,
+            sourceX,
+            sourceY);
+        fields.Append($" steamJetFrontRiseRate={frontRiseRate:0.000000}");
+        bool images = File.Exists(Path.Combine(artifactDirectory, "AA_steam_jet_120.png")) &&
+            File.Exists(Path.Combine(artifactDirectory, "AA_steam_jet_300.png")) &&
+            File.Exists(Path.Combine(artifactDirectory, "AA_steam_jet_600.png"));
+        report = $"PHYXEL_STEAM_JET checkpoints={checkpoints.Count} images={images}{fields}";
+        return hasCheckpoints && finalMetrics.SteamCells > 0;
+    }
+
+    private static void AppendSteamJetProfileSummary(
+        StringBuilder fields,
+        int frame,
+        SteamJetProfileSummary profile)
+    {
+        fields.Append($" steamJetUpperEdgeY{frame}={profile.UpperEdgeY}");
+        fields.Append($" steamJetOccupiedBands{frame}={profile.OccupiedBands}");
+        fields.Append($" steamJetCandidateCapTransitionY{frame}={profile.CandidateCapTransitionY}");
+        fields.Append($" steamJetCandidateSigmaXCurvature{frame}={profile.CandidateSigmaXCurvature:0.000000}");
+    }
+
+    private static SteamJetProfileSummary WriteSteamJetProfile(
+        SimulationWorldSnapshot snapshot,
+        uint steam,
+        string artifactDirectory,
+        int frame,
+        int sourceY)
+    {
+        const int bandHeight = 20;
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        int minimumY = snapshot.Height;
+        int maximumY = -1;
+        for (int index = 0; index < grid.Length; index++)
+        {
+            if (grid[index].IsActive == 0 || grid[index].MaterialIndex != steam)
+            {
+                continue;
+            }
+            int y = index / snapshot.Width;
+            minimumY = Math.Min(minimumY, y);
+            maximumY = Math.Max(maximumY, y);
+        }
+
+        string path = Path.Combine(artifactDirectory, $"steam-jet-profile-{frame}.csv");
+        Directory.CreateDirectory(artifactDirectory);
+        if (maximumY < minimumY)
+        {
+            File.WriteAllText(path, "heightAboveSourceStart,heightAboveSourceEnd,worldYTop,worldYBottom,steamCells,sigmaX\n");
+            return new SteamJetProfileSummary(-1, -1, 0, 0);
+        }
+
+        // The TPT reference is measured in 20-cell strips from the source upward.
+        // Retaining both relative and world coordinates makes the dump directly
+        // comparable without hiding a possible collision with a world boundary.
+        int firstDistance = (sourceY - maximumY) / bandHeight * bandHeight;
+        int lastDistance = (sourceY - minimumY) / bandHeight * bandHeight;
+        int bandCount = (lastDistance - firstDistance) / bandHeight + 1;
+        int[] cells = new int[bandCount];
+        double[] mass = new double[bandCount];
+        double[] sumX = new double[bandCount];
+        double[] sumXSquare = new double[bandCount];
+        for (int index = 0; index < grid.Length; index++)
+        {
+            GridCell cell = grid[index];
+            if (cell.IsActive == 0 || cell.MaterialIndex != steam)
+            {
+                continue;
+            }
+            int x = index % snapshot.Width;
+            int y = index / snapshot.Width;
+            int heightAboveSource = sourceY - y;
+            int band = (heightAboveSource / bandHeight * bandHeight - firstDistance) / bandHeight;
+            cells[band]++;
+            mass[band] += cell.Mass;
+            sumX[band] += x * cell.Mass;
+            sumXSquare[band] += x * x * cell.Mass;
+        }
+
+        List<(int HeightAboveSource, double SigmaX)> occupied = [];
+        StringBuilder csv = new("heightAboveSourceStart,heightAboveSourceEnd,worldYTop,worldYBottom,steamCells,sigmaX\n");
+        for (int band = 0; band < bandCount; band++)
+        {
+            if (cells[band] == 0 || mass[band] <= 0)
+            {
+                continue;
+            }
+            double centreX = sumX[band] / mass[band];
+            double variance = Math.Max(0, sumXSquare[band] / mass[band] - centreX * centreX);
+            double sigmaX = Math.Sqrt(variance);
+            int heightAboveSource = firstDistance + band * bandHeight;
+            int worldYBottom = sourceY - heightAboveSource;
+            int worldYTop = worldYBottom - bandHeight + 1;
+            csv.AppendLine(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{heightAboveSource},{heightAboveSource + bandHeight - 1},{worldYTop},{worldYBottom},{cells[band]},{sigmaX:0.000000}"));
+            occupied.Add((heightAboveSource, sigmaX));
+        }
+        File.WriteAllText(path, csv.ToString());
+
+        int transitionY = -1;
+        double greatestCurvature = 0;
+        for (int index = 1; index + 1 < occupied.Count; index++)
+        {
+            double curvature = Math.Abs(
+                occupied[index + 1].SigmaX - 2 * occupied[index].SigmaX + occupied[index - 1].SigmaX);
+            if (curvature > greatestCurvature)
+            {
+                greatestCurvature = curvature;
+                transitionY = sourceY - occupied[index].HeightAboveSource;
+            }
+        }
+        return new SteamJetProfileSummary(minimumY, transitionY, greatestCurvature, occupied.Count);
+    }
+
+    private static double CalculateSteamJetFrontRiseRate(
+        IReadOnlyList<ThermalAcceptanceCheckpoint> checkpoints,
+        SimulationWorldSnapshot finalSnapshot,
+        uint steam,
+        int sourceX,
+        int sourceY)
+    {
+        List<(double Frame, double TopY)> samples = [];
+        foreach (ThermalAcceptanceCheckpoint checkpoint in checkpoints)
+        {
+            if (checkpoint.Frame is not (120 or 300))
+            {
+                continue;
+            }
+            samples.Add((checkpoint.Frame, MeasureSteamPuff(checkpoint.Snapshot, steam, sourceX, sourceY).MinimumY));
+        }
+        samples.Add((600, MeasureSteamPuff(finalSnapshot, steam, sourceX, sourceY).MinimumY));
+        if (samples.Count < 2)
+        {
+            return double.NaN;
+        }
+
+        double count = samples.Count;
+        double sumFrame = 0;
+        double sumTop = 0;
+        double sumFrameSquare = 0;
+        double sumFrameTop = 0;
+        foreach ((double frame, double topY) in samples)
+        {
+            sumFrame += frame;
+            sumTop += topY;
+            sumFrameSquare += frame * frame;
+            sumFrameTop += frame * topY;
+        }
+        double denominator = count * sumFrameSquare - sumFrame * sumFrame;
+        return Math.Abs(denominator) < double.Epsilon
+            ? double.NaN
+            : -(count * sumFrameTop - sumFrame * sumTop) / denominator;
     }
 
     private static void AppendSteamPuffMetrics(
@@ -1474,15 +1706,17 @@ public static class AcceptanceRegressionVerifier
         fields.Append($" airProfile{frame}=\"{profile}\"");
     }
 
-    private static void WriteSteamPuffStateDump(
+    private static void WriteSteamStateDump(
         SimulationWorldSnapshot snapshot,
         MaterialRegistry registry,
         string artifactDirectory,
-        uint steam)
+        uint steam,
+        string fileName,
+        bool fullWidth)
     {
         Directory.CreateDirectory(artifactDirectory);
-        const int left = 100;
-        const int right = 380;
+        int left = fullWidth ? 0 : 100;
+        int right = fullWidth ? snapshot.Width - 1 : 380;
         const int top = 0;
         const int bottom = 269;
         int firstX = Math.Clamp(left, 0, snapshot.Width - 1);
@@ -1514,7 +1748,7 @@ public static class AcceptanceRegressionVerifier
             }
             map.AppendLine();
         }
-        File.WriteAllText(Path.Combine(artifactDirectory, "steam-puff-ascii.txt"), map.ToString());
+        File.WriteAllText(Path.Combine(artifactDirectory, fileName), map.ToString());
     }
 
     private static bool ValidateFireOpen(

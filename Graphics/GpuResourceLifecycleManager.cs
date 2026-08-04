@@ -170,6 +170,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             CreateStagingBuffer(steamGasStepStatistics.Buffer.Description.SizeInBytes);
         GpuStructuredBuffer<GridCell> steamGasStepPreviousGrid = new(Device, cellCount);
         GpuStructuredBuffer<GasMotionState> steamGasStepPreviousMotion = new(Device, cellCount);
+        GpuStructuredBuffer<SteamJetInjectionStatistics> steamJetInjectionStatistics = new(Device, 1);
+        Buffer steamJetInjectionStatisticsStaging =
+            CreateStagingBuffer(steamJetInjectionStatistics.Buffer.Description.SizeInBytes);
         // The fire light field shares the air resolution: one coarse cell per
         // AirCellSize square, exactly like fire_r/g/b in The Powder Toy.
         Buffer fireGlowConstants = CreateConstantBuffer<FireGlowConstants>();
@@ -389,6 +392,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SteamGasStepStatisticsStaging = steamGasStepStatisticsStaging,
             SteamGasStepPreviousGrid = steamGasStepPreviousGrid,
             SteamGasStepPreviousMotion = steamGasStepPreviousMotion,
+            SteamJetInjectionStatistics = steamJetInjectionStatistics,
+            SteamJetInjectionStatisticsStaging = steamJetInjectionStatisticsStaging,
             FireGlowConstants = fireGlowConstants,
             FireGlow = fireGlow,
             FireGlowScratch = fireGlowScratch,
@@ -435,6 +440,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             CellularAutomataShader = allocateSimulation ? CompileShader("CellularAutomataSolver.hlsl") : null,
             GasRedistributionShader = allocateSimulation ? CompileShader("GasRedistribution.hlsl") : null,
             SteamGasStepObserverShader = allocateSimulation ? CompileShader("SteamGasStepObserver.hlsl") : null,
+            SteamJetInjectionObserverShader = allocateSimulation ? CompileShader("SteamJetInjectionObserver.hlsl") : null,
             ComponentInitializeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "InitializeComponents") : null,
             ComponentUnionShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "UnionComponents") : null,
             ComponentCompressShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "CompressComponents") : null,

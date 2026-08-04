@@ -893,9 +893,14 @@ public sealed class SimulationDispatchCoordinator
         ref SimulationFrameConstants constants)
     {
         DeviceContext context = resources.Context;
+        bool steamJetInjectionTrace = Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_INJECTION_TRACE") == "1";
         for (int commandIndex = 0; commandIndex < commands.Length; commandIndex++)
         {
             ReadOnlySpan<BrushDrawCommand> command = commands.Slice(commandIndex, 1);
+            if (steamJetInjectionTrace)
+            {
+                context.CopyResource(resources.Grid.ReadBuffer, resources.SteamGasStepPreviousGrid.Buffer);
+            }
             resources.Commands.Upload(context, command);
             constants.CommandCount = 1;
             constants.MaximumBrushDiameter =
@@ -921,6 +926,10 @@ public sealed class SimulationDispatchCoordinator
                 DivideRoundUp((int)constants.DispatchExtentY, 16),
                 1);
             Unbind(context, 2, 1);
+            if (steamJetInjectionTrace)
+            {
+                DispatchSteamJetInjectionObserver(context, resources, ref constants);
+            }
         }
     }
 
@@ -1349,6 +1358,8 @@ public sealed class SimulationDispatchCoordinator
         resources.Context.ClearUnorderedAccessView(resources.CellMaterials.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.GasMotion.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, zero);
+        resources.Context.ClearUnorderedAccessView(resources.SteamGasStepStatistics.UnorderedView, zero);
+        resources.Context.ClearUnorderedAccessView(resources.SteamJetInjectionStatistics.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.GasVerticalMotionStatistics.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.GasVerticalBlockFrameMarkers.UnorderedView, zero);
         foreach (UnorderedAccessView view in resources.Statistics.UnorderedAccessViews)
@@ -1756,10 +1767,6 @@ public sealed class SimulationDispatchCoordinator
         context.ClearUnorderedAccessView(
             resources.GasObstacleBypassStatistics.UnorderedView,
             new RawInt4(0, 0, 0, 0));
-        if (steamGasStepTrace)
-        {
-            context.ClearUnorderedAccessView(resources.SteamGasStepStatistics.UnorderedView, new RawInt4(0, 0, 0, 0));
-        }
         if (!airSimulationEnabled)
         {
             context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, new RawInt4(0, 0, 0, 0));
@@ -1907,6 +1914,27 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetUnorderedAccessView(0, resources.SteamGasStepStatistics.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
         Unbind(context, 5, 1);
+    }
+
+    private static void DispatchSteamJetInjectionObserver(
+        DeviceContext context,
+        GpuSimulationResources resources,
+        ref SimulationFrameConstants constants)
+    {
+        context.ComputeShader.Set(resources.SteamJetInjectionObserverShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.SteamGasStepPreviousGrid.View,
+            resources.Grid.ReadView,
+            resources.Commands.View);
+        context.ComputeShader.SetUnorderedAccessView(0, resources.SteamJetInjectionStatistics.UnorderedView);
+        UpdateConstants(context, resources, ref constants);
+        context.Dispatch(
+            DivideRoundUp((int)constants.DispatchExtentX, 16),
+            DivideRoundUp((int)constants.DispatchExtentY, 16),
+            1);
+        Unbind(context, 3, 1);
     }
 
     private static void DispatchAirClear(GpuSimulationResources resources)

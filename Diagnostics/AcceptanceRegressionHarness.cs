@@ -19,6 +19,7 @@ public sealed class AcceptanceRegressionHarness
     private static readonly ulong[] GasCheckpointTicks = [120];
     private static readonly ulong[] SteamDistributionCheckpointTicks = [20, 40, 80, 200];
     private static readonly uint[] SteamPuffCheckpointFrames = [1, 30, 60, 90, 120, 150, 300];
+    private static readonly uint[] SteamJetCheckpointFrames = [120, 300];
     private const ulong SteamDistributionFinalTick = 400;
     private static readonly ulong[] SteamCloudCheckpointTicks =
         [0, 20, 40, 80, 200, 400, 800, 1200, 1300, 1400, 1500];
@@ -31,6 +32,7 @@ public sealed class AcceptanceRegressionHarness
     private readonly GasLateralTransferTrace gasLateralTransferTrace = new();
     private readonly GasVerticalMotionTrace gasVerticalMotionTrace = new();
     private readonly SteamGasStepTrace steamGasStepTrace = new();
+    private readonly SteamJetInjectionTrace steamJetInjectionTrace = new();
     private readonly PhaseAcceptanceController phaseAcceptance;
     private readonly uint scenarioSeed;
 
@@ -107,6 +109,7 @@ public sealed class AcceptanceRegressionHarness
             "furnace" or "fire_furnace" => AcceptanceScenarioMode.Furnace,
             "metal_chimney" or "furnace_metal_chimney" => AcceptanceScenarioMode.MetalChimney,
             "steam_puff" => AcceptanceScenarioMode.SteamPuff,
+            "steam_jet" => AcceptanceScenarioMode.SteamJet,
             "steam_self_cooling" => AcceptanceScenarioMode.SteamSelfCooling,
             "brush_empty_only" => AcceptanceScenarioMode.BrushEmptyOnly,
             "continuous_brush_stroke" => AcceptanceScenarioMode.ContinuousBrushStroke,
@@ -205,6 +208,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.Furnace => 600,
                 AcceptanceScenarioMode.MetalChimney => 600,
                 AcceptanceScenarioMode.SteamPuff => 600,
+                AcceptanceScenarioMode.SteamJet => 600,
                 AcceptanceScenarioMode.SteamSelfCooling => uint.MaxValue,
                 AcceptanceScenarioMode.BrushEmptyOnly => 7,
                 AcceptanceScenarioMode.ContinuousBrushStroke => 3,
@@ -353,7 +357,7 @@ public sealed class AcceptanceRegressionHarness
     public void RecordSteamGasStepTrace(uint frame, GpuSimulationResources resources)
     {
         if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_GAS_STEP_TRACE") != "1" ||
-            Mode != AcceptanceScenarioMode.SteamPuff ||
+            Mode is not (AcceptanceScenarioMode.SteamPuff or AcceptanceScenarioMode.SteamJet) ||
             frame is not (60 or 120 or 300 or 599))
         {
             return;
@@ -361,6 +365,17 @@ public sealed class AcceptanceRegressionHarness
         // The final acceptance world is captured after frame 599 and reported
         // as checkpoint 600, matching the existing steam-puff convention.
         steamGasStepTrace.Record(frame == 599 ? 600u : frame, resources);
+    }
+
+    public void RecordSteamJetInjectionTrace(uint frame, GpuSimulationResources resources)
+    {
+        if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_INJECTION_TRACE") != "1" ||
+            Mode != AcceptanceScenarioMode.SteamJet ||
+            frame is not (120 or 300 or 599))
+        {
+            return;
+        }
+        steamJetInjectionTrace.Record(frame == 599 ? 600u : frame, resources);
     }
 
     public bool TryBeginAcceptanceCheckpoint(
@@ -404,10 +419,13 @@ public sealed class AcceptanceRegressionHarness
             }
             return ready;
         }
-        if (Mode == AcceptanceScenarioMode.SteamPuff)
+        if (Mode is AcceptanceScenarioMode.SteamPuff or AcceptanceScenarioMode.SteamJet)
         {
-            bool ready = thermalCheckpoints.Count < SteamPuffCheckpointFrames.Length &&
-                frame >= SteamPuffCheckpointFrames[thermalCheckpoints.Count];
+            uint[] checkpoints = Mode == AcceptanceScenarioMode.SteamJet
+                ? SteamJetCheckpointFrames
+                : SteamPuffCheckpointFrames;
+            bool ready = thermalCheckpoints.Count < checkpoints.Length &&
+                frame >= checkpoints[thermalCheckpoints.Count];
             if (ready)
             {
                 checkpointTick = frame;
@@ -649,6 +667,9 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.Furnace when frame == 599 => "Z_furnace",
             AcceptanceScenarioMode.MetalChimney when frame == 599 => "Z_metal_chimney",
             AcceptanceScenarioMode.SteamPuff when frame == 599 => "AA_steam_puff",
+            AcceptanceScenarioMode.SteamJet when frame == 119 => "AA_steam_jet_120",
+            AcceptanceScenarioMode.SteamJet when frame == 299 => "AA_steam_jet_300",
+            AcceptanceScenarioMode.SteamJet when frame == 599 => "AA_steam_jet_600",
             _ => null
         };
         if (label is null)
@@ -779,7 +800,7 @@ public sealed class AcceptanceRegressionHarness
                     GasVerticalMotionTrace.FormatMetalChimneyBands(vertical);
             }
         }
-        if (Mode == AcceptanceScenarioMode.SteamPuff)
+        if (Mode is AcceptanceScenarioMode.SteamPuff or AcceptanceScenarioMode.SteamJet)
         {
             string tracePath = steamGasStepTrace.WriteCsv(
                 ArtifactDirectory,
@@ -800,6 +821,23 @@ public sealed class AcceptanceRegressionHarness
                     $" noXSteps{frame}={steps.NoXSteps}";
             }
             report += $" steamGasStepTrace={tracePath}";
+        }
+        if (Mode == AcceptanceScenarioMode.SteamJet)
+        {
+            string tracePath = steamJetInjectionTrace.WriteCsv(
+                ArtifactDirectory,
+                "steam-jet-injection-trace.csv");
+            if (steamJetInjectionTrace.TryGet(600, out SteamJetInjectionStatistics finalInjection))
+            {
+                report +=
+                    $" steamJetCreatedCells600={finalInjection.CreatedSteamCells}" +
+                    $" steamJetInflowPerFrame={finalInjection.CreatedSteamCells / 600.0:0.000000}";
+            }
+            else
+            {
+                report += " steamJetInjection600Missing=1";
+            }
+            report += $" steamJetInjectionTrace={tracePath}";
         }
         report += Environment.NewLine +
             $"PHYXEL_MATERIAL_PROPERTIES_LAYOUT csharpActual={Marshal.SizeOf<MaterialProperties>()} " +

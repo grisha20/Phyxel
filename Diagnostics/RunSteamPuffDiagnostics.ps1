@@ -99,8 +99,18 @@ foreach ($state in $states) {
         $line = $output | Where-Object { $_ -like 'PHYXEL_STEAM_PUFF *' } | Select-Object -Last 1
         if (-not $line) { throw "steam_puff $($state.Name) run $run produced no diagnostic line" }
         Write-Host "PHYXEL_STEAM_PUFF_RUN state=$($state.Name) brushRadius=$BrushRadius spawnDensity=$spawnDensityText run=$run seed=$seed exitCode=$exitCode $($line.Substring('PHYXEL_STEAM_PUFF '.Length))"
+        $runValues = @{}
         foreach ($match in [regex]::Matches($line, '(?:^|\s)([A-Za-z][A-Za-z0-9]*)=(-?[0-9]+(?:\.[0-9]+)?)')) {
-            Add-Sample $values $match.Groups[1].Value ([double]::Parse($match.Groups[2].Value, $culture))
+            $name = $match.Groups[1].Value
+            $value = [double]::Parse($match.Groups[2].Value, $culture)
+            Add-Sample $values $name $value
+            $runValues[$name] = $value
+        }
+        if ($runValues.ContainsKey('sigmaX600') -and $runValues.ContainsKey('sigmaX120') -and $runValues['sigmaX120'] -gt 0) {
+            Add-Sample $values 'sigmaXGrowth600Over120' ($runValues['sigmaX600'] / $runValues['sigmaX120'])
+        }
+        if ($runValues.ContainsKey('sigmaY600') -and $runValues.ContainsKey('sigmaY120') -and $runValues['sigmaY120'] -gt 0) {
+            Add-Sample $values 'sigmaYGrowth600Over120' ($runValues['sigmaY600'] / $runValues['sigmaY120'])
         }
     }
 
