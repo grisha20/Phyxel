@@ -161,6 +161,7 @@ public static class UiLayoutRegressionTests
                     panel.ScaleSliderBounds,
                     panel.GravityToggleBounds,
                     panel.HydraulicsToggleBounds,
+                    panel.WithoutEffectsToggleBounds,
                     panel.ResetButtonBounds,
                     panel.ClearButtonBounds
                 ];
@@ -169,12 +170,16 @@ public static class UiLayoutRegressionTests
                     Require(IsInside(control, layout.RightPanel),
                         $"Property control {control} escaped at {width}x{height}, DPI {dpi}.");
                 }
-                Require(!panel.GravityToggleBounds.Intersects(panel.HydraulicsToggleBounds),
+                Require(!panel.GravityToggleBounds.Intersects(panel.HydraulicsToggleBounds) &&
+                        !panel.GravityToggleBounds.Intersects(panel.WithoutEffectsToggleBounds) &&
+                        !panel.HydraulicsToggleBounds.Intersects(panel.WithoutEffectsToggleBounds),
                     "Property switches overlap.");
                 Require(!panel.ResetButtonBounds.Intersects(panel.ClearButtonBounds),
                     "Property action buttons overlap.");
                 Require(!panel.ResetButtonBounds.Intersects(panel.HydraulicsToggleBounds) &&
-                        !panel.ClearButtonBounds.Intersects(panel.HydraulicsToggleBounds),
+                        !panel.ClearButtonBounds.Intersects(panel.HydraulicsToggleBounds) &&
+                        !panel.ResetButtonBounds.Intersects(panel.WithoutEffectsToggleBounds) &&
+                        !panel.ClearButtonBounds.Intersects(panel.WithoutEffectsToggleBounds),
                     "Property action buttons overlap the simulation switches.");
 
                 UiLeftToolbar toolbar = new();
@@ -269,6 +274,10 @@ public static class UiLayoutRegressionTests
             layout.RightPanel, font, settings, PhyxelToolId.Brush, sand, out _);
         Require(settings.HydraulicPressure && panel.HydraulicsToggled,
             "Hydraulics switch did not change the setting.");
+        panel.Update(
+            Input(panel.WithoutEffectsToggleBounds.Center, leftDown: true, leftPressed: true),
+            layout.RightPanel, font, settings, PhyxelToolId.Brush, sand, out _);
+        Require(settings.RenderWithoutEffects, "Without-effects switch did not change the render setting.");
 
         panel.Update(
             Input(panel.ClearButtonBounds.Center, leftDown: true, leftPressed: true),
