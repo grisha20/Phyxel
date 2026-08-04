@@ -1203,6 +1203,7 @@ public static class AcceptanceRegressionVerifier
                 targetFrame,
                 sourceY);
             AppendSteamJetProfileSummary(fields, targetFrame, profile);
+            if (steamObstacle) AppendSteamObstacleMetrics(fields, checkpoint.Snapshot, registry, targetFrame);
             WriteSteamStateDump(
                 checkpoint.Snapshot,
                 registry,
@@ -1220,7 +1221,8 @@ public static class AcceptanceRegressionVerifier
             artifactDirectory,
             finalFrame,
             sourceY);
-        AppendSteamJetProfileSummary(fields, 600, finalProfile);
+        AppendSteamJetProfileSummary(fields, finalFrame, finalProfile);
+        if (steamObstacle) AppendSteamObstacleMetrics(fields, finalSnapshot, registry, finalFrame);
         WriteSteamStateDump(
             finalSnapshot,
             registry,
@@ -1241,6 +1243,28 @@ public static class AcceptanceRegressionVerifier
             File.Exists(Path.Combine(artifactDirectory, $"AA_steam_jet_{finalFrame}.png"));
         report = $"PHYXEL_STEAM_JET checkpoints={checkpoints.Count} images={images}{fields}";
         return hasCheckpoints && finalMetrics.SteamCells > 0;
+    }
+
+    private static void AppendSteamObstacleMetrics(StringBuilder fields, SimulationWorldSnapshot snapshot, MaterialRegistry registry, int frame)
+    {
+        const int left = 241, right = 371, top = 225, bottom = 231, axis = 306;
+        uint steam = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
+        uint water = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
+        uint metal = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal);
+        ReadOnlySpan<GridCell> cells = Cells(snapshot);
+        int steamCount = 0, waterCount = 0, above = 0, min = int.MaxValue, max = -1, midN = 0, edgeN = 0;
+        double steamX = 0, waterY = 0, midT = 0, edgeT = 0;
+        for (int i = 0; i < cells.Length; i++)
+        {
+            GridCell cell = cells[i]; if (cell.IsActive == 0) continue;
+            int x = i % snapshot.Width, y = i / snapshot.Width;
+            if (cell.MaterialIndex == steam) { steamCount++; steamX += x; if (y < top) above++; if (y > bottom && y <= bottom + 6) { min = Math.Min(min, x); max = Math.Max(max, x); } }
+            else if (cell.MaterialIndex == water) { waterCount++; waterY += y; }
+            else if (cell.MaterialIndex == metal && x >= left && x <= right && y >= top && y <= bottom)
+            { if (x >= left + 44 && x <= right - 44) { midT += cell.Temperature; midN++; } else if (x < left + 22 || x > right - 22) { edgeT += cell.Temperature; edgeN++; } }
+        }
+        int coverage = max < min ? 0 : Math.Max(0, Math.Min(right, max) - Math.Max(left, min) + 1);
+        fields.Append($" obstacleSteamCells{frame}={steamCount} obstacleCoverage{frame}={coverage / 131.0:0.000000} obstacleSteamAboveFraction{frame}={above / (double)Math.Max(1, steamCount):0.000000} obstacleWaterCells{frame}={waterCount} obstacleWaterCentreY{frame}={waterY / Math.Max(1, waterCount):0.000000} obstacleSteamCentreOffsetX{frame}={steamX / Math.Max(1, steamCount) - axis:0.000000} obstaclePlateMiddleTemperature{frame}={midT / Math.Max(1, midN):0.000000} obstaclePlateEdgeTemperature{frame}={edgeT / Math.Max(1, edgeN):0.000000}");
     }
 
     private static void AppendSteamJetProfileSummary(
