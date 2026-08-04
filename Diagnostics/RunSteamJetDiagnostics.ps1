@@ -9,6 +9,9 @@ param(
     [switch]$SourceDistributionTrace,
     [switch]$CollapseTrace,
     [switch]$FixedInflow,
+    [switch]$FixedInflowAreaUniform,
+    [ValidateRange(0, 100)]
+    [int]$FixedInflowRadius = 0,
     [ValidateSet('steam_jet', 'steam_obstacle')]
     [string]$Scenario = 'steam_jet',
     [ValidateRange(320, 7680)]
@@ -202,6 +205,28 @@ function Write-SourceDistributionSummary([string]$root, [int]$runCount) {
     Write-Host "PHYXEL_STEAM_JET_SOURCE_DISTRIBUTION_SUMMARY path=$summary rows=$($out.Count)"
 }
 
+function Write-SourceDistributionAccumulatedSummary([string]$root, [int]$runCount) {
+    $rows = [System.Collections.Generic.List[object]]::new()
+    for ($run = 1; $run -le $runCount; $run++) {
+        $path = Join-Path $root ("run-{0}\steam-jet-source-distribution-accumulated.csv" -f $run)
+        if (-not (Test-Path -LiteralPath $path)) { throw "Missing accumulated source-distribution trace: $path" }
+        $rows.Add((Import-Csv -LiteralPath $path | Select-Object -First 1))
+    }
+
+    $record = [ordered]@{}
+    foreach ($property in $rows[0].PSObject.Properties.Name) {
+        [double[]]$samples = @($rows | ForEach-Object { [double]::Parse($_.$property, $culture) })
+        $mean = ($samples | Measure-Object -Average).Average
+        $variance = 0.0
+        foreach ($sample in $samples) { $variance += [math]::Pow($sample - $mean, 2) }
+        $record[($property + 'Mean')] = $mean.ToString('F6', $culture)
+        $record[($property + 'StdDev')] = ([math]::Sqrt($variance / $samples.Length)).ToString('F6', $culture)
+    }
+    $summary = Join-Path $root 'steam-jet-source-distribution-accumulated-summary.csv'
+    [pscustomobject]$record | Export-Csv -LiteralPath $summary -NoTypeInformation
+    Write-Host "PHYXEL_STEAM_JET_SOURCE_DISTRIBUTION_ACCUMULATED_SUMMARY path=$summary rows=1"
+}
+
 function Write-TrunkCollapseSummary([string]$root, [int]$runCount) {
     $rows = @{}
     for ($run = 1; $run -le $runCount; $run++) {
@@ -313,6 +338,16 @@ for ($run = 1; $run -le $Runs; $run++) {
     } else {
         Remove-Item Env:PHYXEL_STEAM_JET_FIXED_INFLOW -ErrorAction SilentlyContinue
     }
+    if ($FixedInflowAreaUniform) {
+        $env:PHYXEL_STEAM_JET_FIXED_INFLOW_AREA_UNIFORM = '1'
+    } else {
+        Remove-Item Env:PHYXEL_STEAM_JET_FIXED_INFLOW_AREA_UNIFORM -ErrorAction SilentlyContinue
+    }
+    if ($FixedInflowRadius -gt 0) {
+        $env:PHYXEL_STEAM_JET_FIXED_INFLOW_RADIUS = $FixedInflowRadius.ToString($culture)
+    } else {
+        Remove-Item Env:PHYXEL_STEAM_JET_FIXED_INFLOW_RADIUS -ErrorAction SilentlyContinue
+    }
     if ($AirCouplingTrace -or $CollapseTrace) {
         $env:PHYXEL_STEAM_JET_AIR_COUPLING_TRACE = '1'
     } else {
@@ -340,7 +375,10 @@ Write-Summary $values
 if ($AirCouplingTrace) {
     Write-AirCouplingBandSummary $artifactRoot $Runs
 }
-if ($SourceDistributionTrace) { Write-SourceDistributionSummary $artifactRoot $Runs }
+if ($SourceDistributionTrace) {
+    Write-SourceDistributionSummary $artifactRoot $Runs
+    Write-SourceDistributionAccumulatedSummary $artifactRoot $Runs
+}
 if ($CollapseTrace) { Write-TrunkCollapseSummary $artifactRoot $Runs }
 if ($BlockingTrace) {
     Write-BlockingTraceSummary $artifactRoot $Runs

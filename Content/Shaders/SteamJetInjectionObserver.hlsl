@@ -59,7 +59,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 [numthreads(16, 16, 1)]
 void CSDistribution(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    if (FrameIndex >= 60 || dispatchThreadId.x >= DispatchExtentX || dispatchThreadId.y >= DispatchExtentY)
+    if (FrameIndex >= 200 || dispatchThreadId.x >= DispatchExtentX || dispatchThreadId.y >= DispatchExtentY)
     {
         return;
     }

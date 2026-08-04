@@ -353,8 +353,8 @@ public static class AcceptanceRegressionScenario
         // normal held-brush source. The normal brush remains the default.
         int requestedCells = 5 + (frame % 5 is 3 or 4 ? 1 : 0);
         List<BrushDrawCommand> commands = new(requestedCells);
-        const int radius = SteamPuffBrushRadius;
-        const int diameter = radius * 2 + 1;
+        int radius = GetFixedSteamJetInflowRadius();
+        int diameter = radius * 2 + 1;
         uint state = scenarioSeed ^ (frame * 0x9e3779b9u) ^ 0x53a9f41du;
         int sourceX = forcedSourceX ?? GetSteamJetSourceX();
         int sourceY = GetSteamJetSourceY();
@@ -362,12 +362,31 @@ public static class AcceptanceRegressionScenario
         while (selected < requestedCells)
         {
             state = state * 1664525u + 1013904223u;
-            int x = (int)(state % diameter) - radius;
-            state = state * 1664525u + 1013904223u;
-            int y = (int)(state % diameter) - radius;
-            if (x * x + y * y > radius * radius)
+            int x;
+            int y;
+            if (UsesUniformAreaFixedSteamJetInflow())
             {
-                continue;
+                float radialUnit = state / ((float)uint.MaxValue + 1.0f);
+                state = state * 1664525u + 1013904223u;
+                float angleUnit = state / ((float)uint.MaxValue + 1.0f);
+                float sampleRadius = radius * MathF.Sqrt(radialUnit);
+                float angle = MathF.Tau * angleUnit;
+                x = (int)MathF.Round(sampleRadius * MathF.Cos(angle));
+                y = (int)MathF.Round(sampleRadius * MathF.Sin(angle));
+                if (x * x + y * y > radius * radius)
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                x = (int)(state % diameter) - radius;
+                state = state * 1664525u + 1013904223u;
+                y = (int)(state % diameter) - radius;
+                if (x * x + y * y > radius * radius)
+                {
+                    continue;
+                }
             }
 
             bool duplicate = false;
@@ -398,6 +417,15 @@ public static class AcceptanceRegressionScenario
         }
         return commands;
     }
+
+    private static int GetFixedSteamJetInflowRadius()
+    {
+        string? value = Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_FIXED_INFLOW_RADIUS");
+        return int.TryParse(value, out int radius) && radius > 0 ? radius : SteamPuffBrushRadius;
+    }
+
+    private static bool UsesUniformAreaFixedSteamJetInflow() =>
+        Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_FIXED_INFLOW_AREA_UNIFORM") == "1";
 
     private static bool UsesFixedSteamJetInflow() =>
         Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_FIXED_INFLOW") == "1";

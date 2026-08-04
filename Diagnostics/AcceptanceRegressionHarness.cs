@@ -887,7 +887,10 @@ public sealed class AcceptanceRegressionHarness
             if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_DIAGONAL_TRACE") == "1")
                 report += $" steamJetDiagonalTrace={steamJetDiagonalTrace.WriteCsv(ArtifactDirectory)}";
             if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_SOURCE_DISTRIBUTION_TRACE") == "1")
-                report += $" steamJetSourceDistributionTrace={steamJetInjectionDistributionTrace.WriteCsv(ArtifactDirectory)}";
+            {
+                report += $" steamJetSourceDistributionTrace={steamJetInjectionDistributionTrace.WriteCsv(ArtifactDirectory)}" +
+                    $" steamJetSourceDistributionAccumulatedTrace={steamJetInjectionDistributionTrace.WriteAccumulatedCsv(ArtifactDirectory, 200)}";
+            }
             string tracePath = steamJetInjectionTrace.WriteCsv(
                 ArtifactDirectory,
                 "steam-jet-injection-trace.csv");

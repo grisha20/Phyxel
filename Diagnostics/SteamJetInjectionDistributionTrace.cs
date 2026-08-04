@@ -56,4 +56,41 @@ public sealed class SteamJetInjectionDistributionTrace
         }
         return path;
     }
+
+    public string WriteAccumulatedCsv(string directory, int frameCount)
+    {
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "steam-jet-source-distribution-accumulated.csv");
+        int count = Math.Min(frameCount, frames.Length);
+        long createdCells = 0;
+        long sumOffsetX = 0;
+        long sumOffsetXSquared = 0;
+        long ring0 = 0;
+        long ring1 = 0;
+        long ring2 = 0;
+        long ring3 = 0;
+        long ring4 = 0;
+        long ring5OrMore = 0;
+        for (int index = 0; index < count; index++)
+        {
+            SteamJetInjectionDistributionFrame sample = frames[index];
+            createdCells += sample.CreatedSteamCells;
+            sumOffsetX += sample.SumOffsetX;
+            sumOffsetXSquared += sample.SumOffsetXSquared;
+            ring0 += sample.Ring0;
+            ring1 += sample.Ring1;
+            ring2 += sample.Ring2;
+            ring3 += sample.Ring3;
+            ring4 += sample.Ring4;
+            ring5OrMore += sample.Ring5OrMore;
+        }
+
+        double mean = createdCells == 0 ? 0 : sumOffsetX / (double)createdCells;
+        double variance = createdCells == 0 ? 0 : Math.Max(0, sumOffsetXSquared / (double)createdCells - mean * mean);
+        using StreamWriter writer = new(path, false);
+        writer.WriteLine("frameStart,frameEnd,createdSteamCells,meanOffsetX,sigmaX,ring0_1,ring2_3,ring4_5,ring6_7,ring8_9,ring10Plus");
+        writer.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            $"1,{count},{createdCells},{mean:0.000000},{Math.Sqrt(variance):0.000000},{ring0},{ring1},{ring2},{ring3},{ring4},{ring5OrMore}"));
+        return path;
+    }
 }

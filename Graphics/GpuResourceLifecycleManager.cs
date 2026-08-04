@@ -175,7 +175,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             CreateStagingBuffer(steamJetInjectionStatistics.Buffer.Description.SizeInBytes);
         bool steamJetSourceDistributionTrace = allocateSimulation &&
             Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_SOURCE_DISTRIBUTION_TRACE") == "1";
-        const int steamJetSourceDistributionFrameCount = 60;
+        const int steamJetSourceDistributionFrameCount = 200;
         GpuStructuredBuffer<SteamJetInjectionDistributionFrame>? steamJetInjectionDistribution =
             steamJetSourceDistributionTrace ? new(Device, steamJetSourceDistributionFrameCount) : null;
         Buffer? steamJetInjectionDistributionStaging = steamJetInjectionDistribution is null ? null :
