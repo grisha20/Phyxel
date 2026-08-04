@@ -1,0 +1,37 @@
+# Единые правила окончаний строк.
+#
+# Без этого файла поведение зависело от системного core.autocrlf, и рабочее
+# дерево регулярно показывало десятки изменённых файлов, в которых не менялось
+# ни одного символа кода. Это дважды блокировало работу и один раз едва не
+# попало в историю отдельным коммитом на 71 файл.
+#
+# text=auto: git сам решает, текстовый ли файл, и хранит его в индексе с LF.
+# В рабочем каталоге окончания расставляются по настройкам платформы.
+
+* text=auto
+
+# Явные правила для того, что должно оставаться CRLF на Windows.
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.sln   text eol=crlf
+
+# Исходники и данные — LF в индексе и в рабочем каталоге.
+*.cs      text eol=lf
+*.hlsl    text eol=lf
+*.hlsli   text eol=lf
+*.json    text eol=lf
+*.md      text eol=lf
+*.csproj  text eol=lf
+*.props   text eol=lf
+*.manifest text eol=lf
+*.txt     text eol=lf
+*.csv     text eol=lf
+
+# Бинарные — не трогать.
+*.png   binary
+*.ico   binary
+*.pptx  binary
+*.xlsx  binary
+*.docx  binary
+*.pdf   binary
