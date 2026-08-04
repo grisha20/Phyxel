@@ -23,6 +23,7 @@ public sealed class AcceptanceRegressionHarness
     // Keep a dense early history so front speed is fitted only from unclipped
     // observations rather than from a boundary-pinned final snapshot.
     private static readonly uint[] SteamJetCheckpointFrames = [60, 90, 120, 150, 200, 250, 300];
+    private static readonly uint[] SteamObstacleCheckpointFrames = [300, 600];
     private const ulong SteamDistributionFinalTick = 400;
     private static readonly ulong[] SteamCloudCheckpointTicks =
         [0, 20, 40, 80, 200, 400, 800, 1200, 1300, 1400, 1500];
@@ -115,6 +116,7 @@ public sealed class AcceptanceRegressionHarness
             "metal_chimney" or "furnace_metal_chimney" => AcceptanceScenarioMode.MetalChimney,
             "steam_puff" => AcceptanceScenarioMode.SteamPuff,
             "steam_jet" => AcceptanceScenarioMode.SteamJet,
+            "steam_obstacle" => AcceptanceScenarioMode.SteamObstacle,
             "steam_self_cooling" => AcceptanceScenarioMode.SteamSelfCooling,
             "brush_empty_only" => AcceptanceScenarioMode.BrushEmptyOnly,
             "continuous_brush_stroke" => AcceptanceScenarioMode.ContinuousBrushStroke,
@@ -214,6 +216,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.MetalChimney => 600,
                 AcceptanceScenarioMode.SteamPuff => 600,
                 AcceptanceScenarioMode.SteamJet => 600,
+                AcceptanceScenarioMode.SteamObstacle => 1200,
                 AcceptanceScenarioMode.SteamSelfCooling => uint.MaxValue,
                 AcceptanceScenarioMode.BrushEmptyOnly => 7,
                 AcceptanceScenarioMode.ContinuousBrushStroke => 3,
@@ -441,9 +444,10 @@ public sealed class AcceptanceRegressionHarness
             }
             return ready;
         }
-        if (Mode is AcceptanceScenarioMode.SteamPuff or AcceptanceScenarioMode.SteamJet)
+        if (Mode is AcceptanceScenarioMode.SteamPuff or AcceptanceScenarioMode.SteamJet or AcceptanceScenarioMode.SteamObstacle)
         {
-            uint[] checkpoints = Mode == AcceptanceScenarioMode.SteamJet
+            uint[] checkpoints = Mode == AcceptanceScenarioMode.SteamObstacle
+                ? SteamObstacleCheckpointFrames : Mode == AcceptanceScenarioMode.SteamJet
                 ? SteamJetCheckpointFrames
                 : SteamPuffCheckpointFrames;
             bool ready = thermalCheckpoints.Count < checkpoints.Length &&

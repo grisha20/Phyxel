@@ -5,10 +5,14 @@ param(
     [switch]$AirCouplingTrace,
     [switch]$LateralTrace,
     [switch]$FixedInflow,
+    [ValidateSet('steam_jet', 'steam_obstacle')]
+    [string]$Scenario = 'steam_jet',
     [ValidateRange(320, 7680)]
     [int]$WorldWidth = 1920,
     [ValidateRange(180, 4320)]
-    [int]$WorldHeight = 1080
+    [int]$WorldHeight = 1080,
+    [ValidateRange(1, 2400)]
+    [int]$CaptureFrame = 600
 )
 
 $ErrorActionPreference = 'Stop'
@@ -155,13 +159,13 @@ $values = @{}
 
 for ($run = 1; $run -le $Runs; $run++) {
     $seed = 71000 + $run
-    $env:PHYXEL_ACCEPTANCE_MODE = 'steam_jet'
+        $env:PHYXEL_ACCEPTANCE_MODE = $Scenario
     $env:PHYXEL_ACCEPTANCE_RUN_SEED = $seed.ToString($culture)
     $env:PHYXEL_ACCEPTANCE_SCALE = '1.0'
     $env:PHYXEL_ACCEPTANCE_WORLD_WIDTH = $WorldWidth.ToString($culture)
     $env:PHYXEL_ACCEPTANCE_WORLD_HEIGHT = $WorldHeight.ToString($culture)
     $env:PHYXEL_ACCEPTANCE_TARGET_FPS = '60'
-    $env:PHYXEL_ACCEPTANCE_CAPTURE_FRAME = '600'
+    $env:PHYXEL_ACCEPTANCE_CAPTURE_FRAME = $CaptureFrame.ToString($culture)
     $env:PHYXEL_ACCEPTANCE_AIR = '1'
     $env:PHYXEL_STEAM_GAS_STEP_TRACE = '1'
     if ($LateralTrace) { $env:PHYXEL_STEAM_JET_LATERAL_TRACE = '1' }

@@ -76,6 +76,7 @@ public enum AcceptanceScenarioMode
     MetalChimney,
     SteamPuff,
     SteamJet,
+    SteamObstacle,
     SteamSelfCooling,
     BrushEmptyOnly,
     ContinuousBrushStroke,
@@ -163,6 +164,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.MetalChimney => CreateMetalChimney(frame, scenarioSeed),
             AcceptanceScenarioMode.SteamPuff => CreateSteamPuff(frame, scenarioSeed),
             AcceptanceScenarioMode.SteamJet => CreateSteamJet(frame, scenarioSeed),
+            AcceptanceScenarioMode.SteamObstacle => CreateSteamObstacle(frame, scenarioSeed),
             AcceptanceScenarioMode.SteamSelfCooling => [],
             AcceptanceScenarioMode.SteamCloudTemperature =>
                 SteamCloudTemperatureAcceptanceScenario.CreateCommands(frame, materialRegistry),
@@ -319,7 +321,28 @@ public static class AcceptanceRegressionScenario
         return [steam];
     }
 
-    private static IReadOnlyList<BrushDrawCommand> CreateFixedSteamJetInflow(uint frame, uint scenarioSeed)
+    private static IReadOnlyList<BrushDrawCommand> CreateSteamObstacle(uint frame, uint scenarioSeed)
+    {
+        List<BrushDrawCommand> commands = [];
+        if (frame == 0)
+        {
+            // TPT reference: 131×7 ordinary METL, its lower edge is 153 cells
+            // above the 384-cell world's bottom (world y=231).
+            const int plateLength = 131;
+            const int plateBottomY = 231;
+            int left = 306 - plateLength / 2;
+            commands.AddRange(AddFill(left, plateBottomY - 6, left + plateLength - 1,
+                plateBottomY, 7, 5, materials.Metal, 19701));
+        }
+        if (frame < 1200)
+        {
+            commands.AddRange(CreateFixedSteamJetInflow(frame, scenarioSeed, 306));
+        }
+        return commands;
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateFixedSteamJetInflow(
+        uint frame, uint scenarioSeed, int? forcedSourceX = null)
     {
         // A point brush remains empty-only, so a requested site can already
         // contain steam when the source is saturated. Seven attempts on two
@@ -333,6 +356,8 @@ public static class AcceptanceRegressionScenario
         const int radius = SteamPuffBrushRadius;
         const int diameter = radius * 2 + 1;
         uint state = scenarioSeed ^ (frame * 0x9e3779b9u) ^ 0x53a9f41du;
+        int sourceX = forcedSourceX ?? GetSteamJetSourceX();
+        int sourceY = GetSteamJetSourceY();
         int selected = 0;
         while (selected < requestedCells)
         {
@@ -348,7 +373,7 @@ public static class AcceptanceRegressionScenario
             bool duplicate = false;
             foreach (BrushDrawCommand existing in commands)
             {
-                if (existing.X == GetSteamJetSourceX() + x && existing.Y == GetSteamJetSourceY() + y)
+                if (existing.X == sourceX + x && existing.Y == sourceY + y)
                 {
                     duplicate = true;
                     break;
@@ -360,8 +385,8 @@ public static class AcceptanceRegressionScenario
             }
 
             BrushDrawCommand steam = Create(
-                GetSteamJetSourceX() + x,
-                GetSteamJetSourceY() + y,
+                sourceX + x,
+                sourceY + y,
                 0,
                 materials.Steam,
                 0,

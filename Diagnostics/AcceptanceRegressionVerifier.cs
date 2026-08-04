@@ -233,6 +233,13 @@ public static class AcceptanceRegressionVerifier
                 thermalCheckpoints,
                 artifactDirectory,
                 out report),
+            AcceptanceScenarioMode.SteamObstacle => ValidateSteamJet(
+                snapshot,
+                materialRegistry,
+                thermalCheckpoints,
+                artifactDirectory,
+                out report,
+                steamObstacle: true),
             AcceptanceScenarioMode.Furnace => ValidateFurnace(
                 snapshot,
                 materialRegistry,
@@ -451,7 +458,8 @@ public static class AcceptanceRegressionVerifier
         SimulationWorldSnapshot snapshot,
         MaterialRegistry registry,
         string artifactDirectory,
-        out string report)
+        out string report,
+        bool steamObstacle = false)
     {
         (int plateLeft, int plateRight) = AcceptanceRegressionScenario.GetFireObstaclePlateBounds();
         int plateCentre = (plateLeft + plateRight) / 2;
@@ -1110,7 +1118,8 @@ public static class AcceptanceRegressionVerifier
         MaterialRegistry registry,
         IReadOnlyList<ThermalAcceptanceCheckpoint> checkpoints,
         string artifactDirectory,
-        out string report)
+        out string report,
+        bool steamObstacle = false)
     {
         uint steam = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
         const int sourceX = AcceptanceRegressionScenario.SteamPuffSourceX;
@@ -1160,12 +1169,14 @@ public static class AcceptanceRegressionVerifier
         MaterialRegistry registry,
         IReadOnlyList<ThermalAcceptanceCheckpoint> checkpoints,
         string artifactDirectory,
-        out string report)
+        out string report,
+        bool steamObstacle = false)
     {
         uint steam = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
         int sourceX = AcceptanceRegressionScenario.GetSteamJetSourceX();
         int sourceY = AcceptanceRegressionScenario.GetSteamJetSourceY();
-        int[] requestedFrames = [60, 90, 120, 150, 200, 250, 300];
+        int[] requestedFrames = steamObstacle ? [300, 600] : [60, 90, 120, 150, 200, 250, 300];
+        int finalFrame = steamObstacle ? 1200 : 600;
         StringBuilder fields = new();
         bool hasCheckpoints = checkpoints.Count >= requestedFrames.Length;
 
@@ -1202,12 +1213,12 @@ public static class AcceptanceRegressionVerifier
         }
 
         SteamPuffMetrics finalMetrics = MeasureSteamPuff(finalSnapshot, steam, sourceX, sourceY);
-        AppendSteamPuffMetrics(fields, 600, 600, finalMetrics);
+        AppendSteamPuffMetrics(fields, finalFrame, (uint)finalFrame, finalMetrics);
         SteamJetProfileSummary finalProfile = WriteSteamJetProfile(
             finalSnapshot,
             steam,
             artifactDirectory,
-            600,
+            finalFrame,
             sourceY);
         AppendSteamJetProfileSummary(fields, 600, finalProfile);
         WriteSteamStateDump(
@@ -1215,7 +1226,7 @@ public static class AcceptanceRegressionVerifier
             registry,
             artifactDirectory,
             steam,
-            "steam-jet-ascii-600.txt",
+            $"steam-jet-ascii-{finalFrame}.txt",
             true);
         SteamJetFrontRiseMetrics frontRise = CalculateSteamJetFrontRiseRate(
             checkpoints,
@@ -1226,9 +1237,8 @@ public static class AcceptanceRegressionVerifier
         fields.Append($" steamJetFrontRiseRate={frontRise.Rate:0.000000}");
         fields.Append($" steamJetFrontRiseFrames={frontRise.UsedFrames}");
         fields.Append($" steamJetFrontRiseInsufficient={(frontRise.InsufficientSamples ? 1 : 0)}");
-        bool images = File.Exists(Path.Combine(artifactDirectory, "AA_steam_jet_120.png")) &&
-            File.Exists(Path.Combine(artifactDirectory, "AA_steam_jet_300.png")) &&
-            File.Exists(Path.Combine(artifactDirectory, "AA_steam_jet_600.png"));
+        bool images = requestedFrames.All(frame => File.Exists(Path.Combine(artifactDirectory, $"AA_steam_jet_{frame}.png"))) &&
+            File.Exists(Path.Combine(artifactDirectory, $"AA_steam_jet_{finalFrame}.png"));
         report = $"PHYXEL_STEAM_JET checkpoints={checkpoints.Count} images={images}{fields}";
         return hasCheckpoints && finalMetrics.SteamCells > 0;
     }
