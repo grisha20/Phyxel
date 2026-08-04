@@ -89,7 +89,12 @@ public static class AcceptanceRegressionScenario
     public const int FireBrushWidth = FireBrushRadius * 2 + 1;
     public const int SteamPuffSourceX = 240;
     public const int SteamPuffSourceY = 135;
-    public const int SteamPuffBrushRadius = 2;
+    // Previous radius 2 produced a 13-cell sparse probe. Radius 10 and 82%
+    // density mirror one UI brush command. The observed 347 particles in the
+    // game can span several mouse-hold frames; a single disk command yields
+    // about 249 and is the intended diagnostic source.
+    public const int SteamPuffBrushRadius = 10;
+    public const float SteamPuffSpawnDensity = 0.82f;
     private const int FireObstacleSourceX = 240;
     private const int DefaultFireObstaclePlateWidth = 201;
 
@@ -274,6 +279,7 @@ public static class AcceptanceRegressionScenario
             materials.Steam,
             0,
             0);
+        steam.Density = SteamPuffSpawnDensity;
         steam.Seed ^= scenarioSeed;
         return [steam];
     }

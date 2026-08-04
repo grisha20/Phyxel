@@ -1078,7 +1078,12 @@ public static class AcceptanceRegressionVerifier
         double MeanVelocityXRight,
         double MeanVelocityYRight,
         int LeftVelocityCells,
-        int RightVelocityCells);
+        int RightVelocityCells,
+        double SigmaX,
+        double SigmaY,
+        double AspectSigma,
+        double OffsetXClampFraction,
+        double OffsetYClampFraction);
 
     private static bool ValidateSteamPuff(
         SimulationWorldSnapshot finalSnapshot,
@@ -1152,6 +1157,11 @@ public static class AcceptanceRegressionVerifier
         fields.Append($" meanVelocityYRight{suffix}={metrics.MeanVelocityYRight:0.000000}");
         fields.Append($" leftVelocityCells{suffix}={metrics.LeftVelocityCells}");
         fields.Append($" rightVelocityCells{suffix}={metrics.RightVelocityCells}");
+        fields.Append($" sigmaX{suffix}={metrics.SigmaX:0.000000}");
+        fields.Append($" sigmaY{suffix}={metrics.SigmaY:0.000000}");
+        fields.Append($" aspectSigma{suffix}={metrics.AspectSigma:0.000000}");
+        fields.Append($" offsetXClampFraction{suffix}={metrics.OffsetXClampFraction:0.000000}");
+        fields.Append($" offsetYClampFraction{suffix}={metrics.OffsetYClampFraction:0.000000}");
     }
 
     private static SteamPuffMetrics MeasureSteamPuff(
@@ -1214,10 +1224,15 @@ public static class AcceptanceRegressionVerifier
 
         if (cells == 0)
         {
-            return new SteamPuffMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            return new SteamPuffMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
 
         double centreX = totalMass > 0 ? sumX / totalMass : sourceX;
+        double centreY = totalMass > 0 ? sumY / totalMass : sourceY;
+        double varianceX = 0;
+        double varianceY = 0;
+        int offsetXClamped = 0;
+        int offsetYClamped = 0;
         if (hasMotion)
         {
             for (int index = 0; index < grid.Length; index++)
@@ -1228,7 +1243,13 @@ public static class AcceptanceRegressionVerifier
                     continue;
                 }
                 GasMotionState velocity = motion[index];
-                if (index % snapshot.Width < centreX)
+                int x = index % snapshot.Width;
+                int y = index / snapshot.Width;
+                varianceX += cell.Mass * Math.Pow(x - centreX, 2);
+                varianceY += cell.Mass * Math.Pow(y - centreY, 2);
+                offsetXClamped += Math.Abs(velocity.OffsetX) >= 7.999f ? 1 : 0;
+                offsetYClamped += Math.Abs(velocity.OffsetY) >= 7.999f ? 1 : 0;
+                if (x < centreX)
                 {
                     sumVelocityXLeft += velocity.VelocityX;
                     sumVelocityYLeft += velocity.VelocityY;
@@ -1242,6 +1263,25 @@ public static class AcceptanceRegressionVerifier
                 }
             }
         }
+
+        if (!hasMotion)
+        {
+            for (int index = 0; index < grid.Length; index++)
+            {
+                GridCell cell = grid[index];
+                if (cell.IsActive == 0 || cell.MaterialIndex != steam)
+                {
+                    continue;
+                }
+                int x = index % snapshot.Width;
+                int y = index / snapshot.Width;
+                varianceX += cell.Mass * Math.Pow(x - centreX, 2);
+                varianceY += cell.Mass * Math.Pow(y - centreY, 2);
+            }
+        }
+
+        double sigmaX = totalMass > 0 ? Math.Sqrt(varianceX / totalMass) : 0;
+        double sigmaY = totalMass > 0 ? Math.Sqrt(varianceY / totalMass) : 0;
 
         int width = maximumX - minimumX + 1;
         int height = maximumY - minimumY + 1;
@@ -1263,7 +1303,12 @@ public static class AcceptanceRegressionVerifier
             rightVelocityCells > 0 ? sumVelocityXRight / rightVelocityCells : 0,
             rightVelocityCells > 0 ? sumVelocityYRight / rightVelocityCells : 0,
             leftVelocityCells,
-            rightVelocityCells);
+            rightVelocityCells,
+            sigmaX,
+            sigmaY,
+            sigmaY > 0 ? sigmaX / sigmaY : 0,
+            offsetXClamped / (double)cells,
+            offsetYClamped / (double)cells);
     }
 
     private static void AppendSteamPuffAirProfile(

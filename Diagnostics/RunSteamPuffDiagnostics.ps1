@@ -1,15 +1,39 @@
 param(
-    # A 100% brush and the deterministic per-cell hash yield the same path for
-    # every acceptance seed.  This scenario is one measurement, not a sample
-    # distribution.
-    [ValidateRange(1, 1)]
-    [int]$Runs = 1,
+    [ValidateRange(1, 3)]
+    [int]$Runs = 3,
     [string]$ArtifactSuffix = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $culture = [System.Globalization.CultureInfo]::InvariantCulture
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+
+function Assert-MaterialsCopyMatchesSource {
+    $sourceRoot = Join-Path $repoRoot 'Materials'
+    $outputRoot = Join-Path $repoRoot 'bin\Debug\net8.0-windows\Materials'
+    if (-not (Test-Path -LiteralPath $outputRoot -PathType Container)) {
+        throw "Built Materials directory is missing: $outputRoot"
+    }
+
+    $mismatches = [System.Collections.Generic.List[string]]::new()
+    Get-ChildItem -LiteralPath $sourceRoot -File -Recurse -Filter '*.json' | ForEach-Object {
+        $relative = $_.FullName.Substring($sourceRoot.Length).TrimStart('\', '/')
+        $output = Join-Path $outputRoot $relative
+        if (-not (Test-Path -LiteralPath $output -PathType Leaf)) {
+            $mismatches.Add("missing: $relative")
+            return
+        }
+        $sourceHash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+        $outputHash = (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash
+        if ($sourceHash -ne $outputHash) {
+            $mismatches.Add("content differs: $relative")
+        }
+    }
+
+    if ($mismatches.Count -gt 0) {
+        throw ("Materials source/output mismatch before steam_puff: " + ($mismatches -join '; '))
+    }
+}
 
 function Add-Sample([hashtable]$target, [string]$name, [double]$value) {
     if (-not $target.ContainsKey($name)) {
@@ -32,6 +56,7 @@ function Write-Summary([hashtable]$values, [string]$state) {
 
 dotnet build Phyxel.sln -c Debug --nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Assert-MaterialsCopyMatchesSource
 
 foreach ($state in @(
     [pscustomobject]@{ Name = 'air-on'; Enabled = '1' },
