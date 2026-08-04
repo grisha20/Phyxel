@@ -101,7 +101,7 @@ internal static class PhaseTransitionMaterialRegressionVerifier
     private static void VerifyLayouts()
     {
         Require(Marshal.SizeOf<MaterialProperties>() == MaterialPropertiesLayout.ByteSize,
-            "MaterialProperties must be 160 bytes.");
+            "MaterialProperties must be 176 bytes.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.TransitionBelowTemperature)).ToInt32() == 48,
             "TransitionBelowTemperature offset must be 48.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.TransitionBelowMaterialIndex)).ToInt32() == 52,

@@ -14,7 +14,8 @@
   },
   "gas": {
     "diffusion": 0.75,
-    "buoyancy": -0.1
+    "buoyancy": -0.1,
+    "hotAir": 0.0003
   },
   "motion": { "advection": 1.0, "airDrag": 0.01, "airLoss": 0.99, "loss": 0.30, "collision": -0.1 },
   "thermal": {

@@ -78,7 +78,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
     private static async Task RunAsync()
     {
         Require(Marshal.SizeOf<MaterialProperties>() == MaterialPropertiesLayout.ByteSize,
-            "MaterialProperties must be 160 bytes.");
+            "MaterialProperties must be 176 bytes.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.AmbientTemperature)).ToInt32() == 104,
             "AmbientTemperature offset must be 104.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.AmbientCoolingRate)).ToInt32() == 108,
@@ -91,6 +91,8 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             "GasDiffusion offset must be 120.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.GasBuoyancy)).ToInt32() == 124,
             "GasBuoyancy offset must be 124.");
+        Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.HotAir)).ToInt32() == 128,
+            "HotAir offset must be 128.");
         Require(Marshal.SizeOf<ContactTransitionConstants>() == 16,
             "ContactTransitionConstants must be 16 bytes.");
         string contactShader = File.ReadAllText(Path.Combine(
@@ -183,6 +185,15 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         MaterialDefinition water = registry[CoreMaterialIds.Water];
         MaterialDefinition ice = registry[CoreMaterialIds.Ice];
         MaterialDefinition steam = registry[CoreMaterialIds.Steam];
+        Require(Same(steam.Properties.HotAir, 0.0003f), "core:steam hotAir is incorrect.");
+        Require(Same(registry[CoreMaterialIds.Fire].Properties.HotAir, 0.001f),
+            "core:fire hotAir is incorrect.");
+        Require(Same(registry[CoreMaterialIds.Smoke].Properties.HotAir, 0.001f),
+            "core:smoke hotAir is incorrect.");
+        // core:co2 deliberately omits gas.hotAir: existing material files must
+        // retain the zero source rather than requiring a schema migration.
+        Require(Same(registry[CoreMaterialIds.Co2].Properties.HotAir, 0f),
+            "gas.hotAir default for an existing material is not zero.");
         Require(water.UiOrder == 20 && ice.UiOrder == 21 && steam.UiOrder == 22,
             "Water/Ice/Steam UI order is not 20/21/22.");
         Require(!water.Hidden && !ice.Hidden && !steam.Hidden,

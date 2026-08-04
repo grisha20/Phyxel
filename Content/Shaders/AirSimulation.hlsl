@@ -56,20 +56,14 @@ static const float AirAdvection = 0.3;
 static const float AirBacktraceDistance = 0.7;
 static const float AirVelocityLoss = 0.999;
 static const float AirPressureLoss = 0.9999;
-// Injection is deliberately tiny and self-limiting. The Powder Toy writes it as
-//     pv += 4.0f * HotAir * (3.5f - pv)
-// with HotAir = 0.001 for FIRE, so the term fades out as pressure approaches
-// the ceiling and a flame settles at a pressure of about 3.5 instead of running
-// away. Losses are near unity (PLOSS 0.9999, VLOSS 0.999), so a steady value is
-// roughly injection divided by the loss per tick: a constant that looks small
-// still produces a field of a few units. Feeding the raw temperature in here
-// instead pinned the velocity to its ceiling within nine ticks.
+// Losses are near unity (PLOSS 0.9999, VLOSS 0.999), so a per-particle
+// pressure source that looks small still produces a field of a few units.
+// Its magnitude is data-driven by MaterialProperties.HotAir below.
 static const float AirHotReference = 1500.0;
 
 // A coarse cell packed with flame may push several times harder than a single
 // pixel, so hotness is not clamped to one. The ceiling only stops absurdities.
 static const float AirMaximumHotness = 4.0;
-static const float AirHotInjection = 0.004;
 
 // Convection, straight out of Air::update_air, AIRC_BOUSSINESQ:
 //     weight = (hv - ambientAirTemp) / 10000
@@ -221,11 +215,10 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint top = coordinate.y * AirCellSize;
     uint solid = 0;
     uint counted = 0;
-    uint flameCount = 0;
-    uint fireOrSmokeCount = 0;
     uint gasCount = 0;
     float airLossProduct = 1.0;
     float heat = 0;
+    float hotAirInjection = 0;
 
     for (uint offsetY = 0; offsetY < AirCellSize; offsetY++)
     {
@@ -254,7 +247,11 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
                 airLossProduct *= material.MotionAirLoss;
                 if ((material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0)
                 {
-                    fireOrSmokeCount++;
+                    // Keep the established FIRE/SMKE contribution exactly:
+                    // TPT applies pv += 4 * HotAir per particle.
+                    // Steam's material value is loaded now, but enabling it
+                    // is intentionally a separate, reversible physics commit.
+                    hotAirInjection += 4.0 * material.HotAir;
                 }
             }
             if (material.SimulationKind == SimulationKindSolid)
@@ -273,16 +270,9 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
                 }
                 continue;
             }
-            // Anything hotter than the room pushes the air around it outward.
-            // The Powder Toy stores this as a per-element HotAir constant; here
-            // it is derived from the cell temperature, which needs no change to
-            // the material layout and behaves the same way for flame, because a
-            // flame cell is by definition the hottest thing in the scene.
+            // Temperature drives the optional Boussinesq convection term below.
+            // It is separate from the material HotAir pressure source above.
             heat += max(0.0, source.Temperature - AirAmbientTemperature);
-            if ((material.Flags & MaterialFlagFlame) != 0)
-            {
-                flameCount++;
-            }
         }
     }
 
@@ -312,7 +302,7 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
     // The former 3.5 cap erased precisely the pressure gradient that turns a
     // plume sideways below a plate. Pressure transport/loss below is its only
     // limiter, as it is in TPT.
-    cell.Pressure += AirHotInjection * float(fireOrSmokeCount);
+    cell.Pressure += hotAirInjection;
 
     // Convection. Driven by the mean temperature of the cell and hard-capped,
     // exactly as The Powder Toy does it. The y axis grows downward, so rising

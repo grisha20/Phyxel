@@ -182,7 +182,7 @@ internal static class CombustionMaterialRegressionVerifier
     private static void VerifyLayout()
     {
         Require(Marshal.SizeOf<MaterialProperties>() == MaterialPropertiesLayout.ByteSize,
-            "MaterialProperties must be 160 bytes.");
+            "MaterialProperties must be 176 bytes.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.IgnitionTemperature)).ToInt32() == 64,
             "IgnitionTemperature offset must be 64.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.BurnRate)).ToInt32() == 68,
@@ -223,7 +223,8 @@ internal static class CombustionMaterialRegressionVerifier
             "float MinimumLifetime", "float MaximumLifetime", "uint DecayIntoMaterialIndex",
             "float MaximumCombustionTemperature", "float TransitionAboveLatentHeat",
             "float AmbientTemperature", "float AmbientCoolingRate",
-            "uint ContactLiquidIntoMaterialIndex", "float ContactLiquidRatePerSecond"
+            "uint ContactLiquidIntoMaterialIndex", "float ContactLiquidRatePerSecond",
+            "float GasDiffusion", "float GasBuoyancy", "float HotAir"
         ];
         int previous = -1;
         foreach (string field in fields)

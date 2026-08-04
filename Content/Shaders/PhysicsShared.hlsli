@@ -148,6 +148,7 @@ struct MaterialProperties
     float ContactLiquidRatePerSecond;
     float GasDiffusion;
     float GasBuoyancy;
+    float HotAir;
     float MotionAdvection;
     float MotionAirDrag;
     float MotionAirLoss;
@@ -156,11 +157,15 @@ struct MaterialProperties
     float MotionReserved0;
     float MotionReserved1;
     float MotionReserved2;
+    float LayoutReserved0;
+    float LayoutReserved1;
+    float LayoutReserved2;
 };
 
-// Mirrors Physics.MaterialPropertiesLayout.ByteSize. Forty scalar fields
-// produce a 160-byte structured-buffer stride (a multiple of sixteen).
-static const uint MaterialPropertiesByteSize = 160;
+// Mirrors Physics.MaterialPropertiesLayout.ByteSize. Forty-one semantic
+// material fields and three tail-padding scalars produce a 176-byte
+// structured-buffer stride (a multiple of sixteen).
+static const uint MaterialPropertiesByteSize = 176;
 
 struct MaterialEmissionProperties
 {

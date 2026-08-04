@@ -338,6 +338,9 @@ public struct MaterialProperties
     public float ContactLiquidRatePerSecond;
     public float GasDiffusion;
     public float GasBuoyancy;
+    // Mirrors The Powder Toy's per-element HotAir source. It is expressed in
+    // the element's native units; AirSimulation applies the TPT factor of 4.
+    public float HotAir;
     public float MotionAdvection;
     public float MotionAirDrag;
     public float MotionAirLoss;
@@ -346,12 +349,18 @@ public struct MaterialProperties
     public float MotionReserved0;
     public float MotionReserved1;
     public float MotionReserved2;
+    // Explicit tail padding keeps the structured-buffer stride a multiple of
+    // sixteen bytes. These are not material schema fields.
+    public float LayoutReserved0;
+    public float LayoutReserved1;
+    public float LayoutReserved2;
 }
 
 public static class MaterialPropertiesLayout
 {
-    public const int FieldCount = 40;
-    public const int ByteSize = 160;
+    // Forty-one semantic material fields plus three tail-padding scalars.
+    public const int FieldCount = 41;
+    public const int ByteSize = 176;
 }
 
 public enum BrushCommandMode : uint
