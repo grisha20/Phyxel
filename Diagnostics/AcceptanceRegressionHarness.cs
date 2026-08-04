@@ -30,6 +30,7 @@ public sealed class AcceptanceRegressionHarness
     private readonly GasObstacleBypassTrace gasObstacleBypassTrace = new();
     private readonly GasLateralTransferTrace gasLateralTransferTrace = new();
     private readonly GasVerticalMotionTrace gasVerticalMotionTrace = new();
+    private readonly SteamGasStepTrace steamGasStepTrace = new();
     private readonly PhaseAcceptanceController phaseAcceptance;
     private readonly uint scenarioSeed;
 
@@ -347,6 +348,19 @@ public sealed class AcceptanceRegressionHarness
             return;
         }
         gasVerticalMotionTrace.Record(resources);
+    }
+
+    public void RecordSteamGasStepTrace(uint frame, GpuSimulationResources resources)
+    {
+        if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_GAS_STEP_TRACE") != "1" ||
+            Mode != AcceptanceScenarioMode.SteamPuff ||
+            frame is not (60 or 120 or 300 or 599))
+        {
+            return;
+        }
+        // The final acceptance world is captured after frame 599 and reported
+        // as checkpoint 600, matching the existing steam-puff convention.
+        steamGasStepTrace.Record(frame == 599 ? 600u : frame, resources);
     }
 
     public bool TryBeginAcceptanceCheckpoint(
@@ -764,6 +778,28 @@ public sealed class AcceptanceRegressionHarness
                     "PHYXEL_METAL_CHIMNEY_MOTION " +
                     GasVerticalMotionTrace.FormatMetalChimneyBands(vertical);
             }
+        }
+        if (Mode == AcceptanceScenarioMode.SteamPuff)
+        {
+            string tracePath = steamGasStepTrace.WriteCsv(
+                ArtifactDirectory,
+                "steam-gas-step-trace.csv");
+            foreach (uint frame in new uint[] { 60, 120, 300, 600 })
+            {
+                if (!steamGasStepTrace.TryGet(frame, out SteamGasStepStatistics steps))
+                {
+                    report += $" steamGasStepFrame{frame}Missing=1";
+                    continue;
+                }
+                report +=
+                    $" upwardSteps{frame}={steps.UpwardSteps}" +
+                    $" downwardSteps{frame}={steps.DownwardSteps}" +
+                    $" noYSteps{frame}={steps.NoYSteps}" +
+                    $" leftSteps{frame}={steps.LeftSteps}" +
+                    $" rightSteps{frame}={steps.RightSteps}" +
+                    $" noXSteps{frame}={steps.NoXSteps}";
+            }
+            report += $" steamGasStepTrace={tracePath}";
         }
         report += Environment.NewLine +
             $"PHYXEL_MATERIAL_PROPERTIES_LAYOUT csharpActual={Marshal.SizeOf<MaterialProperties>()} " +

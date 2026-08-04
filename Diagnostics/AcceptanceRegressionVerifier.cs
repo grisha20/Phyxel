@@ -1118,6 +1118,7 @@ public static class AcceptanceRegressionVerifier
                 sourceX,
                 sourceY);
             AppendSteamPuffMetrics(fields, targetFrame, checkpoint.Frame, metrics);
+            AppendSteamPuffMotionDistribution(fields, checkpoint.Snapshot, steam, targetFrame);
             AppendSteamPuffAirProfile(fields, checkpoint.Snapshot, metrics, targetFrame);
         }
 
@@ -1127,6 +1128,7 @@ public static class AcceptanceRegressionVerifier
             sourceX,
             sourceY);
         AppendSteamPuffMetrics(fields, 600, 600, finalMetrics);
+        AppendSteamPuffMotionDistribution(fields, finalSnapshot, steam, 600);
         AppendSteamPuffAirProfile(fields, finalSnapshot, finalMetrics, 600);
         double riseRate = CalculateSteamPuffRiseRate(checkpoints, steam, sourceX, sourceY);
         fields.Append($" riseRate={riseRate:0.000000}");
@@ -1170,6 +1172,69 @@ public static class AcceptanceRegressionVerifier
         fields.Append($" minimumY{suffix}={metrics.MinimumY}");
         fields.Append($" maximumY{suffix}={metrics.MaximumY}");
         fields.Append($" clippedTop{suffix}={(metrics.ClippedTop ? 1 : 0)}");
+    }
+
+    private static void AppendSteamPuffMotionDistribution(
+        StringBuilder fields,
+        SimulationWorldSnapshot snapshot,
+        uint steam,
+        int frame)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        ReadOnlySpan<GasMotionState> motion = snapshot.GasMotion is null
+            ? []
+            : MemoryMarshal.Cast<byte, GasMotionState>(snapshot.GasMotion);
+        if (motion.Length != grid.Length)
+        {
+            fields.Append($" steamMotion{frame}Missing=1");
+            return;
+        }
+
+        int cells = 0;
+        double velocityXSum = 0;
+        double velocityXSquareSum = 0;
+        int velocityXPositive = 0;
+        double velocityYSum = 0;
+        double velocityYSquareSum = 0;
+        int velocityYPositive = 0;
+        double offsetYSum = 0;
+        double offsetYSquareSum = 0;
+        int offsetYAboveHalf = 0;
+        for (int index = 0; index < grid.Length; index++)
+        {
+            if (grid[index].IsActive == 0 || grid[index].MaterialIndex != steam)
+            {
+                continue;
+            }
+            GasMotionState state = motion[index];
+            cells++;
+            velocityXSum += state.VelocityX;
+            velocityXSquareSum += state.VelocityX * state.VelocityX;
+            velocityXPositive += state.VelocityX > 0 ? 1 : 0;
+            velocityYSum += state.VelocityY;
+            velocityYSquareSum += state.VelocityY * state.VelocityY;
+            velocityYPositive += state.VelocityY > 0 ? 1 : 0;
+            offsetYSum += state.OffsetY;
+            offsetYSquareSum += state.OffsetY * state.OffsetY;
+            offsetYAboveHalf += Math.Abs(state.OffsetY) > 0.5f ? 1 : 0;
+        }
+
+        double divisor = Math.Max(1, cells);
+        double velocityXMean = velocityXSum / divisor;
+        double velocityYMean = velocityYSum / divisor;
+        double offsetYMean = offsetYSum / divisor;
+        double velocityXSigma = Math.Sqrt(Math.Max(0, velocityXSquareSum / divisor - velocityXMean * velocityXMean));
+        double velocityYSigma = Math.Sqrt(Math.Max(0, velocityYSquareSum / divisor - velocityYMean * velocityYMean));
+        double offsetYSigma = Math.Sqrt(Math.Max(0, offsetYSquareSum / divisor - offsetYMean * offsetYMean));
+        fields.Append($" meanVelocityX{frame}={velocityXMean:0.000000}");
+        fields.Append($" sigmaVelocityX{frame}={velocityXSigma:0.000000}");
+        fields.Append($" velocityXPositiveFraction{frame}={velocityXPositive / divisor:0.000000}");
+        fields.Append($" meanVelocityY{frame}={velocityYMean:0.000000}");
+        fields.Append($" sigmaVelocityY{frame}={velocityYSigma:0.000000}");
+        fields.Append($" velocityYPositiveFraction{frame}={velocityYPositive / divisor:0.000000}");
+        fields.Append($" meanOffsetY{frame}={offsetYMean:0.000000}");
+        fields.Append($" sigmaOffsetY{frame}={offsetYSigma:0.000000}");
+        fields.Append($" offsetYAboveHalfFraction{frame}={offsetYAboveHalf / divisor:0.000000}");
     }
 
     private static SteamPuffMetrics MeasureSteamPuff(

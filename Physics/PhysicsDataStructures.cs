@@ -101,6 +101,23 @@ public struct GasPipeBandMotionStatistics
 }
 
 /// <summary>
+/// Per-fixed-tick movement counters for the steam-puff diagnostic. They are
+/// written after a successful gas move only and never participate in a
+/// simulation decision. A "no Y" (or "no X") event is a successful move whose
+/// displacement on that axis is zero.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SteamGasStepStatistics
+{
+    public uint UpwardSteps;
+    public uint DownwardSteps;
+    public uint NoYSteps;
+    public uint LeftSteps;
+    public uint RightSteps;
+    public uint NoXSteps;
+}
+
+/// <summary>
 /// Layout of the diagnostic-only lateral gas transport buffer. Each path has
 /// fourteen uint counters; this is not persisted simulation state.
 /// </summary>

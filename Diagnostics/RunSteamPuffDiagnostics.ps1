@@ -5,7 +5,8 @@ param(
     [ValidateRange(1, 100)]
     [int]$BrushRadius = 10,
     [ValidateRange(0.01, 1.0)]
-    [double]$SpawnDensity = 0.82
+    [double]$SpawnDensity = 0.82,
+    [switch]$AirOnOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,10 +64,15 @@ dotnet build Phyxel.sln -c Debug --nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Assert-MaterialsCopyMatchesSource
 
-foreach ($state in @(
+ $states = @(
     [pscustomobject]@{ Name = 'air-on'; Enabled = '1' },
     [pscustomobject]@{ Name = 'air-off'; Enabled = '0' }
-)) {
+)
+if ($AirOnOnly) {
+    $states = @($states[0])
+}
+
+foreach ($state in $states) {
     $values = @{}
     $artifactRoot = Join-Path $repoRoot ("artifacts\steam-puff-" + $state.Name + $ArtifactSuffix)
     New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
@@ -81,6 +87,7 @@ foreach ($state in @(
         $env:PHYXEL_ACCEPTANCE_TARGET_FPS = '60'
         $env:PHYXEL_ACCEPTANCE_CAPTURE_FRAME = '600'
         $env:PHYXEL_ACCEPTANCE_AIR = $state.Enabled
+        $env:PHYXEL_STEAM_GAS_STEP_TRACE = '1'
         $env:PHYXEL_STEAM_PUFF_BRUSH_RADIUS = $BrushRadius.ToString($culture)
         $env:PHYXEL_STEAM_PUFF_SPAWN_DENSITY = $spawnDensityText
         $env:PHYXEL_ARTIFACT_DIR = Join-Path $artifactRoot ("run-" + $run)

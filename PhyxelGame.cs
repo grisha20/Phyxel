@@ -226,6 +226,7 @@ public sealed class PhyxelGame : Game
             acceptance.RecordGasObstacleBypassTrace(acceptanceFrame, currentResources);
             acceptance.RecordGasLateralTransferTrace(acceptanceFrame, currentResources);
             acceptance.RecordGasVerticalMotionTrace(currentResources);
+            acceptance.RecordSteamGasStepTrace(acceptanceFrame, currentResources);
             acceptance.CaptureScreenshot(currentResources, frameIndex);
             debugProbe.Update(currentResources, frameIndex++);
             Point? probeCoordinate = acceptance.OwnsTemperatureProbe

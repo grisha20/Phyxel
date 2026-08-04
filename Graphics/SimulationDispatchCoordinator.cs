@@ -1751,27 +1751,15 @@ public sealed class SimulationDispatchCoordinator
         bool airSimulationEnabled)
     {
         DeviceContext context = resources.Context;
-        context.ComputeShader.Set(resources.CellularAutomataShader);
-        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResources(
-            0,
-            resources.Materials.View,
-            resources.Air.View);
-        context.ComputeShader.SetUnorderedAccessViews(
-            0,
-            resources.Grid.ReadUnorderedView,
-            resources.BodyFlags.UnorderedView,
-            resources.PathBlockerMasks.UnorderedView,
-            resources.CellMaterials.UnorderedView);
-        context.ComputeShader.SetUnorderedAccessView(6, resources.GasMotion.UnorderedView);
+        bool steamGasStepTrace = Environment.GetEnvironmentVariable("PHYXEL_STEAM_GAS_STEP_TRACE") == "1";
+        BindGasMotionSolver(context, resources);
         context.ClearUnorderedAccessView(
             resources.GasObstacleBypassStatistics.UnorderedView,
             new RawInt4(0, 0, 0, 0));
-        context.ComputeShader.SetUnorderedAccessView(7, resources.GasObstacleBypassStatistics.UnorderedView);
-        context.ComputeShader.SetUnorderedAccessView(8, resources.GasLateralTransferStatistics.UnorderedView);
-        context.ComputeShader.SetUnorderedAccessView(9, resources.GasAirImpulse.UnorderedView);
-        context.ComputeShader.SetUnorderedAccessView(10, resources.GasVerticalMotionStatistics.UnorderedView);
-        context.ComputeShader.SetUnorderedAccessView(11, resources.GasVerticalBlockFrameMarkers.UnorderedView);
+        if (steamGasStepTrace)
+        {
+            context.ClearUnorderedAccessView(resources.SteamGasStepStatistics.UnorderedView, new RawInt4(0, 0, 0, 0));
+        }
         if (!airSimulationEnabled)
         {
             context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, new RawInt4(0, 0, 0, 0));
@@ -1828,8 +1816,19 @@ public sealed class SimulationDispatchCoordinator
                 constants.DispatchOffsetY = (uint)startY;
                 constants.DispatchExtentX = (uint)dispatchW;
                 constants.DispatchExtentY = (uint)dispatchH;
+                if (steamGasStepTrace)
+                {
+                    context.CopyResource(resources.Grid.ReadBuffer, resources.SteamGasStepPreviousGrid.Buffer);
+                    context.CopyResource(resources.GasMotion.Buffer, resources.SteamGasStepPreviousMotion.Buffer);
+                }
+                BindGasMotionSolver(context, resources);
                 UpdateConstants(context, resources, ref constants);
                 context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
+                if (steamGasStepTrace)
+                {
+                    Unbind(context, 2, 12);
+                    DispatchSteamGasStepObserver(context, resources);
+                }
             }
         }
         // TPT evaluates collision fallback once in MovementPhase after the
@@ -1856,12 +1855,58 @@ public sealed class SimulationDispatchCoordinator
             constants.DispatchOffsetY = (uint)startY;
             constants.DispatchExtentX = (uint)dispatchW;
             constants.DispatchExtentY = (uint)dispatchH;
+            if (steamGasStepTrace)
+            {
+                context.CopyResource(resources.Grid.ReadBuffer, resources.SteamGasStepPreviousGrid.Buffer);
+                context.CopyResource(resources.GasMotion.Buffer, resources.SteamGasStepPreviousMotion.Buffer);
+            }
+            BindGasMotionSolver(context, resources);
             UpdateConstants(context, resources, ref constants);
             context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
+            if (steamGasStepTrace)
+            {
+                Unbind(context, 2, 12);
+                DispatchSteamGasStepObserver(context, resources);
+            }
         }
         constants.SimulationPhase = previousPhase;
         constants.GasSubStep = 0;
         Unbind(context, 2, 12);
+    }
+
+    private static void BindGasMotionSolver(DeviceContext context, GpuSimulationResources resources)
+    {
+        context.ComputeShader.Set(resources.CellularAutomataShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(0, resources.Materials.View, resources.Air.View);
+        context.ComputeShader.SetUnorderedAccessViews(
+            0,
+            resources.Grid.ReadUnorderedView,
+            resources.BodyFlags.UnorderedView,
+            resources.PathBlockerMasks.UnorderedView,
+            resources.CellMaterials.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(6, resources.GasMotion.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(7, resources.GasObstacleBypassStatistics.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(8, resources.GasLateralTransferStatistics.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(9, resources.GasAirImpulse.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(10, resources.GasVerticalMotionStatistics.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(11, resources.GasVerticalBlockFrameMarkers.UnorderedView);
+    }
+
+    private static void DispatchSteamGasStepObserver(DeviceContext context, GpuSimulationResources resources)
+    {
+        context.ComputeShader.Set(resources.SteamGasStepObserverShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.SteamGasStepPreviousGrid.View,
+            resources.Grid.ReadView,
+            resources.Materials.View,
+            resources.SteamGasStepPreviousMotion.View,
+            resources.GasMotion.View);
+        context.ComputeShader.SetUnorderedAccessView(0, resources.SteamGasStepStatistics.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        Unbind(context, 5, 1);
     }
 
     private static void DispatchAirClear(GpuSimulationResources resources)

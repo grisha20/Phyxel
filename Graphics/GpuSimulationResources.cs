@@ -45,6 +45,10 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuStructuredBuffer<uint> GasVerticalBlockFrameMarkers { get; init; }
     public required GpuStructuredBuffer<uint> GasLateralTransferStatistics { get; init; }
     public required Buffer GasLateralTransferStatisticsStaging { get; init; }
+    public required GpuStructuredBuffer<SteamGasStepStatistics> SteamGasStepStatistics { get; init; }
+    public required Buffer SteamGasStepStatisticsStaging { get; init; }
+    public required GpuStructuredBuffer<GridCell> SteamGasStepPreviousGrid { get; init; }
+    public required GpuStructuredBuffer<GasMotionState> SteamGasStepPreviousMotion { get; init; }
     public required Buffer FireGlowConstants { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlow { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlowScratch { get; init; }
@@ -94,6 +98,7 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? BrushShader { get; init; }
     public ComputeShader? CellularAutomataShader { get; init; }
     public ComputeShader? GasRedistributionShader { get; init; }
+    public ComputeShader? SteamGasStepObserverShader { get; init; }
     public ComputeShader? ComponentInitializeShader { get; init; }
     public ComputeShader? ComponentUnionShader { get; init; }
     public ComputeShader? ComponentCompressShader { get; init; }
@@ -156,6 +161,7 @@ public sealed class GpuSimulationResources : IDisposable
         ComponentInitializeShader?.Dispose();
         CellularAutomataShader?.Dispose();
         GasRedistributionShader?.Dispose();
+        SteamGasStepObserverShader?.Dispose();
         BrushShader?.Dispose();
         foreach (KniTexture2D texture in PresentationTextures)
         {
@@ -206,6 +212,10 @@ public sealed class GpuSimulationResources : IDisposable
         GasVerticalBlockFrameMarkers.Dispose();
         GasLateralTransferStatistics.Dispose();
         GasLateralTransferStatisticsStaging.Dispose();
+        SteamGasStepStatistics.Dispose();
+        SteamGasStepStatisticsStaging.Dispose();
+        SteamGasStepPreviousGrid.Dispose();
+        SteamGasStepPreviousMotion.Dispose();
         AirConstants.Dispose();
         ContactTransitionConstants.Dispose();
         foreach (GpuPhaseSummaryReadbackSlot slot in PhaseSummaryReadbackSlots)
