@@ -3,6 +3,7 @@ param(
     [int]$Runs = 3,
     [string]$ArtifactSuffix = '',
     [switch]$AirCouplingTrace,
+    [switch]$LateralTrace,
     [switch]$FixedInflow,
     [ValidateRange(320, 7680)]
     [int]$WorldWidth = 1920,
@@ -163,6 +164,7 @@ for ($run = 1; $run -le $Runs; $run++) {
     $env:PHYXEL_ACCEPTANCE_CAPTURE_FRAME = '600'
     $env:PHYXEL_ACCEPTANCE_AIR = '1'
     $env:PHYXEL_STEAM_GAS_STEP_TRACE = '1'
+    if ($LateralTrace) { $env:PHYXEL_STEAM_JET_LATERAL_TRACE = '1' }
     $env:PHYXEL_STEAM_JET_INJECTION_TRACE = '1'
     if ($FixedInflow) {
         $env:PHYXEL_STEAM_JET_FIXED_INFLOW = '1'

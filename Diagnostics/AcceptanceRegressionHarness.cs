@@ -35,6 +35,7 @@ public sealed class AcceptanceRegressionHarness
     private readonly GasLateralTransferTrace gasLateralTransferTrace = new();
     private readonly GasVerticalMotionTrace gasVerticalMotionTrace = new();
     private readonly SteamGasStepTrace steamGasStepTrace = new();
+    private readonly SteamJetLateralTrace steamJetLateralTrace = new();
     private readonly SteamJetInjectionTrace steamJetInjectionTrace = new();
     private readonly SteamJetAirCouplingTrace steamJetAirCouplingTrace = new();
     private readonly PhaseAcceptanceController phaseAcceptance;
@@ -380,6 +381,13 @@ public sealed class AcceptanceRegressionHarness
             return;
         }
         steamJetInjectionTrace.Record(frame == 599 ? 600u : frame, resources);
+    }
+
+    public void RecordSteamJetLateralTrace(uint frame, GpuSimulationResources resources)
+    {
+        if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_LATERAL_TRACE") != "1" ||
+            Mode != AcceptanceScenarioMode.SteamJet || frame is not (120 or 300 or 599)) return;
+        steamJetLateralTrace.Record(frame == 599 ? 600u : frame, resources);
     }
 
     public void RecordSteamJetAirCouplingTrace(uint frame, GpuSimulationResources resources)
@@ -838,6 +846,8 @@ public sealed class AcceptanceRegressionHarness
         }
         if (Mode == AcceptanceScenarioMode.SteamJet)
         {
+            if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_LATERAL_TRACE") == "1")
+                report += $" steamJetLateralTrace={steamJetLateralTrace.WriteCsv(ArtifactDirectory)}";
             string tracePath = steamJetInjectionTrace.WriteCsv(
                 ArtifactDirectory,
                 "steam-jet-injection-trace.csv");

@@ -1284,6 +1284,15 @@ public static class AcceptanceRegressionVerifier
         double[] mass = new double[bandCount];
         double[] sumX = new double[bandCount];
         double[] sumXSquare = new double[bandCount];
+        double[] sumOffsetX = new double[bandCount];
+        double[] sumOffsetXSquare = new double[bandCount];
+        int[] offsetAboveHalf = new int[bandCount];
+        int[] offsetAtStep = new int[bandCount];
+        int[] neighborOccupancy = new int[bandCount];
+        double[] sumVelocityX = new double[bandCount];
+        double[] sumVelocityXSquare = new double[bandCount];
+        ReadOnlySpan<GasMotionState> motion = snapshot.GasMotion is null
+            ? [] : MemoryMarshal.Cast<byte, GasMotionState>(snapshot.GasMotion);
         for (int index = 0; index < grid.Length; index++)
         {
             GridCell cell = grid[index];
@@ -1299,10 +1308,27 @@ public static class AcceptanceRegressionVerifier
             mass[band] += cell.Mass;
             sumX[band] += x * cell.Mass;
             sumXSquare[band] += x * x * cell.Mass;
+            if (motion.Length == grid.Length)
+            {
+                GasMotionState state = motion[index];
+                double offset = state.OffsetX;
+                sumOffsetX[band] += offset;
+                sumOffsetXSquare[band] += offset * offset;
+                if (Math.Abs(offset) > 0.5) offsetAboveHalf[band]++;
+                if (Math.Abs(offset) >= 1.0) offsetAtStep[band]++;
+                sumVelocityX[band] += state.VelocityX;
+                sumVelocityXSquare[band] += state.VelocityX * state.VelocityX;
+            }
+            foreach ((int dx, int dy) in new[] { (-1, 0), (1, 0), (0, -1), (0, 1) })
+            {
+                int nx = x + dx, ny = y + dy;
+                if (nx >= 0 && ny >= 0 && nx < snapshot.Width && ny < snapshot.Height &&
+                    grid[ny * snapshot.Width + nx].IsActive != 0) neighborOccupancy[band]++;
+            }
         }
 
         List<(int HeightAboveSource, double SigmaX)> occupied = [];
-        StringBuilder csv = new("heightAboveSourceStart,heightAboveSourceEnd,worldYTop,worldYBottom,steamCells,sigmaX\n");
+        StringBuilder csv = new("heightAboveSourceStart,heightAboveSourceEnd,worldYTop,worldYBottom,steamCells,sigmaX,meanOffsetX,sigmaOffsetX,offsetXAboveHalfFraction,offsetXAtStepFraction,meanOccupiedNeighbors,sigmaVelocityX\n");
         for (int band = 0; band < bandCount; band++)
         {
             if (cells[band] == 0 || mass[band] <= 0)
@@ -1312,12 +1338,16 @@ public static class AcceptanceRegressionVerifier
             double centreX = sumX[band] / mass[band];
             double variance = Math.Max(0, sumXSquare[band] / mass[band] - centreX * centreX);
             double sigmaX = Math.Sqrt(variance);
+            double meanOffsetX = sumOffsetX[band] / cells[band];
+            double sigmaOffsetX = Math.Sqrt(Math.Max(0, sumOffsetXSquare[band] / cells[band] - meanOffsetX * meanOffsetX));
+            double meanVelocityX = sumVelocityX[band] / cells[band];
+            double sigmaVelocityX = Math.Sqrt(Math.Max(0, sumVelocityXSquare[band] / cells[band] - meanVelocityX * meanVelocityX));
             int heightAboveSource = firstDistance + band * bandHeight;
             int worldYBottom = sourceY - heightAboveSource;
             int worldYTop = worldYBottom - bandHeight + 1;
             csv.AppendLine(string.Create(
                 CultureInfo.InvariantCulture,
-                $"{heightAboveSource},{heightAboveSource + bandHeight - 1},{worldYTop},{worldYBottom},{cells[band]},{sigmaX:0.000000}"));
+                $"{heightAboveSource},{heightAboveSource + bandHeight - 1},{worldYTop},{worldYBottom},{cells[band]},{sigmaX:0.000000},{meanOffsetX:0.000000},{sigmaOffsetX:0.000000},{offsetAboveHalf[band] / (double)cells[band]:0.000000},{offsetAtStep[band] / (double)cells[band]:0.000000},{neighborOccupancy[band] / (double)cells[band]:0.000000},{sigmaVelocityX:0.000000}"));
             occupied.Add((heightAboveSource, sigmaX));
         }
         File.WriteAllText(path, csv.ToString());

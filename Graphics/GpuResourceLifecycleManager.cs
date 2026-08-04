@@ -173,6 +173,13 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         GpuStructuredBuffer<SteamJetInjectionStatistics> steamJetInjectionStatistics = new(Device, 1);
         Buffer steamJetInjectionStatisticsStaging =
             CreateStagingBuffer(steamJetInjectionStatistics.Buffer.Description.SizeInBytes);
+        bool steamJetLateralTrace = allocateSimulation &&
+            Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_LATERAL_TRACE") == "1";
+        int steamJetBandCount = (height + 19) / 20;
+        GpuStructuredBuffer<SteamJetLateralBandStatistics>? steamJetLateralBands =
+            steamJetLateralTrace ? new(Device, steamJetBandCount) : null;
+        Buffer? steamJetLateralBandsStaging = steamJetLateralBands is null ? null :
+            CreateStagingBuffer(steamJetLateralBands.Buffer.Description.SizeInBytes);
         // A full fine-grid pre-integration trace is sizeable at the 1920x1080
         // steam_jet diagnostic scale. Do not allocate it, or dispatch either
         // observer, unless the explicit environment flag requests it.
@@ -409,6 +416,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SteamGasStepPreviousMotion = steamGasStepPreviousMotion,
             SteamJetInjectionStatistics = steamJetInjectionStatistics,
             SteamJetInjectionStatisticsStaging = steamJetInjectionStatisticsStaging,
+            SteamJetLateralBands = steamJetLateralBands,
+            SteamJetLateralBandsStaging = steamJetLateralBandsStaging,
             SteamJetMotionContributions = steamJetMotionContributions,
             SteamJetMotionContributionsStaging = steamJetMotionContributionsStaging,
             SteamJetAirCoupling = steamJetAirCoupling,
@@ -459,6 +468,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             CellularAutomataShader = allocateSimulation ? CompileShader("CellularAutomataSolver.hlsl") : null,
             GasRedistributionShader = allocateSimulation ? CompileShader("GasRedistribution.hlsl") : null,
             SteamGasStepObserverShader = allocateSimulation ? CompileShader("SteamGasStepObserver.hlsl") : null,
+            SteamJetLateralObserverShader = allocateSimulation && steamJetLateralTrace
+                ? CompileShader("SteamGasStepObserver.hlsl", "CSLateralBands") : null,
             SteamJetInjectionObserverShader = allocateSimulation ? CompileShader("SteamJetInjectionObserver.hlsl") : null,
             SteamJetMotionObserverShader = allocateSimulation ? CompileShader("SteamJetMotionObserver.hlsl") : null,
             SteamJetAirCouplingObserverShader = allocateSimulation ? CompileShader("SteamJetAirCouplingObserver.hlsl") : null,

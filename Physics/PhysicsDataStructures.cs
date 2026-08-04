@@ -118,6 +118,20 @@ public struct SteamGasStepStatistics
 }
 
 /// <summary>
+/// Cumulative, read-only steam_jet lateral-motion counters for one 20-cell
+/// band above the source. Rejected attempts are intents that survived their
+/// horizontal pair phase while their destination was occupied.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SteamJetLateralBandStatistics
+{
+    public uint LeftSteps;
+    public uint RightSteps;
+    public uint RejectedLeft;
+    public uint RejectedRight;
+}
+
+/// <summary>
 /// Cumulative number of WTRV cells actually created by the held-brush source
 /// in steam_jet. This is an observer result, not simulation state.
 /// </summary>

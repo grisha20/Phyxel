@@ -1360,6 +1360,10 @@ public sealed class SimulationDispatchCoordinator
         resources.Context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.SteamGasStepStatistics.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.SteamJetInjectionStatistics.UnorderedView, zero);
+        if (resources.SteamJetLateralBands is not null)
+        {
+            resources.Context.ClearUnorderedAccessView(resources.SteamJetLateralBands.UnorderedView, zero);
+        }
         resources.Context.ClearUnorderedAccessView(resources.GasVerticalMotionStatistics.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.GasVerticalBlockFrameMarkers.UnorderedView, zero);
         foreach (UnorderedAccessView view in resources.Statistics.UnorderedAccessViews)
@@ -1852,6 +1856,7 @@ public sealed class SimulationDispatchCoordinator
                 {
                     Unbind(context, 2, 12);
                     DispatchSteamGasStepObserver(context, resources);
+                    DispatchSteamJetLateralObserver(context, resources);
                 }
             }
         }
@@ -1891,6 +1896,7 @@ public sealed class SimulationDispatchCoordinator
             {
                 Unbind(context, 2, 12);
                 DispatchSteamGasStepObserver(context, resources);
+                DispatchSteamJetLateralObserver(context, resources);
             }
         }
         constants.SimulationPhase = previousPhase;
@@ -1931,6 +1937,22 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetUnorderedAccessView(0, resources.SteamGasStepStatistics.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
         Unbind(context, 5, 1);
+    }
+
+    private static void DispatchSteamJetLateralObserver(DeviceContext context, GpuSimulationResources resources)
+    {
+        if (resources.SteamJetLateralObserverShader is null || resources.SteamJetLateralBands is null)
+        {
+            return;
+        }
+        context.ComputeShader.Set(resources.SteamJetLateralObserverShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(0, resources.SteamGasStepPreviousGrid.View,
+            resources.Grid.ReadView, resources.Materials.View, resources.SteamGasStepPreviousMotion.View,
+            resources.GasMotion.View);
+        context.ComputeShader.SetUnorderedAccessView(1, resources.SteamJetLateralBands.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        Unbind(context, 5, 2);
     }
 
     private static void DispatchSteamJetInjectionObserver(

@@ -51,6 +51,8 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuStructuredBuffer<GasMotionState> SteamGasStepPreviousMotion { get; init; }
     public required GpuStructuredBuffer<SteamJetInjectionStatistics> SteamJetInjectionStatistics { get; init; }
     public required Buffer SteamJetInjectionStatisticsStaging { get; init; }
+    public GpuStructuredBuffer<SteamJetLateralBandStatistics>? SteamJetLateralBands { get; init; }
+    public Buffer? SteamJetLateralBandsStaging { get; init; }
     // Allocated only for PHYXEL_STEAM_JET_AIR_COUPLING_TRACE=1. These are
     // observer outputs and are never bound by a physical solver pass.
     public GpuStructuredBuffer<SteamJetGasMotionContribution>? SteamJetMotionContributions { get; init; }
@@ -107,6 +109,7 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? CellularAutomataShader { get; init; }
     public ComputeShader? GasRedistributionShader { get; init; }
     public ComputeShader? SteamGasStepObserverShader { get; init; }
+    public ComputeShader? SteamJetLateralObserverShader { get; init; }
     public ComputeShader? SteamJetInjectionObserverShader { get; init; }
     public ComputeShader? SteamJetMotionObserverShader { get; init; }
     public ComputeShader? SteamJetAirCouplingObserverShader { get; init; }
@@ -173,6 +176,7 @@ public sealed class GpuSimulationResources : IDisposable
         CellularAutomataShader?.Dispose();
         GasRedistributionShader?.Dispose();
         SteamGasStepObserverShader?.Dispose();
+        SteamJetLateralObserverShader?.Dispose();
         SteamJetInjectionObserverShader?.Dispose();
         SteamJetMotionObserverShader?.Dispose();
         SteamJetAirCouplingObserverShader?.Dispose();
@@ -232,6 +236,8 @@ public sealed class GpuSimulationResources : IDisposable
         SteamGasStepPreviousMotion.Dispose();
         SteamJetInjectionStatistics.Dispose();
         SteamJetInjectionStatisticsStaging.Dispose();
+        SteamJetLateralBands?.Dispose();
+        SteamJetLateralBandsStaging?.Dispose();
         SteamJetMotionContributions?.Dispose();
         SteamJetMotionContributionsStaging?.Dispose();
         SteamJetAirCoupling?.Dispose();
