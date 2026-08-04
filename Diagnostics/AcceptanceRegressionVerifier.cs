@@ -459,9 +459,8 @@ public static class AcceptanceRegressionVerifier
         int leftCells = 0;
         int rightCells = 0;
         int centreCells = 0;
-        double leftMass = 0;
-        double rightMass = 0;
-        double centreMass = 0;
+        double fireSurfaceMass = 0;
+        double sumFireSurfaceMassX = 0;
         int minimumX = snapshot.Width;
         int maximumX = -1;
         int minimumY = snapshot.Height;
@@ -570,6 +569,8 @@ public static class AcceptanceRegressionVerifier
                 if (cell.MaterialIndex == fire)
                 {
                     contactFire++;
+                    fireSurfaceMass += cell.Mass;
+                    sumFireSurfaceMassX += x * cell.Mass;
                     fireHistogram[x]++;
                     fireSmokeHistogram[x]++;
                     if (y <= 108 && x >= plateLeft && x <= plateRight)
@@ -595,17 +596,14 @@ public static class AcceptanceRegressionVerifier
                     if (x < plateCentre)
                     {
                         leftCells++;
-                        leftMass += cell.Mass;
                     }
                     else if (x > plateCentre)
                     {
                         rightCells++;
-                        rightMass += cell.Mass;
                     }
                     else
                     {
                         centreCells++;
-                        centreMass += cell.Mass;
                     }
                 }
                 else if (cell.MaterialIndex == smoke)
@@ -696,8 +694,13 @@ public static class AcceptanceRegressionVerifier
         double fireSmokeHalfWidth = fireSmokeHalfLeft >= 0 && fireSmokeHalfRight >= fireSmokeHalfLeft
             ? (fireSmokeHalfRight - fireSmokeHalfLeft + 1) * 0.5
             : 0;
-        double symmetryMass = Math.Min(leftMass, rightMass) / Math.Max(0.000001, Math.Max(leftMass, rightMass));
-        double symmetryCells = Math.Min(leftCells, rightCells) / (double)Math.Max(1, Math.Max(leftCells, rightCells));
+        // Deprecated: symmetryMass compressed two strongly time-dependent
+        // lobes to one ratio and had sigma > 0.2 even on seven fixed seeds.
+        // The signed, mass-weighted centre is directly interpretable: zero is
+        // centred on the plate axis and the unit is a simulation cell.
+        double fireCentreMassOffset = fireSurfaceMass > 0
+            ? sumFireSurfaceMassX / fireSurfaceMass - plateCentre
+            : 0;
         string histogram = FormatHistogram(fireHistogram);
         string pressureProfile = FormatAirPressureProfile(snapshot, surfaceTop, plateLeft, plateRight);
         int supportWidth = maximumX >= minimumX ? maximumX - minimumX + 1 : 0;
@@ -743,8 +746,8 @@ public static class AcceptanceRegressionVerifier
         // of surface spreading; contactWidth is the spreading measurement.
         bool passed = leftCells >= 8 && rightCells >= 8 && supportWidth >= 70;
         report = $"PHYXEL_FIRE_OBSTACLE fireCellsLeft={leftCells} fireCellsRight={rightCells} " +
-            $"fireCellsCentre={centreCells} fireMassLeft={leftMass:0.000} fireMassRight={rightMass:0.000} " +
-            $"fireMassCentre={centreMass:0.000} symmetryMass={symmetryMass:0.000} symmetryCells={symmetryCells:0.000} " +
+            $"fireCellsCentre={centreCells} symmetryMetric=deprecated " +
+            $"fireSurfaceMass={fireSurfaceMass:0.000} fireCentreMassOffset={fireCentreMassOffset:0.000} " +
             $"fireRangeCentreOffset={fireRangeCentreOffset:0.000} " +
             $"minX={minimumX} maxX={maximumX} minY={minimumY} contactGas={contactGas} " +
             $"blockedGas={blockedGas} lateralLeft={lateralLeft} lateralRight={lateralRight} " +
