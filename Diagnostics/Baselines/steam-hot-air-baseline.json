@@ -1,0 +1,45 @@
+{
+  "revision": "69cfbbd",
+  "seeds": [71001, 71002, 71003],
+  "waterGate": {
+    "pass": 13,
+    "fail": ["hydro"],
+    "note": "hydro is the documented flaky scenario."
+  },
+  "steamJet": {
+    "world": "612x384",
+    "source": "ordinary held brush, radius 8, density 100%",
+    "captureFrame": 600,
+    "inflowPerFrame": 8.823333,
+    "frontRiseRate": 1.221361,
+    "steamCellsAt600": 5294,
+    "sigmaX": { "frame120": 14.264015, "frame300": 32.323940, "frame600": 61.063167 },
+    "artifacts": "artifacts/steam-jet-hotair-steam-jet-baseline"
+  },
+  "steamObstacle": {
+    "world": "612x384",
+    "plate": "METL, 131x7, centre x=306",
+    "captureFrames": [300, 600, 1200],
+    "steamCells": [2631, 5003, 10020],
+    "abovePlateFraction": [0.008742, 0.295223, 0.661577],
+    "contactLayer0to6Occupancy": [0.517857, 0.347411, 0.345562],
+    "contactLayerWidth": [196, 367, 368],
+    "outsidePlateLeftFraction": [0.040289, 0.180891, 0.313772],
+    "outsidePlateRightFraction": [0.028506, 0.169099, 0.298503],
+    "artifacts": "artifacts/steam-obstacle-hotair-baseline"
+  },
+  "fireOpen": {
+    "meanVelocityY": -1.914,
+    "meanVelocityYStdDev": 0.015,
+    "actualRisePerFireFrame": 1.328,
+    "actualRisePerFireFrameStdDev": 0.001,
+    "artifacts": "artifacts/fire-open-current"
+  },
+  "fireObstacle": {
+    "plateWidth": 128,
+    "contactWidth": 128,
+    "smokeAboveLeft": 203.333,
+    "smokeAboveRight": 202.667,
+    "artifacts": "artifacts/fire-obstacle-targetx-off"
+  }
+}
