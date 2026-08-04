@@ -1242,8 +1242,9 @@ public static class AcceptanceRegressionVerifier
         fields.Append($" steamJetFrontRiseRate={frontRise.Rate:0.000000}");
         fields.Append($" steamJetFrontRiseFrames={frontRise.UsedFrames}");
         fields.Append($" steamJetFrontRiseInsufficient={(frontRise.InsufficientSamples ? 1 : 0)}");
-        bool images = requestedFrames.All(frame => File.Exists(Path.Combine(artifactDirectory, $"AA_steam_jet_{frame}.png"))) &&
-            File.Exists(Path.Combine(artifactDirectory, $"AA_steam_jet_{finalFrame}.png"));
+        string imageStem = steamObstacle ? "AA_steam_obstacle" : "AA_steam_jet";
+        bool images = requestedFrames.All(frame => File.Exists(Path.Combine(artifactDirectory, $"{imageStem}_{frame}.png"))) &&
+            File.Exists(Path.Combine(artifactDirectory, $"{imageStem}_{finalFrame}.png"));
         report = $"PHYXEL_STEAM_JET checkpoints={checkpoints.Count} images={images}{fields}";
         return hasCheckpoints && finalMetrics.SteamCells > 0;
     }

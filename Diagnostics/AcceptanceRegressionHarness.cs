@@ -730,6 +730,9 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.SteamJet when frame == 119 => "AA_steam_jet_120",
             AcceptanceScenarioMode.SteamJet when frame == 299 => "AA_steam_jet_300",
             AcceptanceScenarioMode.SteamJet when frame == 599 => "AA_steam_jet_600",
+            AcceptanceScenarioMode.SteamObstacle when frame == 299 => "AA_steam_obstacle_300",
+            AcceptanceScenarioMode.SteamObstacle when frame == 599 => "AA_steam_obstacle_600",
+            AcceptanceScenarioMode.SteamObstacle when frame == 1199 => "AA_steam_obstacle_1200",
             _ => null
         };
         if (label is null)
