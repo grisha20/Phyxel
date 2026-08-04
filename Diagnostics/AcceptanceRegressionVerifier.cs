@@ -1175,7 +1175,10 @@ public static class AcceptanceRegressionVerifier
         uint steam = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
         int sourceX = AcceptanceRegressionScenario.GetSteamJetSourceX();
         int sourceY = AcceptanceRegressionScenario.GetSteamJetSourceY();
-        int[] requestedFrames = steamObstacle ? [300, 600] : [60, 90, 120, 150, 200, 250, 300];
+        int[] requestedFrames = steamObstacle ? [300, 600] :
+            Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_COLLAPSE_TRACE") == "1"
+                ? [60, 90, 120, 150, 200, 250, 300, 450]
+                : [60, 90, 120, 150, 200, 250, 300];
         int finalFrame = steamObstacle ? 1200 : 600;
         StringBuilder fields = new();
         bool hasCheckpoints = checkpoints.Count >= requestedFrames.Length;
@@ -1411,6 +1414,10 @@ public static class AcceptanceRegressionVerifier
         List<(double Frame, double TopY)> samples = [];
         foreach (ThermalAcceptanceCheckpoint checkpoint in checkpoints)
         {
+            if (checkpoint.Frame > 300)
+            {
+                continue;
+            }
             SteamPuffMetrics metrics = MeasureSteamPuff(checkpoint.Snapshot, steam, sourceX, sourceY);
             if (!metrics.ClippedTop)
             {

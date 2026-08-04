@@ -6,6 +6,8 @@ param(
     [switch]$LateralTrace,
     [switch]$BlockingTrace,
     [switch]$DiagonalTrace,
+    [switch]$SourceDistributionTrace,
+    [switch]$CollapseTrace,
     [switch]$FixedInflow,
     [ValidateSet('steam_jet', 'steam_obstacle')]
     [string]$Scenario = 'steam_jet',
@@ -166,6 +168,73 @@ function Write-DiagonalTraceSummary([string]$root, [int]$runCount) {
     $out | Export-Csv -LiteralPath $summary -NoTypeInformation
     Write-Host "PHYXEL_STEAM_JET_DIAGONAL_SUMMARY path=$summary rows=$($out.Count)"
 }
+
+function Write-SourceDistributionSummary([string]$root, [int]$runCount) {
+    $rows = @{}
+    for ($run = 1; $run -le $runCount; $run++) {
+        $path = Join-Path $root ("run-{0}\steam-jet-source-distribution.csv" -f $run)
+        if (-not (Test-Path -LiteralPath $path)) { throw "Missing source-distribution trace: $path" }
+        foreach ($row in Import-Csv -LiteralPath $path | Where-Object { [int]$_.frame -in 5,20,60 }) {
+            $key = [int]$row.frame
+            if (-not $rows.ContainsKey($key)) { $rows[$key] = [System.Collections.Generic.List[object]]::new() }
+            $rows[$key].Add($row)
+        }
+    }
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($frame in 5,20,60) {
+        if (-not $rows.ContainsKey($frame)) { throw "Missing source-distribution frame $frame" }
+        $group = $rows[$frame]
+        $first = $group[0]
+        $record = [ordered]@{ frame = $frame }
+        foreach ($property in $first.PSObject.Properties.Name) {
+            if ($property -eq 'frame') { continue }
+            [double[]]$samples = @($group | ForEach-Object { [double]::Parse($_.$property, $culture) })
+            $mean = ($samples | Measure-Object -Average).Average
+            $variance = 0.0
+            foreach ($sample in $samples) { $variance += [math]::Pow($sample - $mean, 2) }
+            $record[($property + 'Mean')] = $mean.ToString('F6', $culture)
+            $record[($property + 'StdDev')] = ([math]::Sqrt($variance / $samples.Length)).ToString('F6', $culture)
+        }
+        $out.Add([pscustomobject]$record)
+    }
+    $summary = Join-Path $root 'steam-jet-source-distribution-summary.csv'
+    $out | Export-Csv -LiteralPath $summary -NoTypeInformation
+    Write-Host "PHYXEL_STEAM_JET_SOURCE_DISTRIBUTION_SUMMARY path=$summary rows=$($out.Count)"
+}
+
+function Write-TrunkCollapseSummary([string]$root, [int]$runCount) {
+    $rows = @{}
+    for ($run = 1; $run -le $runCount; $run++) {
+        foreach ($frame in 60,120,200,300,450,600) {
+            $path = Join-Path $root ("run-{0}\steam-jet-trunk-collapse-{1}.csv" -f $run, $frame)
+            if (-not (Test-Path -LiteralPath $path)) { throw "Missing trunk-collapse trace: $path" }
+            foreach ($row in Import-Csv -LiteralPath $path) {
+                $key = "{0}:{1}" -f $row.frame, $row.heightAboveSourceStart
+                if (-not $rows.ContainsKey($key)) { $rows[$key] = [System.Collections.Generic.List[object]]::new() }
+                $rows[$key].Add($row)
+            }
+        }
+    }
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($key in $rows.Keys | Sort-Object { [int](($_ -split ':')[0]) * 100 + [int](($_ -split ':')[1]) }) {
+        $group = $rows[$key]
+        $first = $group[0]
+        $record = [ordered]@{ frame = $first.frame; heightAboveSourceStart = $first.heightAboveSourceStart; heightAboveSourceEnd = $first.heightAboveSourceEnd }
+        foreach ($property in $first.PSObject.Properties.Name) {
+            if ($property -in @('frame', 'heightAboveSourceStart', 'heightAboveSourceEnd')) { continue }
+            [double[]]$samples = @($group | ForEach-Object { [double]::Parse($_.$property, $culture) })
+            $mean = ($samples | Measure-Object -Average).Average
+            $variance = 0.0
+            foreach ($sample in $samples) { $variance += [math]::Pow($sample - $mean, 2) }
+            $record[($property + 'Mean')] = $mean.ToString('F6', $culture)
+            $record[($property + 'StdDev')] = ([math]::Sqrt($variance / $samples.Length)).ToString('F6', $culture)
+        }
+        $out.Add([pscustomobject]$record)
+    }
+    $summary = Join-Path $root 'steam-jet-trunk-collapse-summary.csv'
+    $out | Export-Csv -LiteralPath $summary -NoTypeInformation
+    Write-Host "PHYXEL_STEAM_JET_TRUNK_COLLAPSE_SUMMARY path=$summary rows=$($out.Count)"
+}
 function Write-SigmaXProfileSummary([string]$root, [int]$runCount) {
     $rows = @{}
     for ($run = 1; $run -le $runCount; $run++) {
@@ -236,13 +305,15 @@ for ($run = 1; $run -le $Runs; $run++) {
     if ($LateralTrace) { $env:PHYXEL_STEAM_JET_LATERAL_TRACE = '1' }
     if ($BlockingTrace) { $env:PHYXEL_STEAM_JET_BLOCKING_TRACE = '1' } else { Remove-Item Env:PHYXEL_STEAM_JET_BLOCKING_TRACE -ErrorAction SilentlyContinue }
     if ($DiagonalTrace) { $env:PHYXEL_STEAM_JET_DIAGONAL_TRACE = '1' } else { Remove-Item Env:PHYXEL_STEAM_JET_DIAGONAL_TRACE -ErrorAction SilentlyContinue }
+    if ($SourceDistributionTrace) { $env:PHYXEL_STEAM_JET_SOURCE_DISTRIBUTION_TRACE = '1' } else { Remove-Item Env:PHYXEL_STEAM_JET_SOURCE_DISTRIBUTION_TRACE -ErrorAction SilentlyContinue }
+    if ($CollapseTrace) { $env:PHYXEL_STEAM_JET_COLLAPSE_TRACE = '1' } else { Remove-Item Env:PHYXEL_STEAM_JET_COLLAPSE_TRACE -ErrorAction SilentlyContinue }
     $env:PHYXEL_STEAM_JET_INJECTION_TRACE = '1'
     if ($FixedInflow) {
         $env:PHYXEL_STEAM_JET_FIXED_INFLOW = '1'
     } else {
         Remove-Item Env:PHYXEL_STEAM_JET_FIXED_INFLOW -ErrorAction SilentlyContinue
     }
-    if ($AirCouplingTrace) {
+    if ($AirCouplingTrace -or $CollapseTrace) {
         $env:PHYXEL_STEAM_JET_AIR_COUPLING_TRACE = '1'
     } else {
         Remove-Item Env:PHYXEL_STEAM_JET_AIR_COUPLING_TRACE -ErrorAction SilentlyContinue
@@ -269,6 +340,8 @@ Write-Summary $values
 if ($AirCouplingTrace) {
     Write-AirCouplingBandSummary $artifactRoot $Runs
 }
+if ($SourceDistributionTrace) { Write-SourceDistributionSummary $artifactRoot $Runs }
+if ($CollapseTrace) { Write-TrunkCollapseSummary $artifactRoot $Runs }
 if ($BlockingTrace) {
     Write-BlockingTraceSummary $artifactRoot $Runs
 }

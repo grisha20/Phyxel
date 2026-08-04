@@ -51,6 +51,8 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuStructuredBuffer<GasMotionState> SteamGasStepPreviousMotion { get; init; }
     public required GpuStructuredBuffer<SteamJetInjectionStatistics> SteamJetInjectionStatistics { get; init; }
     public required Buffer SteamJetInjectionStatisticsStaging { get; init; }
+    public GpuStructuredBuffer<SteamJetInjectionDistributionFrame>? SteamJetInjectionDistribution { get; init; }
+    public Buffer? SteamJetInjectionDistributionStaging { get; init; }
     public GpuStructuredBuffer<SteamJetLateralBandStatistics>? SteamJetLateralBands { get; init; }
     public Buffer? SteamJetLateralBandsStaging { get; init; }
     public GpuStructuredBuffer<SteamJetBlockingSubstepStatistics>? SteamJetBlockingSubsteps { get; init; }
@@ -122,6 +124,7 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? SteamJetBlockingFrameObserverShader { get; init; }
     public ComputeShader? SteamJetDiagonalObserverShader { get; init; }
     public ComputeShader? SteamJetInjectionObserverShader { get; init; }
+    public ComputeShader? SteamJetInjectionDistributionObserverShader { get; init; }
     public ComputeShader? SteamJetMotionObserverShader { get; init; }
     public ComputeShader? SteamJetAirCouplingObserverShader { get; init; }
     public ComputeShader? ComponentInitializeShader { get; init; }
@@ -192,6 +195,7 @@ public sealed class GpuSimulationResources : IDisposable
         SteamJetBlockingFrameObserverShader?.Dispose();
         SteamJetDiagonalObserverShader?.Dispose();
         SteamJetInjectionObserverShader?.Dispose();
+        SteamJetInjectionDistributionObserverShader?.Dispose();
         SteamJetMotionObserverShader?.Dispose();
         SteamJetAirCouplingObserverShader?.Dispose();
         BrushShader?.Dispose();
@@ -250,6 +254,8 @@ public sealed class GpuSimulationResources : IDisposable
         SteamGasStepPreviousMotion.Dispose();
         SteamJetInjectionStatistics.Dispose();
         SteamJetInjectionStatisticsStaging.Dispose();
+        SteamJetInjectionDistribution?.Dispose();
+        SteamJetInjectionDistributionStaging?.Dispose();
         SteamJetLateralBands?.Dispose();
         SteamJetLateralBandsStaging?.Dispose();
         SteamJetBlockingSubsteps?.Dispose();

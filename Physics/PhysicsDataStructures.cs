@@ -199,6 +199,24 @@ public struct SteamJetInjectionStatistics
 }
 
 /// <summary>
+/// Per-frame spatial distribution of cells created by the steam_jet brush.
+/// This is observer data only; no solver pass reads it.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SteamJetInjectionDistributionFrame
+{
+    public uint CreatedSteamCells;
+    public int SumOffsetX;
+    public int SumOffsetXSquared;
+    public uint Ring0;
+    public uint Ring1;
+    public uint Ring2;
+    public uint Ring3;
+    public uint Ring4;
+    public uint Ring5OrMore;
+}
+
+/// <summary>
 /// Read-only, pre-integration decomposition of a steam cell's vertical gas
 /// motion. It is allocated only when PHYXEL_STEAM_JET_AIR_COUPLING_TRACE=1
 /// and is never read by a simulation pass.

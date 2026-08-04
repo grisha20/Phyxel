@@ -894,10 +894,12 @@ public sealed class SimulationDispatchCoordinator
     {
         DeviceContext context = resources.Context;
         bool steamJetInjectionTrace = Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_INJECTION_TRACE") == "1";
+        bool steamJetSourceDistributionTrace =
+            Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_SOURCE_DISTRIBUTION_TRACE") == "1";
         for (int commandIndex = 0; commandIndex < commands.Length; commandIndex++)
         {
             ReadOnlySpan<BrushDrawCommand> command = commands.Slice(commandIndex, 1);
-            if (steamJetInjectionTrace)
+            if (steamJetInjectionTrace || steamJetSourceDistributionTrace)
             {
                 context.CopyResource(resources.Grid.ReadBuffer, resources.SteamGasStepPreviousGrid.Buffer);
             }
@@ -929,6 +931,10 @@ public sealed class SimulationDispatchCoordinator
             if (steamJetInjectionTrace)
             {
                 DispatchSteamJetInjectionObserver(context, resources, ref constants);
+            }
+            if (steamJetSourceDistributionTrace)
+            {
+                DispatchSteamJetInjectionDistributionObserver(context, resources, ref constants);
             }
         }
     }
@@ -1360,6 +1366,10 @@ public sealed class SimulationDispatchCoordinator
         resources.Context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.SteamGasStepStatistics.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.SteamJetInjectionStatistics.UnorderedView, zero);
+        if (resources.SteamJetInjectionDistribution is not null)
+        {
+            resources.Context.ClearUnorderedAccessView(resources.SteamJetInjectionDistribution.UnorderedView, zero);
+        }
         if (resources.SteamJetLateralBands is not null)
         {
             resources.Context.ClearUnorderedAccessView(resources.SteamJetLateralBands.UnorderedView, zero);
@@ -2065,6 +2075,32 @@ public sealed class SimulationDispatchCoordinator
         Unbind(context, 3, 1);
     }
 
+    private static void DispatchSteamJetInjectionDistributionObserver(
+        DeviceContext context,
+        GpuSimulationResources resources,
+        ref SimulationFrameConstants constants)
+    {
+        if (resources.SteamJetInjectionDistributionObserverShader is null ||
+            resources.SteamJetInjectionDistribution is null)
+        {
+            return;
+        }
+        context.ComputeShader.Set(resources.SteamJetInjectionDistributionObserverShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.SteamGasStepPreviousGrid.View,
+            resources.Grid.ReadView,
+            resources.Commands.View);
+        context.ComputeShader.SetUnorderedAccessView(1, resources.SteamJetInjectionDistribution.UnorderedView);
+        UpdateConstants(context, resources, ref constants);
+        context.Dispatch(
+            DivideRoundUp((int)constants.DispatchExtentX, 16),
+            DivideRoundUp((int)constants.DispatchExtentY, 16),
+            1);
+        Unbind(context, 3, 2);
+    }
+
     private static void DispatchSteamJetMotionObserver(
         DeviceContext context,
         GpuSimulationResources resources)
@@ -2111,7 +2147,7 @@ public sealed class SimulationDispatchCoordinator
     private bool ShouldCaptureSteamJetAirCouplingTrace()
     {
         return Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_AIR_COUPLING_TRACE") == "1" &&
-            frameIndex is 120 or 300 or 599;
+            frameIndex is 60 or 120 or 200 or 300 or 450 or 599;
     }
 
     private static void DispatchAirClear(GpuSimulationResources resources)

@@ -23,6 +23,7 @@ public sealed class AcceptanceRegressionHarness
     // Keep a dense early history so front speed is fitted only from unclipped
     // observations rather than from a boundary-pinned final snapshot.
     private static readonly uint[] SteamJetCheckpointFrames = [60, 90, 120, 150, 200, 250, 300];
+    private static readonly uint[] SteamJetCollapseCheckpointFrames = [60, 90, 120, 150, 200, 250, 300, 450];
     private static readonly uint[] SteamObstacleCheckpointFrames = [300, 600];
     private const ulong SteamDistributionFinalTick = 400;
     private static readonly ulong[] SteamCloudCheckpointTicks =
@@ -40,6 +41,7 @@ public sealed class AcceptanceRegressionHarness
     private readonly SteamJetBlockingTrace steamJetBlockingTrace = new();
     private readonly SteamJetDiagonalTrace steamJetDiagonalTrace = new();
     private readonly SteamJetInjectionTrace steamJetInjectionTrace = new();
+    private readonly SteamJetInjectionDistributionTrace steamJetInjectionDistributionTrace = new();
     private readonly SteamJetAirCouplingTrace steamJetAirCouplingTrace = new();
     private readonly PhaseAcceptanceController phaseAcceptance;
     private readonly uint scenarioSeed;
@@ -388,6 +390,13 @@ public sealed class AcceptanceRegressionHarness
         steamJetInjectionTrace.Record(frame == 599 ? 600u : frame, resources);
     }
 
+    public void RecordSteamJetInjectionDistributionTrace(uint frame, GpuSimulationResources resources)
+    {
+        if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_SOURCE_DISTRIBUTION_TRACE") != "1" ||
+            Mode != AcceptanceScenarioMode.SteamJet || frame != 599) return;
+        steamJetInjectionDistributionTrace.Record(resources);
+    }
+
     public void RecordSteamJetLateralTrace(uint frame, GpuSimulationResources resources)
     {
         if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_LATERAL_TRACE") != "1" ||
@@ -417,7 +426,7 @@ public sealed class AcceptanceRegressionHarness
     public void RecordSteamJetAirCouplingTrace(uint frame, GpuSimulationResources resources)
     {
         if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_AIR_COUPLING_TRACE") != "1" ||
-            Mode != AcceptanceScenarioMode.SteamJet || frame is not (120 or 300 or 599))
+            Mode != AcceptanceScenarioMode.SteamJet || frame is not (60 or 120 or 200 or 300 or 450 or 599))
         {
             return;
         }
@@ -469,7 +478,7 @@ public sealed class AcceptanceRegressionHarness
         {
             uint[] checkpoints = Mode == AcceptanceScenarioMode.SteamObstacle
                 ? SteamObstacleCheckpointFrames : Mode == AcceptanceScenarioMode.SteamJet
-                ? SteamJetCheckpointFrames
+                ? GetSteamJetCheckpointFrames()
                 : SteamPuffCheckpointFrames;
             bool ready = thermalCheckpoints.Count < checkpoints.Length &&
                 frame >= checkpoints[thermalCheckpoints.Count];
@@ -877,6 +886,8 @@ public sealed class AcceptanceRegressionHarness
                 report += $" steamJetBlockingTrace={steamJetBlockingTrace.WriteCsv(ArtifactDirectory)}";
             if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_DIAGONAL_TRACE") == "1")
                 report += $" steamJetDiagonalTrace={steamJetDiagonalTrace.WriteCsv(ArtifactDirectory)}";
+            if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_SOURCE_DISTRIBUTION_TRACE") == "1")
+                report += $" steamJetSourceDistributionTrace={steamJetInjectionDistributionTrace.WriteCsv(ArtifactDirectory)}";
             string tracePath = steamJetInjectionTrace.WriteCsv(
                 ArtifactDirectory,
                 "steam-jet-injection-trace.csv");
@@ -895,13 +906,16 @@ public sealed class AcceptanceRegressionHarness
         if (Mode == AcceptanceScenarioMode.SteamJet && steamJetAirCouplingTrace.Count > 0 && materialRegistry is not null)
         {
             Dictionary<uint, SimulationWorldSnapshot> snapshots = [];
-            if (thermalCheckpoints.Count > 0) snapshots[120] = thermalCheckpoints[0].Snapshot;
-            if (thermalCheckpoints.Count > 1) snapshots[300] = thermalCheckpoints[1].Snapshot;
+            foreach (ThermalAcceptanceCheckpoint checkpoint in thermalCheckpoints)
+            {
+                snapshots[checkpoint.Frame] = checkpoint.Snapshot;
+            }
             snapshots[600] = snapshot;
             string tracePaths = steamJetAirCouplingTrace.WriteArtifacts(
                 ArtifactDirectory,
                 snapshots,
                 materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam),
+                AcceptanceRegressionScenario.GetSteamJetSourceX(),
                 AcceptanceRegressionScenario.GetSteamJetSourceY());
             report += Environment.NewLine +
                 $"PHYXEL_STEAM_JET_AIR_COUPLING samples={steamJetAirCouplingTrace.Count} paths={tracePaths}";
@@ -943,6 +957,11 @@ public sealed class AcceptanceRegressionHarness
         Console.WriteLine(passed ? "PHYXEL_ACCEPTANCE_SUCCESS" : "PHYXEL_ACCEPTANCE_FAILED");
         return passed;
     }
+
+    private static uint[] GetSteamJetCheckpointFrames() =>
+        Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_COLLAPSE_TRACE") == "1"
+            ? SteamJetCollapseCheckpointFrames
+            : SteamJetCheckpointFrames;
 
     private static string ArtifactDirectory =>
         Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR") ??
