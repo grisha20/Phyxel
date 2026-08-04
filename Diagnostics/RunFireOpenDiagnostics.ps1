@@ -6,23 +6,6 @@ param(
 $ErrorActionPreference = 'Stop'
 $culture = [System.Globalization.CultureInfo]::InvariantCulture
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$shaderPath = Join-Path $repoRoot 'Content\Shaders\AirSimulation.hlsl'
-$originalShader = [System.IO.File]::ReadAllText($shaderPath)
-$targetXOn = '        float targetX = meanVelocityX * (AirParticleDrag / (1.0 - AirParticleLoss));'
-$targetXOff = '        float targetX = 0.0;'
-
-function Set-TargetX([bool]$enabled) {
-    $replacement = if ($enabled) { $targetXOn } else { $targetXOff }
-    if (-not [regex]::IsMatch($originalShader, '(?m)^\s*float targetX = .*$')) {
-        throw 'Could not find the targetX declaration in AirSimulation.hlsl.'
-    }
-    $updated = [regex]::Replace(
-        $originalShader,
-        '(?m)^\s*float targetX = .*;$',
-        $replacement)
-    [System.IO.File]::WriteAllText($shaderPath, $updated)
-}
-
 function Add-Sample([hashtable]$target, [string]$name, [double]$value) {
     if (-not $target.ContainsKey($name)) {
         $target[$name] = [System.Collections.Generic.List[double]]::new()
@@ -46,8 +29,7 @@ function Write-Summary([hashtable]$source, [string]$prefix) {
     }
 }
 
-function Run-State([string]$label, [bool]$targetXEnabled) {
-    Set-TargetX $targetXEnabled
+function Run-State([string]$label) {
     dotnet build Phyxel.sln -c Debug --nologo
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -65,6 +47,7 @@ function Run-State([string]$label, [bool]$targetXEnabled) {
         $env:PHYXEL_ACCEPTANCE_SCALE = '0.25'
         $env:PHYXEL_ACCEPTANCE_TARGET_FPS = '60'
         $env:PHYXEL_ACCEPTANCE_CAPTURE_FRAME = '359'
+        $env:PHYXEL_GAS_VERTICAL_TRACE = '1'
         $env:PHYXEL_ARTIFACT_DIR = Join-Path $artifactDirectory ("run-" + $run)
         $output = & dotnet run --project Phyxel.csproj -c Debug --no-build 2>&1
         $runExitCode = $LASTEXITCODE
@@ -76,6 +59,13 @@ function Run-State([string]$label, [bool]$targetXEnabled) {
         $scalarPart = ($line -split ' airPressure=', 2)[0]
         Write-Host "PHYXEL_FIRE_OPEN_RUN label=$label run=$run seed=$runSeed exitCode=$runExitCode $($scalarPart.Substring('PHYXEL_FIRE_OPEN '.Length))"
         foreach ($match in [regex]::Matches($scalarPart, '(?:^|\s)([A-Za-z][A-Za-z0-9]*)=(-?[0-9]+(?:\.[0-9]+)?)')) {
+            Add-Sample $values $match.Groups[1].Value ([double]::Parse($match.Groups[2].Value, $culture))
+        }
+
+        $vertical = $output | Where-Object { $_ -like 'PHYXEL_GAS_VERTICAL *' } | Select-Object -Last 1
+        if (-not $vertical) { throw "fire_open $label run $run produced no vertical motion trace" }
+        Write-Host "PHYXEL_FIRE_OPEN_VERTICAL_RUN label=$label run=$run seed=$runSeed $vertical"
+        foreach ($match in [regex]::Matches($vertical, '(?:^|\s)(meanVelocityY|actualRisePerFireFrame)=(-?[0-9]+(?:\.[0-9]+)?)')) {
             Add-Sample $values $match.Groups[1].Value ([double]::Parse($match.Groups[2].Value, $culture))
         }
 
@@ -93,11 +83,8 @@ function Run-State([string]$label, [bool]$targetXEnabled) {
     Write-Host "PHYXEL_FIRE_OPEN_RAW_REPORT label=$label path=$rawReport"
 }
 
-try {
-    Run-State 'targetx-on' $true
-    Run-State 'targetx-off' $false
-}
-finally {
-    # The task is comparative diagnostics; restore precisely the state that was present.
-    [System.IO.File]::WriteAllText($shaderPath, $originalShader)
-}
+# The old script temporarily rewrote AirSimulation.hlsl to compare targetX.
+# Gas-to-air coupling is no longer expressed by that declaration, so matching
+# the historical text neither tests the active code nor is safe. This script
+# now records a single, immutable current-code baseline.
+Run-State 'current'
