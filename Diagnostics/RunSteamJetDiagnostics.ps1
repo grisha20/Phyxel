@@ -2,7 +2,11 @@ param(
     [ValidateRange(1, 3)]
     [int]$Runs = 3,
     [string]$ArtifactSuffix = '',
-    [switch]$AirCouplingTrace
+    [switch]$AirCouplingTrace,
+    [ValidateRange(320, 7680)]
+    [int]$WorldWidth = 1920,
+    [ValidateRange(180, 4320)]
+    [int]$WorldHeight = 1080
 )
 
 $ErrorActionPreference = 'Stop'
@@ -109,6 +113,8 @@ for ($run = 1; $run -le $Runs; $run++) {
     $env:PHYXEL_ACCEPTANCE_MODE = 'steam_jet'
     $env:PHYXEL_ACCEPTANCE_RUN_SEED = $seed.ToString($culture)
     $env:PHYXEL_ACCEPTANCE_SCALE = '1.0'
+    $env:PHYXEL_ACCEPTANCE_WORLD_WIDTH = $WorldWidth.ToString($culture)
+    $env:PHYXEL_ACCEPTANCE_WORLD_HEIGHT = $WorldHeight.ToString($culture)
     $env:PHYXEL_ACCEPTANCE_TARGET_FPS = '60'
     $env:PHYXEL_ACCEPTANCE_CAPTURE_FRAME = '600'
     $env:PHYXEL_ACCEPTANCE_AIR = '1'
@@ -119,8 +125,10 @@ for ($run = 1; $run -le $Runs; $run++) {
     } else {
         Remove-Item Env:PHYXEL_STEAM_JET_AIR_COUPLING_TRACE -ErrorAction SilentlyContinue
     }
-    $env:PHYXEL_STEAM_JET_SOURCE_X = '960'
-    $env:PHYXEL_STEAM_JET_SOURCE_Y = '1050'
+    # The full-size baseline used x=960,y=1050: centre X and 30 cells
+    # above the lower boundary. Preserve that geometry at other world sizes.
+    $env:PHYXEL_STEAM_JET_SOURCE_X = ([int]($WorldWidth / 2)).ToString($culture)
+    $env:PHYXEL_STEAM_JET_SOURCE_Y = ($WorldHeight - 30).ToString($culture)
     $env:PHYXEL_ARTIFACT_DIR = Join-Path $artifactRoot ("run-" + $run)
     $output = & dotnet run --project Phyxel.csproj -c Debug --no-build 2>&1
     $exitCode = $LASTEXITCODE

@@ -97,6 +97,7 @@ public sealed class PhyxelGame : Game
                 ? parsedScale
                 : acceptance.RequiresNativeResolution ? 1f : 0.25f;
             settings.ApplyScale(acceptanceScale);
+            ApplyAcceptanceWorldSizeOverride(settings);
             if (int.TryParse(
                 Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_TARGET_FPS"),
                 NumberStyles.Integer,
@@ -270,6 +271,37 @@ public sealed class PhyxelGame : Game
             out int value) && value is >= 640 and <= 7680
             ? value
             : fallback;
+    }
+
+    private static void ApplyAcceptanceWorldSizeOverride(SimulationSettings settings)
+    {
+        bool hasWidth = int.TryParse(
+            Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_WORLD_WIDTH"),
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out int width);
+        bool hasHeight = int.TryParse(
+            Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_WORLD_HEIGHT"),
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out int height);
+        if (!hasWidth && !hasHeight)
+        {
+            return;
+        }
+
+        if (!hasWidth || !hasHeight || width < 320 || height < 180 ||
+            width % SimulationSettings.AirCellSize != 0 || height % SimulationSettings.AirCellSize != 0)
+        {
+            throw new InvalidOperationException(
+                "Acceptance world width and height must both be set, meet the minimum size, and align to AirCellSize.");
+        }
+
+        // This override is only for acceptance diagnostics that need to match
+        // an external reference world's dimensions. Scale deliberately remains
+        // unchanged so it cannot select a different simulation schedule.
+        settings.Width = width;
+        settings.Height = height;
     }
 
     protected override void Draw(GameTime gameTime)
