@@ -298,6 +298,11 @@ public static class AcceptanceRegressionScenario
             return [];
         }
 
+        if (UsesFixedSteamJetInflow())
+        {
+            return CreateFixedSteamJetInflow(frame, scenarioSeed);
+        }
+
         // Same single-command brush as the radius-10 steam_puff reference,
         // submitted on every frame to reproduce a held mouse button. Like
         // fire_open, this is a source definition only; it does not alter gas
@@ -313,6 +318,64 @@ public static class AcceptanceRegressionScenario
         steam.Seed ^= scenarioSeed;
         return [steam];
     }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateFixedSteamJetInflow(uint frame, uint scenarioSeed)
+    {
+        // A point brush remains empty-only, so a requested site can already
+        // contain steam when the source is saturated. Seven attempts on two
+        // frames of each five-frame cycle (5.4 sites/frame) produce the
+        // required *measured* 4.2-cell
+        // influx without writing over an occupied particle. Points are
+        // selected without replacement from the same radius-10 disk as the
+        // normal held-brush source. The normal brush remains the default.
+        int requestedCells = 5 + (frame % 5 is 3 or 4 ? 1 : 0);
+        List<BrushDrawCommand> commands = new(requestedCells);
+        const int radius = SteamPuffBrushRadius;
+        const int diameter = radius * 2 + 1;
+        uint state = scenarioSeed ^ (frame * 0x9e3779b9u) ^ 0x53a9f41du;
+        int selected = 0;
+        while (selected < requestedCells)
+        {
+            state = state * 1664525u + 1013904223u;
+            int x = (int)(state % diameter) - radius;
+            state = state * 1664525u + 1013904223u;
+            int y = (int)(state % diameter) - radius;
+            if (x * x + y * y > radius * radius)
+            {
+                continue;
+            }
+
+            bool duplicate = false;
+            foreach (BrushDrawCommand existing in commands)
+            {
+                if (existing.X == GetSteamJetSourceX() + x && existing.Y == GetSteamJetSourceY() + y)
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate)
+            {
+                continue;
+            }
+
+            BrushDrawCommand steam = Create(
+                GetSteamJetSourceX() + x,
+                GetSteamJetSourceY() + y,
+                0,
+                materials.Steam,
+                0,
+                0);
+            steam.Density = 1;
+            steam.Seed = state;
+            commands.Add(steam);
+            selected++;
+        }
+        return commands;
+    }
+
+    private static bool UsesFixedSteamJetInflow() =>
+        Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_FIXED_INFLOW") == "1";
 
     private static int GetSteamPuffBrushRadius()
     {

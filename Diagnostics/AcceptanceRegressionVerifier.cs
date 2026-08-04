@@ -1100,6 +1100,11 @@ public static class AcceptanceRegressionVerifier
         double CandidateSigmaXCurvature,
         int OccupiedBands);
 
+    private readonly record struct SteamJetFrontRiseMetrics(
+        double Rate,
+        string UsedFrames,
+        bool InsufficientSamples);
+
     private static bool ValidateSteamPuff(
         SimulationWorldSnapshot finalSnapshot,
         MaterialRegistry registry,
@@ -1160,7 +1165,7 @@ public static class AcceptanceRegressionVerifier
         uint steam = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
         int sourceX = AcceptanceRegressionScenario.GetSteamJetSourceX();
         int sourceY = AcceptanceRegressionScenario.GetSteamJetSourceY();
-        int[] requestedFrames = [120, 300];
+        int[] requestedFrames = [60, 90, 120, 150, 200, 250, 300];
         StringBuilder fields = new();
         bool hasCheckpoints = checkpoints.Count >= requestedFrames.Length;
 
@@ -1212,13 +1217,15 @@ public static class AcceptanceRegressionVerifier
             steam,
             "steam-jet-ascii-600.txt",
             true);
-        double frontRiseRate = CalculateSteamJetFrontRiseRate(
+        SteamJetFrontRiseMetrics frontRise = CalculateSteamJetFrontRiseRate(
             checkpoints,
             finalSnapshot,
             steam,
             sourceX,
             sourceY);
-        fields.Append($" steamJetFrontRiseRate={frontRiseRate:0.000000}");
+        fields.Append($" steamJetFrontRiseRate={frontRise.Rate:0.000000}");
+        fields.Append($" steamJetFrontRiseFrames={frontRise.UsedFrames}");
+        fields.Append($" steamJetFrontRiseInsufficient={(frontRise.InsufficientSamples ? 1 : 0)}");
         bool images = File.Exists(Path.Combine(artifactDirectory, "AA_steam_jet_120.png")) &&
             File.Exists(Path.Combine(artifactDirectory, "AA_steam_jet_300.png")) &&
             File.Exists(Path.Combine(artifactDirectory, "AA_steam_jet_600.png"));
@@ -1330,7 +1337,7 @@ public static class AcceptanceRegressionVerifier
         return new SteamJetProfileSummary(minimumY, transitionY, greatestCurvature, occupied.Count);
     }
 
-    private static double CalculateSteamJetFrontRiseRate(
+    private static SteamJetFrontRiseMetrics CalculateSteamJetFrontRiseRate(
         IReadOnlyList<ThermalAcceptanceCheckpoint> checkpoints,
         SimulationWorldSnapshot finalSnapshot,
         uint steam,
@@ -1340,16 +1347,23 @@ public static class AcceptanceRegressionVerifier
         List<(double Frame, double TopY)> samples = [];
         foreach (ThermalAcceptanceCheckpoint checkpoint in checkpoints)
         {
-            if (checkpoint.Frame is not (120 or 300))
+            SteamPuffMetrics metrics = MeasureSteamPuff(checkpoint.Snapshot, steam, sourceX, sourceY);
+            if (!metrics.ClippedTop)
             {
-                continue;
+                samples.Add((checkpoint.Frame, metrics.MinimumY));
             }
-            samples.Add((checkpoint.Frame, MeasureSteamPuff(checkpoint.Snapshot, steam, sourceX, sourceY).MinimumY));
         }
-        samples.Add((600, MeasureSteamPuff(finalSnapshot, steam, sourceX, sourceY).MinimumY));
-        if (samples.Count < 2)
+        SteamPuffMetrics finalMetrics = MeasureSteamPuff(finalSnapshot, steam, sourceX, sourceY);
+        if (!finalMetrics.ClippedTop)
         {
-            return double.NaN;
+            samples.Add((600, finalMetrics.MinimumY));
+        }
+        string frames = samples.Count == 0
+            ? "none"
+            : string.Join(',', samples.Select(sample => ((int)sample.Frame).ToString(CultureInfo.InvariantCulture)));
+        if (samples.Count < 3)
+        {
+            return new SteamJetFrontRiseMetrics(double.NaN, frames, true);
         }
 
         double count = samples.Count;
@@ -1365,9 +1379,10 @@ public static class AcceptanceRegressionVerifier
             sumFrameTop += frame * topY;
         }
         double denominator = count * sumFrameSquare - sumFrame * sumFrame;
-        return Math.Abs(denominator) < double.Epsilon
+        double rate = Math.Abs(denominator) < double.Epsilon
             ? double.NaN
             : -(count * sumFrameTop - sumFrame * sumTop) / denominator;
+        return new SteamJetFrontRiseMetrics(rate, frames, false);
     }
 
     private static void AppendSteamPuffMetrics(

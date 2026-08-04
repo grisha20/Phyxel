@@ -19,7 +19,10 @@ public sealed class AcceptanceRegressionHarness
     private static readonly ulong[] GasCheckpointTicks = [120];
     private static readonly ulong[] SteamDistributionCheckpointTicks = [20, 40, 80, 200];
     private static readonly uint[] SteamPuffCheckpointFrames = [1, 30, 60, 90, 120, 150, 300];
-    private static readonly uint[] SteamJetCheckpointFrames = [120, 300];
+    // The jet can reach a short diagnostic world's ceiling before frame 600.
+    // Keep a dense early history so front speed is fitted only from unclipped
+    // observations rather than from a boundary-pinned final snapshot.
+    private static readonly uint[] SteamJetCheckpointFrames = [60, 90, 120, 150, 200, 250, 300];
     private const ulong SteamDistributionFinalTick = 400;
     private static readonly ulong[] SteamCloudCheckpointTicks =
         [0, 20, 40, 80, 200, 400, 800, 1200, 1300, 1400, 1500];

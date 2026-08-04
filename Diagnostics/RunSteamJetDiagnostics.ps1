@@ -3,6 +3,7 @@ param(
     [int]$Runs = 3,
     [string]$ArtifactSuffix = '',
     [switch]$AirCouplingTrace,
+    [switch]$FixedInflow,
     [ValidateRange(320, 7680)]
     [int]$WorldWidth = 1920,
     [ValidateRange(180, 4320)]
@@ -95,6 +96,49 @@ function Write-AirCouplingBandSummary([string]$root, [int]$runCount) {
     Write-Host "PHYXEL_STEAM_JET_AIR_COUPLING_SUMMARY path=$summary rows=$($out.Count)"
 }
 
+function Write-SigmaXProfileSummary([string]$root, [int]$runCount) {
+    $rows = @{}
+    for ($run = 1; $run -le $runCount; $run++) {
+        Get-ChildItem -LiteralPath (Join-Path $root ("run-" + $run)) -Filter 'steam-jet-profile-*.csv' | ForEach-Object {
+            $profileFrame = [int][regex]::Match($_.BaseName, '(\d+)$').Groups[1].Value
+            foreach ($row in Import-Csv -LiteralPath $_.FullName) {
+                $row | Add-Member -NotePropertyName ProfileFrame -NotePropertyValue $profileFrame
+                $key = "{0}_{1}" -f $profileFrame, $row.heightAboveSourceStart
+                if (-not $rows.ContainsKey($key)) { $rows[$key] = [System.Collections.Generic.List[object]]::new() }
+                $rows[$key].Add($row)
+            }
+        }
+    }
+
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($key in $rows.Keys | Sort-Object { [int](($_ -split '_')[0]) * 10000 + [int](($_ -split '_')[1]) }) {
+        $group = $rows[$key]
+        $first = $group[0]
+        [double[]]$cellValues = @($group | ForEach-Object { [double]::Parse($_.steamCells, $culture) })
+        [double[]]$sigmaValues = @($group | ForEach-Object { [double]::Parse($_.sigmaX, $culture) })
+        $cellMean = ($cellValues | Measure-Object -Average).Average
+        $sigmaMean = ($sigmaValues | Measure-Object -Average).Average
+        $cellVariance = 0.0
+        $sigmaVariance = 0.0
+        foreach ($value in $cellValues) { $cellVariance += [math]::Pow($value - $cellMean, 2) }
+        foreach ($value in $sigmaValues) { $sigmaVariance += [math]::Pow($value - $sigmaMean, 2) }
+        $record = [ordered]@{}
+        $record['frame'] = $first.ProfileFrame
+        $record['heightAboveSourceStart'] = $first.heightAboveSourceStart
+        $record['heightAboveSourceEnd'] = $first.heightAboveSourceEnd
+        $record['worldYTop'] = $first.worldYTop
+        $record['worldYBottom'] = $first.worldYBottom
+        $record['steamCellsMean'] = $cellMean.ToString('F6', $culture)
+        $record['steamCellsStdDev'] = ([math]::Sqrt($cellVariance / $cellValues.Length)).ToString('F6', $culture)
+        $record['sigmaXMean'] = $sigmaMean.ToString('F6', $culture)
+        $record['sigmaXStdDev'] = ([math]::Sqrt($sigmaVariance / $sigmaValues.Length)).ToString('F6', $culture)
+        $out.Add([pscustomobject]$record)
+    }
+    $summary = Join-Path $root 'steam-jet-sigmaX-profile-summary.csv'
+    $out | Export-Csv -LiteralPath $summary -NoTypeInformation
+    Write-Host "PHYXEL_STEAM_JET_SIGMAX_SUMMARY path=$summary rows=$($out.Count)"
+}
+
 dotnet build Phyxel.sln -c Debug --nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Assert-MaterialsCopyMatchesSource
@@ -120,6 +164,11 @@ for ($run = 1; $run -le $Runs; $run++) {
     $env:PHYXEL_ACCEPTANCE_AIR = '1'
     $env:PHYXEL_STEAM_GAS_STEP_TRACE = '1'
     $env:PHYXEL_STEAM_JET_INJECTION_TRACE = '1'
+    if ($FixedInflow) {
+        $env:PHYXEL_STEAM_JET_FIXED_INFLOW = '1'
+    } else {
+        Remove-Item Env:PHYXEL_STEAM_JET_FIXED_INFLOW -ErrorAction SilentlyContinue
+    }
     if ($AirCouplingTrace) {
         $env:PHYXEL_STEAM_JET_AIR_COUPLING_TRACE = '1'
     } else {
@@ -147,4 +196,5 @@ Write-Summary $values
 if ($AirCouplingTrace) {
     Write-AirCouplingBandSummary $artifactRoot $Runs
 }
+Write-SigmaXProfileSummary $artifactRoot $Runs
 Write-Host "PHYXEL_STEAM_JET_RAW_REPORT path=$rawReport"
