@@ -81,7 +81,10 @@ void CSDistribution(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    int sourceX = command.X;
+    // steam_jet diagnostics always place the source on the world centre line.
+    // Fixed inflow emits radius-zero commands, so command.X would be each
+    // individual selected point rather than the axis of the source disk.
+    int sourceX = int(Width) / 2;
     int offsetX = position.x - sourceX;
     uint ignored;
     int ignoredSigned;
