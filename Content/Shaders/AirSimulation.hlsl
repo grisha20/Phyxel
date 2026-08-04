@@ -245,12 +245,11 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
             {
                 gasCount++;
                 airLossProduct *= material.MotionAirLoss;
-                if ((material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0)
+                if (material.HotAir != 0.0)
                 {
-                    // Keep the established FIRE/SMKE contribution exactly:
-                    // TPT applies pv += 4 * HotAir per particle.
-                    // Steam's material value is loaded now, but enabling it
-                    // is intentionally a separate, reversible physics commit.
+                    // TPT applies pv += 4 * HotAir per particle. FIRE/SMKE
+                    // remain exactly 4 * 0.001 = 0.004; WTRV now contributes
+                    // its original 4 * 0.0003 = 0.0012 as well.
                     hotAirInjection += 4.0 * material.HotAir;
                 }
             }
