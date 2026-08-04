@@ -228,6 +228,7 @@ public sealed class PhyxelGame : Game
             acceptance.RecordGasVerticalMotionTrace(currentResources);
             acceptance.RecordSteamGasStepTrace(acceptanceFrame, currentResources);
             acceptance.RecordSteamJetInjectionTrace(acceptanceFrame, currentResources);
+            acceptance.RecordSteamJetAirCouplingTrace(acceptanceFrame, currentResources);
             acceptance.CaptureScreenshot(currentResources, frameIndex);
             debugProbe.Update(currentResources, frameIndex++);
             Point? probeCoordinate = acceptance.OwnsTemperatureProbe

@@ -1,7 +1,8 @@
 param(
     [ValidateRange(1, 3)]
     [int]$Runs = 3,
-    [string]$ArtifactSuffix = ''
+    [string]$ArtifactSuffix = '',
+    [switch]$AirCouplingTrace
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,6 +54,43 @@ function Write-Summary([hashtable]$values) {
     }
 }
 
+function Write-AirCouplingBandSummary([string]$root, [int]$runCount) {
+    $rows = @{}
+    for ($run = 1; $run -le $runCount; $run++) {
+        foreach ($frame in 120, 300, 600) {
+            $path = Join-Path $root ("run-{0}\steam-jet-air-field-bands-{1}.csv" -f $run, $frame)
+            if (-not (Test-Path -LiteralPath $path)) { throw "Missing air-coupling profile: $path" }
+            foreach ($row in Import-Csv -LiteralPath $path) {
+                $key = "{0}:{1}" -f $row.frame, $row.heightAboveSourceStart
+                if (-not $rows.ContainsKey($key)) { $rows[$key] = [System.Collections.Generic.List[object]]::new() }
+                $rows[$key].Add($row)
+            }
+        }
+    }
+
+    $identity = @('frame', 'heightAboveSourceStart', 'heightAboveSourceEnd', 'worldYTop', 'worldYBottom')
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($key in $rows.Keys | Sort-Object { [int](($_ -split ':')[0]) * 10000 + [int](($_ -split ':')[1]) }) {
+        $group = $rows[$key]
+        $first = $group[0]
+        $record = [ordered]@{}
+        foreach ($name in $identity) { $record[$name] = $first.$name }
+        foreach ($property in $first.PSObject.Properties.Name) {
+            if ($identity -contains $property) { continue }
+            [double[]]$samples = @($group | ForEach-Object { [double]::Parse($_.$property, $culture) })
+            $mean = ($samples | Measure-Object -Average).Average
+            $variance = 0.0
+            foreach ($sample in $samples) { $variance += [math]::Pow($sample - $mean, 2) }
+            $record[($property + 'Mean')] = $mean.ToString('F6', $culture)
+            $record[($property + 'StdDev')] = ([math]::Sqrt($variance / $samples.Length)).ToString('F6', $culture)
+        }
+        $out.Add([pscustomobject]$record)
+    }
+    $summary = Join-Path $root 'steam-jet-air-field-bands-summary.csv'
+    $out | Export-Csv -LiteralPath $summary -NoTypeInformation
+    Write-Host "PHYXEL_STEAM_JET_AIR_COUPLING_SUMMARY path=$summary rows=$($out.Count)"
+}
+
 dotnet build Phyxel.sln -c Debug --nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Assert-MaterialsCopyMatchesSource
@@ -76,6 +114,11 @@ for ($run = 1; $run -le $Runs; $run++) {
     $env:PHYXEL_ACCEPTANCE_AIR = '1'
     $env:PHYXEL_STEAM_GAS_STEP_TRACE = '1'
     $env:PHYXEL_STEAM_JET_INJECTION_TRACE = '1'
+    if ($AirCouplingTrace) {
+        $env:PHYXEL_STEAM_JET_AIR_COUPLING_TRACE = '1'
+    } else {
+        Remove-Item Env:PHYXEL_STEAM_JET_AIR_COUPLING_TRACE -ErrorAction SilentlyContinue
+    }
     $env:PHYXEL_STEAM_JET_SOURCE_X = '960'
     $env:PHYXEL_STEAM_JET_SOURCE_Y = '1050'
     $env:PHYXEL_ARTIFACT_DIR = Join-Path $artifactRoot ("run-" + $run)
@@ -93,4 +136,7 @@ for ($run = 1; $run -le $Runs; $run++) {
 }
 
 Write-Summary $values
+if ($AirCouplingTrace) {
+    Write-AirCouplingBandSummary $artifactRoot $Runs
+}
 Write-Host "PHYXEL_STEAM_JET_RAW_REPORT path=$rawReport"

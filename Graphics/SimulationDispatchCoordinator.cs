@@ -1554,7 +1554,7 @@ public sealed class SimulationDispatchCoordinator
     /// на GPU соседняя клетка может быть уже обновлена, а может и нет.
     /// Порядок повторяет Air::update_air из The Powder Toy.
     /// </summary>
-    private static void DispatchAirSimulation(
+    private void DispatchAirSimulation(
         GpuSimulationResources resources,
         uint tickIndex)
     {
@@ -1570,6 +1570,13 @@ public sealed class SimulationDispatchCoordinator
             AirReserved0 = 0
         };
         DeviceContext context = resources.Context;
+        // This is deliberately before CSInject: the observer sees the same
+        // pending GasAirImpulse and Grid that CSInject will consume. It writes
+        // only its own optional buffer; no physical resource is delayed.
+        if (ShouldCaptureSteamJetAirCouplingTrace())
+        {
+            DispatchSteamJetAirCouplingObserver(context, resources);
+        }
         context.UpdateSubresource(ref constants, resources.AirConstants);
         context.ComputeShader.SetConstantBuffer(0, resources.AirConstants);
         context.ComputeShader.SetShaderResources(
@@ -1783,6 +1790,16 @@ public sealed class SimulationDispatchCoordinator
         constants.DispatchExtentX = (uint)resources.Width;
         constants.DispatchExtentY = (uint)resources.Height;
         UpdateConstants(context, resources, ref constants);
+        // This observer runs at the exact pre-integration point, with the
+        // same Grid, Air and GasMotion inputs phase 89 consumes next. Changing
+        // shader bindings is sufficient in D3D11; no new physical barrier or
+        // synchronization is introduced.
+        if (ShouldCaptureSteamJetAirCouplingTrace())
+        {
+            Unbind(context, 2, 12);
+            DispatchSteamJetMotionObserver(context, resources);
+            BindGasMotionSolver(context, resources);
+        }
         context.Dispatch(
             DivideRoundUp(resources.Width, 16),
             DivideRoundUp(resources.Height, 16),
@@ -1935,6 +1952,55 @@ public sealed class SimulationDispatchCoordinator
             DivideRoundUp((int)constants.DispatchExtentY, 16),
             1);
         Unbind(context, 3, 1);
+    }
+
+    private static void DispatchSteamJetMotionObserver(
+        DeviceContext context,
+        GpuSimulationResources resources)
+    {
+        if (resources.SteamJetMotionObserverShader is null ||
+            resources.SteamJetMotionContributions is null)
+        {
+            return;
+        }
+        context.ComputeShader.Set(resources.SteamJetMotionObserverShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Materials.View,
+            resources.Air.View,
+            resources.Grid.ReadView,
+            resources.GasMotion.View);
+        context.ComputeShader.SetUnorderedAccessView(0, resources.SteamJetMotionContributions.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        Unbind(context, 4, 1);
+    }
+
+    private static void DispatchSteamJetAirCouplingObserver(
+        DeviceContext context,
+        GpuSimulationResources resources)
+    {
+        if (resources.SteamJetAirCouplingObserverShader is null ||
+            resources.SteamJetAirCoupling is null)
+        {
+            return;
+        }
+        context.ComputeShader.Set(resources.SteamJetAirCouplingObserverShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(
+            0,
+            resources.Materials.View,
+            resources.Grid.ReadView,
+            resources.GasAirImpulse.View);
+        context.ComputeShader.SetUnorderedAccessView(0, resources.SteamJetAirCoupling.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.AirWidth, 8), DivideRoundUp(resources.AirHeight, 8), 1);
+        Unbind(context, 3, 1);
+    }
+
+    private bool ShouldCaptureSteamJetAirCouplingTrace()
+    {
+        return Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_AIR_COUPLING_TRACE") == "1" &&
+            frameIndex is 120 or 300 or 599;
     }
 
     private static void DispatchAirClear(GpuSimulationResources resources)

@@ -51,6 +51,12 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuStructuredBuffer<GasMotionState> SteamGasStepPreviousMotion { get; init; }
     public required GpuStructuredBuffer<SteamJetInjectionStatistics> SteamJetInjectionStatistics { get; init; }
     public required Buffer SteamJetInjectionStatisticsStaging { get; init; }
+    // Allocated only for PHYXEL_STEAM_JET_AIR_COUPLING_TRACE=1. These are
+    // observer outputs and are never bound by a physical solver pass.
+    public GpuStructuredBuffer<SteamJetGasMotionContribution>? SteamJetMotionContributions { get; init; }
+    public Buffer? SteamJetMotionContributionsStaging { get; init; }
+    public GpuStructuredBuffer<SteamJetAirCouplingCell>? SteamJetAirCoupling { get; init; }
+    public Buffer? SteamJetAirCouplingStaging { get; init; }
     public required Buffer FireGlowConstants { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlow { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlowScratch { get; init; }
@@ -102,6 +108,8 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? GasRedistributionShader { get; init; }
     public ComputeShader? SteamGasStepObserverShader { get; init; }
     public ComputeShader? SteamJetInjectionObserverShader { get; init; }
+    public ComputeShader? SteamJetMotionObserverShader { get; init; }
+    public ComputeShader? SteamJetAirCouplingObserverShader { get; init; }
     public ComputeShader? ComponentInitializeShader { get; init; }
     public ComputeShader? ComponentUnionShader { get; init; }
     public ComputeShader? ComponentCompressShader { get; init; }
@@ -166,6 +174,8 @@ public sealed class GpuSimulationResources : IDisposable
         GasRedistributionShader?.Dispose();
         SteamGasStepObserverShader?.Dispose();
         SteamJetInjectionObserverShader?.Dispose();
+        SteamJetMotionObserverShader?.Dispose();
+        SteamJetAirCouplingObserverShader?.Dispose();
         BrushShader?.Dispose();
         foreach (KniTexture2D texture in PresentationTextures)
         {
@@ -222,6 +232,10 @@ public sealed class GpuSimulationResources : IDisposable
         SteamGasStepPreviousMotion.Dispose();
         SteamJetInjectionStatistics.Dispose();
         SteamJetInjectionStatisticsStaging.Dispose();
+        SteamJetMotionContributions?.Dispose();
+        SteamJetMotionContributionsStaging?.Dispose();
+        SteamJetAirCoupling?.Dispose();
+        SteamJetAirCouplingStaging?.Dispose();
         AirConstants.Dispose();
         ContactTransitionConstants.Dispose();
         foreach (GpuPhaseSummaryReadbackSlot slot in PhaseSummaryReadbackSlots)

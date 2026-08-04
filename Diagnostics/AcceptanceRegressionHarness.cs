@@ -33,6 +33,7 @@ public sealed class AcceptanceRegressionHarness
     private readonly GasVerticalMotionTrace gasVerticalMotionTrace = new();
     private readonly SteamGasStepTrace steamGasStepTrace = new();
     private readonly SteamJetInjectionTrace steamJetInjectionTrace = new();
+    private readonly SteamJetAirCouplingTrace steamJetAirCouplingTrace = new();
     private readonly PhaseAcceptanceController phaseAcceptance;
     private readonly uint scenarioSeed;
 
@@ -376,6 +377,16 @@ public sealed class AcceptanceRegressionHarness
             return;
         }
         steamJetInjectionTrace.Record(frame == 599 ? 600u : frame, resources);
+    }
+
+    public void RecordSteamJetAirCouplingTrace(uint frame, GpuSimulationResources resources)
+    {
+        if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_AIR_COUPLING_TRACE") != "1" ||
+            Mode != AcceptanceScenarioMode.SteamJet || frame is not (120 or 300 or 599))
+        {
+            return;
+        }
+        steamJetAirCouplingTrace.Record(frame == 599 ? 600u : frame, resources);
     }
 
     public bool TryBeginAcceptanceCheckpoint(
@@ -838,6 +849,20 @@ public sealed class AcceptanceRegressionHarness
                 report += " steamJetInjection600Missing=1";
             }
             report += $" steamJetInjectionTrace={tracePath}";
+        }
+        if (Mode == AcceptanceScenarioMode.SteamJet && steamJetAirCouplingTrace.Count > 0 && materialRegistry is not null)
+        {
+            Dictionary<uint, SimulationWorldSnapshot> snapshots = [];
+            if (thermalCheckpoints.Count > 0) snapshots[120] = thermalCheckpoints[0].Snapshot;
+            if (thermalCheckpoints.Count > 1) snapshots[300] = thermalCheckpoints[1].Snapshot;
+            snapshots[600] = snapshot;
+            string tracePaths = steamJetAirCouplingTrace.WriteArtifacts(
+                ArtifactDirectory,
+                snapshots,
+                materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam),
+                AcceptanceRegressionScenario.GetSteamJetSourceY());
+            report += Environment.NewLine +
+                $"PHYXEL_STEAM_JET_AIR_COUPLING samples={steamJetAirCouplingTrace.Count} paths={tracePaths}";
         }
         report += Environment.NewLine +
             $"PHYXEL_MATERIAL_PROPERTIES_LAYOUT csharpActual={Marshal.SizeOf<MaterialProperties>()} " +

@@ -42,6 +42,30 @@ struct GasAirImpulse
     int Y;
 };
 
+// Diagnostic-only observer records. Neither struct is bound by a physical
+// simulation pass; they deliberately stay outside GridCell and materials.
+struct SteamJetGasMotionContribution
+{
+    float PreviousVelocityY;
+    float RetainedVelocityY;
+    float AirAdvectionY;
+    float BuoyancyY;
+    float DiffusionY;
+    float UnclampedVelocityY;
+    float IntegratedVelocityY;
+    uint Flags;
+};
+
+struct SteamJetAirCouplingCell
+{
+    int ImpulseX;
+    int ImpulseY;
+    float AirLossProduct;
+    uint GasCellCount;
+    uint SteamMask;
+    uint SteamCellCount;
+};
+
 struct GasPipeBandMotionStatistics
 {
     uint GasCellFrames;

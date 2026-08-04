@@ -173,6 +173,21 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         GpuStructuredBuffer<SteamJetInjectionStatistics> steamJetInjectionStatistics = new(Device, 1);
         Buffer steamJetInjectionStatisticsStaging =
             CreateStagingBuffer(steamJetInjectionStatistics.Buffer.Description.SizeInBytes);
+        // A full fine-grid pre-integration trace is sizeable at the 1920x1080
+        // steam_jet diagnostic scale. Do not allocate it, or dispatch either
+        // observer, unless the explicit environment flag requests it.
+        bool steamJetAirCouplingTrace = allocateSimulation &&
+            Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_AIR_COUPLING_TRACE") == "1";
+        GpuStructuredBuffer<SteamJetGasMotionContribution>? steamJetMotionContributions =
+            steamJetAirCouplingTrace ? new(Device, cellCount) : null;
+        Buffer? steamJetMotionContributionsStaging = steamJetMotionContributions is null
+            ? null
+            : CreateStagingBuffer(steamJetMotionContributions.Buffer.Description.SizeInBytes);
+        GpuStructuredBuffer<SteamJetAirCouplingCell>? steamJetAirCoupling =
+            steamJetAirCouplingTrace ? new(Device, airCellCount) : null;
+        Buffer? steamJetAirCouplingStaging = steamJetAirCoupling is null
+            ? null
+            : CreateStagingBuffer(steamJetAirCoupling.Buffer.Description.SizeInBytes);
         // The fire light field shares the air resolution: one coarse cell per
         // AirCellSize square, exactly like fire_r/g/b in The Powder Toy.
         Buffer fireGlowConstants = CreateConstantBuffer<FireGlowConstants>();
@@ -394,6 +409,10 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SteamGasStepPreviousMotion = steamGasStepPreviousMotion,
             SteamJetInjectionStatistics = steamJetInjectionStatistics,
             SteamJetInjectionStatisticsStaging = steamJetInjectionStatisticsStaging,
+            SteamJetMotionContributions = steamJetMotionContributions,
+            SteamJetMotionContributionsStaging = steamJetMotionContributionsStaging,
+            SteamJetAirCoupling = steamJetAirCoupling,
+            SteamJetAirCouplingStaging = steamJetAirCouplingStaging,
             FireGlowConstants = fireGlowConstants,
             FireGlow = fireGlow,
             FireGlowScratch = fireGlowScratch,
@@ -441,6 +460,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             GasRedistributionShader = allocateSimulation ? CompileShader("GasRedistribution.hlsl") : null,
             SteamGasStepObserverShader = allocateSimulation ? CompileShader("SteamGasStepObserver.hlsl") : null,
             SteamJetInjectionObserverShader = allocateSimulation ? CompileShader("SteamJetInjectionObserver.hlsl") : null,
+            SteamJetMotionObserverShader = allocateSimulation ? CompileShader("SteamJetMotionObserver.hlsl") : null,
+            SteamJetAirCouplingObserverShader = allocateSimulation ? CompileShader("SteamJetAirCouplingObserver.hlsl") : null,
             ComponentInitializeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "InitializeComponents") : null,
             ComponentUnionShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "UnionComponents") : null,
             ComponentCompressShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "CompressComponents") : null,

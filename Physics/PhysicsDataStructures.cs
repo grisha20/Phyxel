@@ -128,6 +128,40 @@ public struct SteamJetInjectionStatistics
 }
 
 /// <summary>
+/// Read-only, pre-integration decomposition of a steam cell's vertical gas
+/// motion. It is allocated only when PHYXEL_STEAM_JET_AIR_COUPLING_TRACE=1
+/// and is never read by a simulation pass.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SteamJetGasMotionContribution
+{
+    public float PreviousVelocityY;
+    public float RetainedVelocityY;
+    public float AirAdvectionY;
+    public float BuoyancyY;
+    public float DiffusionY;
+    public float UnclampedVelocityY;
+    public float IntegratedVelocityY;
+    public uint Flags;
+}
+
+/// <summary>
+/// Read-only copy of one coarse Air cell immediately before CSInject consumes
+/// its pending gas impulse. SteamMask identifies the fine cells occupied by
+/// steam at that exact sampling point; it is not a simulation input.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SteamJetAirCouplingCell
+{
+    public int ImpulseX;
+    public int ImpulseY;
+    public float AirLossProduct;
+    public uint GasCellCount;
+    public uint SteamMask;
+    public uint SteamCellCount;
+}
+
+/// <summary>
 /// Layout of the diagnostic-only lateral gas transport buffer. Each path has
 /// fourteen uint counters; this is not persisted simulation state.
 /// </summary>
