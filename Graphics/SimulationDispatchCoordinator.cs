@@ -1364,6 +1364,13 @@ public sealed class SimulationDispatchCoordinator
         {
             resources.Context.ClearUnorderedAccessView(resources.SteamJetLateralBands.UnorderedView, zero);
         }
+        if (resources.SteamJetBlockingSubsteps is not null)
+        {
+            resources.Context.ClearUnorderedAccessView(resources.SteamJetBlockingSubsteps.UnorderedView, zero);
+            resources.Context.ClearUnorderedAccessView(resources.SteamJetBlockingFrames!.UnorderedView, zero);
+            resources.Context.ClearUnorderedAccessView(resources.SteamJetBlockingMarkers!.UnorderedView, zero);
+            resources.Context.ClearUnorderedAccessView(resources.SteamJetBlockingMovedFrames!.UnorderedView, zero);
+        }
         resources.Context.ClearUnorderedAccessView(resources.GasVerticalMotionStatistics.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.GasVerticalBlockFrameMarkers.UnorderedView, zero);
         foreach (UnorderedAccessView view in resources.Statistics.UnorderedAccessViews)
@@ -1774,6 +1781,8 @@ public sealed class SimulationDispatchCoordinator
     {
         DeviceContext context = resources.Context;
         bool steamGasStepTrace = Environment.GetEnvironmentVariable("PHYXEL_STEAM_GAS_STEP_TRACE") == "1";
+        bool steamJetBlockingTrace = Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_BLOCKING_TRACE") == "1";
+        bool steamObserverTrace = steamGasStepTrace || steamJetBlockingTrace;
         BindGasMotionSolver(context, resources);
         context.ClearUnorderedAccessView(
             resources.GasObstacleBypassStatistics.UnorderedView,
@@ -1844,7 +1853,7 @@ public sealed class SimulationDispatchCoordinator
                 constants.DispatchOffsetY = (uint)startY;
                 constants.DispatchExtentX = (uint)dispatchW;
                 constants.DispatchExtentY = (uint)dispatchH;
-                if (steamGasStepTrace)
+                if (steamObserverTrace)
                 {
                     context.CopyResource(resources.Grid.ReadBuffer, resources.SteamGasStepPreviousGrid.Buffer);
                     context.CopyResource(resources.GasMotion.Buffer, resources.SteamGasStepPreviousMotion.Buffer);
@@ -1852,11 +1861,18 @@ public sealed class SimulationDispatchCoordinator
                 BindGasMotionSolver(context, resources);
                 UpdateConstants(context, resources, ref constants);
                 context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
-                if (steamGasStepTrace)
+                if (steamObserverTrace)
                 {
                     Unbind(context, 2, 12);
-                    DispatchSteamGasStepObserver(context, resources);
-                    DispatchSteamJetLateralObserver(context, resources);
+                    if (steamGasStepTrace)
+                    {
+                        DispatchSteamGasStepObserver(context, resources);
+                        DispatchSteamJetLateralObserver(context, resources);
+                    }
+                    if (steamJetBlockingTrace)
+                    {
+                        DispatchSteamJetBlockingObserver(context, resources);
+                    }
                 }
             }
         }
@@ -1884,7 +1900,7 @@ public sealed class SimulationDispatchCoordinator
             constants.DispatchOffsetY = (uint)startY;
             constants.DispatchExtentX = (uint)dispatchW;
             constants.DispatchExtentY = (uint)dispatchH;
-            if (steamGasStepTrace)
+            if (steamObserverTrace)
             {
                 context.CopyResource(resources.Grid.ReadBuffer, resources.SteamGasStepPreviousGrid.Buffer);
                 context.CopyResource(resources.GasMotion.Buffer, resources.SteamGasStepPreviousMotion.Buffer);
@@ -1892,12 +1908,24 @@ public sealed class SimulationDispatchCoordinator
             BindGasMotionSolver(context, resources);
             UpdateConstants(context, resources, ref constants);
             context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
-            if (steamGasStepTrace)
+            if (steamObserverTrace)
             {
                 Unbind(context, 2, 12);
-                DispatchSteamGasStepObserver(context, resources);
-                DispatchSteamJetLateralObserver(context, resources);
+                if (steamGasStepTrace)
+                {
+                    DispatchSteamGasStepObserver(context, resources);
+                    DispatchSteamJetLateralObserver(context, resources);
+                }
+                if (steamJetBlockingTrace)
+                {
+                    DispatchSteamJetBlockingObserver(context, resources);
+                }
             }
+        }
+        if (steamJetBlockingTrace)
+        {
+            Unbind(context, 2, 12);
+            DispatchSteamJetBlockingFrameObserver(context, resources);
         }
         constants.SimulationPhase = previousPhase;
         constants.GasSubStep = 0;
@@ -1955,6 +1983,41 @@ public sealed class SimulationDispatchCoordinator
         Unbind(context, 5, 2);
     }
 
+    private static void DispatchSteamJetBlockingObserver(DeviceContext context, GpuSimulationResources resources)
+    {
+        if (resources.SteamJetBlockingObserverShader is null || resources.SteamJetBlockingSubsteps is null ||
+            resources.SteamJetBlockingMarkers is null || resources.SteamJetBlockingMovedFrames is null)
+        {
+            return;
+        }
+        context.ComputeShader.Set(resources.SteamJetBlockingObserverShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(0, resources.SteamGasStepPreviousGrid.View,
+            resources.Grid.ReadView, resources.Materials.View, resources.SteamGasStepPreviousMotion.View,
+            resources.GasMotion.View);
+        context.ComputeShader.SetUnorderedAccessView(2, resources.SteamJetBlockingSubsteps.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(3, resources.SteamJetBlockingMarkers.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(5, resources.SteamJetBlockingMovedFrames.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        Unbind(context, 5, 6);
+    }
+
+    private static void DispatchSteamJetBlockingFrameObserver(DeviceContext context, GpuSimulationResources resources)
+    {
+        if (resources.SteamJetBlockingFrameObserverShader is null || resources.SteamJetBlockingFrames is null ||
+            resources.SteamJetBlockingMovedFrames is null)
+        {
+            return;
+        }
+        context.ComputeShader.Set(resources.SteamJetBlockingFrameObserverShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.Grid.ReadView,
+            resources.Materials.View, resources.GasMotion.View, resources.GasMotion.View);
+        context.ComputeShader.SetUnorderedAccessView(4, resources.SteamJetBlockingFrames.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(5, resources.SteamJetBlockingMovedFrames.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        Unbind(context, 5, 6);
+    }
     private static void DispatchSteamJetInjectionObserver(
         DeviceContext context,
         GpuSimulationResources resources,

@@ -230,6 +230,7 @@ public sealed class PhyxelGame : Game
             acceptance.RecordSteamGasStepTrace(acceptanceFrame, currentResources);
             acceptance.RecordSteamJetInjectionTrace(acceptanceFrame, currentResources);
             acceptance.RecordSteamJetLateralTrace(acceptanceFrame, currentResources);
+            acceptance.RecordSteamJetBlockingTrace(acceptanceFrame, currentResources);
             acceptance.RecordSteamJetAirCouplingTrace(acceptanceFrame, currentResources);
             acceptance.CaptureScreenshot(currentResources, frameIndex);
             debugProbe.Update(currentResources, frameIndex++);

@@ -4,6 +4,7 @@ param(
     [string]$ArtifactSuffix = '',
     [switch]$AirCouplingTrace,
     [switch]$LateralTrace,
+    [switch]$BlockingTrace,
     [switch]$FixedInflow,
     [ValidateSet('steam_jet', 'steam_obstacle')]
     [string]$Scenario = 'steam_jet',
@@ -101,6 +102,37 @@ function Write-AirCouplingBandSummary([string]$root, [int]$runCount) {
     Write-Host "PHYXEL_STEAM_JET_AIR_COUPLING_SUMMARY path=$summary rows=$($out.Count)"
 }
 
+function Write-BlockingTraceSummary([string]$root, [int]$runCount) {
+    $rows = @{}
+    for ($run = 1; $run -le $runCount; $run++) {
+        $path = Join-Path $root ("run-{0}\steam-jet-blocking-trace.csv" -f $run)
+        if (-not (Test-Path -LiteralPath $path)) { throw "Missing blocking trace: $path" }
+        foreach ($row in Import-Csv -LiteralPath $path) {
+            $key = "{0}:{1}:{2}" -f $row.frame, $row.region, $row.substep
+            if (-not $rows.ContainsKey($key)) { $rows[$key] = [System.Collections.Generic.List[object]]::new() }
+            $rows[$key].Add($row)
+        }
+    }
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($key in $rows.Keys | Sort-Object) {
+        $group = $rows[$key]
+        $first = $group[0]
+        $record = [ordered]@{ frame = $first.frame; region = $first.region; substep = $first.substep }
+        foreach ($property in $first.PSObject.Properties.Name) {
+            if ($property -in @('frame', 'region', 'substep')) { continue }
+            [double[]]$samples = @($group | ForEach-Object { [double]::Parse($_.$property, $culture) })
+            $mean = ($samples | Measure-Object -Average).Average
+            $variance = 0.0
+            foreach ($sample in $samples) { $variance += [math]::Pow($sample - $mean, 2) }
+            $record[($property + 'Mean')] = $mean.ToString('F6', $culture)
+            $record[($property + 'StdDev')] = ([math]::Sqrt($variance / $samples.Length)).ToString('F6', $culture)
+        }
+        $out.Add([pscustomobject]$record)
+    }
+    $summary = Join-Path $root 'steam-jet-blocking-summary.csv'
+    $out | Export-Csv -LiteralPath $summary -NoTypeInformation
+    Write-Host "PHYXEL_STEAM_JET_BLOCKING_SUMMARY path=$summary rows=$($out.Count)"
+}
 function Write-SigmaXProfileSummary([string]$root, [int]$runCount) {
     $rows = @{}
     for ($run = 1; $run -le $runCount; $run++) {
@@ -169,6 +201,7 @@ for ($run = 1; $run -le $Runs; $run++) {
     $env:PHYXEL_ACCEPTANCE_AIR = '1'
     $env:PHYXEL_STEAM_GAS_STEP_TRACE = '1'
     if ($LateralTrace) { $env:PHYXEL_STEAM_JET_LATERAL_TRACE = '1' }
+    if ($BlockingTrace) { $env:PHYXEL_STEAM_JET_BLOCKING_TRACE = '1' } else { Remove-Item Env:PHYXEL_STEAM_JET_BLOCKING_TRACE -ErrorAction SilentlyContinue }
     $env:PHYXEL_STEAM_JET_INJECTION_TRACE = '1'
     if ($FixedInflow) {
         $env:PHYXEL_STEAM_JET_FIXED_INFLOW = '1'
@@ -201,6 +234,9 @@ for ($run = 1; $run -le $Runs; $run++) {
 Write-Summary $values
 if ($AirCouplingTrace) {
     Write-AirCouplingBandSummary $artifactRoot $Runs
+}
+if ($BlockingTrace) {
+    Write-BlockingTraceSummary $artifactRoot $Runs
 }
 Write-SigmaXProfileSummary $artifactRoot $Runs
 Write-Host "PHYXEL_STEAM_JET_RAW_REPORT path=$rawReport"

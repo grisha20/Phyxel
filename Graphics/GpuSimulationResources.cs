@@ -53,6 +53,12 @@ public sealed class GpuSimulationResources : IDisposable
     public required Buffer SteamJetInjectionStatisticsStaging { get; init; }
     public GpuStructuredBuffer<SteamJetLateralBandStatistics>? SteamJetLateralBands { get; init; }
     public Buffer? SteamJetLateralBandsStaging { get; init; }
+    public GpuStructuredBuffer<SteamJetBlockingSubstepStatistics>? SteamJetBlockingSubsteps { get; init; }
+    public Buffer? SteamJetBlockingSubstepsStaging { get; init; }
+    public GpuStructuredBuffer<SteamJetBlockingFrameStatistics>? SteamJetBlockingFrames { get; init; }
+    public Buffer? SteamJetBlockingFramesStaging { get; init; }
+    public GpuStructuredBuffer<SteamJetBlockingMarker>? SteamJetBlockingMarkers { get; init; }
+    public GpuStructuredBuffer<uint>? SteamJetBlockingMovedFrames { get; init; }
     // Allocated only for PHYXEL_STEAM_JET_AIR_COUPLING_TRACE=1. These are
     // observer outputs and are never bound by a physical solver pass.
     public GpuStructuredBuffer<SteamJetGasMotionContribution>? SteamJetMotionContributions { get; init; }
@@ -110,6 +116,8 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? GasRedistributionShader { get; init; }
     public ComputeShader? SteamGasStepObserverShader { get; init; }
     public ComputeShader? SteamJetLateralObserverShader { get; init; }
+    public ComputeShader? SteamJetBlockingObserverShader { get; init; }
+    public ComputeShader? SteamJetBlockingFrameObserverShader { get; init; }
     public ComputeShader? SteamJetInjectionObserverShader { get; init; }
     public ComputeShader? SteamJetMotionObserverShader { get; init; }
     public ComputeShader? SteamJetAirCouplingObserverShader { get; init; }
@@ -177,6 +185,8 @@ public sealed class GpuSimulationResources : IDisposable
         GasRedistributionShader?.Dispose();
         SteamGasStepObserverShader?.Dispose();
         SteamJetLateralObserverShader?.Dispose();
+        SteamJetBlockingObserverShader?.Dispose();
+        SteamJetBlockingFrameObserverShader?.Dispose();
         SteamJetInjectionObserverShader?.Dispose();
         SteamJetMotionObserverShader?.Dispose();
         SteamJetAirCouplingObserverShader?.Dispose();
@@ -238,6 +248,12 @@ public sealed class GpuSimulationResources : IDisposable
         SteamJetInjectionStatisticsStaging.Dispose();
         SteamJetLateralBands?.Dispose();
         SteamJetLateralBandsStaging?.Dispose();
+        SteamJetBlockingSubsteps?.Dispose();
+        SteamJetBlockingSubstepsStaging?.Dispose();
+        SteamJetBlockingFrames?.Dispose();
+        SteamJetBlockingFramesStaging?.Dispose();
+        SteamJetBlockingMarkers?.Dispose();
+        SteamJetBlockingMovedFrames?.Dispose();
         SteamJetMotionContributions?.Dispose();
         SteamJetMotionContributionsStaging?.Dispose();
         SteamJetAirCoupling?.Dispose();

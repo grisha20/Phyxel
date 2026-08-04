@@ -180,6 +180,22 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             steamJetLateralTrace ? new(Device, steamJetBandCount) : null;
         Buffer? steamJetLateralBandsStaging = steamJetLateralBands is null ? null :
             CreateStagingBuffer(steamJetLateralBands.Buffer.Description.SizeInBytes);
+        bool steamJetBlockingTrace = allocateSimulation &&
+            Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_BLOCKING_TRACE") == "1";
+        const int steamJetBlockingGroupCount = 2;
+        const int steamJetBlockingSubstepCount = 8;
+        GpuStructuredBuffer<SteamJetBlockingSubstepStatistics>? steamJetBlockingSubsteps =
+            steamJetBlockingTrace ? new(Device, steamJetBlockingGroupCount * steamJetBlockingSubstepCount) : null;
+        Buffer? steamJetBlockingSubstepsStaging = steamJetBlockingSubsteps is null ? null :
+            CreateStagingBuffer(steamJetBlockingSubsteps.Buffer.Description.SizeInBytes);
+        GpuStructuredBuffer<SteamJetBlockingFrameStatistics>? steamJetBlockingFrames =
+            steamJetBlockingTrace ? new(Device, steamJetBlockingGroupCount) : null;
+        Buffer? steamJetBlockingFramesStaging = steamJetBlockingFrames is null ? null :
+            CreateStagingBuffer(steamJetBlockingFrames.Buffer.Description.SizeInBytes);
+        GpuStructuredBuffer<SteamJetBlockingMarker>? steamJetBlockingMarkers =
+            steamJetBlockingTrace ? new(Device, checked(cellCount * 2)) : null;
+        GpuStructuredBuffer<uint>? steamJetBlockingMovedFrames =
+            steamJetBlockingTrace ? new(Device, cellCount) : null;
         // A full fine-grid pre-integration trace is sizeable at the 1920x1080
         // steam_jet diagnostic scale. Do not allocate it, or dispatch either
         // observer, unless the explicit environment flag requests it.
@@ -418,6 +434,12 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SteamJetInjectionStatisticsStaging = steamJetInjectionStatisticsStaging,
             SteamJetLateralBands = steamJetLateralBands,
             SteamJetLateralBandsStaging = steamJetLateralBandsStaging,
+            SteamJetBlockingSubsteps = steamJetBlockingSubsteps,
+            SteamJetBlockingSubstepsStaging = steamJetBlockingSubstepsStaging,
+            SteamJetBlockingFrames = steamJetBlockingFrames,
+            SteamJetBlockingFramesStaging = steamJetBlockingFramesStaging,
+            SteamJetBlockingMarkers = steamJetBlockingMarkers,
+            SteamJetBlockingMovedFrames = steamJetBlockingMovedFrames,
             SteamJetMotionContributions = steamJetMotionContributions,
             SteamJetMotionContributionsStaging = steamJetMotionContributionsStaging,
             SteamJetAirCoupling = steamJetAirCoupling,
@@ -470,6 +492,10 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SteamGasStepObserverShader = allocateSimulation ? CompileShader("SteamGasStepObserver.hlsl") : null,
             SteamJetLateralObserverShader = allocateSimulation && steamJetLateralTrace
                 ? CompileShader("SteamGasStepObserver.hlsl", "CSLateralBands") : null,
+            SteamJetBlockingObserverShader = allocateSimulation && steamJetBlockingTrace
+                ? CompileShader("SteamGasStepObserver.hlsl", "CSBlocking") : null,
+            SteamJetBlockingFrameObserverShader = allocateSimulation && steamJetBlockingTrace
+                ? CompileShader("SteamGasStepObserver.hlsl", "CSBlockingFrame") : null,
             SteamJetInjectionObserverShader = allocateSimulation ? CompileShader("SteamJetInjectionObserver.hlsl") : null,
             SteamJetMotionObserverShader = allocateSimulation ? CompileShader("SteamJetMotionObserver.hlsl") : null,
             SteamJetAirCouplingObserverShader = allocateSimulation ? CompileShader("SteamJetAirCouplingObserver.hlsl") : null,

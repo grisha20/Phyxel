@@ -131,6 +131,41 @@ public struct SteamJetLateralBandStatistics
     public uint RejectedRight;
 }
 
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SteamJetBlockingSubstepStatistics
+{
+    public uint Rejected;
+    public uint Successful;
+    public uint FreedNextSubstep;
+    public uint SameMaterial;
+    public uint OtherMaterial;
+    public uint Solid;
+}
+
+/// <summary>
+/// Cumulative cell-frame counters for the two steam_jet diagnostic bands.
+/// This is observer output only, never simulation state.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SteamJetBlockingFrameStatistics
+{
+    public uint SteamCellFrames;
+    public uint StalledWithWholeOffset;
+}
+
+/// <summary>
+/// One rejected horizontal intent, retained until the next gas substep checks
+/// whether its target became empty. There are two marker slots per fine cell.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SteamJetBlockingMarker
+{
+    public uint TargetIndexPlusOne;
+    public uint StatisticsSlotPlusOne;
+    public uint OriginFrame;
+    public uint OriginSubstep;
+}
+
 /// <summary>
 /// Cumulative number of WTRV cells actually created by the held-brush source
 /// in steam_jet. This is an observer result, not simulation state.
