@@ -1386,6 +1386,7 @@ public static class AcceptanceRegressionVerifier
         int centreAirX = Math.Clamp(centreFineX / SimulationSettings.AirCellSize, 0, airWidth - 1);
         int centreAirY = Math.Clamp(centreFineY / SimulationSettings.AirCellSize, 0, airHeight - 1);
         int aboveAirY = Math.Clamp((centreFineY - 10) / SimulationSettings.AirCellSize, 0, airHeight - 1);
+        fields.Append($" centreAirVelocityY{frame}={air[centreAirY * airWidth + centreAirX].VelocityY:0.000000}");
         int[] distances = [-6, -3, -2, -1, 0, 1, 2, 3, 6];
         StringBuilder profile = new($"centre=[{centreAirX},{centreAirY}];above10=[{centreAirX},{aboveAirY}];");
         foreach (int airY in new[] { centreAirY, aboveAirY })

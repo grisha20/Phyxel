@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Phyxel.Materials;
 using Phyxel.Physics;
 
@@ -275,13 +276,31 @@ public static class AcceptanceRegressionScenario
         BrushDrawCommand steam = Create(
             SteamPuffSourceX,
             SteamPuffSourceY,
-            SteamPuffBrushRadius,
+            GetSteamPuffBrushRadius(),
             materials.Steam,
             0,
             0);
-        steam.Density = SteamPuffSpawnDensity;
+        steam.Density = GetSteamPuffSpawnDensity();
         steam.Seed ^= scenarioSeed;
         return [steam];
+    }
+
+    private static int GetSteamPuffBrushRadius()
+    {
+        string? value = Environment.GetEnvironmentVariable("PHYXEL_STEAM_PUFF_BRUSH_RADIUS");
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int radius) &&
+            radius is >= 1 and <= 100
+            ? radius
+            : SteamPuffBrushRadius;
+    }
+
+    private static float GetSteamPuffSpawnDensity()
+    {
+        string? value = Environment.GetEnvironmentVariable("PHYXEL_STEAM_PUFF_SPAWN_DENSITY");
+        return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float density) &&
+            density is > 0 and <= 1
+            ? density
+            : SteamPuffSpawnDensity;
     }
 
     /// <summary>

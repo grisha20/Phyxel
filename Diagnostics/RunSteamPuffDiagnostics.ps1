@@ -1,12 +1,17 @@
 param(
     [ValidateRange(1, 3)]
     [int]$Runs = 3,
-    [string]$ArtifactSuffix = ''
+    [string]$ArtifactSuffix = '',
+    [ValidateRange(1, 100)]
+    [int]$BrushRadius = 10,
+    [ValidateRange(0.01, 1.0)]
+    [double]$SpawnDensity = 0.82
 )
 
 $ErrorActionPreference = 'Stop'
 $culture = [System.Globalization.CultureInfo]::InvariantCulture
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$spawnDensityText = $SpawnDensity.ToString($culture)
 
 function Assert-MaterialsCopyMatchesSource {
     $sourceRoot = Join-Path $repoRoot 'Materials'
@@ -76,6 +81,8 @@ foreach ($state in @(
         $env:PHYXEL_ACCEPTANCE_TARGET_FPS = '60'
         $env:PHYXEL_ACCEPTANCE_CAPTURE_FRAME = '600'
         $env:PHYXEL_ACCEPTANCE_AIR = $state.Enabled
+        $env:PHYXEL_STEAM_PUFF_BRUSH_RADIUS = $BrushRadius.ToString($culture)
+        $env:PHYXEL_STEAM_PUFF_SPAWN_DENSITY = $spawnDensityText
         $env:PHYXEL_ARTIFACT_DIR = Join-Path $artifactRoot ("run-" + $run)
         $output = & dotnet run --project Phyxel.csproj -c Debug --no-build 2>&1
         $exitCode = $LASTEXITCODE
@@ -84,12 +91,12 @@ foreach ($state in @(
 
         $line = $output | Where-Object { $_ -like 'PHYXEL_STEAM_PUFF *' } | Select-Object -Last 1
         if (-not $line) { throw "steam_puff $($state.Name) run $run produced no diagnostic line" }
-        Write-Host "PHYXEL_STEAM_PUFF_RUN state=$($state.Name) run=$run seed=$seed exitCode=$exitCode $($line.Substring('PHYXEL_STEAM_PUFF '.Length))"
+        Write-Host "PHYXEL_STEAM_PUFF_RUN state=$($state.Name) brushRadius=$BrushRadius spawnDensity=$spawnDensityText run=$run seed=$seed exitCode=$exitCode $($line.Substring('PHYXEL_STEAM_PUFF '.Length))"
         foreach ($match in [regex]::Matches($line, '(?:^|\s)([A-Za-z][A-Za-z0-9]*)=(-?[0-9]+(?:\.[0-9]+)?)')) {
             Add-Sample $values $match.Groups[1].Value ([double]::Parse($match.Groups[2].Value, $culture))
         }
     }
 
     Write-Summary $values $state.Name
-    Write-Host "PHYXEL_STEAM_PUFF_RAW_REPORT state=$($state.Name) path=$rawReport"
+    Write-Host "PHYXEL_STEAM_PUFF_RAW_REPORT state=$($state.Name) brushRadius=$BrushRadius spawnDensity=$spawnDensityText path=$rawReport"
 }
