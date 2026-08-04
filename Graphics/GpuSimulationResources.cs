@@ -59,6 +59,8 @@ public sealed class GpuSimulationResources : IDisposable
     public Buffer? SteamJetBlockingFramesStaging { get; init; }
     public GpuStructuredBuffer<SteamJetBlockingMarker>? SteamJetBlockingMarkers { get; init; }
     public GpuStructuredBuffer<uint>? SteamJetBlockingMovedFrames { get; init; }
+    public GpuStructuredBuffer<SteamJetDiagonalIntentStatistics>? SteamJetDiagonalIntents { get; init; }
+    public Buffer? SteamJetDiagonalIntentsStaging { get; init; }
     // Allocated only for PHYXEL_STEAM_JET_AIR_COUPLING_TRACE=1. These are
     // observer outputs and are never bound by a physical solver pass.
     public GpuStructuredBuffer<SteamJetGasMotionContribution>? SteamJetMotionContributions { get; init; }
@@ -118,6 +120,7 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? SteamJetLateralObserverShader { get; init; }
     public ComputeShader? SteamJetBlockingObserverShader { get; init; }
     public ComputeShader? SteamJetBlockingFrameObserverShader { get; init; }
+    public ComputeShader? SteamJetDiagonalObserverShader { get; init; }
     public ComputeShader? SteamJetInjectionObserverShader { get; init; }
     public ComputeShader? SteamJetMotionObserverShader { get; init; }
     public ComputeShader? SteamJetAirCouplingObserverShader { get; init; }
@@ -187,6 +190,7 @@ public sealed class GpuSimulationResources : IDisposable
         SteamJetLateralObserverShader?.Dispose();
         SteamJetBlockingObserverShader?.Dispose();
         SteamJetBlockingFrameObserverShader?.Dispose();
+        SteamJetDiagonalObserverShader?.Dispose();
         SteamJetInjectionObserverShader?.Dispose();
         SteamJetMotionObserverShader?.Dispose();
         SteamJetAirCouplingObserverShader?.Dispose();
@@ -254,6 +258,8 @@ public sealed class GpuSimulationResources : IDisposable
         SteamJetBlockingFramesStaging?.Dispose();
         SteamJetBlockingMarkers?.Dispose();
         SteamJetBlockingMovedFrames?.Dispose();
+        SteamJetDiagonalIntents?.Dispose();
+        SteamJetDiagonalIntentsStaging?.Dispose();
         SteamJetMotionContributions?.Dispose();
         SteamJetMotionContributionsStaging?.Dispose();
         SteamJetAirCoupling?.Dispose();

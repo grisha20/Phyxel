@@ -100,3 +100,50 @@ public sealed class SteamJetBlockingTrace
         return values;
     }
 }
+
+public sealed class SteamJetDiagonalTrace
+{
+    private readonly Dictionary<uint, SteamJetDiagonalIntentStatistics[]> samples = [];
+
+    public void Record(uint frame, GpuSimulationResources resources)
+    {
+        if (samples.ContainsKey(frame) || resources.SteamJetDiagonalIntents is null ||
+            resources.SteamJetDiagonalIntentsStaging is null)
+        {
+            return;
+        }
+        DeviceContext context = resources.Context;
+        context.CopyResource(resources.SteamJetDiagonalIntents.Buffer, resources.SteamJetDiagonalIntentsStaging);
+        DataBox map = context.MapSubresource(resources.SteamJetDiagonalIntentsStaging, 0, MapMode.Read, MapFlags.None);
+        int stride = Marshal.SizeOf<SteamJetDiagonalIntentStatistics>();
+        int count = resources.SteamJetDiagonalIntents.Buffer.Description.SizeInBytes / stride;
+        SteamJetDiagonalIntentStatistics[] values = new SteamJetDiagonalIntentStatistics[count];
+        for (int index = 0; index < count; index++)
+        {
+            values[index] = Marshal.PtrToStructure<SteamJetDiagonalIntentStatistics>(IntPtr.Add(map.DataPointer, index * stride));
+        }
+        context.UnmapSubresource(resources.SteamJetDiagonalIntentsStaging, 0);
+        samples.Add(frame, values);
+    }
+
+    public string WriteCsv(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "steam-jet-diagonal-intents.csv");
+        using StreamWriter writer = new(path, false);
+        writer.WriteLine("frame,region,steamCells,diagonalIntents,diagonalIntentFraction,validIntentTargets,lateralTargetOccupied,lateralTargetOccupiedFraction,diagonalTargetOccupied,diagonalTargetOccupiedFraction,leftOccupiedFraction,rightOccupiedFraction,upOccupiedFraction,downOccupiedFraction,upLeftOccupiedFraction,upRightOccupiedFraction,downLeftOccupiedFraction,downRightOccupiedFraction");
+        foreach ((uint frame, SteamJetDiagonalIntentStatistics[] values) in samples)
+        {
+            for (int group = 0; group < values.Length; group++)
+            {
+                SteamJetDiagonalIntentStatistics v = values[group];
+                double neighbourDenominator = Math.Max(1, v.SteamCells);
+                double targetDenominator = Math.Max(1, v.ValidIntentTargets);
+                string region = group == 0 ? "trunk_0_79" : "cap_200_279";
+                writer.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                    $"{frame},{region},{v.SteamCells},{v.DiagonalIntents},{v.DiagonalIntents / neighbourDenominator:F6},{v.ValidIntentTargets},{v.LateralTargetOccupied},{v.LateralTargetOccupied / targetDenominator:F6},{v.DiagonalTargetOccupied},{v.DiagonalTargetOccupied / targetDenominator:F6},{v.LeftOccupied / neighbourDenominator:F6},{v.RightOccupied / neighbourDenominator:F6},{v.UpOccupied / neighbourDenominator:F6},{v.DownOccupied / neighbourDenominator:F6},{v.UpLeftOccupied / neighbourDenominator:F6},{v.UpRightOccupied / neighbourDenominator:F6},{v.DownLeftOccupied / neighbourDenominator:F6},{v.DownRightOccupied / neighbourDenominator:F6}"));
+            }
+        }
+        return path;
+    }
+}

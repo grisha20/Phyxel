@@ -1782,6 +1782,7 @@ public sealed class SimulationDispatchCoordinator
         DeviceContext context = resources.Context;
         bool steamGasStepTrace = Environment.GetEnvironmentVariable("PHYXEL_STEAM_GAS_STEP_TRACE") == "1";
         bool steamJetBlockingTrace = Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_BLOCKING_TRACE") == "1";
+        bool steamJetDiagonalTrace = Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_DIAGONAL_TRACE") == "1";
         bool steamObserverTrace = steamGasStepTrace || steamJetBlockingTrace;
         BindGasMotionSolver(context, resources);
         context.ClearUnorderedAccessView(
@@ -1817,6 +1818,16 @@ public sealed class SimulationDispatchCoordinator
             DivideRoundUp(resources.Width, 16),
             DivideRoundUp(resources.Height, 16),
             1);
+        if (steamJetDiagonalTrace && resources.SteamJetDiagonalIntents is not null)
+        {
+            // A self-contained observer pass after the physical integration
+            // reads the intent field but neither changes nor orders the
+            // following checkerboard passes.
+            Unbind(context, 2, 12);
+            context.ClearUnorderedAccessView(resources.SteamJetDiagonalIntents.UnorderedView, new RawInt4(0, 0, 0, 0));
+            DispatchSteamJetDiagonalObserver(context, resources);
+            BindGasMotionSolver(context, resources);
+        }
 
         for (int step = 0; step < GasMotionSubSteps; step++)
         {
@@ -2000,6 +2011,21 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetUnorderedAccessView(5, resources.SteamJetBlockingMovedFrames.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
         Unbind(context, 5, 6);
+    }
+
+    private static void DispatchSteamJetDiagonalObserver(DeviceContext context, GpuSimulationResources resources)
+    {
+        if (resources.SteamJetDiagonalObserverShader is null || resources.SteamJetDiagonalIntents is null)
+        {
+            return;
+        }
+        context.ComputeShader.Set(resources.SteamJetDiagonalObserverShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.Grid.ReadView,
+            resources.Materials.View, resources.GasMotion.View, resources.GasMotion.View);
+        context.ComputeShader.SetUnorderedAccessView(6, resources.SteamJetDiagonalIntents.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        Unbind(context, 5, 7);
     }
 
     private static void DispatchSteamJetBlockingFrameObserver(DeviceContext context, GpuSimulationResources resources)

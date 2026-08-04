@@ -167,6 +167,28 @@ public struct SteamJetBlockingMarker
 }
 
 /// <summary>
+/// One-frame, read-only comparison of the axial and diagonal destinations of
+/// WTRV cells whose accumulated motion is ready to consume both axes.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct SteamJetDiagonalIntentStatistics
+{
+    public uint SteamCells;
+    public uint DiagonalIntents;
+    public uint ValidIntentTargets;
+    public uint LateralTargetOccupied;
+    public uint DiagonalTargetOccupied;
+    public uint LeftOccupied;
+    public uint RightOccupied;
+    public uint UpOccupied;
+    public uint DownOccupied;
+    public uint UpLeftOccupied;
+    public uint UpRightOccupied;
+    public uint DownLeftOccupied;
+    public uint DownRightOccupied;
+}
+
+/// <summary>
 /// Cumulative number of WTRV cells actually created by the held-brush source
 /// in steam_jet. This is an observer result, not simulation state.
 /// </summary>

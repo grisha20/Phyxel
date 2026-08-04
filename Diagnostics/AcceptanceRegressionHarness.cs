@@ -38,6 +38,7 @@ public sealed class AcceptanceRegressionHarness
     private readonly SteamGasStepTrace steamGasStepTrace = new();
     private readonly SteamJetLateralTrace steamJetLateralTrace = new();
     private readonly SteamJetBlockingTrace steamJetBlockingTrace = new();
+    private readonly SteamJetDiagonalTrace steamJetDiagonalTrace = new();
     private readonly SteamJetInjectionTrace steamJetInjectionTrace = new();
     private readonly SteamJetAirCouplingTrace steamJetAirCouplingTrace = new();
     private readonly PhaseAcceptanceController phaseAcceptance;
@@ -402,6 +403,16 @@ public sealed class AcceptanceRegressionHarness
             return;
         }
         steamJetBlockingTrace.Record(frame == 599 ? 600u : frame, resources);
+    }
+
+    public void RecordSteamJetDiagonalTrace(uint frame, GpuSimulationResources resources)
+    {
+        if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_DIAGONAL_TRACE") != "1" ||
+            Mode != AcceptanceScenarioMode.SteamJet || frame is not (300 or 599))
+        {
+            return;
+        }
+        steamJetDiagonalTrace.Record(frame == 599 ? 600u : frame, resources);
     }
     public void RecordSteamJetAirCouplingTrace(uint frame, GpuSimulationResources resources)
     {
@@ -864,6 +875,8 @@ public sealed class AcceptanceRegressionHarness
                 report += $" steamJetLateralTrace={steamJetLateralTrace.WriteCsv(ArtifactDirectory)}";
             if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_BLOCKING_TRACE") == "1")
                 report += $" steamJetBlockingTrace={steamJetBlockingTrace.WriteCsv(ArtifactDirectory)}";
+            if (Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_DIAGONAL_TRACE") == "1")
+                report += $" steamJetDiagonalTrace={steamJetDiagonalTrace.WriteCsv(ArtifactDirectory)}";
             string tracePath = steamJetInjectionTrace.WriteCsv(
                 ArtifactDirectory,
                 "steam-jet-injection-trace.csv");

@@ -196,6 +196,12 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             steamJetBlockingTrace ? new(Device, checked(cellCount * 2)) : null;
         GpuStructuredBuffer<uint>? steamJetBlockingMovedFrames =
             steamJetBlockingTrace ? new(Device, cellCount) : null;
+        bool steamJetDiagonalTrace = allocateSimulation &&
+            Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_DIAGONAL_TRACE") == "1";
+        GpuStructuredBuffer<SteamJetDiagonalIntentStatistics>? steamJetDiagonalIntents =
+            steamJetDiagonalTrace ? new(Device, steamJetBlockingGroupCount) : null;
+        Buffer? steamJetDiagonalIntentsStaging = steamJetDiagonalIntents is null ? null :
+            CreateStagingBuffer(steamJetDiagonalIntents.Buffer.Description.SizeInBytes);
         // A full fine-grid pre-integration trace is sizeable at the 1920x1080
         // steam_jet diagnostic scale. Do not allocate it, or dispatch either
         // observer, unless the explicit environment flag requests it.
@@ -440,6 +446,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SteamJetBlockingFramesStaging = steamJetBlockingFramesStaging,
             SteamJetBlockingMarkers = steamJetBlockingMarkers,
             SteamJetBlockingMovedFrames = steamJetBlockingMovedFrames,
+            SteamJetDiagonalIntents = steamJetDiagonalIntents,
+            SteamJetDiagonalIntentsStaging = steamJetDiagonalIntentsStaging,
             SteamJetMotionContributions = steamJetMotionContributions,
             SteamJetMotionContributionsStaging = steamJetMotionContributionsStaging,
             SteamJetAirCoupling = steamJetAirCoupling,
@@ -496,6 +504,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
                 ? CompileShader("SteamGasStepObserver.hlsl", "CSBlocking") : null,
             SteamJetBlockingFrameObserverShader = allocateSimulation && steamJetBlockingTrace
                 ? CompileShader("SteamGasStepObserver.hlsl", "CSBlockingFrame") : null,
+            SteamJetDiagonalObserverShader = allocateSimulation && steamJetDiagonalTrace
+                ? CompileShader("SteamGasStepObserver.hlsl", "CSDiagonalIntent") : null,
             SteamJetInjectionObserverShader = allocateSimulation ? CompileShader("SteamJetInjectionObserver.hlsl") : null,
             SteamJetMotionObserverShader = allocateSimulation ? CompileShader("SteamJetMotionObserver.hlsl") : null,
             SteamJetAirCouplingObserverShader = allocateSimulation ? CompileShader("SteamJetAirCouplingObserver.hlsl") : null,

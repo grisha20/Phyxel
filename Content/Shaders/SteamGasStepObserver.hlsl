@@ -172,6 +172,28 @@ RWStructuredBuffer<SteamJetBlockingMarker> BlockingMarkers : register(u3);
 RWStructuredBuffer<SteamJetBlockingFrameStatistics> BlockingFrames : register(u4);
 RWStructuredBuffer<uint> BlockingMovedFrames : register(u5);
 
+struct SteamJetDiagonalIntentStatistics
+{
+    uint SteamCells;
+    uint DiagonalIntents;
+    uint ValidIntentTargets;
+    uint LateralTargetOccupied;
+    uint DiagonalTargetOccupied;
+    uint LeftOccupied;
+    uint RightOccupied;
+    uint UpOccupied;
+    uint DownOccupied;
+    uint UpLeftOccupied;
+    uint UpRightOccupied;
+    uint DownLeftOccupied;
+    uint DownRightOccupied;
+};
+
+// Allocated only when PHYXEL_STEAM_JET_DIAGONAL_TRACE=1.  This output is
+// sampled after phase 89 has formed OffsetX/Y and before either axis consumes
+// those offsets, so it observes intent rather than a later retained state.
+RWStructuredBuffer<SteamJetDiagonalIntentStatistics> DiagonalIntents : register(u6);
+
 int GetSteamJetBlockingGroup(uint2 coordinate)
 {
     int heightAboveSource = int(Height) - 30 - int(coordinate.y);
@@ -293,4 +315,67 @@ void CSBlockingFrame(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         InterlockedAdd(BlockingFrames[group].StalledWithWholeOffset, 1, ignored);
     }
+}
+
+void RecordOccupiedNeighbour(uint group, uint fieldOffset, bool occupied)
+{
+    if (!occupied) return;
+    uint ignored;
+    if (fieldOffset == 0) InterlockedAdd(DiagonalIntents[group].LeftOccupied, 1, ignored);
+    else if (fieldOffset == 1) InterlockedAdd(DiagonalIntents[group].RightOccupied, 1, ignored);
+    else if (fieldOffset == 2) InterlockedAdd(DiagonalIntents[group].UpOccupied, 1, ignored);
+    else if (fieldOffset == 3) InterlockedAdd(DiagonalIntents[group].DownOccupied, 1, ignored);
+    else if (fieldOffset == 4) InterlockedAdd(DiagonalIntents[group].UpLeftOccupied, 1, ignored);
+    else if (fieldOffset == 5) InterlockedAdd(DiagonalIntents[group].UpRightOccupied, 1, ignored);
+    else if (fieldOffset == 6) InterlockedAdd(DiagonalIntents[group].DownLeftOccupied, 1, ignored);
+    else InterlockedAdd(DiagonalIntents[group].DownRightOccupied, 1, ignored);
+}
+
+[numthreads(16, 16, 1)]
+void CSDiagonalIntent(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coordinate = dispatchThreadId.xy;
+    if (coordinate.x >= Width || coordinate.y >= Height) return;
+    int group = GetSteamJetBlockingGroup(coordinate);
+    if (group < 0) return;
+    uint index = FlattenCoordinate(coordinate);
+    if (!IsSteamPuffCell(CurrentGrid[index])) return;
+
+    uint ignored;
+    InterlockedAdd(DiagonalIntents[group].SteamCells, 1, ignored);
+    [unroll]
+    for (int neighbour = 0; neighbour < 8; neighbour++)
+    {
+        int2 delta = int2(1, 1);
+        if (neighbour == 0) delta = int2(-1, 0);
+        else if (neighbour == 1) delta = int2(1, 0);
+        else if (neighbour == 2) delta = int2(0, -1);
+        else if (neighbour == 3) delta = int2(0, 1);
+        else if (neighbour == 4) delta = int2(-1, -1);
+        else if (neighbour == 5) delta = int2(1, -1);
+        else if (neighbour == 6) delta = int2(-1, 1);
+        int2 target = int2(coordinate) + delta;
+        bool valid = target.x >= 0 && target.y >= 0 && target.x < int(Width) && target.y < int(Height);
+        bool occupied = valid && CurrentGrid[FlattenCoordinate(uint2(target))].IsActive != 0;
+        RecordOccupiedNeighbour(group, neighbour, occupied);
+    }
+
+    GasMotionState motion = CurrentMotion[index];
+    // Offset, not raw velocity, is the discrete solver's actual step intent:
+    // it reaches +/-1 only once a full fine-cell move is ready to consume.
+    if (abs(motion.OffsetX) < 1.0 || abs(motion.OffsetY) < 1.0) return;
+    int stepX = motion.OffsetX > 0.0 ? 1 : -1;
+    int stepY = motion.OffsetY > 0.0 ? 1 : -1;
+    int2 lateralTarget = int2(coordinate) + int2(stepX, 0);
+    int2 diagonalTarget = int2(coordinate) + int2(stepX, stepY);
+    bool targetsValid = lateralTarget.x >= 0 && lateralTarget.x < int(Width) &&
+        diagonalTarget.x >= 0 && diagonalTarget.x < int(Width) &&
+        diagonalTarget.y >= 0 && diagonalTarget.y < int(Height);
+    InterlockedAdd(DiagonalIntents[group].DiagonalIntents, 1, ignored);
+    if (!targetsValid) return;
+    InterlockedAdd(DiagonalIntents[group].ValidIntentTargets, 1, ignored);
+    if (CurrentGrid[FlattenCoordinate(uint2(lateralTarget))].IsActive != 0)
+        InterlockedAdd(DiagonalIntents[group].LateralTargetOccupied, 1, ignored);
+    if (CurrentGrid[FlattenCoordinate(uint2(diagonalTarget))].IsActive != 0)
+        InterlockedAdd(DiagonalIntents[group].DiagonalTargetOccupied, 1, ignored);
 }
