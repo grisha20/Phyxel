@@ -3,7 +3,8 @@ param(
     # every acceptance seed.  This scenario is one measurement, not a sample
     # distribution.
     [ValidateRange(1, 1)]
-    [int]$Runs = 1
+    [int]$Runs = 1,
+    [string]$ArtifactSuffix = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,7 +38,7 @@ foreach ($state in @(
     [pscustomobject]@{ Name = 'air-off'; Enabled = '0' }
 )) {
     $values = @{}
-    $artifactRoot = Join-Path $repoRoot ("artifacts\steam-puff-" + $state.Name)
+    $artifactRoot = Join-Path $repoRoot ("artifacts\steam-puff-" + $state.Name + $ArtifactSuffix)
     New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
     $rawReport = Join-Path $artifactRoot 'steam-puff-diagnostics-runs.log'
     Set-Content -Path $rawReport -Value ''

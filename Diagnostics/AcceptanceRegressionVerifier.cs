@@ -1071,7 +1071,14 @@ public static class AcceptanceRegressionVerifier
         int Height,
         double AspectRatio,
         double MeanAbsVelocityX,
-        double MeanAbsVelocityY);
+        double MeanAbsVelocityY,
+        double MeanTemperature,
+        double MeanVelocityXLeft,
+        double MeanVelocityYLeft,
+        double MeanVelocityXRight,
+        double MeanVelocityYRight,
+        int LeftVelocityCells,
+        int RightVelocityCells);
 
     private static bool ValidateSteamPuff(
         SimulationWorldSnapshot finalSnapshot,
@@ -1103,6 +1110,7 @@ public static class AcceptanceRegressionVerifier
                 sourceX,
                 sourceY);
             AppendSteamPuffMetrics(fields, targetFrame, checkpoint.Frame, metrics);
+            AppendSteamPuffAirProfile(fields, checkpoint.Snapshot, metrics, targetFrame);
         }
 
         SteamPuffMetrics finalMetrics = MeasureSteamPuff(
@@ -1111,6 +1119,7 @@ public static class AcceptanceRegressionVerifier
             sourceX,
             sourceY);
         AppendSteamPuffMetrics(fields, 600, 600, finalMetrics);
+        AppendSteamPuffAirProfile(fields, finalSnapshot, finalMetrics, 600);
         WriteSteamPuffStateDump(finalSnapshot, registry, artifactDirectory, steam);
         bool image = File.Exists(Path.Combine(artifactDirectory, "AA_steam_puff.png"));
         report = $"PHYXEL_STEAM_PUFF checkpoints={checkpoints.Count} image={image}{fields}";
@@ -1136,6 +1145,13 @@ public static class AcceptanceRegressionVerifier
         fields.Append($" cloudAspect{suffix}={metrics.AspectRatio:0.000000}");
         fields.Append($" meanAbsVelocityX{suffix}={metrics.MeanAbsVelocityX:0.000000}");
         fields.Append($" meanAbsVelocityY{suffix}={metrics.MeanAbsVelocityY:0.000000}");
+        fields.Append($" meanTemperature{suffix}={metrics.MeanTemperature:0.000000}");
+        fields.Append($" meanVelocityXLeft{suffix}={metrics.MeanVelocityXLeft:0.000000}");
+        fields.Append($" meanVelocityYLeft{suffix}={metrics.MeanVelocityYLeft:0.000000}");
+        fields.Append($" meanVelocityXRight{suffix}={metrics.MeanVelocityXRight:0.000000}");
+        fields.Append($" meanVelocityYRight{suffix}={metrics.MeanVelocityYRight:0.000000}");
+        fields.Append($" leftVelocityCells{suffix}={metrics.LeftVelocityCells}");
+        fields.Append($" rightVelocityCells{suffix}={metrics.RightVelocityCells}");
     }
 
     private static SteamPuffMetrics MeasureSteamPuff(
@@ -1161,6 +1177,13 @@ public static class AcceptanceRegressionVerifier
         double maximumCellMass = 0;
         double sumAbsVelocityX = 0;
         double sumAbsVelocityY = 0;
+        double sumTemperature = 0;
+        double sumVelocityXLeft = 0;
+        double sumVelocityYLeft = 0;
+        double sumVelocityXRight = 0;
+        double sumVelocityYRight = 0;
+        int leftVelocityCells = 0;
+        int rightVelocityCells = 0;
         for (int index = 0; index < grid.Length; index++)
         {
             GridCell cell = grid[index];
@@ -1181,6 +1204,7 @@ public static class AcceptanceRegressionVerifier
             maximumX = Math.Max(maximumX, x);
             minimumY = Math.Min(minimumY, y);
             maximumY = Math.Max(maximumY, y);
+            sumTemperature += cell.Temperature;
             if (hasMotion)
             {
                 sumAbsVelocityX += Math.Abs(motion[index].VelocityX);
@@ -1190,7 +1214,33 @@ public static class AcceptanceRegressionVerifier
 
         if (cells == 0)
         {
-            return new SteamPuffMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            return new SteamPuffMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
+        double centreX = totalMass > 0 ? sumX / totalMass : sourceX;
+        if (hasMotion)
+        {
+            for (int index = 0; index < grid.Length; index++)
+            {
+                GridCell cell = grid[index];
+                if (cell.IsActive == 0 || cell.MaterialIndex != steam)
+                {
+                    continue;
+                }
+                GasMotionState velocity = motion[index];
+                if (index % snapshot.Width < centreX)
+                {
+                    sumVelocityXLeft += velocity.VelocityX;
+                    sumVelocityYLeft += velocity.VelocityY;
+                    leftVelocityCells++;
+                }
+                else
+                {
+                    sumVelocityXRight += velocity.VelocityX;
+                    sumVelocityYRight += velocity.VelocityY;
+                    rightVelocityCells++;
+                }
+            }
         }
 
         int width = maximumX - minimumX + 1;
@@ -1200,13 +1250,62 @@ public static class AcceptanceRegressionVerifier
             totalMass,
             minimumCellMass,
             maximumCellMass,
-            totalMass > 0 ? sumX / totalMass - sourceX : 0,
+            centreX - sourceX,
             totalMass > 0 ? sumY / totalMass - sourceY : 0,
             width,
             height,
             height > 0 ? width / (double)height : 0,
             sumAbsVelocityX / cells,
-            sumAbsVelocityY / cells);
+            sumAbsVelocityY / cells,
+            sumTemperature / cells,
+            leftVelocityCells > 0 ? sumVelocityXLeft / leftVelocityCells : 0,
+            leftVelocityCells > 0 ? sumVelocityYLeft / leftVelocityCells : 0,
+            rightVelocityCells > 0 ? sumVelocityXRight / rightVelocityCells : 0,
+            rightVelocityCells > 0 ? sumVelocityYRight / rightVelocityCells : 0,
+            leftVelocityCells,
+            rightVelocityCells);
+    }
+
+    private static void AppendSteamPuffAirProfile(
+        StringBuilder fields,
+        SimulationWorldSnapshot snapshot,
+        SteamPuffMetrics metrics,
+        int frame)
+    {
+        ReadOnlySpan<AirCell> air = snapshot.Air is null ? [] : MemoryMarshal.Cast<byte, AirCell>(snapshot.Air);
+        int airWidth = Math.Max(1, (snapshot.Width + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize);
+        int airHeight = Math.Max(1, (snapshot.Height + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize);
+        if (metrics.SteamCells == 0 || air.Length != airWidth * airHeight)
+        {
+            fields.Append($" airProfile{frame}=unavailable");
+            return;
+        }
+
+        int centreFineX = (int)Math.Round(AcceptanceRegressionScenario.SteamPuffSourceX + metrics.CentreOffsetX);
+        int centreFineY = (int)Math.Round(AcceptanceRegressionScenario.SteamPuffSourceY + metrics.CentreOffsetY);
+        int centreAirX = Math.Clamp(centreFineX / SimulationSettings.AirCellSize, 0, airWidth - 1);
+        int centreAirY = Math.Clamp(centreFineY / SimulationSettings.AirCellSize, 0, airHeight - 1);
+        int aboveAirY = Math.Clamp((centreFineY - 10) / SimulationSettings.AirCellSize, 0, airHeight - 1);
+        int[] distances = [-6, -3, -2, -1, 0, 1, 2, 3, 6];
+        StringBuilder profile = new($"centre=[{centreAirX},{centreAirY}];above10=[{centreAirX},{aboveAirY}];");
+        foreach (int airY in new[] { centreAirY, aboveAirY })
+        {
+            profile.Append(airY == centreAirY ? "level(" : "above10(");
+            bool first = true;
+            foreach (int distance in distances)
+            {
+                int airX = Math.Clamp(centreAirX + distance, 0, airWidth - 1);
+                AirCell cell = air[airY * airWidth + airX];
+                if (!first)
+                {
+                    profile.Append(',');
+                }
+                profile.Append($"d{distance}:{cell.VelocityX:0.000}/{cell.VelocityY:0.000}/{cell.Pressure:0.000}");
+                first = false;
+            }
+            profile.Append(");");
+        }
+        fields.Append($" airProfile{frame}=\"{profile}\"");
     }
 
     private static void WriteSteamPuffStateDump(
