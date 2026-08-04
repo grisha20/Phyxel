@@ -34,11 +34,36 @@ struct GasMotionState
 };
 
 // Fixed-point, per-air-cell momentum produced by actual gas-cell steps during
-// the previous gas tick.  One integer unit is AirParticleDrag (0.04).
+// the previous gas tick. Values are pre-weighted by the moving material's
+// motion.airDrag and use the fixed-point scale declared by the gas/air passes.
 struct GasAirImpulse
 {
     int X;
     int Y;
+};
+
+struct GasPipeBandMotionStatistics
+{
+    uint GasCellFrames;
+    int GasVelocityYMillisteps;
+    uint GasOffsetYClampFrames;
+    uint GasUpwardSteps;
+};
+
+// Mirrors Physics.GasVerticalMotionStatistics. This is diagnostic-only state:
+// it is reset with the world and is not read by any simulation decision.
+struct GasVerticalMotionStatistics
+{
+    uint FireCellFrames;
+    int FireVelocityYMillisteps;
+    uint FireOffsetYClampFrames;
+    uint FireUpwardCandidates;
+    uint FireUpwardSteps;
+    uint FireUpwardBlockedByGas;
+    uint FireUpwardBlockedCellFrames;
+    GasPipeBandMotionStatistics PipeLow;
+    GasPipeBandMotionStatistics PipeMid;
+    GasPipeBandMotionStatistics PipeHigh;
 };
 
 // One cell of the persistent fire light field, on the same coarse grid as the
@@ -99,7 +124,19 @@ struct MaterialProperties
     float ContactLiquidRatePerSecond;
     float GasDiffusion;
     float GasBuoyancy;
+    float MotionAdvection;
+    float MotionAirDrag;
+    float MotionAirLoss;
+    float MotionLoss;
+    float MotionCollision;
+    float MotionReserved0;
+    float MotionReserved1;
+    float MotionReserved2;
 };
+
+// Mirrors Physics.MaterialPropertiesLayout.ByteSize. Forty scalar fields
+// produce a 160-byte structured-buffer stride (a multiple of sixteen).
+static const uint MaterialPropertiesByteSize = 160;
 
 struct MaterialEmissionProperties
 {

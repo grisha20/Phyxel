@@ -121,6 +121,13 @@ public sealed record MaterialGasDefinition(
     float Diffusion,
     float Buoyancy);
 
+public sealed record MaterialMotionDefinition(
+    float Advection,
+    float AirDrag,
+    float AirLoss,
+    float Loss,
+    float Collision);
+
 public sealed record MaterialDefinition(
     string Id,
     ushort RuntimeIndex,
@@ -137,6 +144,12 @@ public sealed record MaterialDefinition(
     public MaterialLifecycleDefinition? Lifecycle { get; init; }
     public MaterialLiquidContactTransitionDefinition? LiquidContactTransition { get; init; }
     public MaterialGasDefinition? Gas { get; init; }
+    public MaterialMotionDefinition Motion { get; init; } = new(
+        MaterialRegistry.DefaultMotionAdvection,
+        MaterialRegistry.DefaultMotionAirDrag,
+        MaterialRegistry.DefaultMotionAirLoss,
+        MaterialRegistry.DefaultMotionLoss,
+        MaterialRegistry.DefaultMotionCollision);
     internal string SourcePath { get; init; } = string.Empty;
     internal bool IsBundled { get; init; }
 }

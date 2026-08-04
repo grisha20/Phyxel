@@ -1,4 +1,4 @@
-﻿#include "PhysicsShared.hlsli"
+#include "PhysicsShared.hlsli"
 
 StructuredBuffer<MaterialProperties> Materials : register(t0);
 StructuredBuffer<AirCell> Air : register(t1);
@@ -17,7 +17,59 @@ RWStructuredBuffer<WaterPressureRouteData> WaterPressureRoutes : register(u4);
 RWStructuredBuffer<WaterPressureRouteData> WaterPressureRouteScratch : register(u5);
 RWStructuredBuffer<GasMotionState> GasMotion : register(u6);
 RWStructuredBuffer<uint> GasObstacleBypassStatistics : register(u7);
-RWStructuredBuffer<GasAirImpulse> GasAirImpulses : register(u8);
+RWStructuredBuffer<uint> GasLateralTransferStatistics : register(u8);
+RWStructuredBuffer<GasAirImpulse> GasAirImpulses : register(u9);
+RWStructuredBuffer<GasVerticalMotionStatistics> GasVerticalMotionStatisticsBuffer : register(u10);
+RWStructuredBuffer<uint> GasVerticalBlockFrameMarkers : register(u11);
+
+static const uint MetalChimneyInnerLeft = 221;
+static const uint MetalChimneyInnerRight = 258;
+
+void RecordMetalChimneyGasState(uint2 coordinate, GasMotionState state)
+{
+    if (coordinate.x < MetalChimneyInnerLeft || coordinate.x > MetalChimneyInnerRight)
+    {
+        return;
+    }
+    uint band = coordinate.y >= 180 && coordinate.y <= 199 ? 0u :
+        coordinate.y >= 120 && coordinate.y <= 139 ? 1u :
+        coordinate.y >= 60 && coordinate.y <= 79 ? 2u : 3u;
+    if (band == 3u) return;
+    uint ignored;
+    if (band == 0u)
+    {
+        InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].PipeLow.GasCellFrames, 1, ignored);
+        InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].PipeLow.GasVelocityYMillisteps, int(round(state.VelocityY * 1000.0)), ignored);
+        if (abs(state.OffsetY) >= float(GasMotionSubSteps) - 0.001) InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].PipeLow.GasOffsetYClampFrames, 1, ignored);
+    }
+    else if (band == 1u)
+    {
+        InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].PipeMid.GasCellFrames, 1, ignored);
+        InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].PipeMid.GasVelocityYMillisteps, int(round(state.VelocityY * 1000.0)), ignored);
+        if (abs(state.OffsetY) >= float(GasMotionSubSteps) - 0.001) InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].PipeMid.GasOffsetYClampFrames, 1, ignored);
+    }
+    else
+    {
+        InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].PipeHigh.GasCellFrames, 1, ignored);
+        InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].PipeHigh.GasVelocityYMillisteps, int(round(state.VelocityY * 1000.0)), ignored);
+        if (abs(state.OffsetY) >= float(GasMotionSubSteps) - 0.001) InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].PipeHigh.GasOffsetYClampFrames, 1, ignored);
+    }
+}
+
+void RecordMetalChimneyUpwardStep(uint2 coordinate)
+{
+    if (coordinate.x < MetalChimneyInnerLeft || coordinate.x > MetalChimneyInnerRight) return;
+    uint ignored;
+    if (coordinate.y >= 180 && coordinate.y <= 199) InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].PipeLow.GasUpwardSteps, 1, ignored);
+    else if (coordinate.y >= 120 && coordinate.y <= 139) InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].PipeMid.GasUpwardSteps, 1, ignored);
+    else if (coordinate.y >= 60 && coordinate.y <= 79) InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].PipeHigh.GasUpwardSteps, 1, ignored);
+}
+
+static const uint GasLateralPathMotionHorizontal = 0;
+static const uint GasLateralPathObstacleX = 1;
+static const uint GasLateralPathObstacleDiagonal = 2;
+static const uint GasLateralFieldsPerPath = 14;
+static const float GasAirImpulseFixedPointScale = 100000.0;
 
 static const uint SandRestThreshold = 30;
 static const uint FluidRestThreshold = 60;
@@ -72,28 +124,6 @@ uint PressurePlanCounterIndex()
 // measured in cells per frame. Our cells move in whole steps, so that value
 // becomes the probability of stepping one cell this frame -- the two agree on
 // average, and no arbitrary scale factor is needed anywhere.
-static const float GasAdvection = 0.9;
-
-// Equal to the vertical response, as in The Powder Toy, where both axes share
-// Advection 0.9.
-//
-// This was held far lower for a while, down to 0.06, in an attempt to keep the
-// plume narrow. That was a mistake: the width being measured belonged to the
-// glow field, which had no upper bound and bled its surplus outward, and a
-// leftover diagonal pass was moving flame sideways without consulting this
-// value at all. With the glow clamped, that pass removed, the substep seed
-// fixed and convection cut fourfold, none of those reasons survive.
-//
-// Keeping it low also produced a plainly wrong behaviour. When a plume meets an
-// obstacle the pressure underneath drives the air sideways and downward. At a
-// fifteen to one split the flame could barely follow the sideways flow yet
-// followed the downward one at full strength, so it dived under the plate
-// instead of spreading along it. Air is isotropic; the response to it has to be
-// isotropic too.
-static const float GasLateralAdvection = 0.9;
-
-// Gravity -0.1 divided by (1 - Loss) = 0.8. What a candle does in still air.
-static const float FlameOwnRise = 0.125;
 // The carrier can consume one cell in each of eight motion passes. Each pass
 // admits its intended move with a maximum 0.9 probability, so 8 * 0.9 = 7.2
 // cells per fixed tick is the structural ceiling. This is not a visual cap.
@@ -108,19 +138,6 @@ static const uint GasSurfaceQueueSearch = 3;
 // visual speed multiplier here: it makes FIRE look like a plasma jet and
 // hides, rather than fixes, missing surface flow.
 static const float GasAirVelocityScale = 1.0;
-
-// FIRE and SMKE both have Gravity = -0.1 in The Powder Toy.  The registry's
-// buoyancy sign is also used by the continuum pass, so use its positive sign
-// only as the compact marker for the two light, rising gases.  CO2 remains a
-// passive/heavy gas and is still moved by the air field and density ordering.
-float GasOwnRise(uint materialId)
-{
-    if ((Materials[materialId].Flags & MaterialFlagFlame) != 0)
-    {
-        return FlameOwnRise;
-    }
-    return Materials[materialId].GasBuoyancy > 0 ? FlameOwnRise : 0.0;
-}
 
 float2 FlameAirDrift(uint2 coordinate)
 {
@@ -242,10 +259,42 @@ void SwapCells(uint firstIndex, uint secondIndex, float horizontal, float vertic
 // returned on the next tick, making obstacle bypass visually cancel itself.
 // Keep the generic helper untouched for water/granular physics and give gas an
 // explicit source -> target operation.
-// TPT's AirDrag is applied when a particle actually traverses space. Record
-// the successful one-cell carrier step in the source air slot; CSInject
-// consumes this fixed-point impulse on the following air tick.
-void RecordGasAirStep(uint sourceIndex, uint targetIndex)
+void RecordGasLateralCellMove(
+    uint path,
+    uint sourceIndex,
+    uint targetIndex,
+    float velocityX,
+    uint material)
+{
+    int sourceX = int(sourceIndex % Width);
+    int targetX = int(targetIndex % Width);
+    int stepX = targetX - sourceX;
+    if (stepX == 0)
+    {
+        return;
+    }
+    uint baseIndex = path * GasLateralFieldsPerPath;
+    uint directionIndex = stepX < 0 ? 0u : 1u;
+    uint sourceSide = sourceX < int(Width / 2) ? 0u : 1u;
+    uint ignored;
+    InterlockedAdd(GasLateralTransferStatistics[baseIndex + directionIndex], 1, ignored);
+    InterlockedAdd(GasLateralTransferStatistics[baseIndex + 2u + sourceSide * 2u + directionIndex], 1, ignored);
+
+    float signedVelocity = velocityX * float(stepX);
+    uint agreementIndex = signedVelocity > 0.0001 ? 6u :
+        signedVelocity < -0.0001 ? 7u : 8u;
+    InterlockedAdd(GasLateralTransferStatistics[baseIndex + agreementIndex], 1, ignored);
+    if ((Materials[material].Flags & MaterialFlagFlame) != 0)
+    {
+        InterlockedAdd(GasLateralTransferStatistics[baseIndex + 9u + directionIndex], 1, ignored);
+        InterlockedAdd(GasLateralTransferStatistics[baseIndex + 11u + (agreementIndex - 6u)], 1, ignored);
+    }
+}
+
+// Record the successful carrier step already weighted by the source
+// material's motion.airDrag. This keeps the coarse accumulator atomic while
+// preserving material-specific drag through the following air tick.
+void RecordGasAirStep(uint sourceIndex, uint targetIndex, uint material)
 {
     int sourceX = int(sourceIndex % Width);
     int sourceY = int(sourceIndex / Width);
@@ -259,28 +308,43 @@ void RecordGasAirStep(uint sourceIndex, uint targetIndex)
     }
 
     uint airWidth = (Width + AirCellSize - 1) / AirCellSize;
-    uint airIndex = (uint(sourceY) / AirCellSize) * airWidth + uint(sourceX) / AirCellSize;
+    uint airIndex = (uint(sourceY) / AirCellSize) * airWidth +
+        uint(sourceX) / AirCellSize;
     int ignored;
+    float airDrag = Materials[material].MotionAirDrag;
     if (stepX != 0)
     {
-        InterlockedAdd(GasAirImpulses[airIndex].X, stepX, ignored);
+        InterlockedAdd(
+            GasAirImpulses[airIndex].X,
+            int(round(float(stepX) * airDrag * GasAirImpulseFixedPointScale)),
+            ignored);
     }
     if (stepY != 0)
     {
-        InterlockedAdd(GasAirImpulses[airIndex].Y, stepY, ignored);
+        InterlockedAdd(
+            GasAirImpulses[airIndex].Y,
+            int(round(float(stepY) * airDrag * GasAirImpulseFixedPointScale)),
+            ignored);
     }
 }
 
 void MoveGasCell(
     uint sourceIndex,
-    uint targetIndex)
+    uint targetIndex,
+    uint lateralPath)
 {
     GridCell mover = Grid[sourceIndex];
     GridCell displaced = Grid[targetIndex];
     GasMotionState moverMotion = GasMotion[sourceIndex];
     GasMotionState displacedMotion = GasMotion[targetIndex];
 
-    RecordGasAirStep(sourceIndex, targetIndex);
+    RecordGasLateralCellMove(
+        lateralPath,
+        sourceIndex,
+        targetIndex,
+        moverMotion.VelocityX,
+        mover.MaterialIndex);
+    RecordGasAirStep(sourceIndex, targetIndex, mover.MaterialIndex);
 
     mover.RestFrames = 0;
     displaced.RestFrames = 0;
@@ -1045,7 +1109,7 @@ void IntegrateGasMotion(uint2 coordinate)
     // four checkerboard collision phases cannot move the same particle twice
     // in one 60 Hz tick after it changes parity.
     bool surfaceCarrierMarker = abs(state.OffsetY - 0.5) < 0.001 &&
-        abs(state.VelocityX) >= GasAdvection;
+        abs(state.VelocityX) >= Materials[cell.MaterialIndex].MotionAdvection;
     bool carriesAlongSurface = coordinate.y > 0 &&
         (state.OffsetY <= -1.0 || surfaceCarrierMarker);
     if (carriesAlongSurface)
@@ -1056,7 +1120,8 @@ void IntegrateGasMotion(uint2 coordinate)
     }
     if (carriesAlongSurface && abs(state.VelocityX) > 0.0001)
     {
-        state.VelocityX = state.VelocityX > 0 ? GasAdvection : -GasAdvection;
+        float surfaceAdvection = Materials[cell.MaterialIndex].MotionAdvection;
+        state.VelocityX = state.VelocityX > 0 ? surfaceAdvection : -surfaceAdvection;
         state.VelocityY = 0;
         state.OffsetX = 0;
         state.OffsetY = -1.0;
@@ -1064,14 +1129,27 @@ void IntegrateGasMotion(uint2 coordinate)
         return;
     }
 
+    MaterialProperties material = Materials[cell.MaterialIndex];
     float2 drift = FlameAirDrift(coordinate);
-    float2 gravity = float2(0, -GasOwnRise(cell.MaterialIndex));
+    // TPT diffusion is an unbiased random impulse on the velocity of an
+    // individual particle.  It is deliberately not a mass-transfer pass:
+    // splitting one gas cell into fractional neighbours turns a sparse steam
+    // puff into a continuum cloud and introduces stencil-direction bias.
+    uint diffusionSeed = index ^ (FrameIndex * 0x9e3779b9u);
+    float2 diffusionImpulse = float2(
+        HashUnitFloat(diffusionSeed) * 2.0 - 1.0,
+        HashUnitFloat(diffusionSeed ^ 0x85ebca6bu) * 2.0 - 1.0) * material.GasDiffusion;
+    // GasBuoyancy now has TPT gravity semantics: it is a velocity increment
+    // per fixed tick and negative values rise because the y axis points down.
+    float2 gravity = float2(0, material.GasBuoyancy);
     state.VelocityX = clamp(
-        state.VelocityX * 0.20 + drift.x * GasAdvection * GasAirVelocityScale + gravity.x,
+        state.VelocityX * material.MotionLoss +
+            drift.x * material.MotionAdvection * GasAirVelocityScale + gravity.x + diffusionImpulse.x,
         -GasMaximumSpeed,
         GasMaximumSpeed);
     state.VelocityY = clamp(
-        state.VelocityY * 0.20 + drift.y * GasAdvection * GasAirVelocityScale + gravity.y,
+        state.VelocityY * material.MotionLoss +
+            drift.y * material.MotionAdvection * GasAirVelocityScale + gravity.y + diffusionImpulse.y,
         -GasMaximumSpeed,
         GasMaximumSpeed);
     state.OffsetX = clamp(
@@ -1082,7 +1160,21 @@ void IntegrateGasMotion(uint2 coordinate)
         state.OffsetY + state.VelocityY,
         -float(GasMotionSubSteps),
         float(GasMotionSubSteps));
+    if ((Materials[cell.MaterialIndex].Flags & MaterialFlagFlame) != 0)
+    {
+        uint ignored;
+        InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].FireCellFrames, 1, ignored);
+        InterlockedAdd(
+            GasVerticalMotionStatisticsBuffer[0].FireVelocityYMillisteps,
+            int(round(state.VelocityY * 1000.0)),
+            ignored);
+        if (abs(state.OffsetY) >= float(GasMotionSubSteps) - 0.001)
+        {
+            InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].FireOffsetYClampFrames, 1, ignored);
+        }
+    }
     GasMotion[index] = state;
+    RecordMetalChimneyGasState(coordinate, state);
 }
 
 void ConsumeGasOffset(uint index, int stepX, int stepY)
@@ -1093,9 +1185,15 @@ void ConsumeGasOffset(uint index, int stepX, int stepY)
     GasMotion[index] = state;
 }
 
-void StopGasMotion(uint index)
+void StopGasMotion(uint index, uint material)
 {
-    GasMotion[index] = (GasMotionState)0;
+    GasMotionState state = GasMotion[index];
+    float collision = Materials[material].MotionCollision;
+    state.VelocityX *= collision;
+    state.VelocityY *= collision;
+    state.OffsetX *= collision;
+    state.OffsetY *= collision;
+    GasMotion[index] = state;
 }
 
 bool GasPairBranch(uint upperKind, uint lowerKind)
@@ -1137,10 +1235,42 @@ void ResolveGasVerticalPair(uint2 upperCoordinate)
         GasMotionState lowerMotion = GasMotion[lowerIndex];
         if (lowerMotion.OffsetY <= -1.0)
         {
+            if ((Materials[lowerMaterial].Flags & MaterialFlagFlame) != 0)
+            {
+                uint ignored;
+                InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].FireUpwardCandidates, 1, ignored);
+                InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].FireUpwardSteps, 1, ignored);
+            }
             ConsumeGasOffset(lowerIndex, 0, -1);
-            MoveGasCell(lowerIndex, upperIndex);
+            RecordMetalChimneyUpwardStep(lowerCoordinate);
+            MoveGasCell(lowerIndex, upperIndex, GasLateralPathMotionHorizontal);
         }
         return;
+    }
+    if (lowerKind == SimulationKindGas && lowerCoordinate.y > 0)
+    {
+        GasMotionState lowerMotion = GasMotion[lowerIndex];
+        if (lowerMotion.OffsetY <= -1.0 &&
+            (Materials[lowerMaterial].Flags & MaterialFlagFlame) != 0 &&
+            upperKind == SimulationKindGas)
+        {
+            uint ignored;
+            InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].FireUpwardCandidates, 1, ignored);
+            InterlockedAdd(GasVerticalMotionStatisticsBuffer[0].FireUpwardBlockedByGas, 1, ignored);
+            uint previousFrameMarker;
+            uint currentFrameMarker = FrameIndex + 1u;
+            InterlockedExchange(
+                GasVerticalBlockFrameMarkers[lowerIndex],
+                currentFrameMarker,
+                previousFrameMarker);
+            if (previousFrameMarker != currentFrameMarker)
+            {
+                InterlockedAdd(
+                    GasVerticalMotionStatisticsBuffer[0].FireUpwardBlockedCellFrames,
+                    1,
+                    ignored);
+            }
+        }
     }
     if (upperKind == SimulationKindGas && GasCanEnter(upperMaterial, lowerMaterial))
     {
@@ -1148,7 +1278,7 @@ void ResolveGasVerticalPair(uint2 upperCoordinate)
         if (upperMotion.OffsetY >= 1.0)
         {
             ConsumeGasOffset(upperIndex, 0, 1);
-            MoveGasCell(upperIndex, lowerIndex);
+            MoveGasCell(upperIndex, lowerIndex, GasLateralPathMotionHorizontal);
         }
     }
 }
@@ -1219,8 +1349,8 @@ void ResolveGasObstacleBypass(uint2 coordinate)
             if (GasCanEnter(material, sideMaterial))
             {
                 InterlockedAdd(GasObstacleBypassStatistics[1], 1, ignored);
-                StopGasMotion(index);
-                MoveGasCell(index, sideIndex);
+                StopGasMotion(index, material);
+                MoveGasCell(index, sideIndex, GasLateralPathObstacleX);
                 return;
             }
         }
@@ -1231,8 +1361,8 @@ void ResolveGasObstacleBypass(uint2 coordinate)
     if (GasCanEnter(material, aboveCell.MaterialIndex))
     {
         InterlockedAdd(GasObstacleBypassStatistics[2], 1, ignored);
-        StopGasMotion(index);
-        MoveGasCell(index, aboveIndex);
+        StopGasMotion(index, material);
+        MoveGasCell(index, aboveIndex, GasLateralPathMotionHorizontal);
         return;
     }
 
@@ -1256,8 +1386,8 @@ void ResolveGasObstacleBypass(uint2 coordinate)
         if (GasCanEnter(material, diagonalMaterial))
         {
             InterlockedAdd(GasObstacleBypassStatistics[3], 1, ignored);
-            StopGasMotion(index);
-            MoveGasCell(index, diagonalIndex);
+            StopGasMotion(index, material);
+            MoveGasCell(index, diagonalIndex, GasLateralPathObstacleDiagonal);
             return;
         }
     }
@@ -1294,7 +1424,7 @@ void ResolveGasHorizontalPair(uint2 leftCoordinate)
     if (leftMoves)
     {
         ConsumeGasOffset(leftIndex, 1, 0);
-        MoveGasCell(leftIndex, rightIndex);
+        MoveGasCell(leftIndex, rightIndex, GasLateralPathMotionHorizontal);
         return;
     }
     if (rightKind == SimulationKindGas && GasCanEnter(rightMaterial, leftMaterial))
@@ -1304,7 +1434,7 @@ void ResolveGasHorizontalPair(uint2 leftCoordinate)
             return;
         }
         ConsumeGasOffset(rightIndex, -1, 0);
-        MoveGasCell(rightIndex, leftIndex);
+        MoveGasCell(rightIndex, leftIndex, GasLateralPathMotionHorizontal);
     }
 }
 
@@ -1412,7 +1542,7 @@ void ResolveDiagonalPair(uint2 upperCoordinate, uint2 lowerCoordinate)
         // This branch used to keep its own random diagonal hop for flame, left
         // behind when the vertical and horizontal branches were moved out. It
         // ran in parallel with the new passes, moved flame up and sideways at
-        // once, and never consulted GasLateralAdvection -- which is why
+        // once, and never consulted the material's motion.advection -- which is why
         // lowering that value from 0.9 to 0.22 and then to 0.06 barely changed
         // the width of the plume. The sideways spread was coming through here.
         return;

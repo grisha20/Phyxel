@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 
 namespace Phyxel.Physics;
 
@@ -69,6 +69,46 @@ public struct GasObstacleBypassStatistics
     public uint YOnly;
     public uint Diagonal;
     public uint Stayed;
+}
+
+/// <summary>
+/// Acceptance-only cumulative counters for vertical FIRE transport. They are
+/// reset with the world and never feed back into the simulation.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct GasVerticalMotionStatistics
+{
+    public uint FireCellFrames;
+    public int FireVelocityYMillisteps;
+    public uint FireOffsetYClampFrames;
+    public uint FireUpwardCandidates;
+    public uint FireUpwardSteps;
+    public uint FireUpwardBlockedByGas;
+    public uint FireUpwardBlockedCellFrames;
+    public GasPipeBandMotionStatistics PipeLow;
+    public GasPipeBandMotionStatistics PipeMid;
+    public GasPipeBandMotionStatistics PipeHigh;
+}
+
+/// <summary>Diagnostic-only aggregate for one horizontal band of the metal chimney.</summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct GasPipeBandMotionStatistics
+{
+    public uint GasCellFrames;
+    public int GasVelocityYMillisteps;
+    public uint GasOffsetYClampFrames;
+    public uint GasUpwardSteps;
+}
+
+/// <summary>
+/// Layout of the diagnostic-only lateral gas transport buffer. Each path has
+/// fourteen uint counters; this is not persisted simulation state.
+/// </summary>
+public static class GasLateralTransferStatisticsLayout
+{
+    public const int PathCount = 6;
+    public const int FieldsPerPath = 14;
+    public const int Count = PathCount * FieldsPerPath;
 }
 
 /// <summary>
@@ -148,6 +188,20 @@ public struct MaterialProperties
     public float ContactLiquidRatePerSecond;
     public float GasDiffusion;
     public float GasBuoyancy;
+    public float MotionAdvection;
+    public float MotionAirDrag;
+    public float MotionAirLoss;
+    public float MotionLoss;
+    public float MotionCollision;
+    public float MotionReserved0;
+    public float MotionReserved1;
+    public float MotionReserved2;
+}
+
+public static class MaterialPropertiesLayout
+{
+    public const int FieldCount = 40;
+    public const int ByteSize = 160;
 }
 
 public enum BrushCommandMode : uint

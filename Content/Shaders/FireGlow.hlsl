@@ -44,24 +44,44 @@ uint FireGlowIndex(uint2 coordinate)
 // The Powder Toy indexes its flame gradient by the particle's remaining life,
 // so a flame fades from pale yellow through orange to black as it dies:
 //     0.00 black, 0.50 0x60300F, 0.90 0xDFBF6F, 1.00 0xAF9F0F
-float3 FlameGradient(float life)
+float3 FlameGradient(uint lifeIndex)
 {
-    float t = saturate(life);
-    if (t < 0.5)
+    // This is Renderer::Gradient(..., 200) for flameTable, including its
+    // integer alpha and RGB divisions. Renderer::flameTableAt() clips its
+    // input, so the final table entry is index 199, not a synthetic endpoint.
+    uint index = min(lifeIndex, 199u);
+    uint alpha;
+    uint3 left;
+    uint3 right;
+    if (index < 100u)
     {
-        return lerp(float3(0.0, 0.0, 0.0), float3(0.376, 0.188, 0.059), t / 0.5);
+        left = uint3(0u, 0u, 0u);
+        right = uint3(96u, 48u, 15u);
+        alpha = index * 255u / 100u;
     }
-    if (t < 0.9)
+    else if (index < 180u)
     {
-        return lerp(
-            float3(0.376, 0.188, 0.059),
-            float3(0.875, 0.749, 0.435),
-            (t - 0.5) / 0.4);
+        left = uint3(96u, 48u, 15u);
+        right = uint3(223u, 191u, 111u);
+        alpha = (index - 100u) * 255u / 80u;
     }
-    return lerp(
-        float3(0.875, 0.749, 0.435),
-        float3(0.686, 0.624, 0.059),
-        (t - 0.9) / 0.1);
+    else
+    {
+        left = uint3(223u, 191u, 111u);
+        right = uint3(175u, 159u, 15u);
+        alpha = (index - 180u) * 255u / 20u;
+    }
+    uint3 color = (alpha * right + (255u - alpha) * left) / 255u;
+    return float3(color) / 255.0;
+}
+
+float3 FireAddContribution(float3 color)
+{
+    // FIRE.cpp sets firea = 255 and Renderer.cpp performs integer firea /= 8
+    // before ((firea * channel) >> 8). Reproduce both 8-bit truncations.
+    float fireAlpha = floor(FireGlowDeposit * 255.0);
+    float3 colorBytes = floor(saturate(color) * 255.0 + 0.5);
+    return floor(fireAlpha * colorBytes / 256.0) / 255.0;
 }
 
 // Тёплый серо-коричневый, как у SMKE в The Powder Toy: чуть теплее чистого
@@ -131,10 +151,10 @@ void CSDeposit(uint3 dispatchThreadId : SV_DispatchThreadID)
                 // lifetime is stored in seconds, so normalising by the
                 // material's own maximum incorrectly made every new cell 1.0
                 // and made a blocked, dense band turn white.
-                float life = saturate(source.Lifetime * (60.0 / 200.0));
+                uint lifeIndex = min(199u, (uint)max(0.0, floor(source.Lifetime * 60.0)));
                 // Every flame adds its own light. Summing rather than taking a
                 // maximum is what lets a dense core burn out to white.
-                deposited += FlameGradient(life) * FireGlowDeposit;
+                deposited += FireAddContribution(FlameGradient(lifeIndex));
                 continue;
             }
 
@@ -198,9 +218,7 @@ void CSDiffuse(uint3 dispatchThreadId : SV_DispatchThreadID)
     int2 signedCoordinate = int2(coordinate);
     FireGlowCell centre = FireGlow[FireGlowIndex(coordinate)];
     float3 total = float3(centre.Red, centre.Green, centre.Blue) * 8.0;
-    float weightSum = 8.0;
     float smokeTotal = centre.Smoke * 8.0;
-    float smokeWeightSum = 8.0;
 
     for (int offsetY = -1; offsetY <= 1; offsetY++)
     {
@@ -223,15 +241,15 @@ void CSDiffuse(uint3 dispatchThreadId : SV_DispatchThreadID)
             // the plume look artificially drawn out.
             FireGlowCell neighbor = FireGlow[FireGlowIndex(uint2(sample))];
             total += float3(neighbor.Red, neighbor.Green, neighbor.Blue);
-            weightSum += 1.0;
             smokeTotal += neighbor.Smoke;
-            smokeWeightSum += 1.0;
         }
     }
 
-    float3 blurred = total / max(1.0, weightSum);
+    // TPT retains the denominator 16 even at the simulation boundary: absent
+    // neighbours contribute zero rather than increasing the remaining weight.
+    float3 blurred = total / 16.0;
     blurred = max(0.0, blurred - FireGlowDecay);
-    float blurredSmoke = smokeTotal / max(1.0, smokeWeightSum);
+    float blurredSmoke = smokeTotal / 16.0;
     blurredSmoke = max(0.0, blurredSmoke - FireGlowSmokeDecay);
 
     FireGlowCell result;

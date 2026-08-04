@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -156,6 +156,15 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         GpuStructuredBuffer<GasObstacleBypassStatistics> gasObstacleBypassStatistics = new(Device, 1);
         Buffer gasObstacleBypassStatisticsStaging =
             CreateStagingBuffer(gasObstacleBypassStatistics.Buffer.Description.SizeInBytes);
+        GpuStructuredBuffer<GasVerticalMotionStatistics> gasVerticalMotionStatistics = new(Device, 1);
+        Buffer gasVerticalMotionStatisticsStaging =
+            CreateStagingBuffer(gasVerticalMotionStatistics.Buffer.Description.SizeInBytes);
+        GpuStructuredBuffer<uint> gasVerticalBlockFrameMarkers = new(Device, cellCount);
+        GpuStructuredBuffer<uint> gasLateralTransferStatistics = new(
+            Device,
+            GasLateralTransferStatisticsLayout.Count);
+        Buffer gasLateralTransferStatisticsStaging =
+            CreateStagingBuffer(gasLateralTransferStatistics.Buffer.Description.SizeInBytes);
         // The fire light field shares the air resolution: one coarse cell per
         // AirCellSize square, exactly like fire_r/g/b in The Powder Toy.
         Buffer fireGlowConstants = CreateConstantBuffer<FireGlowConstants>();
@@ -366,6 +375,11 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             GasMotionStaging = gasMotionStaging,
             GasObstacleBypassStatistics = gasObstacleBypassStatistics,
             GasObstacleBypassStatisticsStaging = gasObstacleBypassStatisticsStaging,
+            GasVerticalMotionStatistics = gasVerticalMotionStatistics,
+            GasVerticalMotionStatisticsStaging = gasVerticalMotionStatisticsStaging,
+            GasVerticalBlockFrameMarkers = gasVerticalBlockFrameMarkers,
+            GasLateralTransferStatistics = gasLateralTransferStatistics,
+            GasLateralTransferStatisticsStaging = gasLateralTransferStatisticsStaging,
             FireGlowConstants = fireGlowConstants,
             FireGlow = fireGlow,
             FireGlowScratch = fireGlowScratch,

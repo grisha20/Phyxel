@@ -4,8 +4,55 @@ StructuredBuffer<MaterialProperties> Materials : register(t0);
 RWStructuredBuffer<GridCell> Grid : register(u0);
 RWStructuredBuffer<uint> CellMaterials : register(u1);
 RWStructuredBuffer<GasMotionState> GasMotion : register(u2);
+RWStructuredBuffer<uint> GasLateralTransferStatistics : register(u3);
 
 static const float MinimumGasMass = 0.0005;
+static const uint GasLateralPathRedistributionHorizontal = 3;
+static const uint GasLateralPathRedistributionDiagonal = 4;
+static const uint GasLateralPathDifferentGasDiagonal = 5;
+static const uint GasLateralFieldsPerPath = 14;
+
+void RecordGasLateralMassTransfer(
+    uint path,
+    uint sourceIndex,
+    int stepX,
+    float velocityX,
+    uint material)
+{
+    if (stepX == 0)
+    {
+        return;
+    }
+    int sourceX = int(sourceIndex % Width);
+    uint baseIndex = path * GasLateralFieldsPerPath;
+    uint directionIndex = stepX < 0 ? 0u : 1u;
+    uint sourceSide = sourceX < int(Width / 2) ? 0u : 1u;
+    uint ignored;
+    InterlockedAdd(GasLateralTransferStatistics[baseIndex + directionIndex], 1, ignored);
+    InterlockedAdd(GasLateralTransferStatistics[baseIndex + 2u + sourceSide * 2u + directionIndex], 1, ignored);
+    float signedVelocity = velocityX * float(stepX);
+    uint agreementIndex = signedVelocity > 0.0001 ? 6u :
+        signedVelocity < -0.0001 ? 7u : 8u;
+    InterlockedAdd(GasLateralTransferStatistics[baseIndex + agreementIndex], 1, ignored);
+    if ((Materials[material].Flags & MaterialFlagFlame) != 0)
+    {
+        InterlockedAdd(GasLateralTransferStatistics[baseIndex + 9u + directionIndex], 1, ignored);
+        InterlockedAdd(GasLateralTransferStatistics[baseIndex + 11u + (agreementIndex - 6u)], 1, ignored);
+    }
+}
+
+bool HasDiscreteGasMotion(MaterialProperties material)
+{
+    // MaterialProperties stores the resolved motion values rather than JSON
+    // presence.  A non-zero resolved motion term therefore means this gas is
+    // carried by GasMotion and must remain one indivisible grid particle.
+    return material.MotionAdvection != 0 ||
+        material.MotionAirDrag != 0 ||
+        material.MotionAirLoss != 0 ||
+        material.MotionLoss != 0 ||
+        material.MotionCollision != 0 ||
+        material.GasBuoyancy != 0;
+}
 
 bool IsContinuumGas(GridCell cell)
 {
@@ -15,7 +62,8 @@ bool IsContinuumGas(GridCell cell)
     }
     MaterialProperties material = Materials[cell.MaterialIndex];
     return material.SimulationKind == SimulationKindGas &&
-        (material.Flags & MaterialFlagFlame) == 0;
+        (material.Flags & MaterialFlagFlame) == 0 &&
+        !HasDiscreteGasMotion(material);
 }
 
 void StorePair(
@@ -86,6 +134,19 @@ void ResolveDifferentGases(
     second.RestFrames = 0;
     GasMotionState firstMotion = GasMotion[firstIndex];
     GasMotionState secondMotion = GasMotion[secondIndex];
+    int stepX = int(secondIndex % Width) - int(firstIndex % Width);
+    RecordGasLateralMassTransfer(
+        GasLateralPathDifferentGasDiagonal,
+        firstIndex,
+        stepX,
+        firstMotion.VelocityX,
+        first.MaterialIndex);
+    RecordGasLateralMassTransfer(
+        GasLateralPathDifferentGasDiagonal,
+        secondIndex,
+        -stepX,
+        secondMotion.VelocityX,
+        second.MaterialIndex);
     StorePair(firstIndex, second, secondMotion, secondIndex, first, firstMotion);
 }
 
@@ -125,7 +186,10 @@ void RedistributeSameGas(
     float firstFraction = 0.5;
     if (vertical || diagonal)
     {
-        firstFraction = saturate(0.5 + material.GasBuoyancy * (diagonal ? 0.6 : 1.0));
+        // GasBuoyancy uses the TPT gravity sign: negative rises (toward the
+        // first/upper cell), positive sinks. Redistribution follows the same
+        // convention as IntegrateGasMotion.
+        firstFraction = saturate(0.5 - material.GasBuoyancy * (diagonal ? 0.6 : 1.0));
     }
     float targetFirstMass = totalMass * firstFraction;
     float passWeight = diagonal ? 0.42 : vertical ? 0.55 : 0.70;
@@ -165,6 +229,23 @@ void RedistributeSameGas(
         secondEnergy -= movedMass * heatCapacity * second.Temperature;
         firstLifetimeAmount += movedMass * second.Lifetime;
         secondLifetimeAmount -= movedMass * second.Lifetime;
+    }
+
+    if (abs(transfer) > 0.0000001)
+    {
+        int pairStepX = int(secondIndex % Width) - int(firstIndex % Width);
+        uint path = diagonal ? GasLateralPathRedistributionDiagonal :
+            GasLateralPathRedistributionHorizontal;
+        if (transfer > 0)
+        {
+            RecordGasLateralMassTransfer(
+                path, firstIndex, pairStepX, firstMotion.VelocityX, templateCell.MaterialIndex);
+        }
+        else
+        {
+            RecordGasLateralMassTransfer(
+                path, secondIndex, -pairStepX, secondMotion.VelocityX, templateCell.MaterialIndex);
+        }
     }
 
     float directionX = vertical ? 0 : transfer;

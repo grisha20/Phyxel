@@ -116,19 +116,16 @@ static const float AirConvectionMaximum = 0.01;
 
 // Particle drag, from the main particle loop in Simulation.cpp. FIRE and SMKE
 // both use AirLoss 0.97 and AirDrag 0.04.
-static const float AirParticleLoss = 0.97;
 // Must match GasMaximumSpeed in CellularAutomataSolver.hlsl. Air only receives
 // the velocity the cellular FIRE/SMKE carrier can actually realise.
 static const float AirGasMaximumSpeed = 7.2;
+// Must mirror CellularAutomataSolver.hlsl. One accumulator unit is a
+// material-weighted velocity contribution, not a universal AirDrag.
+static const float GasAirImpulseFixedPointScale = 100000.0;
 
 // The same carrier has a stronger feedback loop than TPT's independent
 // particles, so keep this just below the literal 0.04 to avoid a pulse/ball.
-static const float AirParticleDrag = 0.04;
 
-// Mirrors FlameOwnRise and GasAdvection in CellularAutomataSolver.hlsl:
-// Gravity -0.1 over (1 - Loss 0.20), and Advection 0.9.
-static const float FlameRiseSpeed = 0.125;
-static const float GasAdvectionResponse = 0.9;
 
 // The fastest a gas cell can actually travel: GasMotionSubSteps passes, each
 // stepping at most one cell and capped at a 0.9 probability.
@@ -227,6 +224,7 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint flameCount = 0;
     uint fireOrSmokeCount = 0;
     uint gasCount = 0;
+    float airLossProduct = 1.0;
     float heat = 0;
 
     for (uint offsetY = 0; offsetY < AirCellSize; offsetY++)
@@ -253,6 +251,7 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
             if (material.SimulationKind == SimulationKindGas)
             {
                 gasCount++;
+                airLossProduct *= material.MotionAirLoss;
                 if ((material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0)
                 {
                     fireOrSmokeCount++;
@@ -325,16 +324,16 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
         -AirMaximumVelocity,
         AirMaximumVelocity);
 
-    // Apply TPT-style drag only for a successful particle displacement.  Each
-    // fine-cell step contributes the fixed AirDrag 0.04 in its actual direction;
-    // a particle stalled against metal therefore cannot drive the air forever.
-    float retained = pow(AirParticleLoss, float(gasCount));
+    // The impulse was pre-weighted by the source material's motion.airDrag
+    // when the successful gas step occurred. Each currently occupied gas cell
+    // contributes its own motion.airLoss to the coarse air retention.
+    float retained = airLossProduct;
     cell.VelocityX = clamp(
-        cell.VelocityX * retained + float(gasImpulse.X) * AirParticleDrag,
+        cell.VelocityX * retained + float(gasImpulse.X) / GasAirImpulseFixedPointScale,
         -AirMaximumVelocity,
         AirMaximumVelocity);
     cell.VelocityY = clamp(
-        cell.VelocityY * retained + float(gasImpulse.Y) * AirParticleDrag,
+        cell.VelocityY * retained + float(gasImpulse.Y) / GasAirImpulseFixedPointScale,
         -AirMaximumVelocity,
         AirMaximumVelocity);
 

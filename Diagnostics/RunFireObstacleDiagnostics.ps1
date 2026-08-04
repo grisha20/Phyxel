@@ -2,7 +2,9 @@ param(
     [ValidateRange(3, 3)]
     [int]$Runs = 3,
     [ValidateSet('targetx-off', 'targetx-on')]
-    [string]$Label = 'targetx-off'
+    [string]$Label = 'targetx-off',
+    [ValidateRange(1, 400)]
+    [int]$PlateWidth = 201
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,6 +32,7 @@ for ($run = 1; $run -le $Runs; $run++) {
     $env:PHYXEL_ACCEPTANCE_SCALE = '0.25'
     $env:PHYXEL_ACCEPTANCE_TARGET_FPS = '60'
     $env:PHYXEL_ACCEPTANCE_CAPTURE_FRAME = '359'
+    $env:PHYXEL_FIRE_OBSTACLE_PLATE_WIDTH = $PlateWidth.ToString($culture)
     $env:PHYXEL_ARTIFACT_DIR = Join-Path $artifactDirectory ("run-$run")
     $output = & dotnet run --project Phyxel.csproj -c Debug --no-build 2>&1
     Add-Content -Path $rawReport -Value ("=== run $run seed=$runSeed ===")

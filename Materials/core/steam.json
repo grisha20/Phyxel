@@ -13,9 +13,10 @@
     "flowRate": 1.20
   },
   "gas": {
-    "diffusion": 0.36,
-    "buoyancy": 0.060
+    "diffusion": 0.75,
+    "buoyancy": -0.1
   },
+  "motion": { "advection": 1.0, "airDrag": 0.01, "airLoss": 0.99, "loss": 0.30, "collision": -0.1 },
   "thermal": {
     "initialTemperature": 122.0,
     "conductivity": 0.04,

@@ -22,6 +22,7 @@ internal static partial class MaterialFileLoader
         public string? Color { get; set; }
         public MaterialPhysicsDocument? Physics { get; set; }
         public MaterialGasDocument? Gas { get; set; }
+        public MaterialMotionDocument? Motion { get; set; }
         public MaterialThermalDocument? Thermal { get; set; }
         public JsonElement Combustion { get; set; }
         public JsonElement Emissions { get; set; }
@@ -253,6 +254,7 @@ internal static partial class MaterialFileLoader
         Color color = ParseColor(document.Color ?? "#FFFFFF");
         MaterialPhysicsDocument physics = document.Physics ?? new MaterialPhysicsDocument();
         MaterialGasDocument? gas = document.Gas;
+        MaterialMotionDocument motion = document.Motion ?? new MaterialMotionDocument();
         MaterialThermalDocument thermal = document.Thermal ?? new MaterialThermalDocument();
         if (!float.IsFinite(physics.Density) || physics.Density < 0 ||
             physics.Density > MaterialRegistry.MaximumDensity ||
@@ -294,6 +296,20 @@ internal static partial class MaterialFileLoader
                     $"gas.buoyancy must be finite and between " +
                     $"{MaterialRegistry.MinimumGasBuoyancy} and {MaterialRegistry.MaximumGasBuoyancy}.");
             }
+        }
+        if (motion.UnknownFields is { Count: > 0 })
+        {
+            throw new InvalidDataException(
+                $"Unknown motion field '{motion.UnknownFields.Keys.OrderBy(key => key, StringComparer.Ordinal).First()}'.");
+        }
+        if (!float.IsFinite(motion.Advection) || motion.Advection < 0 ||
+            !float.IsFinite(motion.AirDrag) || motion.AirDrag < 0 ||
+            !float.IsFinite(motion.AirLoss) || motion.AirLoss < 0 || motion.AirLoss > 1 ||
+            !float.IsFinite(motion.Loss) || motion.Loss < 0 || motion.Loss > 1 ||
+            !float.IsFinite(motion.Collision) || motion.Collision < -1 || motion.Collision > 1)
+        {
+            throw new InvalidDataException(
+                "motion requires finite advection/airDrag >= 0, airLoss/loss in [0,1], and collision in [-1,1].");
         }
         if (!float.IsFinite(thermal.InitialTemperature) ||
             thermal.InitialTemperature < MaterialRegistry.MinimumInitialTemperature ||
@@ -362,6 +378,16 @@ internal static partial class MaterialFileLoader
             throw new InvalidDataException("A material with flag 'flame' requires lifecycle.");
         }
         string name = ParseName(document.Name, id);
+        // FIRE needs the gas gravity increment, but it has never participated
+        // in the continuum diffusion exchange. Preserve that existing split
+        // while allowing a flame material to declare its gravity.
+        float gasDiffusion = kind == MaterialSimulationKind.Gas &&
+            (flags & MaterialFlags.Flame) == 0
+            ? gas?.Diffusion ?? MaterialRegistry.DefaultGasDiffusion
+            : 0;
+        float gasBuoyancy = kind == MaterialSimulationKind.Gas
+            ? gas?.Buoyancy ?? 0
+            : 0;
         MaterialUiDocument ui = document.Ui ?? new MaterialUiDocument();
         return new MaterialDefinition(
             id,
@@ -379,12 +405,14 @@ internal static partial class MaterialFileLoader
                 thermal.HeatCapacity,
                 ambientTemperature,
                 ambientCoolingRate,
-                kind == MaterialSimulationKind.Gas && (flags & MaterialFlags.Flame) == 0
-                    ? gas?.Diffusion ?? MaterialRegistry.DefaultGasDiffusion
-                    : 0,
-                kind == MaterialSimulationKind.Gas && (flags & MaterialFlags.Flame) == 0
-                    ? gas?.Buoyancy ?? 0
-                    : 0,
+                gasDiffusion,
+                gasBuoyancy,
+                new MaterialMotionDefinition(
+                    motion.Advection,
+                    motion.AirDrag,
+                    motion.AirLoss,
+                    motion.Loss,
+                    motion.Collision),
                 color),
             ui.Order,
             ui.Hidden,
@@ -396,6 +424,12 @@ internal static partial class MaterialFileLoader
             Lifecycle = lifecycle,
             LiquidContactTransition = liquidContactTransition,
             Gas = gas is null ? null : new MaterialGasDefinition(gas.Diffusion, gas.Buoyancy),
+            Motion = new MaterialMotionDefinition(
+                motion.Advection,
+                motion.AirDrag,
+                motion.AirLoss,
+                motion.Loss,
+                motion.Collision),
             SourcePath = path
         };
     }
@@ -404,6 +438,18 @@ internal static partial class MaterialFileLoader
     {
         public float Diffusion { get; set; } = MaterialRegistry.DefaultGasDiffusion;
         public float Buoyancy { get; set; }
+
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? UnknownFields { get; set; }
+    }
+
+    private sealed class MaterialMotionDocument
+    {
+        public float Advection { get; set; } = MaterialRegistry.DefaultMotionAdvection;
+        public float AirDrag { get; set; } = MaterialRegistry.DefaultMotionAirDrag;
+        public float AirLoss { get; set; } = MaterialRegistry.DefaultMotionAirLoss;
+        public float Loss { get; set; } = MaterialRegistry.DefaultMotionLoss;
+        public float Collision { get; set; } = MaterialRegistry.DefaultMotionCollision;
 
         [JsonExtensionData]
         public Dictionary<string, JsonElement>? UnknownFields { get; set; }

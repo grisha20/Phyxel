@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Physics;
 using SharpDX.Direct3D11;
@@ -40,6 +40,11 @@ public sealed class GpuSimulationResources : IDisposable
     public required Buffer GasMotionStaging { get; init; }
     public required GpuStructuredBuffer<GasObstacleBypassStatistics> GasObstacleBypassStatistics { get; init; }
     public required Buffer GasObstacleBypassStatisticsStaging { get; init; }
+    public required GpuStructuredBuffer<GasVerticalMotionStatistics> GasVerticalMotionStatistics { get; init; }
+    public required Buffer GasVerticalMotionStatisticsStaging { get; init; }
+    public required GpuStructuredBuffer<uint> GasVerticalBlockFrameMarkers { get; init; }
+    public required GpuStructuredBuffer<uint> GasLateralTransferStatistics { get; init; }
+    public required Buffer GasLateralTransferStatisticsStaging { get; init; }
     public required Buffer FireGlowConstants { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlow { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlowScratch { get; init; }
@@ -196,6 +201,11 @@ public sealed class GpuSimulationResources : IDisposable
         GasMotionStaging.Dispose();
         GasObstacleBypassStatistics.Dispose();
         GasObstacleBypassStatisticsStaging.Dispose();
+        GasVerticalMotionStatistics.Dispose();
+        GasVerticalMotionStatisticsStaging.Dispose();
+        GasVerticalBlockFrameMarkers.Dispose();
+        GasLateralTransferStatistics.Dispose();
+        GasLateralTransferStatisticsStaging.Dispose();
         AirConstants.Dispose();
         ContactTransitionConstants.Dispose();
         foreach (GpuPhaseSummaryReadbackSlot slot in PhaseSummaryReadbackSlots)

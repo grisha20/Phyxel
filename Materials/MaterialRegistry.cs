@@ -32,6 +32,11 @@ public sealed class MaterialRegistry
     public const float MaximumGasDiffusion = 1f;
     public const float MinimumGasBuoyancy = -0.25f;
     public const float MaximumGasBuoyancy = 0.25f;
+    public const float DefaultMotionAdvection = 0.9f;
+    public const float DefaultMotionAirDrag = 0.04f;
+    public const float DefaultMotionAirLoss = 0.97f;
+    public const float DefaultMotionLoss = 0.20f;
+    public const float DefaultMotionCollision = 0f;
 
     private readonly ReadOnlyCollection<MaterialDefinition> materials;
     private readonly ReadOnlyCollection<MaterialDefinition> selectableMaterials;
@@ -631,6 +636,7 @@ public sealed class MaterialRegistry
         float ambientCoolingRate,
         float gasDiffusion,
         float gasBuoyancy,
+        MaterialMotionDefinition motion,
         Color color)
     {
         return new MaterialProperties
@@ -651,6 +657,11 @@ public sealed class MaterialRegistry
             AmbientCoolingRate = ambientCoolingRate,
             GasDiffusion = gasDiffusion,
             GasBuoyancy = gasBuoyancy,
+            MotionAdvection = motion.Advection,
+            MotionAirDrag = motion.AirDrag,
+            MotionAirLoss = motion.AirLoss,
+            MotionLoss = motion.Loss,
+            MotionCollision = motion.Collision,
             TransitionBelowMaterialIndex = uint.MaxValue,
             TransitionAboveMaterialIndex = uint.MaxValue,
             BurnedIntoMaterialIndex = uint.MaxValue,

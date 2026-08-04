@@ -113,13 +113,26 @@ float3 SampleFireGlow(uint2 coordinate, out float smokeCoverage)
             for (int localY = 0; localY < int(AirCellSize); localY++)
             {
                 [unroll]
-                for (int localX = 0; localX < int(AirCellSize); localX++)
+            for (int localX = 0; localX < int(AirCellSize); localX++)
+            {
+                int2 kernelOffset = int2(delta) - int2(localX, localY);
+                // prepare_alpha only emits offsets i,j in [-CELL, CELL).
+                // Without this crop our gather evaluated the gaussian up to
+                // seven pixels from a source particle and made the visible
+                // tongue wider than TPT's 12-by-12 splat.
+                if (kernelOffset.x < -int(AirCellSize) ||
+                    kernelOffset.x >= int(AirCellSize) ||
+                    kernelOffset.y < -int(AirCellSize) ||
+                    kernelOffset.y >= int(AirCellSize))
                 {
-                    float2 kernelOffset = delta - float2(localX, localY);
-                    weight += exp(-0.1 * dot(kernelOffset, kernelOffset));
+                    continue;
                 }
+                weight += exp(-0.1 * dot(kernelOffset, kernelOffset));
             }
-            weight /= float(AirCellSize * AirCellSize);
+        }
+            // Renderer::prepare_alpha quantises the normalized gaussian to
+            // an 8-bit alpha before AddFirePixel consumes it.
+            weight = floor(255.0 * weight / float(AirCellSize * AirCellSize)) / 255.0;
             FireGlowCell glow = FireGlowField[sample.y * glowWidth + sample.x];
             total += float3(glow.Red, glow.Green, glow.Blue) * weight;
             smokeTotal += glow.Smoke * weight;

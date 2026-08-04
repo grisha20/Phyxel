@@ -77,7 +77,8 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static async Task RunAsync()
     {
-        Require(Marshal.SizeOf<MaterialProperties>() == 128, "MaterialProperties must be 128 bytes.");
+        Require(Marshal.SizeOf<MaterialProperties>() == MaterialPropertiesLayout.ByteSize,
+            "MaterialProperties must be 160 bytes.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.AmbientTemperature)).ToInt32() == 104,
             "AmbientTemperature offset must be 104.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.AmbientCoolingRate)).ToInt32() == 108,

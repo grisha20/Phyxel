@@ -43,6 +43,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $values = @{}
 $profiles = @{}
+$vertical = @{}
 $rawReport = Join-Path $artifactDirectory 'fire-open-air-diagnostics-runs.log'
 Set-Content -Path $rawReport -Value ''
 
@@ -53,6 +54,7 @@ for ($run = 1; $run -le $Runs; $run++) {
     $env:PHYXEL_ACCEPTANCE_SCALE = '0.25'
     $env:PHYXEL_ACCEPTANCE_TARGET_FPS = '60'
     $env:PHYXEL_ACCEPTANCE_CAPTURE_FRAME = '359'
+    $env:PHYXEL_GAS_VERTICAL_TRACE = '1'
     $env:PHYXEL_ARTIFACT_DIR = Join-Path $artifactDirectory ("run-" + $run)
     $output = & dotnet run --project Phyxel.csproj -c Debug --no-build 2>&1
     $exitCode = $LASTEXITCODE
@@ -65,6 +67,13 @@ for ($run = 1; $run -le $Runs; $run++) {
     Write-Host "PHYXEL_FIRE_OPEN_AIR_RUN run=$run seed=$runSeed exitCode=$exitCode $($scalarPart.Substring('PHYXEL_FIRE_OPEN '.Length))"
     foreach ($match in [regex]::Matches($scalarPart, '(?:^|\s)([A-Za-z][A-Za-z0-9]*)=(-?[0-9]+(?:\.[0-9]+)?)')) {
         Add-Sample $values $match.Groups[1].Value ([double]::Parse($match.Groups[2].Value, $culture))
+    }
+
+    $verticalLine = $output | Where-Object { $_ -like 'PHYXEL_GAS_VERTICAL *' } | Select-Object -Last 1
+    if (-not $verticalLine) { throw "fire_open run $run produced no vertical gas diagnostic line" }
+    Write-Host "PHYXEL_FIRE_OPEN_VERTICAL_RUN run=$run seed=$runSeed $verticalLine"
+    foreach ($match in [regex]::Matches($verticalLine, '(?:^|\s)([A-Za-z][A-Za-z0-9]*)=(-?[0-9]+(?:\.[0-9]+)?)')) {
+        Add-Sample $vertical $match.Groups[1].Value ([double]::Parse($match.Groups[2].Value, $culture))
     }
 
     if ($line -notmatch ' airProfiles=(.+?) airPressure=') {
@@ -87,6 +96,7 @@ for ($run = 1; $run -le $Runs; $run++) {
 
 Write-Summary $values 'AIR_SUMMARY'
 Write-Summary $profiles 'AIR_PROFILE_SUMMARY'
+Write-Summary $vertical 'VERTICAL_SUMMARY'
 
 $profileRows = foreach ($name in $profiles.Keys) {
     if ($name -notmatch '^h(\d+)_d(-?\d+)_(vx|vy|pressure)$') { continue }
@@ -105,5 +115,12 @@ $profileCsv = Join-Path $artifactDirectory 'air-profiles-summary.csv'
 $profileRows |
     Sort-Object HeightAboveSource, DistanceFromAxisCoarseCells, Component |
     Export-Csv -NoTypeInformation -Encoding utf8 -Path $profileCsv
+$coreDistances = @(-10, -3, -2, -1, 0, 1, 2, 3, 10)
+$coreProfileCsv = Join-Path $artifactDirectory 'air-core-profiles-summary.csv'
+$profileRows |
+    Where-Object { $_.DistanceFromAxisCoarseCells -in $coreDistances } |
+    Sort-Object HeightAboveSource, DistanceFromAxisCoarseCells, Component |
+    Export-Csv -NoTypeInformation -Encoding utf8 -Path $coreProfileCsv
 Write-Host "PHYXEL_FIRE_OPEN_AIR_PROFILE_CSV $profileCsv"
+Write-Host "PHYXEL_FIRE_OPEN_AIR_CORE_PROFILE_CSV $coreProfileCsv"
 Write-Host "PHYXEL_FIRE_OPEN_AIR_RAW_REPORT $rawReport"

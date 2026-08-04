@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using Microsoft.Xna.Framework;
 using Phyxel.Core;
 using Phyxel.Graphics;
@@ -17,6 +18,7 @@ public sealed class AcceptanceRegressionHarness
     private static readonly ulong[] CoalCheckpointTicks = [0, 20, 120, 240];
     private static readonly ulong[] GasCheckpointTicks = [120];
     private static readonly ulong[] SteamDistributionCheckpointTicks = [20, 40, 80, 200];
+    private static readonly uint[] SteamPuffCheckpointFrames = [1, 60, 150, 300];
     private const ulong SteamDistributionFinalTick = 400;
     private static readonly ulong[] SteamCloudCheckpointTicks =
         [0, 20, 40, 80, 200, 400, 800, 1200, 1300, 1400, 1500];
@@ -26,6 +28,8 @@ public sealed class AcceptanceRegressionHarness
     private readonly TemperatureProbeAcceptanceTrace temperatureProbeTrace = new();
     private readonly AirPressureTimeSeries airPressureTrace = new();
     private readonly GasObstacleBypassTrace gasObstacleBypassTrace = new();
+    private readonly GasLateralTransferTrace gasLateralTransferTrace = new();
+    private readonly GasVerticalMotionTrace gasVerticalMotionTrace = new();
     private readonly PhaseAcceptanceController phaseAcceptance;
     private readonly uint scenarioSeed;
 
@@ -100,6 +104,8 @@ public sealed class AcceptanceRegressionHarness
             "fire_obstacle" or "fire_plate" => AcceptanceScenarioMode.FireObstacle,
             "fire_open" or "fire_no_plate" => AcceptanceScenarioMode.FireOpen,
             "furnace" or "fire_furnace" => AcceptanceScenarioMode.Furnace,
+            "metal_chimney" or "furnace_metal_chimney" => AcceptanceScenarioMode.MetalChimney,
+            "steam_puff" => AcceptanceScenarioMode.SteamPuff,
             "steam_self_cooling" => AcceptanceScenarioMode.SteamSelfCooling,
             "brush_empty_only" => AcceptanceScenarioMode.BrushEmptyOnly,
             "continuous_brush_stroke" => AcceptanceScenarioMode.ContinuousBrushStroke,
@@ -196,6 +202,8 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.FireObstacle => 360,
                 AcceptanceScenarioMode.FireOpen => 360,
                 AcceptanceScenarioMode.Furnace => 600,
+                AcceptanceScenarioMode.MetalChimney => 600,
+                AcceptanceScenarioMode.SteamPuff => 600,
                 AcceptanceScenarioMode.SteamSelfCooling => uint.MaxValue,
                 AcceptanceScenarioMode.BrushEmptyOnly => 7,
                 AcceptanceScenarioMode.ContinuousBrushStroke => 3,
@@ -321,6 +329,26 @@ public sealed class AcceptanceRegressionHarness
         gasObstacleBypassTrace.Record(frame, resources);
     }
 
+    public void RecordGasLateralTransferTrace(uint frame, GpuSimulationResources resources)
+    {
+        if (Environment.GetEnvironmentVariable("PHYXEL_GAS_LATERAL_TRACE") != "1" ||
+            Mode is not (AcceptanceScenarioMode.FireObstacle or AcceptanceScenarioMode.FireOpen))
+        {
+            return;
+        }
+        gasLateralTransferTrace.Record(frame, resources);
+    }
+
+    public void RecordGasVerticalMotionTrace(GpuSimulationResources resources)
+    {
+        if (Environment.GetEnvironmentVariable("PHYXEL_GAS_VERTICAL_TRACE") != "1" ||
+            Mode is not (AcceptanceScenarioMode.FireOpen or AcceptanceScenarioMode.MetalChimney))
+        {
+            return;
+        }
+        gasVerticalMotionTrace.Record(resources);
+    }
+
     public bool TryBeginAcceptanceCheckpoint(
         uint frame,
         SimulationDispatchCoordinator dispatchCoordinator,
@@ -359,6 +387,16 @@ public sealed class AcceptanceRegressionHarness
             if (ready)
             {
                 checkpointTick = dispatchCoordinator.ThermalTicks;
+            }
+            return ready;
+        }
+        if (Mode == AcceptanceScenarioMode.SteamPuff)
+        {
+            bool ready = thermalCheckpoints.Count < SteamPuffCheckpointFrames.Length &&
+                frame >= SteamPuffCheckpointFrames[thermalCheckpoints.Count];
+            if (ready)
+            {
+                checkpointTick = frame;
             }
             return ready;
         }
@@ -595,6 +633,8 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.FireObstacle when frame == 359 => "Y_fire_obstacle",
             AcceptanceScenarioMode.FireOpen when frame == 359 => "Y_fire_open",
             AcceptanceScenarioMode.Furnace when frame == 599 => "Z_furnace",
+            AcceptanceScenarioMode.MetalChimney when frame == 599 => "Z_metal_chimney",
+            AcceptanceScenarioMode.SteamPuff when frame == 599 => "AA_steam_puff",
             _ => null
         };
         if (label is null)
@@ -655,6 +695,7 @@ public sealed class AcceptanceRegressionHarness
         {
             AcceptanceScenarioMode.FireObstacle => "fire-obstacle-pressure-trace.csv",
             AcceptanceScenarioMode.FireOpen => "fire-open-pressure-trace.csv",
+            AcceptanceScenarioMode.MetalChimney => "metal-chimney-pressure-trace.csv",
             _ => null
         };
         if (traceName is not null)
@@ -674,6 +715,60 @@ public sealed class AcceptanceRegressionHarness
                 $"blocked={total.Blocked} xOnly={total.XOnly} yOnly={total.YOnly} " +
                 $"diagonal={total.Diagonal} stayed={total.Stayed} path={bypassTracePath}";
         }
+        if (gasLateralTransferTrace.Count > 0)
+        {
+            string lateralTracePath = gasLateralTransferTrace.WriteCsv(
+                ArtifactDirectory,
+                "gas-lateral-transfer-trace.csv");
+            foreach (GasLateralPathTotal total in gasLateralTransferTrace.Sum())
+            {
+                long bias = unchecked((long)total.Right - (long)total.Left);
+                report += Environment.NewLine +
+                    $"PHYXEL_GAS_LATERAL path={total.Path} left={total.Left} right={total.Right} bias={bias} " +
+                    $"fromLeftLeft={total.FromLeftLeft} fromLeftRight={total.FromLeftRight} " +
+                    $"fromRightLeft={total.FromRightLeft} fromRightRight={total.FromRightRight} " +
+                    $"velocityMatch={total.VelocityMatch} velocityMismatch={total.VelocityMismatch} velocityZero={total.VelocityZero} " +
+                    $"fireLeft={total.FireLeft} fireRight={total.FireRight} " +
+                    $"fireVelocityMatch={total.FireVelocityMatch} fireVelocityMismatch={total.FireVelocityMismatch} " +
+                    $"fireVelocityZero={total.FireVelocityZero} samples={gasLateralTransferTrace.Count} trace={lateralTracePath}";
+            }
+        }
+        if (gasVerticalMotionTrace.Count > 0)
+        {
+            GasVerticalMotionStatistics vertical = gasVerticalMotionTrace.Latest;
+            double fireCellFrames = Math.Max(1, vertical.FireCellFrames);
+            double meanVelocityY = vertical.FireVelocityYMillisteps / (1000.0 * fireCellFrames);
+            double actualRisePerFireFrame = vertical.FireUpwardSteps / fireCellFrames;
+            double offsetYClampFraction = vertical.FireOffsetYClampFrames / fireCellFrames;
+            double upwardBlockedByGasFraction = vertical.FireUpwardBlockedByGas /
+                (double)Math.Max(1, vertical.FireUpwardCandidates);
+            double upwardBlockedCellFrameFraction = vertical.FireUpwardBlockedCellFrames / fireCellFrames;
+            string verticalTracePath = gasVerticalMotionTrace.WriteCsv(
+                ArtifactDirectory,
+                "gas-vertical-motion-trace.csv");
+            report += Environment.NewLine +
+                $"PHYXEL_GAS_VERTICAL fireCellFrames={vertical.FireCellFrames} " +
+                $"meanVelocityY={meanVelocityY:0.000000} " +
+                $"actualRisePerFireFrame={actualRisePerFireFrame:0.000000} " +
+                $"offsetYClampFraction={offsetYClampFraction:0.000000} " +
+                $"upwardCandidates={vertical.FireUpwardCandidates} " +
+                $"upwardSteps={vertical.FireUpwardSteps} " +
+                $"upwardBlockedByGas={vertical.FireUpwardBlockedByGas} " +
+                $"upwardBlockedByGasFraction={upwardBlockedByGasFraction:0.000000} " +
+                $"upwardBlockedCellFrames={vertical.FireUpwardBlockedCellFrames} " +
+                $"upwardBlockedCellFrameFraction={upwardBlockedCellFrameFraction:0.000000} " +
+                $"samples={gasVerticalMotionTrace.Count} trace={verticalTracePath}";
+            if (Mode == AcceptanceScenarioMode.MetalChimney)
+            {
+                report += Environment.NewLine +
+                    "PHYXEL_METAL_CHIMNEY_MOTION " +
+                    GasVerticalMotionTrace.FormatMetalChimneyBands(vertical);
+            }
+        }
+        report += Environment.NewLine +
+            $"PHYXEL_MATERIAL_PROPERTIES_LAYOUT csharpActual={Marshal.SizeOf<MaterialProperties>()} " +
+            $"hlslDeclared={MaterialPropertiesLayout.ByteSize} fields={MaterialPropertiesLayout.FieldCount} " +
+            $"match={(Marshal.SizeOf<MaterialProperties>() == MaterialPropertiesLayout.ByteSize ? 1 : 0)}";
         report += Environment.NewLine +
             $"PHYXEL_ACCEPTANCE_METRICS size={snapshot.Width}x{snapshot.Height} fps={framesPerSecond:0.0} " +
             $"thermalGpuMs={thermalGpuTiming.AverageMilliseconds:0.0000}/" +

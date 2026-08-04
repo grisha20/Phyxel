@@ -19,6 +19,7 @@ internal sealed class AcceptanceMaterialIndices
         Wood = Resolve(CoreMaterialIds.Wood);
         Coal = Resolve(CoreMaterialIds.Coal);
         Fire = Resolve(CoreMaterialIds.Fire);
+        Steam = Resolve(CoreMaterialIds.Steam);
     }
 
     public uint Sand { get; }
@@ -31,5 +32,6 @@ internal sealed class AcceptanceMaterialIndices
     public uint Wood { get; }
     public uint Coal { get; }
     public uint Fire { get; }
+    public uint Steam { get; }
     public uint Resolve(string id) => registry.GetRequiredRuntimeIndex(id);
 }

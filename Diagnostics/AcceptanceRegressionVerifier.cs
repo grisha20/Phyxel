@@ -221,7 +221,18 @@ public static class AcceptanceRegressionVerifier
                 materialRegistry,
                 artifactDirectory,
                 out report),
+            AcceptanceScenarioMode.SteamPuff => ValidateSteamPuff(
+                snapshot,
+                materialRegistry,
+                thermalCheckpoints,
+                artifactDirectory,
+                out report),
             AcceptanceScenarioMode.Furnace => ValidateFurnace(
+                snapshot,
+                materialRegistry,
+                artifactDirectory,
+                out report),
+            AcceptanceScenarioMode.MetalChimney => ValidateMetalChimney(
                 snapshot,
                 materialRegistry,
                 artifactDirectory,
@@ -436,9 +447,8 @@ public static class AcceptanceRegressionVerifier
         string artifactDirectory,
         out string report)
     {
-        const int plateLeft = 140;
-        const int plateRight = 340;
-        const int plateCentre = (plateLeft + plateRight) / 2;
+        (int plateLeft, int plateRight) = AcceptanceRegressionScenario.GetFireObstaclePlateBounds();
+        int plateCentre = (plateLeft + plateRight) / 2;
         const int surfaceTop = 107;
         const int surfaceBottom = 135;
         const float fireToSmokeTemperatureCelsius = 351.85f;
@@ -461,12 +471,16 @@ public static class AcceptanceRegressionVerifier
         int blockedGas = 0;
         int globalMinimumX = snapshot.Width;
         int globalMaximumX = -1;
+        int fireGlobalMinimumX = snapshot.Width;
+        int fireGlobalMaximumX = -1;
         int globalSmoke = 0;
         int globalFire = 0;
         int smokeMinimumY = snapshot.Height;
         int smokeMaximumY = -1;
         int contactFire = 0;
         int contactSmoke = 0;
+        int contactFireMinimumX = snapshot.Width;
+        int contactFireMaximumX = -1;
         int smokeAboveLeft = 0;
         int smokeAboveRight = 0;
         int[] fireHistogram = new int[snapshot.Width];
@@ -474,6 +488,7 @@ public static class AcceptanceRegressionVerifier
         int[] fireContactRowHistogram = new int[snapshot.Width];
         int[] smokeContactRowHistogram = new int[snapshot.Width];
         bool[] contactColumns = new bool[plateRight - plateLeft + 1];
+        bool[] fireContactColumns = new bool[plateRight - plateLeft + 1];
         bool fireReachesLeftEnd = false;
         bool fireReachesRightEnd = false;
         List<double> fireLifetimeFrames = [];
@@ -530,6 +545,8 @@ public static class AcceptanceRegressionVerifier
             else if (cell.MaterialIndex == fire)
             {
                 globalFire++;
+                fireGlobalMinimumX = Math.Min(fireGlobalMinimumX, x);
+                fireGlobalMaximumX = Math.Max(fireGlobalMaximumX, x);
             }
         }
 
@@ -559,6 +576,9 @@ public static class AcceptanceRegressionVerifier
                     {
                         fireContactRowHistogram[x]++;
                         contactColumns[x - plateLeft] = true;
+                        fireContactColumns[x - plateLeft] = true;
+                        contactFireMinimumX = Math.Min(contactFireMinimumX, x);
+                        contactFireMaximumX = Math.Max(contactFireMaximumX, x);
                         fireReachesLeftEnd |= x < plateLeft + 10;
                         fireReachesRightEnd |= x > plateRight - 10;
                     }
@@ -705,6 +725,17 @@ public static class AcceptanceRegressionVerifier
             (double)Math.Max(1, fireLifetimeFrames.Count);
         int contactWidth = contactColumns.Count(occupied => occupied);
         double contactWidthFraction = contactWidth / (double)contactColumns.Length;
+        int fireContactWidth = fireContactColumns.Count(occupied => occupied);
+        double fireContactWidthFraction = fireContactWidth / (double)fireContactColumns.Length;
+        double fireRangeCentreOffset = fireGlobalMaximumX >= fireGlobalMinimumX
+            ? (fireGlobalMinimumX + fireGlobalMaximumX) * 0.5 - plateCentre
+            : 0;
+        int reportedContactFireMinimumX = contactFireMaximumX >= contactFireMinimumX
+            ? contactFireMinimumX
+            : -1;
+        int reportedContactFireMaximumX = contactFireMaximumX >= contactFireMinimumX
+            ? contactFireMaximumX
+            : -1;
         WriteFireObstacleStateDump(snapshot, registry, artifactDirectory, fire, smoke);
         bool image = File.Exists(Path.Combine(artifactDirectory, "Y_fire_obstacle.png"));
         // This remains only a liveness gate for the diagnostic scenario.
@@ -714,6 +745,7 @@ public static class AcceptanceRegressionVerifier
         report = $"PHYXEL_FIRE_OBSTACLE fireCellsLeft={leftCells} fireCellsRight={rightCells} " +
             $"fireCellsCentre={centreCells} fireMassLeft={leftMass:0.000} fireMassRight={rightMass:0.000} " +
             $"fireMassCentre={centreMass:0.000} symmetryMass={symmetryMass:0.000} symmetryCells={symmetryCells:0.000} " +
+            $"fireRangeCentreOffset={fireRangeCentreOffset:0.000} " +
             $"minX={minimumX} maxX={maximumX} minY={minimumY} contactGas={contactGas} " +
             $"blockedGas={blockedGas} lateralLeft={lateralLeft} lateralRight={lateralRight} " +
             $"contactFire={contactFire} contactSmoke={contactSmoke} " +
@@ -723,7 +755,10 @@ public static class AcceptanceRegressionVerifier
             $"fireSmokePeakCount={fireSmokePeakCount} fireSmokePeakX={fireSmokePeakX} " +
             $"fireSmokeJetHalfMaximum={fireSmokeHalfMaximum:0.0} fireSmokeJetHalfMaximumLeft={fireSmokeHalfLeft} " +
             $"fireSmokeJetHalfMaximumRight={fireSmokeHalfRight} fireSmokeJetHalfWidth={fireSmokeHalfWidth:0.0} " +
+            $"plateLeft={plateLeft} plateRight={plateRight} plateWidth={contactColumns.Length} " +
             $"contactWidth={contactWidth} contactWidthFraction={contactWidthFraction:0.000000} " +
+            $"fireContactWidth={fireContactWidth} fireContactWidthFraction={fireContactWidthFraction:0.000000} " +
+            $"contactFireMinX={reportedContactFireMinimumX} contactFireMaxX={reportedContactFireMaximumX} " +
             $"fireReachesLeftEnd={(fireReachesLeftEnd ? 1 : 0)} fireReachesRightEnd={(fireReachesRightEnd ? 1 : 0)} " +
             $"fireLifetimeMeanFrames={fireLifetimeMeanFrames:0.000} fireLifetimeMedianFrames={fireLifetimeMedianFrames:0.000} " +
             $"fireTemperatureMean={fireTemperatureMean:0.000} fireTemperatureMinimum={fireTemperatureMinimum:0.000} " +
@@ -1022,6 +1057,198 @@ public static class AcceptanceRegressionVerifier
         File.WriteAllText(Path.Combine(artifactDirectory, fileName), table.ToString());
     }
 
+    private readonly record struct SteamPuffMetrics(
+        int SteamCells,
+        double TotalMass,
+        double MinimumCellMass,
+        double MaximumCellMass,
+        double CentreOffsetX,
+        double CentreOffsetY,
+        int Width,
+        int Height,
+        double AspectRatio,
+        double MeanAbsVelocityX,
+        double MeanAbsVelocityY);
+
+    private static bool ValidateSteamPuff(
+        SimulationWorldSnapshot finalSnapshot,
+        MaterialRegistry registry,
+        IReadOnlyList<ThermalAcceptanceCheckpoint> checkpoints,
+        string artifactDirectory,
+        out string report)
+    {
+        uint steam = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
+        const int sourceX = AcceptanceRegressionScenario.SteamPuffSourceX;
+        const int sourceY = AcceptanceRegressionScenario.SteamPuffSourceY;
+        int[] requestedFrames = [1, 60, 150, 300];
+
+        StringBuilder fields = new();
+        bool hasInitialSample = checkpoints.Count > 0;
+        for (int sample = 0; sample < requestedFrames.Length; sample++)
+        {
+            int targetFrame = requestedFrames[sample];
+            if (sample >= checkpoints.Count)
+            {
+                fields.Append($" checkpoint{targetFrame}Missing=1");
+                continue;
+            }
+
+            ThermalAcceptanceCheckpoint checkpoint = checkpoints[sample];
+            SteamPuffMetrics metrics = MeasureSteamPuff(
+                checkpoint.Snapshot,
+                steam,
+                sourceX,
+                sourceY);
+            AppendSteamPuffMetrics(fields, targetFrame, checkpoint.Frame, metrics);
+        }
+
+        SteamPuffMetrics finalMetrics = MeasureSteamPuff(
+            finalSnapshot,
+            steam,
+            sourceX,
+            sourceY);
+        AppendSteamPuffMetrics(fields, 600, 600, finalMetrics);
+        WriteSteamPuffStateDump(finalSnapshot, registry, artifactDirectory, steam);
+        bool image = File.Exists(Path.Combine(artifactDirectory, "AA_steam_puff.png"));
+        report = $"PHYXEL_STEAM_PUFF checkpoints={checkpoints.Count} image={image}{fields}";
+        return hasInitialSample && finalMetrics.SteamCells > 0;
+    }
+
+    private static void AppendSteamPuffMetrics(
+        StringBuilder fields,
+        int targetFrame,
+        uint capturedFrame,
+        SteamPuffMetrics metrics)
+    {
+        string suffix = targetFrame.ToString(CultureInfo.InvariantCulture);
+        fields.Append($" capturedFrame{suffix}={capturedFrame}");
+        fields.Append($" steamCells{suffix}={metrics.SteamCells}");
+        fields.Append($" steamMass{suffix}={metrics.TotalMass:0.000000}");
+        fields.Append($" steamMinimumCellMass{suffix}={metrics.MinimumCellMass:0.000000}");
+        fields.Append($" steamMaximumCellMass{suffix}={metrics.MaximumCellMass:0.000000}");
+        fields.Append($" centreOffsetX{suffix}={metrics.CentreOffsetX:0.000000}");
+        fields.Append($" centreOffsetY{suffix}={metrics.CentreOffsetY:0.000000}");
+        fields.Append($" cloudWidth{suffix}={metrics.Width}");
+        fields.Append($" cloudHeight{suffix}={metrics.Height}");
+        fields.Append($" cloudAspect{suffix}={metrics.AspectRatio:0.000000}");
+        fields.Append($" meanAbsVelocityX{suffix}={metrics.MeanAbsVelocityX:0.000000}");
+        fields.Append($" meanAbsVelocityY{suffix}={metrics.MeanAbsVelocityY:0.000000}");
+    }
+
+    private static SteamPuffMetrics MeasureSteamPuff(
+        SimulationWorldSnapshot snapshot,
+        uint steam,
+        int sourceX,
+        int sourceY)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        ReadOnlySpan<GasMotionState> motion = snapshot.GasMotion is null
+            ? []
+            : MemoryMarshal.Cast<byte, GasMotionState>(snapshot.GasMotion);
+        bool hasMotion = motion.Length == grid.Length;
+        int cells = 0;
+        int minimumX = snapshot.Width;
+        int maximumX = -1;
+        int minimumY = snapshot.Height;
+        int maximumY = -1;
+        double sumX = 0;
+        double sumY = 0;
+        double totalMass = 0;
+        double minimumCellMass = double.PositiveInfinity;
+        double maximumCellMass = 0;
+        double sumAbsVelocityX = 0;
+        double sumAbsVelocityY = 0;
+        for (int index = 0; index < grid.Length; index++)
+        {
+            GridCell cell = grid[index];
+            if (cell.IsActive == 0 || cell.MaterialIndex != steam)
+            {
+                continue;
+            }
+
+            int x = index % snapshot.Width;
+            int y = index / snapshot.Width;
+            cells++;
+            totalMass += cell.Mass;
+            sumX += x * cell.Mass;
+            sumY += y * cell.Mass;
+            minimumCellMass = Math.Min(minimumCellMass, cell.Mass);
+            maximumCellMass = Math.Max(maximumCellMass, cell.Mass);
+            minimumX = Math.Min(minimumX, x);
+            maximumX = Math.Max(maximumX, x);
+            minimumY = Math.Min(minimumY, y);
+            maximumY = Math.Max(maximumY, y);
+            if (hasMotion)
+            {
+                sumAbsVelocityX += Math.Abs(motion[index].VelocityX);
+                sumAbsVelocityY += Math.Abs(motion[index].VelocityY);
+            }
+        }
+
+        if (cells == 0)
+        {
+            return new SteamPuffMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
+        int width = maximumX - minimumX + 1;
+        int height = maximumY - minimumY + 1;
+        return new SteamPuffMetrics(
+            cells,
+            totalMass,
+            minimumCellMass,
+            maximumCellMass,
+            totalMass > 0 ? sumX / totalMass - sourceX : 0,
+            totalMass > 0 ? sumY / totalMass - sourceY : 0,
+            width,
+            height,
+            height > 0 ? width / (double)height : 0,
+            sumAbsVelocityX / cells,
+            sumAbsVelocityY / cells);
+    }
+
+    private static void WriteSteamPuffStateDump(
+        SimulationWorldSnapshot snapshot,
+        MaterialRegistry registry,
+        string artifactDirectory,
+        uint steam)
+    {
+        Directory.CreateDirectory(artifactDirectory);
+        const int left = 100;
+        const int right = 380;
+        const int top = 0;
+        const int bottom = 269;
+        int firstX = Math.Clamp(left, 0, snapshot.Width - 1);
+        int lastX = Math.Clamp(right, 0, snapshot.Width - 1);
+        int firstY = Math.Clamp(top, 0, snapshot.Height - 1);
+        int lastY = Math.Clamp(bottom, 0, snapshot.Height - 1);
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        StringBuilder map = new();
+        map.AppendLine($"# x={firstX}..{lastX}; y={firstY}..{lastY}; .=empty V=steam #=solid");
+        for (int y = firstY; y <= lastY; y++)
+        {
+            for (int x = firstX; x <= lastX; x++)
+            {
+                GridCell cell = grid[y * snapshot.Width + x];
+                char glyph = '.';
+                if (cell.IsActive != 0)
+                {
+                    if (cell.MaterialIndex == steam)
+                    {
+                        glyph = 'V';
+                    }
+                    else if ((MaterialSimulationKind)registry[cell.MaterialIndex].Properties.SimulationKind ==
+                        MaterialSimulationKind.Solid)
+                    {
+                        glyph = '#';
+                    }
+                }
+                map.Append(glyph);
+            }
+            map.AppendLine();
+        }
+        File.WriteAllText(Path.Combine(artifactDirectory, "steam-puff-ascii.txt"), map.ToString());
+    }
+
     private static bool ValidateFireOpen(
         SimulationWorldSnapshot snapshot,
         MaterialRegistry registry,
@@ -1047,7 +1274,7 @@ public static class AcceptanceRegressionVerifier
             maximumX = Math.Max(maximumX, x);
         }
 
-        const int brushWidth = 11;
+        const int brushWidth = AcceptanceRegressionScenario.FireBrushWidth;
         const int sourceX = 240;
         const int sourceY = 170;
         int[] heightsAboveSource = [20, 40, 60, 80];
@@ -1077,13 +1304,22 @@ public static class AcceptanceRegressionVerifier
             snapshot, grid, fire, sourceX, sourceY - 40);
         string fireColumnsH20 = FormatFireSliceColumns(snapshot, grid, fire, sourceY - 20);
         string fireColumnsH40 = FormatFireSliceColumns(snapshot, grid, fire, sourceY - 40);
+        string fireAirPairsH20 = FormatFireAirVelocityPairs(
+            snapshot, grid, fire, sourceY - 20);
+        string fireAirPairsH40 = FormatFireAirVelocityPairs(
+            snapshot, grid, fire, sourceY - 40);
         string airProfiles = FormatOpenAirProfiles(snapshot, sourceX, sourceY, [5, 10, 20, 40]);
+        CoreAirPressureMaximum corePressureMaximum = FindOpenCoreAirPressureMaximum(
+            snapshot, sourceX, sourceY, 5, 40, 3);
+        double fireRangeCentreOffset = maximumX >= minimumX
+            ? (minimumX + maximumX) * 0.5 - sourceX
+            : 0;
         WriteFireOpenStateDump(snapshot, registry, artifactDirectory, fire, smoke);
         bool image = File.Exists(Path.Combine(artifactDirectory, "Y_fire_open.png"));
         // Fine y=164 is the coarse cell immediately above the source brush.
         string pressureProfile = FormatAirPressureProfile(snapshot, 164, 140, 340);
         report = $"PHYXEL_FIRE_OPEN fireCells={fireCells} minX={minimumX} maxX={maximumX} " +
-            $"brushWidth={brushWidth}{slices} " +
+            $"fireRangeCentreOffset={fireRangeCentreOffset:0.000} brushWidth={brushWidth}{slices} " +
             $"fireGasRatioH40Count={fireGasRatio.Count} " +
             $"fireGasRatioH40Mean={fireGasRatio.Mean:0.000000} " +
             $"fireGasRatioH40StdDev={fireGasRatio.StandardDeviation:0.000000} " +
@@ -1097,8 +1333,14 @@ public static class AcceptanceRegressionVerifier
             $"fireSignedVelocityXH40Right={fireVelocityH40.RightMean:0.000000} " +
             $"fireSignedVelocityXH40LeftCount={fireVelocityH40.LeftCount} " +
             $"fireSignedVelocityXH40RightCount={fireVelocityH40.RightCount} " +
+            $"airCorePressureMax={corePressureMaximum.Pressure:0.000000} " +
+            $"airCorePressureHeight={corePressureMaximum.HeightAboveSource} " +
+            $"airCorePressureDistance={corePressureMaximum.DistanceFromAxis} " +
+            $"airCorePressureX={corePressureMaximum.AirX} " +
+            $"airCorePressureY={corePressureMaximum.AirY} " +
             $"fireColumnsH20={fireColumnsH20} fireColumnsH40={fireColumnsH40} " +
-            $"image={image} airProfiles={airProfiles} airPressure={pressureProfile}";
+            $"image={image} airProfiles={airProfiles} airPressure={pressureProfile} " +
+            $"fireAirPairsH20={fireAirPairsH20} fireAirPairsH40={fireAirPairsH40}";
         return fireCells > 0 && pressureProfile is not "unavailable" and not "invalid";
     }
 
@@ -1114,6 +1356,13 @@ public static class AcceptanceRegressionVerifier
         int RightCount,
         double LeftMean,
         double RightMean);
+
+    private readonly record struct CoreAirPressureMaximum(
+        float Pressure,
+        int HeightAboveSource,
+        int DistanceFromAxis,
+        int AirX,
+        int AirY);
 
     private static SignedGasVelocityMetrics MeasureSignedFireVelocity(
         SimulationWorldSnapshot snapshot,
@@ -1184,6 +1433,93 @@ public static class AcceptanceRegressionVerifier
             }
         }
         return columns.Count == 0 ? "none" : string.Join(';', columns);
+    }
+
+    // Uses precisely the same fine-to-coarse lookup as FlameAirDrift in CellularAutomataSolver.hlsl.
+    private static string FormatFireAirVelocityPairs(
+        SimulationWorldSnapshot snapshot,
+        ReadOnlySpan<GridCell> grid,
+        uint fire,
+        int y)
+    {
+        ReadOnlySpan<GasMotionState> motion = snapshot.GasMotion is null
+            ? []
+            : MemoryMarshal.Cast<byte, GasMotionState>(snapshot.GasMotion);
+        ReadOnlySpan<AirCell> air = snapshot.Air is null
+            ? []
+            : MemoryMarshal.Cast<byte, AirCell>(snapshot.Air);
+        int airWidth = Math.Max(1, (snapshot.Width + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize);
+        int airHeight = Math.Max(1, (snapshot.Height + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize);
+        if (motion.Length != grid.Length || air.Length != airWidth * airHeight || y < 0 || y >= snapshot.Height)
+        {
+            return "unavailable";
+        }
+
+        List<string> pairs = [];
+        int airY = Math.Clamp(y / SimulationSettings.AirCellSize, 0, airHeight - 1);
+        for (int x = 0; x < snapshot.Width; x++)
+        {
+            int index = y * snapshot.Width + x;
+            if (grid[index].IsActive == 0 || grid[index].MaterialIndex != fire)
+            {
+                continue;
+            }
+
+            int airX = Math.Clamp(x / SimulationSettings.AirCellSize, 0, airWidth - 1);
+            GasMotionState gas = motion[index];
+            AirCell sourceAir = air[airY * airWidth + airX];
+            pairs.Add($"x{x}:gasVx={gas.VelocityX:0.000000},air[{airX},{airY}].Vx={sourceAir.VelocityX:0.000000}");
+        }
+        return pairs.Count == 0 ? "none" : string.Join(';', pairs);
+    }
+
+    private static CoreAirPressureMaximum FindOpenCoreAirPressureMaximum(
+        SimulationWorldSnapshot snapshot,
+        int sourceFineX,
+        int sourceFineY,
+        int minimumHeightAboveSource,
+        int maximumHeightAboveSource,
+        int coreRadiusCoarseCells)
+    {
+        ReadOnlySpan<AirCell> air = snapshot.Air is null
+            ? []
+            : MemoryMarshal.Cast<byte, AirCell>(snapshot.Air);
+        int airWidth = Math.Max(1, (snapshot.Width + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize);
+        int airHeight = Math.Max(1, (snapshot.Height + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize);
+        if (air.Length != airWidth * airHeight)
+        {
+            return new CoreAirPressureMaximum(0, 0, 0, 0, 0);
+        }
+
+        int axisX = Math.Clamp(sourceFineX / SimulationSettings.AirCellSize, 0, airWidth - 1);
+        bool found = false;
+        CoreAirPressureMaximum maximum = new(float.NegativeInfinity, 0, 0, 0, 0);
+        for (int airY = 0; airY < airHeight; airY++)
+        {
+            int heightAboveSource = sourceFineY - airY * SimulationSettings.AirCellSize;
+            if (heightAboveSource < minimumHeightAboveSource || heightAboveSource > maximumHeightAboveSource)
+            {
+                continue;
+            }
+
+            for (int distance = -coreRadiusCoarseCells; distance <= coreRadiusCoarseCells; distance++)
+            {
+                int airX = axisX + distance;
+                if (airX < 0 || airX >= airWidth)
+                {
+                    continue;
+                }
+
+                float pressure = air[airY * airWidth + airX].Pressure;
+                if (!found || pressure > maximum.Pressure)
+                {
+                    maximum = new CoreAirPressureMaximum(
+                        pressure, heightAboveSource, distance, airX, airY);
+                    found = true;
+                }
+            }
+        }
+        return found ? maximum : new CoreAirPressureMaximum(0, 0, 0, 0, 0);
     }
 
     private static GasMotionRatioMetrics MeasureFireGasMotionRatio(
@@ -1377,6 +1713,65 @@ public static class AcceptanceRegressionVerifier
         report = $"PHYXEL_FURNACE chimneySmoke={chimneySmoke} chimneyFire={chimneyFire} " +
             $"topSmoke={topSmoke} chamberFire={chamberFire} chamberSmoke={chamberSmoke} image={image}";
         return passed;
+    }
+
+    private static bool ValidateMetalChimney(
+        SimulationWorldSnapshot snapshot,
+        MaterialRegistry registry,
+        string artifactDirectory,
+        out string report)
+    {
+        ReadOnlySpan<GridCell> grid = Cells(snapshot);
+        ReadOnlySpan<GasMotionState> motion = snapshot.GasMotion is null
+            ? []
+            : MemoryMarshal.Cast<byte, GasMotionState>(snapshot.GasMotion);
+        ReadOnlySpan<AirCell> air = snapshot.Air is null
+            ? []
+            : MemoryMarshal.Cast<byte, AirCell>(snapshot.Air);
+        int airWidth = Math.Max(1, (snapshot.Width + SimulationSettings.AirCellSize - 1) / SimulationSettings.AirCellSize);
+        uint smoke = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke);
+        int[] tops = [180, 120, 60];
+        StringBuilder bands = new();
+        int outletSmoke = 0;
+        for (int band = 0; band < tops.Length; band++)
+        {
+            int fromY = tops[band];
+            int toY = fromY + 19;
+            int gasCount = 0;
+            double velocityY = 0;
+            int clamped = 0;
+            double airVelocityY = 0;
+            int airCount = 0;
+            for (int y = fromY; y <= toY; y++)
+            for (int x = 221; x <= 258; x++)
+            {
+                int index = y * snapshot.Width + x;
+                GridCell cell = grid[index];
+                if (cell.IsActive != 0 &&
+                    (MaterialSimulationKind)registry[cell.MaterialIndex].Properties.SimulationKind == MaterialSimulationKind.Gas &&
+                    motion.Length == grid.Length)
+                {
+                    gasCount++;
+                    velocityY += motion[index].VelocityY;
+                    clamped += Math.Abs(motion[index].OffsetY) >= 7.999f ? 1 : 0;
+                    if (band == 2 && cell.MaterialIndex == smoke) outletSmoke++;
+                }
+                int airX = x / 4;
+                int airY = y / 4;
+                if (air.Length > 0)
+                {
+                    airVelocityY += air[airY * airWidth + airX].VelocityY;
+                    airCount++;
+                }
+            }
+            bands.Append($" band{band}Y={fromY}..{toY}" +
+                $" gasCells={gasCount} meanGasVelocityY={velocityY / Math.Max(1, gasCount):0.000000}" +
+                $" offsetYClampFraction={clamped / (double)Math.Max(1, gasCount):0.000000}" +
+                $" meanAirVelocityY={airVelocityY / Math.Max(1, airCount):0.000000}");
+        }
+        bool image = File.Exists(Path.Combine(artifactDirectory, "Z_metal_chimney.png"));
+        report = $"PHYXEL_METAL_CHIMNEY outletSmoke={outletSmoke} image={image}{bands}";
+        return image;
     }
 
     private static bool ValidatePhaseDispatchSmoke(

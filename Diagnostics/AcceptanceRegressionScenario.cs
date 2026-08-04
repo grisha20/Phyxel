@@ -72,6 +72,8 @@ public enum AcceptanceScenarioMode
     FireObstacle,
     FireOpen,
     Furnace,
+    MetalChimney,
+    SteamPuff,
     SteamSelfCooling,
     BrushEmptyOnly,
     ContinuousBrushStroke,
@@ -83,6 +85,14 @@ public enum AcceptanceScenarioMode
 
 public static class AcceptanceRegressionScenario
 {
+    public const int FireBrushRadius = 5;
+    public const int FireBrushWidth = FireBrushRadius * 2 + 1;
+    public const int SteamPuffSourceX = 240;
+    public const int SteamPuffSourceY = 135;
+    public const int SteamPuffBrushRadius = 2;
+    private const int FireObstacleSourceX = 240;
+    private const int DefaultFireObstaclePlateWidth = 201;
+
     private static AcceptanceMaterialIndices materials = null!;
 
     public static IReadOnlyList<BrushDrawCommand> CreateCommands(
@@ -139,6 +149,8 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.FireObstacle => CreateFireObstacle(frame, scenarioSeed),
             AcceptanceScenarioMode.FireOpen => CreateFireOpen(frame, scenarioSeed),
             AcceptanceScenarioMode.Furnace => CreateFurnace(frame),
+            AcceptanceScenarioMode.MetalChimney => CreateMetalChimney(frame, scenarioSeed),
+            AcceptanceScenarioMode.SteamPuff => CreateSteamPuff(frame, scenarioSeed),
             AcceptanceScenarioMode.SteamSelfCooling => [],
             AcceptanceScenarioMode.SteamCloudTemperature =>
                 SteamCloudTemperatureAcceptanceScenario.CreateCommands(frame, materialRegistry),
@@ -218,13 +230,14 @@ public static class AcceptanceRegressionScenario
             // The manual reproduction: a broad metal plate with a centred
             // flame source below it. The plate is deliberately ordinary metal,
             // not an air-blocking fixture, matching the user scene and TPT.
-            AddLine(commands, 140, 100, 340, 100, 5, 6, materials.Metal, 19101);
+            (int plateLeft, int plateRight) = GetFireObstaclePlateBounds();
+            AddLine(commands, plateLeft, 100, plateRight, 100, 5, 6, materials.Metal, 19101);
         }
         if (frame < 360)
         {
             // Holding the brush is part of the experiment. A one-frame puff can
             // expire before reaching the plate and does not test a furnace.
-            BrushDrawCommand flame = Create(240, 170, 5, materials.Fire, 0, 0);
+            BrushDrawCommand flame = Create(FireObstacleSourceX, 170, FireBrushRadius, materials.Fire, 0, 0);
             flame.Density = 0.82f;
             flame.Seed ^= scenarioSeed;
             commands.Add(flame);
@@ -241,10 +254,44 @@ public static class AcceptanceRegressionScenario
 
         // Intentionally identical source to fire_obstacle, without any plate
         // or other solid.  This isolates the source/air feedback loop.
-        BrushDrawCommand flame = Create(240, 170, 5, materials.Fire, 0, 0);
+        BrushDrawCommand flame = Create(FireObstacleSourceX, 170, FireBrushRadius, materials.Fire, 0, 0);
         flame.Density = 0.82f;
         flame.Seed ^= scenarioSeed;
         return [flame];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateSteamPuff(uint frame, uint scenarioSeed)
+    {
+        if (frame != 0)
+        {
+            return [];
+        }
+
+        BrushDrawCommand steam = Create(
+            SteamPuffSourceX,
+            SteamPuffSourceY,
+            SteamPuffBrushRadius,
+            materials.Steam,
+            0,
+            0);
+        steam.Seed ^= scenarioSeed;
+        return [steam];
+    }
+
+    /// <summary>
+    /// Lets the diagnostics reproduce TPT's 128-cell plate while retaining
+    /// the 201-cell default acceptance scene. Endpoints are inclusive.
+    /// </summary>
+    public static (int Left, int Right) GetFireObstaclePlateBounds()
+    {
+        int width = DefaultFireObstaclePlateWidth;
+        if (int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_FIRE_OBSTACLE_PLATE_WIDTH"), out int requestedWidth))
+        {
+            width = Math.Clamp(requestedWidth, 1, 400);
+        }
+
+        int left = FireObstacleSourceX - width / 2;
+        return (left, left + width - 1);
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateFurnace(uint frame)
@@ -279,6 +326,28 @@ public static class AcceptanceRegressionScenario
             return [flame];
         }
         return [];
+    }
+
+    // An intentionally simple open-topped chimney: ordinary METL walls only.
+    // Its 38-cell internal bore mirrors the user's TPT reference and does not
+    // receive the blocks-air flag used by fixture.
+    private static IReadOnlyList<BrushDrawCommand> CreateMetalChimney(uint frame, uint scenarioSeed)
+    {
+        List<BrushDrawCommand> commands = [];
+        if (frame == 0)
+        {
+            AddLine(commands, 215, 245, 215, 35, 5, 5, materials.Metal, 19301);
+            AddLine(commands, 264, 245, 264, 35, 5, 5, materials.Metal, 19301);
+            AddLine(commands, 215, 245, 264, 245, 5, 5, materials.Metal, 19301);
+        }
+        if (frame < 600)
+        {
+            BrushDrawCommand smoke = Create(240, 222, 5, materials.Resolve(CoreMaterialIds.Smoke), 0, 0);
+            smoke.Density = 0.82f;
+            smoke.Seed ^= scenarioSeed;
+            commands.Add(smoke);
+        }
+        return commands;
     }
 
     private static IReadOnlyList<BrushDrawCommand> CreateTemperatureBrush(uint frame)

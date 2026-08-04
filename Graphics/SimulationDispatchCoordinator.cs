@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.InteropServices;
 using Phyxel.Core;
 using Phyxel.Materials;
@@ -1349,6 +1349,8 @@ public sealed class SimulationDispatchCoordinator
         resources.Context.ClearUnorderedAccessView(resources.CellMaterials.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.GasMotion.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, zero);
+        resources.Context.ClearUnorderedAccessView(resources.GasVerticalMotionStatistics.UnorderedView, zero);
+        resources.Context.ClearUnorderedAccessView(resources.GasVerticalBlockFrameMarkers.UnorderedView, zero);
         foreach (UnorderedAccessView view in resources.Statistics.UnorderedAccessViews)
         {
             resources.Context.ClearUnorderedAccessView(view, zero);
@@ -1766,7 +1768,10 @@ public sealed class SimulationDispatchCoordinator
             resources.GasObstacleBypassStatistics.UnorderedView,
             new RawInt4(0, 0, 0, 0));
         context.ComputeShader.SetUnorderedAccessView(7, resources.GasObstacleBypassStatistics.UnorderedView);
-        context.ComputeShader.SetUnorderedAccessView(8, resources.GasAirImpulse.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(8, resources.GasLateralTransferStatistics.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(9, resources.GasAirImpulse.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(10, resources.GasVerticalMotionStatistics.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(11, resources.GasVerticalBlockFrameMarkers.UnorderedView);
         if (!airSimulationEnabled)
         {
             context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, new RawInt4(0, 0, 0, 0));
@@ -1856,7 +1861,7 @@ public sealed class SimulationDispatchCoordinator
         }
         constants.SimulationPhase = previousPhase;
         constants.GasSubStep = 0;
-        Unbind(context, 2, 9);
+        Unbind(context, 2, 12);
     }
 
     private static void DispatchAirClear(GpuSimulationResources resources)
@@ -2099,6 +2104,9 @@ public sealed class SimulationDispatchCoordinator
         uint previousFrame = constants.FrameIndex;
         uint previousPhase = constants.SimulationPhase;
         constants.FrameIndex = unchecked((uint)tickIndex);
+        context.ClearUnorderedAccessView(
+            resources.GasLateralTransferStatistics.UnorderedView,
+            new RawInt4(0, 0, 0, 0));
         context.ComputeShader.Set(resources.GasRedistributionShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
         context.ComputeShader.SetShaderResource(0, resources.Materials.View);
@@ -2107,6 +2115,7 @@ public sealed class SimulationDispatchCoordinator
             resources.Grid.ReadUnorderedView,
             resources.CellMaterials.UnorderedView);
         context.ComputeShader.SetUnorderedAccessView(2, resources.GasMotion.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(3, resources.GasLateralTransferStatistics.UnorderedView);
         // Gas packets move only across disjoint adjacent pairs. Vertical edges
         // alternate parity; both horizontal parities and one diagonal pairing
         // run every fixed tick without long-range mass splitting.
