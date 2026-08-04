@@ -224,7 +224,7 @@ internal static class CombustionMaterialRegressionVerifier
             "float MaximumCombustionTemperature", "float TransitionAboveLatentHeat",
             "float AmbientTemperature", "float AmbientCoolingRate",
             "uint ContactLiquidIntoMaterialIndex", "float ContactLiquidRatePerSecond",
-            "float GasDiffusion", "float GasBuoyancy", "float HotAir"
+            "float GasDiffusion", "float GasBuoyancy", "float HotAir", "float GasHazeStrength"
         ];
         int previous = -1;
         foreach (string field in fields)

@@ -349,17 +349,18 @@ public struct MaterialProperties
     public float MotionReserved0;
     public float MotionReserved1;
     public float MotionReserved2;
-    // Explicit tail padding keeps the structured-buffer stride a multiple of
-    // sixteen bytes. These are not material schema fields.
-    public float LayoutReserved0;
+    // Render-only density of the soft halo around a gas. It deliberately
+    // occupies the first former tail-padding scalar so the GPU table remains
+    // 176 bytes; no physics pass reads it.
+    public float GasHazeStrength;
     public float LayoutReserved1;
     public float LayoutReserved2;
 }
 
 public static class MaterialPropertiesLayout
 {
-    // Forty-one semantic material fields plus three tail-padding scalars.
-    public const int FieldCount = 41;
+    // Forty-two semantic material fields plus two tail-padding scalars.
+    public const int FieldCount = 42;
     public const int ByteSize = 176;
 }
 

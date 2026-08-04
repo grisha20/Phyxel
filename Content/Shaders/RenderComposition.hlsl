@@ -285,12 +285,54 @@ void FluidCoverage(
     GridCell gasCell = Grid[FlattenCoordinate(coordinate)];
     bool visibleGas = gasCell.IsActive != 0 &&
         Materials[gasCell.MaterialIndex].SimulationKind == SimulationKindGas &&
-        !IsFlameCell(gasCell) && !IsSmokeCell(gasCell);
+        !IsFlameCell(gasCell);
     float4 directGasColor = visibleGas ? MaterialColor(gasCell.MaterialIndex) : 0;
     gasCoverage = visibleGas
         ? saturate(gasCell.Mass) * directGasColor.a
         : 0;
     gasColor = directGasColor.rgb;
+}
+
+// A gas cell itself remains a sharp point.  Only a local concentration above
+// one isolated cell produces a gaussian haze, so a sparse gas still reads as
+// particles while a packed cloud has a soft continuous edge.
+void GasHaze(uint2 coordinate, out float hazeCoverage, out float3 hazeColor)
+{
+    float localDensity = 0;
+    float strengthWeight = 0;
+    float3 weightedColor = 0;
+    for (int y = -3; y <= 3; y++)
+    {
+        for (int x = -3; x <= 3; x++)
+        {
+            int2 sample = int2(coordinate) + int2(x, y);
+            if (sample.x < 0 || sample.y < 0 || sample.x >= int(Width) || sample.y >= int(Height))
+            {
+                continue;
+            }
+            GridCell source = Grid[FlattenCoordinate(uint2(sample))];
+            if (source.IsActive == 0)
+            {
+                continue;
+            }
+            MaterialProperties material = Materials[source.MaterialIndex];
+            if (material.SimulationKind != SimulationKindGas ||
+                (material.Flags & MaterialFlagFlame) != 0 || material.GasHazeStrength <= 0)
+            {
+                continue;
+            }
+            float kernel = exp(-0.42 * float(x * x + y * y));
+            float contribution = saturate(source.Mass) * kernel;
+            localDensity += contribution;
+            float visualWeight = contribution * material.GasHazeStrength;
+            strengthWeight += visualWeight;
+            weightedColor += MaterialColor(source.MaterialIndex).rgb * visualWeight;
+        }
+    }
+    hazeColor = strengthWeight > 0 ? weightedColor / strengthWeight : 0;
+    // A singleton peaks at density 1 and remains a point. Two or more nearby
+    // cells smoothly build the cloud rather than exposing a square stencil.
+    hazeCoverage = smoothstep(1.15, 2.85, localDensity) * saturate(strengthWeight / 2.0);
 }
 
 void Collect(GridCell cell)
@@ -429,6 +471,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
                 gasCoverage) * 1.35);
             color.rgb = lerp(color.rgb, gasColor, gasOpacity);
         }
+    }
+    float gasHazeCoverage;
+    float3 gasHazeColor;
+    GasHaze(coordinate, gasHazeCoverage, gasHazeColor);
+    if (gasHazeCoverage > 0)
+    {
+        color.rgb = lerp(color.rgb, gasHazeColor, gasHazeCoverage);
     }
     float smokeCoverage;
     float3 fireGlow = SampleFireGlow(coordinate, smokeCoverage);

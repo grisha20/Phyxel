@@ -120,7 +120,8 @@ public sealed record MaterialLiquidContactTransitionDefinition(
 public sealed record MaterialGasDefinition(
     float Diffusion,
     float Buoyancy,
-    float HotAir);
+    float HotAir,
+    float HazeStrength);
 
 public sealed record MaterialMotionDefinition(
     float Advection,

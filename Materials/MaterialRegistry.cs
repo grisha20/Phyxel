@@ -35,6 +35,9 @@ public sealed class MaterialRegistry
     public const float DefaultGasHotAir = 0f;
     public const float MinimumGasHotAir = 0f;
     public const float MaximumGasHotAir = 1f;
+    public const float DefaultGasHazeStrength = 0f;
+    public const float MinimumGasHazeStrength = 0f;
+    public const float MaximumGasHazeStrength = 1f;
     public const float DefaultMotionAdvection = 0.9f;
     public const float DefaultMotionAirDrag = 0.04f;
     public const float DefaultMotionAirLoss = 0.97f;
@@ -640,6 +643,7 @@ public sealed class MaterialRegistry
         float gasDiffusion,
         float gasBuoyancy,
         float gasHotAir,
+        float gasHazeStrength,
         MaterialMotionDefinition motion,
         Color color)
     {
@@ -662,6 +666,7 @@ public sealed class MaterialRegistry
             GasDiffusion = gasDiffusion,
             GasBuoyancy = gasBuoyancy,
             HotAir = gasHotAir,
+            GasHazeStrength = gasHazeStrength,
             MotionAdvection = motion.Advection,
             MotionAirDrag = motion.AirDrag,
             MotionAirLoss = motion.AirLoss,

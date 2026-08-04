@@ -304,6 +304,14 @@ internal static partial class MaterialFileLoader
                     $"gas.hotAir must be finite and between " +
                     $"{MaterialRegistry.MinimumGasHotAir} and {MaterialRegistry.MaximumGasHotAir}.");
             }
+            if (!float.IsFinite(gas.HazeStrength) ||
+                gas.HazeStrength < MaterialRegistry.MinimumGasHazeStrength ||
+                gas.HazeStrength > MaterialRegistry.MaximumGasHazeStrength)
+            {
+                throw new InvalidDataException(
+                    $"gas.hazeStrength must be finite and between " +
+                    $"{MaterialRegistry.MinimumGasHazeStrength} and {MaterialRegistry.MaximumGasHazeStrength}.");
+            }
         }
         if (motion.UnknownFields is { Count: > 0 })
         {
@@ -399,6 +407,9 @@ internal static partial class MaterialFileLoader
         float gasHotAir = kind == MaterialSimulationKind.Gas
             ? gas?.HotAir ?? MaterialRegistry.DefaultGasHotAir
             : MaterialRegistry.DefaultGasHotAir;
+        float gasHazeStrength = kind == MaterialSimulationKind.Gas
+            ? gas?.HazeStrength ?? MaterialRegistry.DefaultGasHazeStrength
+            : MaterialRegistry.DefaultGasHazeStrength;
         MaterialUiDocument ui = document.Ui ?? new MaterialUiDocument();
         return new MaterialDefinition(
             id,
@@ -419,6 +430,7 @@ internal static partial class MaterialFileLoader
                 gasDiffusion,
                 gasBuoyancy,
                 gasHotAir,
+                gasHazeStrength,
                 new MaterialMotionDefinition(
                     motion.Advection,
                     motion.AirDrag,
@@ -435,7 +447,11 @@ internal static partial class MaterialFileLoader
             Emissions = emissions,
             Lifecycle = lifecycle,
             LiquidContactTransition = liquidContactTransition,
-            Gas = gas is null ? null : new MaterialGasDefinition(gas.Diffusion, gas.Buoyancy, gas.HotAir),
+            Gas = gas is null ? null : new MaterialGasDefinition(
+                gas.Diffusion,
+                gas.Buoyancy,
+                gas.HotAir,
+                gas.HazeStrength),
             Motion = new MaterialMotionDefinition(
                 motion.Advection,
                 motion.AirDrag,
@@ -451,6 +467,7 @@ internal static partial class MaterialFileLoader
         public float Diffusion { get; set; } = MaterialRegistry.DefaultGasDiffusion;
         public float Buoyancy { get; set; }
         public float HotAir { get; set; } = MaterialRegistry.DefaultGasHotAir;
+        public float HazeStrength { get; set; } = MaterialRegistry.DefaultGasHazeStrength;
 
         [JsonExtensionData]
         public Dictionary<string, JsonElement>? UnknownFields { get; set; }

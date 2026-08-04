@@ -93,6 +93,8 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             "GasBuoyancy offset must be 124.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.HotAir)).ToInt32() == 128,
             "HotAir offset must be 128.");
+        Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.GasHazeStrength)).ToInt32() == 164,
+            "GasHazeStrength must occupy the first former tail-padding scalar at offset 164.");
         Require(Marshal.SizeOf<ContactTransitionConstants>() == 16,
             "ContactTransitionConstants must be 16 bytes.");
         string contactShader = File.ReadAllText(Path.Combine(
@@ -194,6 +196,12 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         // retain the zero source rather than requiring a schema migration.
         Require(Same(registry[CoreMaterialIds.Co2].Properties.HotAir, 0f),
             "gas.hotAir default for an existing material is not zero.");
+        Require(Same(steam.Properties.GasHazeStrength, 0.55f),
+            "core:steam hazeStrength is incorrect.");
+        Require(Same(registry[CoreMaterialIds.Smoke].Properties.GasHazeStrength, 0.75f),
+            "core:smoke hazeStrength is incorrect.");
+        Require(Same(registry[CoreMaterialIds.Co2].Properties.GasHazeStrength, 0f),
+            "gas.hazeStrength default for an existing material is not zero.");
         Require(water.UiOrder == 20 && ice.UiOrder == 21 && steam.UiOrder == 22,
             "Water/Ice/Steam UI order is not 20/21/22.");
         Require(!water.Hidden && !ice.Hidden && !steam.Hidden,
@@ -571,7 +579,8 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         Same(left.AmbientTemperature, right.AmbientTemperature) &&
         Same(left.AmbientCoolingRate, right.AmbientCoolingRate) &&
         left.ContactLiquidIntoMaterialIndex == right.ContactLiquidIntoMaterialIndex &&
-        Same(left.ContactLiquidRatePerSecond, right.ContactLiquidRatePerSecond);
+        Same(left.ContactLiquidRatePerSecond, right.ContactLiquidRatePerSecond) &&
+        Same(left.GasHazeStrength, right.GasHazeStrength);
 
     private static Color ParseColor(string value)
     {

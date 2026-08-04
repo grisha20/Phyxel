@@ -6,7 +6,7 @@
   "flags": ["smoke"],
   "color": "#3737374B",
   "physics": { "density": 0.04, "friction": 0.0, "flowRate": 1.0 },
-  "gas": { "diffusion": 0.0, "buoyancy": -0.125, "hotAir": 0.001 },
+  "gas": { "diffusion": 0.0, "buoyancy": -0.125, "hotAir": 0.001, "hazeStrength": 0.75 },
   "motion": { "advection": 0.9, "airDrag": 0.04, "airLoss": 0.97, "loss": 0.20, "collision": 0.0 },
   "thermal": { "initialTemperature": 340.0, "conductivity": 0.08, "heatCapacity": 1.0 },
   "lifecycle": { "minimum": 4.1666667, "maximum": 4.4833333, "decayInto": "core:empty" },
