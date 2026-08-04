@@ -20,6 +20,7 @@ public sealed class UiPropertiesPanel
         "0");
     private readonly UiToggleSwitch solidGravityToggle = new("Гравитация");
     private readonly UiToggleSwitch hydraulicsToggle = new("Гидравлика сосудов");
+    private readonly UiToggleSwitch withoutEffectsToggle = new("Без эффектов");
 
     /// <summary>
     /// Показать поле воздуха вместо сцены. Без этого настройка огня велась
@@ -59,6 +60,7 @@ public sealed class UiPropertiesPanel
     internal Rectangle TemperatureSliderBounds => temperatureSlider.Bounds;
     internal Rectangle GravityToggleBounds => solidGravityToggle.Bounds;
     internal Rectangle HydraulicsToggleBounds => hydraulicsToggle.Bounds;
+    internal Rectangle WithoutEffectsToggleBounds => withoutEffectsToggle.Bounds;
     internal static bool ShowsDensity(PhyxelToolId tool) => tool == PhyxelToolId.Brush;
     internal static bool ShowsTemperature(PhyxelToolId tool) => tool == PhyxelToolId.Temperature;
     internal static bool ShowsBrushControls(PhyxelToolId tool) =>
@@ -180,6 +182,12 @@ public sealed class UiPropertiesPanel
             HydraulicsToggled = true;
         }
         cursorY += toggleHeight + 4;
+        withoutEffectsToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
+        if (withoutEffectsToggle.Update(input))
+        {
+            settings.RenderWithoutEffects = !settings.RenderWithoutEffects;
+        }
+        cursorY += toggleHeight + 4;
         boundariesToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (boundariesToggle.Update(input))
         {
@@ -259,6 +267,7 @@ public sealed class UiPropertiesPanel
         scaleSlider.Draw(spriteBatch, font, backdrop, pixel);
         solidGravityToggle.Draw(spriteBatch, font, backdrop, pixel, settings.SolidGravity);
         hydraulicsToggle.Draw(spriteBatch, font, backdrop, pixel, settings.HydraulicPressure);
+        withoutEffectsToggle.Draw(spriteBatch, font, backdrop, pixel, settings.RenderWithoutEffects);
         // Тумблер показывает «стены есть», поэтому значение инвертировано
         // относительно OpenBoundaries.
         boundariesToggle.Draw(spriteBatch, font, backdrop, pixel, !settings.OpenBoundaries);

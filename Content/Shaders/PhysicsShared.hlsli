@@ -286,6 +286,7 @@ cbuffer SimulationFrameConstants : register(b0)
 
 static const uint DebugViewNone = 0;
 static const uint DebugViewAir = 1;
+static const uint DebugViewWithoutEffects = 2;
 
 // Width of the strip that swallows anything reaching it. The Powder Toy kills
 // every particle within CELL of the left, right and top edges; the floor is

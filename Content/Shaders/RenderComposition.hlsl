@@ -360,6 +360,34 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     GridCell cell = Grid[FlattenCoordinate(coordinate)];
+    // TPT's Nothing Display equivalent. Keep this before every composition
+    // path: an occupied simulation cell maps to precisely one output pixel
+    // of its material colour. FIRE is deliberately drawn here too, unlike
+    // the normal mode where it is represented only by FireGlow.
+    if (DebugView == DebugViewWithoutEffects)
+    {
+        float4 flatColor = float4(0.035, 0.041, 0.047, 1);
+        if (cell.IsActive != 0)
+        {
+            flatColor = MaterialColor(cell.MaterialIndex);
+            flatColor.a = 1;
+        }
+        OutputTexture[coordinate] = flatColor;
+        if (SimulationPhase != 0)
+        {
+            Collect(cell);
+            if (coordinate.x == 0 && coordinate.y == 0)
+            {
+                Statistics[0].FrameIndex = FrameIndex;
+                Statistics[0].PressureMoves = WaterActivity[Width * 17];
+                uint blockerCount = ((Width + 31) / 32) * Height;
+                Statistics[0].FarColumnMoves = WaterDiagnostics[blockerCount];
+                Statistics[0].PressurePlans = WaterDiagnostics[blockerCount + 1];
+            }
+        }
+        return;
+    }
+
     float4 color = float4(0.035, 0.041, 0.047, 1);
     bool continuumGas = cell.IsActive != 0 &&
         Materials[cell.MaterialIndex].SimulationKind == SimulationKindGas &&

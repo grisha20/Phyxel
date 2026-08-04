@@ -1417,7 +1417,9 @@ public sealed class SimulationDispatchCoordinator
             MaximumVelocity = 2200,
             SolidGravity = settings.SolidGravity ? 1u : 0u,
             HydraulicPressure = settings.HydraulicPressure ? 1u : 0u,
-            DebugView = settings.ShowAirField ? 1u : 0u,
+            DebugView = settings.RenderWithoutEffects
+                ? 2u
+                : settings.ShowAirField ? 1u : 0u,
             OpenBoundaries = settings.OpenBoundaries ? 1u : 0u
         };
     }

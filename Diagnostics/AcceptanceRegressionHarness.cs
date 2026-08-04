@@ -629,6 +629,10 @@ public sealed class AcceptanceRegressionHarness
             _ => settings.AirSimulation
         };
         settings.ShowAirField = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_SHOW_AIR") == "1";
+        // PNG-артефакты диагностики — измерительный материал. Они всегда
+        // снимаются в сопоставимом с TPT Nothing Display режиме и не зависят
+        // от последнего состояния пользовательского тумблера.
+        settings.RenderWithoutEffects = true;
         // Сцены acceptance-набора построены в замкнутом мире: вода стоит в
         // сосудах, песок опирается на стенки. С открытыми границами всё это
         // вытечет за край, поэтому здесь границы всегда сплошные.
