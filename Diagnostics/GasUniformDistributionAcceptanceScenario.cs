@@ -55,11 +55,12 @@ internal static class GasUniformDistributionAcceptanceScenario
         string[] gasIds =
         [
             CoreMaterialIds.Steam,
-            CoreMaterialIds.Smoke,
             "acceptance:gas",
             CoreMaterialIds.Co2
         ];
-        FillMixedGases(cells, width, 250, 70, 309, 89, materials, gasIds);
+        // Three stable gases, 300 particles each. Smoke has a finite lifetime
+        // and belongs to combustion acceptance, not closed-mass gas mixing.
+        FillMixedGases(cells, width, 250, 70, 309, 84, materials, gasIds);
 
         // A divider with a bottom opening and two ceiling pockets exercises
         // connected-space traversal without allowing gases through fixtures.

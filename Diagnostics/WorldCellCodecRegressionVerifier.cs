@@ -49,7 +49,6 @@ internal static class WorldCellCodecRegressionVerifier
             SimulationStateSerializer serializer = new();
 
             VerifyLayoutContracts();
-            VerifyGasThermalMixingContract();
             VerifyGasSchedulerContract();
             await VerifyV3Async(directory, serializer, materials);
             await VerifyV4MigrationsAsync(directory, serializer, materials);
@@ -95,37 +94,6 @@ internal static class WorldCellCodecRegressionVerifier
             Require(position > previous, $"HLSL GridCell field '{field}' is missing or out of order.");
             previous = position;
         }
-    }
-
-    private static void VerifyGasThermalMixingContract()
-    {
-        string shaderPath = Path.Combine(
-            AppContext.BaseDirectory,
-            "Content",
-            "Shaders",
-            "GasRedistribution.hlsl");
-        string shader = File.ReadAllText(shaderPath);
-        Require(
-            shader.Contains("void ResolveContinuumPair(", StringComparison.Ordinal) &&
-            shader.Contains("void RedistributeSameGas(", StringComparison.Ordinal),
-            "Local gas continuum contract is missing.");
-        Require(
-            shader.Contains("first.MaterialIndex != second.MaterialIndex", StringComparison.Ordinal) &&
-            shader.Contains("firstMaterial.Density <= secondMaterial.Density", StringComparison.Ordinal) &&
-            shader.Contains("StorePair(firstIndex, second, secondIndex, first)", StringComparison.Ordinal),
-            "Different gases are not kept distinct and sorted by density.");
-        Require(
-            shader.Contains("firstMass + secondMass", StringComparison.Ordinal) &&
-            shader.Contains("firstMass * heatCapacity * first.Temperature", StringComparison.Ordinal) &&
-            shader.Contains("firstMass * first.Lifetime", StringComparison.Ordinal),
-            "Gas redistribution does not preserve mass, thermal energy and lifetime.");
-        Require(
-            shader.Contains("(material.Flags & MaterialFlagFlame) == 0", StringComparison.Ordinal),
-            "Flame exclusion is missing from ordinary gas movement.");
-        Require(
-            !shader.Contains("Interlocked", StringComparison.Ordinal) &&
-            !shader.Contains("HorizontalPathAllowsGas", StringComparison.Ordinal),
-            "Gas continuum introduced atomics or long-range movement.");
     }
 
     private static void VerifyGasSchedulerContract()

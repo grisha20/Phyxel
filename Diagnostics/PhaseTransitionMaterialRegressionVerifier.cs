@@ -30,6 +30,8 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             0, 0, 0, "#00000000", 0, 0, 1),
         new(CoreMaterialIds.Sand, MaterialSimulationKind.Granular, MaterialFlags.None,
             1.5f, 0.75f, 0.18f, "#DAB85C", 20, 0.15f, 0.83f),
+        new("core:gunpowder", MaterialSimulationKind.Granular, MaterialFlags.SelfOxidizing,
+            1.4f, 0.80f, 0.15f, "#505358", 20f, 0.25f, 0.90f),
         new(CoreMaterialIds.Water, MaterialSimulationKind.Liquid, MaterialFlags.None,
             1, 0.025f, 0.92f, "#2B84CF", 20, 0.60f, 4.18f),
         new(CoreMaterialIds.Ice, MaterialSimulationKind.Solid, MaterialFlags.None,
@@ -37,25 +39,27 @@ internal static class PhaseTransitionMaterialRegressionVerifier
         new(CoreMaterialIds.Steam, MaterialSimulationKind.Gas, MaterialFlags.None,
             0.03f, 0.005f, 1.20f, "#A0A0FFFF", 122, 0.04f, 2.08f),
         new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
-            7.8f, 0.35f, 0, "#8E9CA6", 20, 1, 0.50f),
+            7.8f, 0.35f, 0, "#8E9CA6", 20, 1, 0.13f),
+        new("core:molten_metal", MaterialSimulationKind.Liquid, MaterialFlags.None,
+            7f, 0.55f, 0.34f, "#FF7A1E", 1050f, 0.60f, 0.50f),
         new(CoreMaterialIds.Stone, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
             9.2f, 0.75f, 0, "#5C6065", 20, 0.25f, 0.84f),
-        new(CoreMaterialIds.Fixture, MaterialSimulationKind.Solid, MaterialFlags.None,
+        new(CoreMaterialIds.Fixture, MaterialSimulationKind.Solid, MaterialFlags.BlocksAir,
             100, 0.9f, 0, "#525B63", 20, 0.25f, 0.84f),
         new(CoreMaterialIds.Wood, MaterialSimulationKind.Solid, MaterialFlags.None,
             0.8f, 0.65f, 0, "#8B5A2B", 20, 0.65f, 1.0f),
         new(CoreMaterialIds.Coal, MaterialSimulationKind.Granular, MaterialFlags.None,
-            0.2f, 0.6f, 0.35f, "#292929", 20, 0.78f, 1.0f),
+            0.2f, 0.6f, 0.35f, "#292929", 20, 0.08f, 1.0f),
         new(CoreMaterialIds.WetCharcoal, MaterialSimulationKind.Granular, MaterialFlags.None,
-            1.15f, 0.62f, 0.32f, "#202020", 20, 0.78f, 1.0f),
+            1.15f, 0.62f, 0.32f, "#202020", 20, 0.22f, 1.0f),
         new(CoreMaterialIds.StoneCoal, MaterialSimulationKind.Granular, MaterialFlags.None,
-            1.4f, 0.65f, 0.3f, "#171717", 20, 0.85f, 0.75f),
-        new(CoreMaterialIds.Smoke, MaterialSimulationKind.Gas, MaterialFlags.None,
-            0.04f, 0, 1, "#777777B0", 120, 0.08f, 1),
+            1.4f, 0.65f, 0.3f, "#171717", 20, 0.11f, 0.75f),
+        new(CoreMaterialIds.Smoke, MaterialSimulationKind.Gas, MaterialFlags.Smoke,
+            0.04f, 0, 1, "#3737374B", 340, 0.08f, 1),
         new(CoreMaterialIds.Co2, MaterialSimulationKind.Gas, MaterialFlags.None,
             0.12f, 0, 0.8f, "#666666FF", 20, 0.06f, 0.85f),
         new(CoreMaterialIds.Fire, MaterialSimulationKind.Gas, MaterialFlags.Flame,
-            1.0f, 0, 1.4f, "#FF3A08E8", 650, 0.35f, 1.0f),
+            1.0f, 0, 1.4f, "#FF3A08E8", 420, 0.35f, 1.0f),
         new(CoreMaterialIds.Eraser, MaterialSimulationKind.Tool, MaterialFlags.None,
             0, 0, 0, "#DE5858", 20, 0, 1)
     ];
@@ -481,6 +485,14 @@ internal static class PhaseTransitionMaterialRegressionVerifier
                 break;
             case CoreMaterialIds.Steam:
                 VerifyRule(registry, material.Id, true, 98, CoreMaterialIds.Water,
+                    false, 0, null);
+                break;
+            case CoreMaterialIds.Metal:
+                VerifyRule(registry, material.Id, false, 0, null,
+                    true, 1000, "core:molten_metal");
+                break;
+            case "core:molten_metal":
+                VerifyRule(registry, material.Id, true, 950, CoreMaterialIds.Metal,
                     false, 0, null);
                 break;
             default:

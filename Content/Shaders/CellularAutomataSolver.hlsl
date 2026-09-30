@@ -1118,7 +1118,11 @@ void IntegrateGasMotion(uint2 coordinate)
         carriesAlongSurface = aboveCell.IsActive != 0 &&
             Materials[aboveCell.MaterialIndex].SimulationKind == SimulationKindSolid;
     }
-    if (carriesAlongSurface && abs(state.VelocityX) > 0.0001)
+    // The surface carrier is a calibrated flame/smoke fallback. Ordinary
+    // gases keep their diffusion and velocity at a surface, just as in space.
+    bool legacySurfaceCarrier = (Materials[cell.MaterialIndex].Flags &
+        (MaterialFlagFlame | MaterialFlagSmoke)) != 0;
+    if (legacySurfaceCarrier && carriesAlongSurface && abs(state.VelocityX) > 0.0001)
     {
         float surfaceAdvection = Materials[cell.MaterialIndex].MotionAdvection;
         state.VelocityX = state.VelocityX > 0 ? surfaceAdvection : -surfaceAdvection;
@@ -1135,7 +1139,9 @@ void IntegrateGasMotion(uint2 coordinate)
     // individual particle.  It is deliberately not a mass-transfer pass:
     // splitting one gas cell into fractional neighbours turns a sparse steam
     // puff into a continuum cloud and introduces stencil-direction bias.
-    uint diffusionSeed = index ^ (FrameIndex * 0x9e3779b9u);
+    uint diffusionTick = (material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0
+        ? FrameIndex : DebugReserved2;
+    uint diffusionSeed = index ^ (diffusionTick * 0x9e3779b9u);
     float2 diffusionImpulse = float2(
         HashUnitFloat(diffusionSeed) * 2.0 - 1.0,
         HashUnitFloat(diffusionSeed ^ 0x85ebca6bu) * 2.0 - 1.0) * material.GasDiffusion;
@@ -1203,6 +1209,15 @@ bool GasPairBranch(uint upperKind, uint lowerKind)
         (upperKind == SimulationKindGas || lowerKind == SimulationKindGas);
 }
 
+float GasCellStepThreshold(uint material)
+{
+    // Offset is a fractional position relative to the occupied pixel centre.
+    // Ordinary particles change pixel at +/-0.5, not after travelling a full
+    // cell from its centre. Keep the established flame/smoke carrier intact.
+    return (Materials[material].Flags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0
+        ? 1.0 : 0.5;
+}
+
 void ResolveGasVerticalPair(uint2 upperCoordinate)
 {
     if (upperCoordinate.y + 1 >= Height)
@@ -1233,7 +1248,7 @@ void ResolveGasVerticalPair(uint2 upperCoordinate)
     if (lowerKind == SimulationKindGas && GasCanEnter(lowerMaterial, upperMaterial))
     {
         GasMotionState lowerMotion = GasMotion[lowerIndex];
-        if (lowerMotion.OffsetY <= -1.0)
+        if (lowerMotion.OffsetY <= -GasCellStepThreshold(lowerMaterial))
         {
             if ((Materials[lowerMaterial].Flags & MaterialFlagFlame) != 0)
             {
@@ -1275,7 +1290,7 @@ void ResolveGasVerticalPair(uint2 upperCoordinate)
     if (upperKind == SimulationKindGas && GasCanEnter(upperMaterial, lowerMaterial))
     {
         GasMotionState upperMotion = GasMotion[upperIndex];
-        if (upperMotion.OffsetY >= 1.0)
+        if (upperMotion.OffsetY >= GasCellStepThreshold(upperMaterial))
         {
             ConsumeGasOffset(upperIndex, 0, 1);
             MoveGasCell(upperIndex, lowerIndex, GasLateralPathMotionHorizontal);
@@ -1311,7 +1326,8 @@ void ResolveGasObstacleBypass(uint2 coordinate)
         return;
     }
     uint material = sourceCell.MaterialIndex;
-    if (Materials[material].SimulationKind != SimulationKindGas)
+    if (Materials[material].SimulationKind != SimulationKindGas ||
+        (Materials[material].Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0)
     {
         return;
     }
@@ -1420,7 +1436,7 @@ void ResolveGasHorizontalPair(uint2 leftCoordinate)
     // Same rule as the vertical pass: each cell reads the air under itself.
     bool leftMoves = leftKind == SimulationKindGas &&
         GasCanEnter(leftMaterial, rightMaterial) &&
-        GasMotion[leftIndex].OffsetX >= 1.0;
+        GasMotion[leftIndex].OffsetX >= GasCellStepThreshold(leftMaterial);
     if (leftMoves)
     {
         ConsumeGasOffset(leftIndex, 1, 0);
@@ -1429,13 +1445,52 @@ void ResolveGasHorizontalPair(uint2 leftCoordinate)
     }
     if (rightKind == SimulationKindGas && GasCanEnter(rightMaterial, leftMaterial))
     {
-        if (GasMotion[rightIndex].OffsetX > -1.0)
+        if (GasMotion[rightIndex].OffsetX > -GasCellStepThreshold(rightMaterial))
         {
             return;
         }
         ConsumeGasOffset(rightIndex, -1, 0);
         MoveGasCell(rightIndex, leftIndex, GasLateralPathMotionHorizontal);
     }
+}
+
+bool OrdinaryGasBlocked(uint material, int2 target)
+{
+    if (target.x < 0 || target.y < 0 || target.x >= int(Width) || target.y >= int(Height))
+    {
+        return true;
+    }
+    GridCell neighbor = Grid[FlattenCoordinate(uint2(target))];
+    return neighbor.IsActive != 0 && !GasCanEnter(material, neighbor.MaterialIndex);
+}
+
+// Run once after all movement passes. No cell is moved here: Grid is stable,
+// and each thread writes only its own motion. An occupied target may become
+// free during the eight carrier substeps; only the remaining blocked intent
+// is a collision. Never retain a whole-cell movement debt at a floor/wall or
+// inside a dense gas, otherwise a falling gas becomes a packed powder bed.
+void ResolveOrdinaryGasCollision(uint2 coordinate)
+{
+    uint index = FlattenCoordinate(coordinate);
+    GridCell cell = Grid[index];
+    if (cell.IsActive == 0) return;
+    MaterialProperties material = Materials[cell.MaterialIndex];
+    if (material.SimulationKind != SimulationKindGas ||
+        (material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0) return;
+    GasMotionState state = GasMotion[index];
+    if (abs(state.OffsetX) >= 0.5 && OrdinaryGasBlocked(cell.MaterialIndex,
+        int2(coordinate) + int2(state.OffsetX > 0 ? 1 : -1, 0)))
+    {
+        state.VelocityX *= material.MotionCollision;
+        state.OffsetX = 0;
+    }
+    if (abs(state.OffsetY) >= 0.5 && OrdinaryGasBlocked(cell.MaterialIndex,
+        int2(coordinate) + int2(0, state.OffsetY > 0 ? 1 : -1)))
+    {
+        state.VelocityY *= material.MotionCollision;
+        state.OffsetY = 0;
+    }
+    GasMotion[index] = state;
 }
 
 // Anything that reaches the left, right or top edge is swallowed, so a plume
@@ -3056,6 +3111,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (SimulationPhase == 89)
     {
         IntegrateGasMotion(coordinate);
+        return;
+    }
+    if (SimulationPhase == 90)
+    {
+        ResolveOrdinaryGasCollision(coordinate);
         return;
     }
     if (SimulationPhase == 84)

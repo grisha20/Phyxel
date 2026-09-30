@@ -229,6 +229,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         Buffer fireGlowConstants = CreateConstantBuffer<FireGlowConstants>();
         GpuStructuredBuffer<FireGlowCell> fireGlow = new(Device, airCellCount);
         GpuStructuredBuffer<FireGlowCell> fireGlowScratch = new(Device, airCellCount);
+        GpuStructuredBuffer<FireGlowCell> gasVisual = new(Device, airCellCount);
+        GpuStructuredBuffer<FireGlowCell> gasVisualScratch = new(Device, airCellCount);
         Buffer contactTransitionConstants = CreateConstantBuffer<ContactTransitionConstants>();
         Buffer phaseConstants = CreateConstantBuffer<PhaseTransitionConstants>();
         GpuStructuredBuffer<uint> phaseSummary = new(Device, 1);
@@ -464,6 +466,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             FireGlowConstants = fireGlowConstants,
             FireGlow = fireGlow,
             FireGlowScratch = fireGlowScratch,
+            GasVisual = gasVisual,
+            GasVisualScratch = gasVisualScratch,
             ContactTransitionConstants = contactTransitionConstants,
             PhaseConstants = phaseConstants,
             PhaseSummary = phaseSummary,
@@ -541,6 +545,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             FireGlowDiffuseShader = allocateSimulation ? CompileShader("FireGlow.hlsl", "CSDiffuse") : null,
             FireGlowCommitShader = allocateSimulation ? CompileShader("FireGlow.hlsl", "CSCommitGlow") : null,
             FireGlowClearShader = allocateSimulation ? CompileShader("FireGlow.hlsl", "CSClearGlow") : null,
+            GasVisualDepositShader = allocateSimulation ? CompileShader("GasVisual.hlsl", "CSDeposit") : null,
+            GasVisualDiffuseShader = allocateSimulation ? CompileShader("GasVisual.hlsl", "CSDiffuse") : null,
+            GasVisualCommitShader = allocateSimulation ? CompileShader("GasVisual.hlsl", "CSCommit") : null,
             ContactTransitionShader = allocateSimulation ? CompileShader("ContactTransitions.hlsl") : null,
             PhaseTransitionShader = allocateSimulation ? CompileShader("PhaseTransitions.hlsl") : null,
             CombustionShader = allocateSimulation ? CompileShader("Combustion.hlsl") : null,

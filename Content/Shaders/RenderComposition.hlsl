@@ -6,6 +6,7 @@ StructuredBuffer<uint> WaterActivity : register(t2);
 StructuredBuffer<uint> WaterDiagnostics : register(t3);
 StructuredBuffer<FireGlowCell> FireGlowField : register(t4);
 StructuredBuffer<AirCell> AirField : register(t5);
+StructuredBuffer<FireGlowCell> GasVisualField : register(t6);
 RWTexture2D<unorm float4> OutputTexture : register(u0);
 RWStructuredBuffer<SimulationStatistics> Statistics : register(u1);
 
@@ -84,7 +85,7 @@ bool IsSmokeCell(GridCell cell)
         (Materials[cell.MaterialIndex].Flags & MaterialFlagSmoke) != 0;
 }
 
-float3 SampleFireGlow(uint2 coordinate, out float smokeCoverage)
+float3 SampleFireGlow(uint2 coordinate, out float smokeCoverage, out float3 gasColor)
 {
     uint glowWidth = (Width + AirCellSize - 1) / AirCellSize;
     uint glowHeight = (Height + AirCellSize - 1) / AirCellSize;
@@ -96,6 +97,7 @@ float3 SampleFireGlow(uint2 coordinate, out float smokeCoverage)
     int2 base = int2(coordinate / AirCellSize);
     float3 total = 0;
     float smokeTotal = 0;
+    gasColor = 0;
     for (int offsetY = -1; offsetY <= 1; offsetY++)
     {
         for (int offsetX = -1; offsetX <= 1; offsetX++)
@@ -136,6 +138,8 @@ float3 SampleFireGlow(uint2 coordinate, out float smokeCoverage)
             FireGlowCell glow = FireGlowField[sample.y * glowWidth + sample.x];
             total += float3(glow.Red, glow.Green, glow.Blue) * weight;
             smokeTotal += glow.Smoke * weight;
+            FireGlowCell gas = GasVisualField[sample.y * glowWidth + sample.x];
+            gasColor += float3(gas.Red, gas.Green, gas.Blue) * weight;
         }
     }
     smokeCoverage = smokeTotal;
@@ -293,9 +297,7 @@ void FluidCoverage(
     gasColor = directGasColor.rgb;
 }
 
-// A gas cell itself remains a sharp point.  Only a local concentration above
-// one isolated cell produces a gaussian haze, so a sparse gas still reads as
-// particles while a packed cloud has a soft continuous edge.
+// Keep the established smoke haze. Ordinary gases now use GasVisual instead.
 void GasHaze(uint2 coordinate, out float hazeCoverage, out float3 hazeColor)
 {
     float localDensity = 0;
@@ -317,7 +319,7 @@ void GasHaze(uint2 coordinate, out float hazeCoverage, out float3 hazeColor)
             }
             MaterialProperties material = Materials[source.MaterialIndex];
             if (material.SimulationKind != SimulationKindGas ||
-                (material.Flags & MaterialFlagFlame) != 0 || material.GasHazeStrength <= 0)
+                (material.Flags & MaterialFlagSmoke) == 0 || material.GasHazeStrength <= 0)
             {
                 continue;
             }
@@ -457,12 +459,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             color.rgb = lerp(color.rgb, liquidColor, saturate(liquidCoverage * 2.5));
         }
-        if (gasCoverage > 0)
+        if (gasCoverage > 0 && (Materials[cell.MaterialIndex].GasHazeStrength <= 0 || IsSmokeCell(cell)))
         {
-            // TPT's CO2/WTRV use the ordinary flat-particle path rather than
-            // a blur mode. A narrow concentration contour gives the lower
-            // resolution continuum grid the same readable outer boundary
-            // without turning fractional mass into a wide translucent halo.
+            // Explicit zero-haze external gases keep their legacy flat path.
+            // Soft gases are drawn only through the coarse RGB field below.
             float edgeNoise = (HashUnitFloat(
                 FlattenCoordinate(coordinate) ^ 0x6d2b79f5u) - 0.5) * 0.016;
             float gasOpacity = saturate(smoothstep(
@@ -472,15 +472,21 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             color.rgb = lerp(color.rgb, gasColor, gasOpacity);
         }
     }
-    float gasHazeCoverage;
-    float3 gasHazeColor;
-    GasHaze(coordinate, gasHazeCoverage, gasHazeColor);
-    if (gasHazeCoverage > 0)
+    float smokeHazeCoverage;
+    float3 smokeHazeColor;
+    GasHaze(coordinate, smokeHazeCoverage, smokeHazeColor);
+    if (smokeHazeCoverage > 0)
     {
-        color.rgb = lerp(color.rgb, gasHazeColor, gasHazeCoverage);
+        color.rgb = lerp(color.rgb, smokeHazeColor, smokeHazeCoverage);
     }
     float smokeCoverage;
-    float3 fireGlow = SampleFireGlow(coordinate, smokeCoverage);
+    float3 gasCloudColor;
+    float3 fireGlow = SampleFireGlow(coordinate, smokeCoverage, gasCloudColor);
+    // Occlude render-only gas trails at non-gas occupied cells.
+    if (cell.IsActive == 0 || continuumGas || flameCell)
+    {
+        color.rgb += gasCloudColor;
+    }
     // SMKE uses FIRE_BLEND to write charcoal RGB into TPT's fire buffer, and
     // render_fire() then adds that buffer to the video.  SmokeCoverage is this
     // already blended luminance, not an alpha; treating it as one made dense

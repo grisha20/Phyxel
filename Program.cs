@@ -8,6 +8,11 @@ public static class Program
     [STAThread]
     public static void Main()
     {
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_GAS_BRUSH") == "1")
+        {
+            Environment.ExitCode = GasBrushQueueRegressionVerifier.Run();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_WORLD_CODEC") == "1")
         {
             Environment.ExitCode = WorldCellCodecRegressionVerifier.Run();

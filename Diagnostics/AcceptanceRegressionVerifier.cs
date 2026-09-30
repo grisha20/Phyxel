@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Security.Cryptography;
 using Phyxel.Core;
 using Phyxel.Graphics;
 using Phyxel.Materials;
@@ -17,6 +18,50 @@ namespace Phyxel.Diagnostics;
 public static class AcceptanceRegressionVerifier
 {
     private static AcceptanceMaterialIndices materials = null!;
+
+    private static bool ValidateGasBrushFps(SimulationWorldSnapshot snapshot, uint gas, string artifactDirectory, out string report)
+    {
+        ReadOnlySpan<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid);
+        if (Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_GAS_BRUSH_PAUSED") == "1")
+        {
+            int active = 0;
+            foreach (GridCell cell in cells) active += cell.IsActive != 0 ? 1 : 0;
+            int painted = CountColor(Path.Combine(artifactDirectory, "F_gas_paused_paint.png"),
+                170, 90, 230, 150, color => color.B > 20 && color.B > color.G * 1.25);
+            int erased = CountColor(Path.Combine(artifactDirectory, "F_gas_brush_fps.png"),
+                170, 90, 230, 150, color => color.R > 20 || color.G > 20 || color.B > 20);
+            report = $"PHYXEL_GAS_BRUSH_PAUSED activeAfterErase={active} paintedPixels={painted} erasedPixels={erased}";
+            return active == 0 && painted > 50 && erased == 0;
+        }
+        ReadOnlySpan<GasMotionState> motion = snapshot.GasMotion is null
+            ? [] : MemoryMarshal.Cast<byte, GasMotionState>(snapshot.GasMotion);
+        if (motion.Length != cells.Length) return Fail(out report);
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Span<byte> sample = stackalloc byte[28];
+        double mass = 0, x = 0, y = 0, xx = 0;
+        int count = 0;
+        for (int i = 0; i < cells.Length; i++)
+        {
+            GridCell cell = cells[i];
+            if (cell.IsActive == 0 || cell.MaterialIndex != gas) continue;
+            count++;
+            mass += cell.Mass;
+            x += (i % snapshot.Width) * cell.Mass;
+            y += (i / snapshot.Width) * cell.Mass;
+            xx += Math.Pow(i % snapshot.Width, 2) * cell.Mass;
+            BitConverter.TryWriteBytes(sample, i);
+            BitConverter.TryWriteBytes(sample[4..], cell.Mass);
+            BitConverter.TryWriteBytes(sample[8..], cell.Temperature);
+            BitConverter.TryWriteBytes(sample[12..], motion[i].VelocityX);
+            BitConverter.TryWriteBytes(sample[16..], motion[i].VelocityY);
+            BitConverter.TryWriteBytes(sample[20..], motion[i].OffsetX);
+            BitConverter.TryWriteBytes(sample[24..], motion[i].OffsetY);
+            hash.AppendData(sample);
+        }
+        double sigmaX = Math.Sqrt(Math.Max(0, xx / Math.Max(1, mass) - Math.Pow(x / Math.Max(1, mass), 2)));
+        report = $"PHYXEL_GAS_BRUSH_FPS cells={count} mass={mass:F6} centreX={x / Math.Max(1, mass):F6} centreY={y / Math.Max(1, mass):F6} sigmaX={sigmaX:F6} hash={Convert.ToHexString(hash.GetHashAndReset())}";
+        return mass > 197 && Math.Abs(mass - count) < 0.01;
+    }
 
     private readonly record struct ComponentMetrics(
         int Count,
@@ -84,7 +129,9 @@ public static class AcceptanceRegressionVerifier
                 artifactDirectory,
                 "F_gas_rise.png",
                 "F_gas_spread.png",
-                out report),
+                out report,
+                checkpoints: thermalCheckpoints),
+            AcceptanceScenarioMode.GasBrushFps => ValidateGasBrushFps(snapshot, materials.Gas, artifactDirectory, out report),
             AcceptanceScenarioMode.WaterStress => ValidateWaterStress(
                 snapshot,
                 framesPerSecond,
@@ -135,7 +182,8 @@ public static class AcceptanceRegressionVerifier
                 artifactDirectory,
                 "S_external_gas_rise.png",
                 "S_external_gas_spread.png",
-                out report),
+                out report,
+                heavyGas: false),
             AcceptanceScenarioMode.ExternalSolids => ValidateExternalSolids(
                 snapshot,
                 materials.Resolve("acceptance:solid_light"),
@@ -1257,7 +1305,7 @@ public static class AcceptanceRegressionVerifier
         uint metal = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal);
         ReadOnlySpan<GridCell> cells = Cells(snapshot);
         int steamCount = 0, waterCount = 0, above = 0, min = int.MaxValue, max = -1, midN = 0, edgeN = 0;
-        int outsideLeft = 0, outsideRight = 0;
+        int outsideLeft = 0, outsideRight = 0, plateContactCount = 0;
         SteamObstacleLayerMetrics contactLayer = new(bottom + 1, bottom + 6);
         SteamObstacleLayerMetrics nearLayer = new(bottom + 7, bottom + 20);
         SteamObstacleLayerMetrics lowerLayer = new(bottom + 21, bottom + 40);
@@ -1277,6 +1325,7 @@ public static class AcceptanceRegressionVerifier
                 {
                     min = Math.Min(min, x);
                     max = Math.Max(max, x);
+                    if (x >= left && x <= right) plateContactCount++;
                 }
                 contactLayer.Add(x, y);
                 nearLayer.Add(x, y);
@@ -1294,6 +1343,12 @@ public static class AcceptanceRegressionVerifier
         AppendSteamObstacleLayerMetrics(fields, frame, "0to6", contactLayer);
         AppendSteamObstacleLayerMetrics(fields, frame, "6to20", nearLayer);
         AppendSteamObstacleLayerMetrics(fields, frame, "20to40", lowerLayer);
+        // Fixed geometry makes these comparable across runs. The historical
+        // occupancy denominator follows min/max outliers and can change even
+        // when the contact particle count is effectively identical.
+        fields.Append($" obstaclePlateContactCount{frame}={plateContactCount}" +
+            $" obstaclePlateContactOccupancy{frame}={plateContactCount / (131.0 * 6):0.000000}" +
+            $" obstacleWorldContactOccupancy{frame}={contactLayer.Count / (snapshot.Width * 6.0):0.000000}");
         fields.Append($" obstacleContactLayerWidth{frame}={contactLayer.Width} obstacleSteamOutsideLeftFraction{frame}={outsideLeft / (double)Math.Max(1, steamCount):0.000000} obstacleSteamOutsideRightFraction{frame}={outsideRight / (double)Math.Max(1, steamCount):0.000000}");
     }
 

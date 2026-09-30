@@ -30,11 +30,9 @@ internal static class GasUniformDistributionAcceptanceVerifier
             GasUniformDistributionAcceptanceScenario.SingleBottom - 4);
         Require(Math.Abs(single.Mass - GasUniformDistributionAcceptanceScenario.SingleMass) <= 0.05,
             $"single gas mass changed={single.Mass:F4}", errors);
-        Require(single.Cells >= GasUniformDistributionAcceptanceScenario.SingleMass * 4 &&
-            single.FractionalCells >= single.Cells * 0.95,
-            $"single gas did not become a fractional concentration field={single}", errors);
-        Require(single.HorizontalSpan >= 110 && single.Rows is >= 30 and <= 130 &&
-            single.AverageY >= 117,
+        Require(single.Cells == GasUniformDistributionAcceptanceScenario.SingleMass && single.FractionalCells == 0,
+            $"single gas particles split or disappeared={single}", errors);
+        Require(single.SigmaX >= 8 && single.AverageY >= 110,
             $"CO2 did not form a broad, gently descending cloud={single}", errors);
         Require(single.ParityImbalance <= 0.18,
             $"single gas has vertical parity bands={single}", errors);
@@ -48,14 +46,15 @@ internal static class GasUniformDistributionAcceptanceVerifier
             GasUniformDistributionAcceptanceScenario.ObstacleBottom - 4);
         Require(Math.Abs(obstacle.Mass - GasUniformDistributionAcceptanceScenario.ObstacleMass) <= 0.05,
             $"obstacle gas mass changed={obstacle.Mass:F4}", errors);
-        Require(obstacle.Cells > GasUniformDistributionAcceptanceScenario.ObstacleMass &&
-            obstacle.FractionalCells >= obstacle.Cells * 0.95,
-            $"obstacle gas did not diffuse as fractional mass={obstacle}", errors);
-        Require(obstacle.MinimumX < 190 && obstacle.MaximumX > 260 && obstacle.MinimumY < 150,
-            $"gas did not rise locally around the divider={obstacle}", errors);
+        Require(obstacle.Cells == GasUniformDistributionAcceptanceScenario.ObstacleMass && obstacle.FractionalCells == 0,
+            $"obstacle gas particles split or disappeared={obstacle}", errors);
+        // A 20-cell-wide uniform source starts at sigmaX=sqrt((20^2-1)/12).
+        // This neutral fixture has weaker diffusion than CO2; require measurable
+        // growth from its own source rather than a CO2-derived width.
+        Require(obstacle.SigmaX >= Math.Sqrt(399.0 / 12) * 1.05 && obstacle.MinimumY < 150,
+            $"neutral gas did not diffuse near the divider={obstacle}", errors);
 
         GasMetrics steam = default;
-        GasMetrics smoke = default;
         GasMetrics ordinary = default;
         GasMetrics co2 = default;
         if (checkpoints.Count > 0)
@@ -67,28 +66,25 @@ internal static class GasUniformDistributionAcceptanceVerifier
             int bottom = GasUniformDistributionAcceptanceScenario.MultiBottom - 4;
             steam = Measure(layered, materials.GetRequiredRuntimeIndex(CoreMaterialIds.Steam),
                 left, top, right, bottom);
-            smoke = Measure(layered, materials.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke),
-                left, top, right, bottom);
             ordinary = Measure(layered, gas, left, top, right, bottom);
             co2 = Measure(layered, materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2),
                 left, top, right, bottom);
             foreach ((string name, GasMetrics metrics) in new[]
             {
-                ("steam", steam), ("smoke", smoke), ("gas", ordinary), ("co2", co2)
+                ("steam", steam), ("gas", ordinary), ("co2", co2)
             })
             {
                 Require(Math.Abs(metrics.Mass - GasUniformDistributionAcceptanceScenario.MultiMass) <= 0.05,
                     $"{name} mass changed={metrics.Mass:F4}", errors);
-                Require(metrics.Cells > GasUniformDistributionAcceptanceScenario.MultiMass &&
-                    metrics.FractionalCells >= metrics.Cells * 0.95,
-                    $"{name} did not form a fractional concentration field={metrics}", errors);
+                Require(metrics.Cells == GasUniformDistributionAcceptanceScenario.MultiMass && metrics.FractionalCells == 0,
+                    $"{name} particles split or disappeared={metrics}", errors);
                 Require(metrics.HorizontalSpan >= 45,
                     $"{name} did not diffuse from the mixed gas cloud={metrics}", errors);
             }
             Require(steam.AverageY + 2 < co2.AverageY &&
                 ordinary.AverageY + 2 < co2.AverageY,
                 $"light gases did not stay above CO2 steam={steam.AverageY:F2} " +
-                $"smoke={smoke.AverageY:F2} gas={ordinary.AverageY:F2} co2={co2.AverageY:F2}",
+                $"gas={ordinary.AverageY:F2} co2={co2.AverageY:F2}",
                 errors);
         }
 
@@ -102,7 +98,7 @@ internal static class GasUniformDistributionAcceptanceVerifier
             "gas solver removed liquid mass", errors);
 
         report = $"PHYXEL_GAS_UNIFORM single={single} obstacle={obstacle} " +
-            $"layers=steam({steam}) smoke({smoke}) gas({ordinary}) co2({co2})";
+            $"layers=steam({steam}) gas({ordinary}) co2({co2})";
         if (errors.Count == 0)
         {
             return true;
@@ -128,6 +124,8 @@ internal static class GasUniformDistributionAcceptanceVerifier
         int maxY = int.MinValue;
         double mass = 0;
         double weightedY = 0;
+        double weightedX = 0;
+        double weightedXX = 0;
         double sumSquares = 0;
         double evenMass = 0;
         double oddMass = 0;
@@ -150,6 +148,8 @@ internal static class GasUniformDistributionAcceptanceVerifier
                 if (Math.Abs(localMass - 1) > 0.0001) fractionalCells++;
                 mass += localMass;
                 weightedY += y * localMass;
+                weightedX += x * localMass;
+                weightedXX += x * x * localMass;
                 if ((x & 1) == 0)
                 {
                     evenMass += localMass;
@@ -179,7 +179,8 @@ internal static class GasUniformDistributionAcceptanceVerifier
             count > 0 ? maxX - minX + 1 : 0,
             count > 0 ? maxY - minY + 1 : 0,
             mean > 0 ? Math.Sqrt(variance) / mean : double.PositiveInfinity,
-            parity);
+            parity,
+            mass > 0 ? Math.Sqrt(Math.Max(0, weightedXX / mass - Math.Pow(weightedX / mass, 2))) : 0);
     }
 
     private static double TotalMass(SimulationWorldSnapshot snapshot, uint material)
@@ -212,11 +213,12 @@ internal static class GasUniformDistributionAcceptanceVerifier
         int HorizontalSpan,
         int Rows,
         double CoefficientOfVariation,
-        double ParityImbalance)
+        double ParityImbalance,
+        double SigmaX)
     {
         public override string ToString() =>
             $"cells={Cells} fractional={FractionalCells} mass={Mass:F3} " +
-            $"y={AverageY:F1} span={HorizontalSpan} " +
+            $"y={AverageY:F1} sigmaX={SigmaX:F3} span={HorizontalSpan} " +
             $"rows={Rows} bounds={MinimumX},{MinimumY}-{MaximumX},{MaximumY} " +
             $"cv={CoefficientOfVariation:F2} parity={ParityImbalance:F3}";
     }

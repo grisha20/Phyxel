@@ -72,6 +72,8 @@ public sealed class GpuSimulationResources : IDisposable
     public required Buffer FireGlowConstants { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlow { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlowScratch { get; init; }
+    public required GpuStructuredBuffer<FireGlowCell> GasVisual { get; init; }
+    public required GpuStructuredBuffer<FireGlowCell> GasVisualScratch { get; init; }
     public required Buffer ContactTransitionConstants { get; init; }
     public required Buffer PhaseConstants { get; init; }
     public required GpuStructuredBuffer<uint> PhaseSummary { get; init; }
@@ -148,6 +150,9 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? FireGlowDiffuseShader { get; init; }
     public ComputeShader? FireGlowCommitShader { get; init; }
     public ComputeShader? FireGlowClearShader { get; init; }
+    public ComputeShader? GasVisualDepositShader { get; init; }
+    public ComputeShader? GasVisualDiffuseShader { get; init; }
+    public ComputeShader? GasVisualCommitShader { get; init; }
     public ComputeShader? ContactTransitionShader { get; init; }
     public ComputeShader? PhaseTransitionShader { get; init; }
     public ComputeShader? CombustionShader { get; init; }
@@ -177,6 +182,9 @@ public sealed class GpuSimulationResources : IDisposable
         FireGlowDiffuseShader?.Dispose();
         FireGlowCommitShader?.Dispose();
         FireGlowClearShader?.Dispose();
+        GasVisualDepositShader?.Dispose();
+        GasVisualDiffuseShader?.Dispose();
+        GasVisualCommitShader?.Dispose();
         ContactTransitionShader?.Dispose();
         SolidDisplacementApplyShader?.Dispose();
         SolidMoveShader?.Dispose();
@@ -233,6 +241,8 @@ public sealed class GpuSimulationResources : IDisposable
         TemperatureProbeConstants.Dispose();
         ThermalConstants.Dispose();
         FireGlowScratch.Dispose();
+        GasVisual.Dispose();
+        GasVisualScratch.Dispose();
         FireGlow.Dispose();
         FireGlowConstants.Dispose();
         AirScratch.Dispose();

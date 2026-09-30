@@ -436,6 +436,7 @@ public struct SimulationFrameConstants
     /// вероятность уже поделена на восемь. Газ двигался в восемь раз медленнее.
     /// </summary>
     public uint GasSubStep;
+    // Ordinary-gas physical tick. Reuses reserved space without changing layout.
     public uint DebugReserved2;
 }
 

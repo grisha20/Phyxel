@@ -281,7 +281,7 @@ cbuffer SimulationFrameConstants : register(b0)
     // за кадр получают одно случайное число, и восемь попыток вырождаются в
     // одну, повторённую восемь раз с вероятностью, уже делённой на восемь.
     uint GasSubStep;
-    uint DebugReserved2;
+    uint DebugReserved2; // Ordinary-gas physical tick; independent of render FPS.
 };
 
 static const uint DebugViewNone = 0;

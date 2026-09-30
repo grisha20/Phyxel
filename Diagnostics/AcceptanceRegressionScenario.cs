@@ -15,6 +15,7 @@ public enum AcceptanceScenarioMode
     Hydro,
     Slope,
     Gas,
+    GasBrushFps,
     WaterStress,
     FlatSurface,
     WaterDrain,
@@ -129,7 +130,8 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.Sand => CreateSand(frame),
             AcceptanceScenarioMode.Hydro => CreateHydro(frame),
             AcceptanceScenarioMode.Slope => CreateSlope(frame),
-            AcceptanceScenarioMode.Gas => CreateGas(frame),
+            AcceptanceScenarioMode.Gas => CreateGas(frame, scenarioSeed),
+            AcceptanceScenarioMode.GasBrushFps => CreateGasBrushFps(frame),
             AcceptanceScenarioMode.WaterStress => CreateWaterStress(frame),
             AcceptanceScenarioMode.FlatSurface => CreateFlatSurface(frame),
             AcceptanceScenarioMode.WaterDrain => CreateWaterDrain(frame),
@@ -751,7 +753,29 @@ public static class AcceptanceRegressionScenario
         return [sand];
     }
 
-    private static IReadOnlyList<BrushDrawCommand> CreateGas(uint frame)
+    private static IReadOnlyList<BrushDrawCommand> CreateGasBrushFps(uint frame)
+    {
+        if (Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_GAS_BRUSH_PAUSED") == "1")
+        {
+            BrushDrawCommand paused = Create(200, 120, 8, materials.Steam, 0, 71001);
+            paused.Density = 1;
+            if (frame == 0) return [paused];
+            if (frame == 30)
+            {
+                paused.Mode = BrushCommandMode.Erase;
+                paused.Radius = 12;
+                return [paused];
+            }
+            return [];
+        }
+        int fps = int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_TARGET_FPS"), out int value) ? value : 60;
+        if (frame >= fps * 2) return [];
+        BrushDrawCommand command = Create(240, 135, 8, materials.Gas, 0, 71001);
+        command.Density = 1;
+        return [command];
+    }
+
+    private static IReadOnlyList<BrushDrawCommand> CreateGas(uint frame, uint scenarioSeed)
     {
         if (frame == 0)
         {
@@ -768,7 +792,7 @@ public static class AcceptanceRegressionScenario
         }
         BrushDrawCommand gas = Create(240, 215, 25, materials.Gas, 0, 0);
         gas.Density = 0.72f;
-        gas.Seed = 6002;
+        gas.Seed = 6002 ^ scenarioSeed;
         return [gas];
     }
 

@@ -58,6 +58,7 @@ public sealed class AcceptanceRegressionHarness
             "hydro" or "acceptance_hydro" => AcceptanceScenarioMode.Hydro,
             "slope" or "acceptance_slope" => AcceptanceScenarioMode.Slope,
             "gas" or "acceptance_gas" => AcceptanceScenarioMode.Gas,
+            "gas_brush_fps" => AcceptanceScenarioMode.GasBrushFps,
             "water_stress" or "stress_water" => AcceptanceScenarioMode.WaterStress,
             "flat_surface" or "surface" => AcceptanceScenarioMode.FlatSurface,
             "water_drain" or "drain" => AcceptanceScenarioMode.WaterDrain,
@@ -183,6 +184,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.Hydro => 1200,
                 AcceptanceScenarioMode.Slope => 600,
                 AcceptanceScenarioMode.Gas => 900,
+                AcceptanceScenarioMode.GasBrushFps => (uint)(4 * (int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_TARGET_FPS"), out int fps) ? fps : 60)),
                 AcceptanceScenarioMode.WaterStress => 180,
                 AcceptanceScenarioMode.FlatSurface => 1200,
                 AcceptanceScenarioMode.WaterDrain => 1800,
@@ -281,6 +283,11 @@ public sealed class AcceptanceRegressionHarness
         SimulationDispatchCoordinator dispatchCoordinator,
         GpuTemperatureProbe temperatureProbe)
     {
+        if (Mode == AcceptanceScenarioMode.GasBrushFps &&
+            Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_GAS_BRUSH_PAUSED") == "1")
+        {
+            settings.Paused = true;
+        }
         phaseAcceptance.ApplyRuntimeControls(frame, settings, dispatchCoordinator);
         if (Mode == AcceptanceScenarioMode.TemperatureTool)
         {
@@ -474,6 +481,12 @@ public sealed class AcceptanceRegressionHarness
             }
             return ready;
         }
+        if (Mode == AcceptanceScenarioMode.Gas)
+        {
+            bool ready = thermalCheckpoints.Count == 0 && frame >= 2;
+            if (ready) checkpointTick = frame;
+            return ready;
+        }
         if (Mode is AcceptanceScenarioMode.SteamPuff or AcceptanceScenarioMode.SteamJet or AcceptanceScenarioMode.SteamObstacle)
         {
             uint[] checkpoints = Mode == AcceptanceScenarioMode.SteamObstacle
@@ -568,7 +581,9 @@ public sealed class AcceptanceRegressionHarness
     }
 
     public float AdjustElapsedSeconds(float elapsedSeconds) =>
-        phaseAcceptance.AdjustElapsedSeconds(elapsedSeconds);
+        Mode == AcceptanceScenarioMode.GasBrushFps
+            ? 1f / (int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_TARGET_FPS"), out int fps) ? fps : 60)
+            : phaseAcceptance.AdjustElapsedSeconds(elapsedSeconds);
 
     public bool CanBeginFinalCapture(uint frame, SimulationDispatchCoordinator dispatchCoordinator) =>
         Mode == AcceptanceScenarioMode.SteamSelfCooling
@@ -632,7 +647,7 @@ public sealed class AcceptanceRegressionHarness
         // PNG-артефакты диагностики — измерительный материал. Они всегда
         // снимаются в сопоставимом с TPT Nothing Display режиме и не зависят
         // от последнего состояния пользовательского тумблера.
-        settings.RenderWithoutEffects = true;
+        settings.RenderWithoutEffects = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_RENDER_EFFECTS") != "1";
         // Сцены acceptance-набора построены в замкнутом мире: вода стоит в
         // сосудах, песок опирается на стенки. С открытыми границами всё это
         // вытечет за край, поэтому здесь границы всегда сплошные.
@@ -697,7 +712,10 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.Slope when frame == 20 => "E_slope_fall",
             AcceptanceScenarioMode.Slope when frame == 599 => "E_slope_rest",
             AcceptanceScenarioMode.Gas when frame == 30 => "F_gas_rise",
-            AcceptanceScenarioMode.Gas when frame == 899 => "F_gas_spread",
+            AcceptanceScenarioMode.Gas when frame + 1 == CaptureFrame => "F_gas_spread",
+            AcceptanceScenarioMode.GasBrushFps when frame == 29 &&
+                Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_GAS_BRUSH_PAUSED") == "1" => "F_gas_paused_paint",
+            AcceptanceScenarioMode.GasBrushFps when frame + 1 == CaptureFrame => "F_gas_brush_fps",
             AcceptanceScenarioMode.FlatSurface when frame == 15 => "O_flat_stream_early",
             AcceptanceScenarioMode.FlatSurface when frame == 100 => "O_flat_stream_mid1",
             AcceptanceScenarioMode.FlatSurface when frame == 200 => "O_flat_stream_mid2",

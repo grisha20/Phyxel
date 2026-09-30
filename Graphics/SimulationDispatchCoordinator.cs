@@ -169,14 +169,17 @@ public sealed class SimulationDispatchCoordinator
     private bool previousSolidGravity;
     private bool previousHydraulicPressure;
     private bool presentationDirty = true;
+    private bool gasVisualNeedsRebuild = true;
     private bool finalizeCellularRest;
     private bool waterPressureRoutesDirty = true;
     private bool solidMotionNeedsCellular = true;
     private bool cellMaterialsDirty;
     private bool thermalActive;
     private readonly FixedStepThermalScheduler thermalScheduler = new();
-    private double airAccumulator;
     private double gasMotionAccumulator;
+    private ulong gasMotionTickIndex;
+    private readonly GasBrushQueue gasBrushQueue = new();
+    private readonly BrushDrawCommand[] immediateBrushCommands = new BrushDrawCommand[SimulationSettings.MaximumBrushCommands];
     private double combustionAccumulator;
     // Renderer::render_fire in TPT advances together with its 60 Hz particle
     // simulation.  Keeping this accumulator separate from presentation avoids
@@ -429,8 +432,29 @@ public sealed class SimulationDispatchCoordinator
         SimulationFrameConstants constants = CreateConstants(settings, commands);
         if (commands.Length > 0 && resources.IsSimulationAllocated)
         {
-            DispatchBrush(resources, commands, ref constants);
-            cellMaterialsDirty |= ContainsGridTopologyCommand(commands);
+            int immediateCount = 0;
+            bool gasHeld = false;
+            foreach (BrushDrawCommand command in commands)
+            {
+                bool scheduledGas = false;
+                if (!settings.Paused && command.Mode == BrushCommandMode.Material)
+                {
+                    MaterialProperties material = materialRegistry[command.MaterialIndex].Properties;
+                    scheduledGas = material.SimulationKind == (uint)MaterialSimulationKind.Gas &&
+                        (material.Flags & (uint)(MaterialFlags.Flame | MaterialFlags.Smoke)) == 0;
+                }
+                if (scheduledGas)
+                {
+                    gasHeld = true;
+                    if (!gasBrushQueue.Capture(command)) continue;
+                }
+                immediateBrushCommands[immediateCount++] = command;
+            }
+            if (!gasHeld) gasBrushQueue.Reset();
+            DispatchBrush(resources, immediateBrushCommands.AsSpan(0, immediateCount), ref constants);
+            bool topologyCommands = ContainsGridTopologyCommand(commands);
+            cellMaterialsDirty |= topologyCommands;
+            gasVisualNeedsRebuild |= topologyCommands;
             RegisterActivity(
                 commands,
                 settings.Width,
@@ -438,6 +462,10 @@ public sealed class SimulationDispatchCoordinator
                 settings.HydraulicPressure);
             worldHasMatter |= containsMaterialCommand;
             presentationDirty = true;
+        }
+        else
+        {
+            gasBrushQueue.Release();
         }
 
         if (settings.SolidGravity && !previousSolidGravity)
@@ -583,33 +611,11 @@ public sealed class SimulationDispatchCoordinator
             presentationDirty = true;
         }
 
-        // TPT advances the air field before particles consume it.  Therefore
-        // this pass reads the particle state left by the previous tick, and
-        // the gas carrier below moves through the freshly solved flow.
-        if (settings.AirSimulation && resources.IsSimulationAllocated && !settings.Paused)
-        {
-            airAccumulator = Math.Min(
-                airAccumulator + Math.Clamp(elapsedSeconds, 0, FixedAirStep * MaximumAirTicksPerFrame),
-                FixedAirStep * MaximumAirTicksPerFrame);
-            int airTicks = 0;
-            while (airAccumulator + 1e-9 >= FixedAirStep && airTicks < MaximumAirTicksPerFrame)
-            {
-                airAccumulator -= FixedAirStep;
-                airTicks++;
-                airTickIndex++;
-                DispatchAirSimulation(resources, unchecked((uint)airTickIndex));
-            }
-            if (airTicks > 0)
-            {
-                presentationDirty = true;
-            }
-        }
-        else if (airFieldPopulated && resources.IsSimulationAllocated)
+        if (!settings.AirSimulation && airFieldPopulated && resources.IsSimulationAllocated)
         {
             // Выключили на ходу — стереть поле, иначе застывший шлейф останется
             // висеть в режиме отображения давления.
             DispatchAirClear(resources);
-            airAccumulator = 0;
             presentationDirty = true;
         }
         airFieldPopulated = settings.AirSimulation && resources.IsSimulationAllocated;
@@ -617,17 +623,40 @@ public sealed class SimulationDispatchCoordinator
         // Fixed 60 Hz deterministic gas carrier.  This deliberately follows
         // air: FIRE and SMKE are tracers of the just-solved field, as in TPT's
         // BeforeSim -> UpdateParticles order.
-        if (gasMatter && resources.IsSimulationAllocated && !settings.Paused)
+        if (resources.IsSimulationAllocated && !settings.Paused && (gasMatter || settings.AirSimulation))
         {
             gasMotionAccumulator = Math.Min(
                 gasMotionAccumulator + Math.Clamp(elapsedSeconds, 0, FixedAirStep * MaximumAirTicksPerFrame),
                 FixedAirStep * MaximumAirTicksPerFrame);
             int gasMotionTicks = 0;
-            while (gasMotionAccumulator + 1e-9 >= FixedAirStep && gasMotionTicks < MaximumAirTicksPerFrame)
+            // elapsedSeconds arrives as float. Its rounding at 100 FPS must
+            // not lose the last 60 Hz tick at an otherwise exact checkpoint.
+            while (gasMotionAccumulator + 1e-6 >= FixedAirStep && gasMotionTicks < MaximumAirTicksPerFrame)
             {
                 gasMotionAccumulator -= FixedAirStep;
                 gasMotionTicks++;
-                DispatchGasMotion(resources, ref constants, settings.AirSimulation);
+                gasMotionTickIndex++;
+                ReadOnlySpan<BrushDrawCommand> gasCommands = gasBrushQueue.Tick();
+                if (!gasCommands.IsEmpty)
+                {
+                    uint previousFrame = constants.FrameIndex;
+                    constants.FrameIndex = unchecked((uint)gasMotionTickIndex);
+                    DispatchBrush(resources, gasCommands, ref constants);
+                    constants.FrameIndex = previousFrame;
+                    cellMaterialsDirty = true;
+                    RegisterActivity(gasCommands, settings.Width, settings.Height, settings.HydraulicPressure);
+                    worldHasMatter = true;
+                }
+                gasBrushQueue.Consumed();
+                // Interleave each air tick and its particle tick. Batched air
+                // updates at 30 FPS would otherwise consume stale gas impulses.
+                if (settings.AirSimulation)
+                {
+                    airTickIndex++;
+                    DispatchAirSimulation(resources, unchecked((uint)airTickIndex));
+                }
+                constants.DebugReserved2 = unchecked((uint)gasMotionTickIndex);
+                if (gasMatter) DispatchGasMotion(resources, ref constants, settings.AirSimulation);
             }
             if (gasMotionTicks > 0)
             {
@@ -744,7 +773,18 @@ public sealed class SimulationDispatchCoordinator
         constants.SolidGravity = settings.SolidGravity ? 1u : 0u;
         if (presentationDirty && resources.IsSimulationAllocated)
         {
+            if (settings.Paused && gasVisualNeedsRebuild)
+            {
+                // Editing on pause must be visible immediately, and erased
+                // gas must not leave a frozen render-only trail behind it.
+                RawInt4 zero = new(0, 0, 0, 0);
+                resources.Context.ClearUnorderedAccessView(resources.GasVisual.UnorderedView, zero);
+                resources.Context.ClearUnorderedAccessView(resources.GasVisualScratch.UnorderedView, zero);
+                DispatchGasVisual(resources, decay: false);
+                gasVisualNeedsRebuild = false;
+            }
             DispatchComposition(resources, ref constants, fireGlowTicks);
+            if (fireGlowTicks > 0) gasVisualNeedsRebuild = false;
             lastCompositionFrame = frameIndex;
             presentationDirty = false;
         }
@@ -1312,10 +1352,13 @@ public sealed class SimulationDispatchCoordinator
         {
             DispatchFireGlowDeposit(resources);
             DispatchFireGlowDiffuse(resources);
+            DispatchGasVisual(resources, decay: false);
+            DispatchGasVisual(resources, decay: true);
         }
         if (fireGlowTicks > 0)
         {
             DispatchFireGlowDeposit(resources);
+            DispatchGasVisual(resources, decay: false);
         }
         constants.SimulationPhase = collect ? 1u : 0u;
         UpdateConstants(context, resources, ref constants);
@@ -1328,13 +1371,14 @@ public sealed class SimulationDispatchCoordinator
             resources.BodyFlags.View,
             resources.PathBlockerMasks.View,
             resources.FireGlow.View,
-            resources.Air.View);
+            resources.Air.View,
+            resources.GasVisual.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.CompositionTargets.WriteView,
             resources.Statistics.WriteUnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 6, 2);
+        Unbind(context, 7, 2);
         if (collect)
         {
             resources.Statistics.Swap();
@@ -1346,6 +1390,7 @@ public sealed class SimulationDispatchCoordinator
         if (fireGlowTicks > 0)
         {
             DispatchFireGlowDiffuse(resources);
+            DispatchGasVisual(resources, decay: true);
         }
     }
 
@@ -1393,6 +1438,8 @@ public sealed class SimulationDispatchCoordinator
         // висеть зарево, а новый мазок огня попадает в остаточный воздушный
         // вихрь и разлетается ещё до того, как создаст собственный поток.
         DispatchFireGlowClear(resources);
+        resources.Context.ClearUnorderedAccessView(resources.GasVisual.UnorderedView, zero);
+        resources.Context.ClearUnorderedAccessView(resources.GasVisualScratch.UnorderedView, zero);
         DispatchAirClear(resources);
     }
 
@@ -1504,8 +1551,9 @@ public sealed class SimulationDispatchCoordinator
         gasMatter = false;
         gasScheduler.Reset();
         ResetGasTiming();
-        airAccumulator = 0;
         gasMotionAccumulator = 0;
+        gasMotionTickIndex = 0;
+        gasBrushQueue.Reset();
         combustionAccumulator = 0;
         fireGlowAccumulator = 0;
         airFieldPopulated = false;
@@ -1515,6 +1563,7 @@ public sealed class SimulationDispatchCoordinator
         topologyDirty = false;
         settledObservations = 0;
         presentationDirty = dirtyPresentation;
+        gasVisualNeedsRebuild = dirtyPresentation;
         finalizeCellularRest = false;
         waterPressureRoutesDirty = true;
         solidMotionNeedsCellular = true;
@@ -1707,6 +1756,28 @@ public sealed class SimulationDispatchCoordinator
         Unbind(context, 2, 2);
     }
 
+    private static void DispatchGasVisual(GpuSimulationResources resources, bool decay)
+    {
+        DeviceContext context = resources.Context;
+        FireGlowConstants constants = new()
+        {
+            FireGlowWidth = (uint)resources.AirWidth,
+            FireGlowHeight = (uint)resources.AirHeight,
+            FireGlowGridWidth = (uint)resources.Width,
+            FireGlowGridHeight = (uint)resources.Height
+        };
+        context.UpdateSubresource(ref constants, resources.FireGlowConstants);
+        context.ComputeShader.SetConstantBuffer(0, resources.FireGlowConstants);
+        context.ComputeShader.SetShaderResources(0, resources.Materials.View, resources.Grid.ReadView);
+        context.ComputeShader.SetUnorderedAccessViews(0,
+            resources.GasVisual.UnorderedView, resources.GasVisualScratch.UnorderedView);
+        int groupsX = DivideRoundUp(resources.AirWidth, 8);
+        int groupsY = DivideRoundUp(resources.AirHeight, 8);
+        RunAirPass(context, decay ? resources.GasVisualDiffuseShader : resources.GasVisualDepositShader, groupsX, groupsY);
+        if (decay) RunAirPass(context, resources.GasVisualCommitShader, groupsX, groupsY);
+        Unbind(context, 2, 2);
+    }
+
     private static void DispatchFireGlowClear(GpuSimulationResources resources)
     {
         if (resources.FireGlowClearShader is null)
@@ -1845,7 +1916,7 @@ public sealed class SimulationDispatchCoordinator
         {
             // Номер подшага уходит в шейдер и входит в seed случайности.
             constants.GasSubStep = unchecked((uint)step) + 1u;
-            uint[] order = GasMotionPhaseOrders[(step + (int)(frameIndex & 1u)) % GasMotionPhaseOrders.Length];
+            uint[] order = GasMotionPhaseOrders[(step + (int)((gasMotionTickIndex - 1) & 1u)) % GasMotionPhaseOrders.Length];
             foreach (uint phase in order)
             {
                 constants.SimulationPhase = phase;
@@ -1905,7 +1976,7 @@ public sealed class SimulationDispatchCoordinator
         // obstacle branch eight times. Doing so here made FIRE teleport along
         // the whole plate and left only a thin, old red shelf.
         constants.GasSubStep = 0;
-        uint[] collisionOrder = (frameIndex & 1u) == 0
+        uint[] collisionOrder = ((gasMotionTickIndex - 1) & 1u) == 0
             ? [85, 86, 87, 88]
             : [88, 87, 86, 85];
         foreach (uint phase in collisionOrder)
@@ -1950,6 +2021,16 @@ public sealed class SimulationDispatchCoordinator
             Unbind(context, 2, 12);
             DispatchSteamJetBlockingFrameObserver(context, resources);
         }
+        // Ordinary gases resolve all blocked axes once, against the stable
+        // post-movement grid. FIRE/SMKE retain their existing surface fallback.
+        BindGasMotionSolver(context, resources);
+        constants.SimulationPhase = 90;
+        constants.DispatchOffsetX = 0;
+        constants.DispatchOffsetY = 0;
+        constants.DispatchExtentX = (uint)resources.Width;
+        constants.DispatchExtentY = (uint)resources.Height;
+        UpdateConstants(context, resources, ref constants);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
         constants.SimulationPhase = previousPhase;
         constants.GasSubStep = 0;
         Unbind(context, 2, 12);
