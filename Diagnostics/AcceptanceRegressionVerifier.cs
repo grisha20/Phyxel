@@ -122,6 +122,8 @@ public static class AcceptanceRegressionVerifier
                 out report),
             AcceptanceScenarioMode.HydraulicSurface or AcceptanceScenarioMode.HydraulicBalance =>
                 HydraulicsAcceptance.Validate(mode, snapshot, materialRegistry, thermalCheckpoints, out report),
+            AcceptanceScenarioMode.WaterConvection or AcceptanceScenarioMode.WaterConvectionPause or AcceptanceScenarioMode.WaterConvectionHeated =>
+                WaterConvectionAcceptance.Validate(mode, snapshot, materialRegistry, thermalCheckpoints, artifactDirectory, out report),
             AcceptanceScenarioMode.Slope => MaterialRegressionVerifier.ValidateSlope(
                 snapshot,
                 materials.Sand,

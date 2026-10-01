@@ -150,6 +150,7 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? SolidDisplacementApplyShader { get; init; }
     public ComputeShader? CompositionShader { get; init; }
     public ComputeShader? ThermalDiffusionShader { get; init; }
+    public ComputeShader? WaterConvectionShader { get; init; }
     public ComputeShader? AirInjectShader { get; init; }
     public ComputeShader? AirPressureShader { get; init; }
     public ComputeShader? AirVelocityShader { get; init; }
@@ -182,6 +183,7 @@ public sealed class GpuSimulationResources : IDisposable
         EmissionResolveShader?.Dispose();
         TransientLifecycleShader?.Dispose();
         ThermalDiffusionShader?.Dispose();
+        WaterConvectionShader?.Dispose();
         AirInjectShader?.Dispose();
         AirPressureShader?.Dispose();
         AirVelocityShader?.Dispose();

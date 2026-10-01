@@ -242,7 +242,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         Buffer phaseConstants = CreateConstantBuffer<PhaseTransitionConstants>();
         GpuStructuredBuffer<uint> phaseSummary = new(Device, 1);
         string? thermalTestMode = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_MODE");
-        GpuStructuredBuffer<ThermalEnergyLedgerCell>? thermalLedger = thermalTestMode is "thermal_devices" or "steam_apparatus"
+        GpuStructuredBuffer<ThermalEnergyLedgerCell>? thermalLedger = thermalTestMode is "thermal_devices" or "steam_apparatus" or
+            "water_convection" or "water_convection_pause" or "water_convection_heated"
             ? new(Device, width * height) : null;
         Buffer? thermalEnergyStaging = thermalLedger is null ? null : CreateReadStagingBuffer(width * height * 8);
         if (thermalLedger is not null)
@@ -561,6 +562,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SolidDisplacementApplyShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "ApplyHullWaterDisplacement") : null,
             CompositionShader = allocateSimulation ? CompileShader("RenderComposition.hlsl") : null,
             ThermalDiffusionShader = allocateSimulation ? CompileShader("ThermalDiffusion.hlsl") : null,
+            WaterConvectionShader = allocateSimulation ? CompileShader("WaterConvection.hlsl") : null,
             OxidizerTransportShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSTransport") : null,
             OxidizerConsumeShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSConsume") : null,
             AirInjectShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSInject") : null,

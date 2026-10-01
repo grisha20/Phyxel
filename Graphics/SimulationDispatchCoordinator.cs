@@ -675,8 +675,10 @@ public sealed class SimulationDispatchCoordinator
         lastThermalTicksPerFrame = thermalTicks;
         for (int tick = 0; tick < thermalTicks; tick++)
         {
+            uint thermalTick = unchecked((uint)(thermalScheduler.TotalTicks -
+                (ulong)thermalTicks + (ulong)tick + 1));
             bool measure = thermalScheduler.TotalTicks >= 40 && !thermalTimingPending;
-            DispatchThermalDiffusion(resources, measure);
+            DispatchThermalDiffusion(resources, measure, thermalTick, liquidMatter);
             if (materialRegistry.RegistryHasContactTransitions && contactTransitionPotential)
             {
                 uint tickIndex = unchecked((uint)(thermalScheduler.TotalTicks -
@@ -1595,7 +1597,8 @@ public sealed class SimulationDispatchCoordinator
         ResetActiveRegion();
     }
 
-    private void DispatchThermalDiffusion(GpuSimulationResources resources, bool measure)
+    private void DispatchThermalDiffusion(GpuSimulationResources resources, bool measure,
+        uint tickIndex, bool convectWater)
     {
         ThermalSimulationConstants constants = new()
         {
@@ -1611,6 +1614,9 @@ public sealed class SimulationDispatchCoordinator
             context.Begin(resources.ThermalTimestampDisjointQuery);
             context.End(resources.ThermalTimestampStartQuery);
         }
+        // Independent of cellular sleep, hydraulic mode and render FPS.
+        // Same-water rotations preserve occupancy, so material/path maps stay valid.
+        if (convectWater) DispatchWaterConvection(resources, tickIndex);
         context.UpdateSubresource(ref constants, resources.ThermalConstants);
         context.ComputeShader.Set(resources.ThermalDiffusionShader);
         context.ComputeShader.SetConstantBuffer(0, resources.ThermalConstants);
@@ -1633,6 +1639,31 @@ public sealed class SimulationDispatchCoordinator
         }
         Unbind(context, 2, resources.ThermalEnergyLedger is null ? 1 : 2);
         resources.Grid.Swap();
+    }
+
+    private void DispatchWaterConvection(GpuSimulationResources resources, uint tickIndex)
+    {
+        DeviceContext context = resources.Context;
+        SimulationFrameConstants constants = new()
+        {
+            Width = (uint)resources.Width, Height = (uint)resources.Height,
+            FrameIndex = tickIndex,
+            CommandCount = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Water)
+        };
+        context.ComputeShader.Set(resources.WaterConvectionShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.ReadUnorderedView);
+        for (uint pass = 0; pass < 4; pass++)
+        {
+            uint parity = (tickIndex & 1) == 0 ? pass : 3 - pass;
+            constants.SimulationPhase = parity;
+            constants.DispatchOffsetX = parity & 1;
+            constants.DispatchOffsetY = parity >> 1;
+            context.UpdateSubresource(ref constants, resources.FrameConstants);
+            context.Dispatch(DivideRoundUp((resources.Width + 1) / 2, 16),
+                DivideRoundUp((resources.Height + 1) / 2, 16), 1);
+        }
+        Unbind(context, 0, 1);
     }
 
     /// <summary>

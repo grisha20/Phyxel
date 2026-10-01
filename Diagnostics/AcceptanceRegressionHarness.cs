@@ -58,6 +58,9 @@ public sealed class AcceptanceRegressionHarness
             "hydro" or "acceptance_hydro" => AcceptanceScenarioMode.Hydro,
             "hydraulic_surface" => AcceptanceScenarioMode.HydraulicSurface,
             "hydraulic_balance" => AcceptanceScenarioMode.HydraulicBalance,
+            "water_convection" => AcceptanceScenarioMode.WaterConvection,
+            "water_convection_pause" => AcceptanceScenarioMode.WaterConvectionPause,
+            "water_convection_heated" => AcceptanceScenarioMode.WaterConvectionHeated,
             "slope" or "acceptance_slope" => AcceptanceScenarioMode.Slope,
             "gas" or "acceptance_gas" => AcceptanceScenarioMode.Gas,
             "gas_brush_fps" => AcceptanceScenarioMode.GasBrushFps,
@@ -195,6 +198,8 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.Hydro => 1200,
                 AcceptanceScenarioMode.HydraulicSurface => 900,
                 AcceptanceScenarioMode.HydraulicBalance => 1200,
+                AcceptanceScenarioMode.WaterConvection or AcceptanceScenarioMode.WaterConvectionHeated => (uint)(60 * WaterConvectionAcceptance.Fps),
+                AcceptanceScenarioMode.WaterConvectionPause => 60,
                 AcceptanceScenarioMode.Slope => 600,
                 AcceptanceScenarioMode.Gas => 900,
                 AcceptanceScenarioMode.GasBrushFps => (uint)(4 * (int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_TARGET_FPS"), out int fps) ? fps : 60)),
@@ -271,6 +276,7 @@ public sealed class AcceptanceRegressionHarness
             : OxidizerAcceptance.Create(Mode, width, height, materialRegistry) ??
                 CoalFireAcceptance.Create(Mode, width, height, materialRegistry) ??
                 HydraulicsAcceptance.Create(Mode, width, height, materialRegistry) ??
+                WaterConvectionAcceptance.Create(Mode, width, height, materialRegistry) ??
                 ThermalAcceptanceScenario.Create(Mode, width, height, materialRegistry) ??
                 BrushEmptyOnlyAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry) ??
                 ContinuousBrushStrokeAcceptanceScenario.CreateInitialWorld(
@@ -472,6 +478,14 @@ public sealed class AcceptanceRegressionHarness
         out ulong checkpointTick)
     {
         checkpointTick = 0;
+        if (WaterConvectionAcceptance.IsMode(Mode))
+        {
+            ulong[] targets = [20, 100, 300, 600, 1000];
+            bool ready = thermalCheckpoints.Count < targets.Length &&
+                dispatchCoordinator.ThermalTicks >= targets[thermalCheckpoints.Count];
+            if (ready) checkpointTick = dispatchCoordinator.ThermalTicks;
+            return ready;
+        }
         uint[] hydraulicFrames = HydraulicsAcceptance.Checkpoints(Mode);
         if (hydraulicFrames.Length > 0)
         {
@@ -645,6 +659,7 @@ public sealed class AcceptanceRegressionHarness
     }
 
     public float AdjustElapsedSeconds(float elapsedSeconds) =>
+        WaterConvectionAcceptance.IsMode(Mode) ? 1f / WaterConvectionAcceptance.Fps :
         Mode == AcceptanceScenarioMode.CoalFire ? 1f / CoalFireAcceptance.Fps :
         Mode == AcceptanceScenarioMode.Oxidizer ? 1f / OxidizerAcceptance.Fps :
         Mode == AcceptanceScenarioMode.GasBrushFps
@@ -736,6 +751,10 @@ public sealed class AcceptanceRegressionHarness
         if (Mode == AcceptanceScenarioMode.ThermalDevices)
         {
             settings.Paused = frame < ThermalDeviceAcceptance.FramesAt60(30);
+        }
+        else if (Mode == AcceptanceScenarioMode.WaterConvectionPause)
+        {
+            settings.Paused = true;
         }
         else if (Mode == AcceptanceScenarioMode.TemperatureTool)
         {
