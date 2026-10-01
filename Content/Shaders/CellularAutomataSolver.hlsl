@@ -1084,6 +1084,38 @@ void PlanWaterColumnMove(
 // buffer is the missing per-particle state while GridCell remains the stable
 // serialized 40-byte world format.
 
+// A dense heavy gas needs a lateral concentration gradient in addition to
+// single-particle diffusion. Otherwise gravity and excluded grid occupancy
+// produce a granular heap. Sample the stable grid; never transfer mass here.
+float HeavyGasSideDensity(uint2 coordinate, int direction)
+{
+    float gas = 0;
+    float accessible = 0;
+    [unroll]
+    for (int y = -2; y <= 2; y++)
+    {
+        bool pathOpen = true;
+        [unroll]
+        for (int distance = 1; distance <= 3; distance++)
+        {
+            int2 p = int2(coordinate) + int2(direction * distance, y);
+            if (p.x < 0 || p.y < 0 || p.x >= int(Width) || p.y >= int(Height))
+                pathOpen = false;
+            if (!pathOpen) continue;
+            GridCell neighbor = Grid[uint(p.y) * Width + uint(p.x)];
+            if (neighbor.IsActive != 0 && CellKind(neighbor) != SimulationKindGas)
+            {
+                pathOpen = false;
+                continue;
+            }
+            accessible += 1;
+            if (neighbor.IsActive != 0) gas += 1;
+        }
+    }
+    // An impermeable side is not a vacuum. Suppress its gradient below.
+    return accessible > 0 ? gas / accessible : -1;
+}
+
 void IntegrateGasMotion(uint2 coordinate)
 {
     uint index = FlattenCoordinate(coordinate);
@@ -1148,9 +1180,17 @@ void IntegrateGasMotion(uint2 coordinate)
     // GasBuoyancy now has TPT gravity semantics: it is a velocity increment
     // per fixed tick and negative values rise because the y axis points down.
     float2 gravity = float2(0, material.GasBuoyancy);
+    float lateralPressure = 0;
+    if (material.GasBuoyancy > 0 && !legacySurfaceCarrier)
+    {
+        float leftDensity = HeavyGasSideDensity(coordinate, -1);
+        float rightDensity = HeavyGasSideDensity(coordinate, 1);
+        if (leftDensity >= 0 && rightDensity >= 0)
+            lateralPressure = (leftDensity - rightDensity) * material.GasDiffusion * 1.5;
+    }
     state.VelocityX = clamp(
         state.VelocityX * material.MotionLoss +
-            drift.x * material.MotionAdvection * GasAirVelocityScale + gravity.x + diffusionImpulse.x,
+            drift.x * material.MotionAdvection * GasAirVelocityScale + lateralPressure + diffusionImpulse.x,
         -GasMaximumSpeed,
         GasMaximumSpeed);
     state.VelocityY = clamp(
@@ -1429,11 +1469,8 @@ void ResolveGasHorizontalPair(uint2 leftCoordinate)
         return;
     }
 
-    // Sideways drift comes purely from the air, so nothing moves sideways
-    // unless something is actually pushing it. This applies to every gas, not
-    // only flame: smoke that stayed put while the fire blew sideways was the
-    // clearest sign the two were not being treated as one medium.
-    // Same rule as the vertical pass: each cell reads the air under itself.
+    // Move the pending integrated velocity, including air, diffusion and
+    // lateral crowding. Each disjoint pair owns its two cells in this pass.
     bool leftMoves = leftKind == SimulationKindGas &&
         GasCanEnter(leftMaterial, rightMaterial) &&
         GasMotion[leftIndex].OffsetX >= GasCellStepThreshold(leftMaterial);

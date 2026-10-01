@@ -15,6 +15,7 @@ cbuffer PhaseConstants : register(b0)
 StructuredBuffer<MaterialProperties> Materials : register(t0);
 RWStructuredBuffer<GridCell> Grid : register(u0);
 RWStructuredBuffer<uint> PhaseSummary : register(u1);
+RWStructuredBuffer<uint> PhaseEventCounters : register(u2);
 
 // Continuum gas leaves a very dilute numerical tail far beyond its visible
 // cloud. That tail must not nucleate liquid by itself when it touches a cold
@@ -177,5 +178,18 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         : 0u;
     cell.Lifetime = InitialMaterialLifetime(target, index);
     Grid[index] = cell;
+    if (PhaseReserved0 != 0)
+    {
+        if (source.SimulationKind == SimulationKindLiquid && target.SimulationKind == SimulationKindGas)
+        {
+            InterlockedAdd(PhaseEventCounters[0], 1);
+            if (coordinate.y >= PhaseHeight / 2) InterlockedAdd(PhaseEventCounters[3], 1);
+        }
+        if (source.SimulationKind == SimulationKindGas && target.SimulationKind == SimulationKindLiquid)
+        {
+            InterlockedAdd(PhaseEventCounters[1], 1);
+            if (coordinate.y < PhaseHeight / 2) InterlockedAdd(PhaseEventCounters[2], 1);
+        }
+    }
     InterlockedOr(PhaseSummary[0], BuildPhaseSummary(source, target));
 }

@@ -2718,7 +2718,8 @@ public sealed class SimulationDispatchCoordinator
             Height = (uint)resources.Height,
             MaterialCount = (uint)materialRegistry.Count,
             TickIndex = unchecked((uint)thermalScheduler.TotalTicks),
-            TickCount = (uint)Math.Max(1, thermalTicks)
+            TickCount = (uint)Math.Max(1, thermalTicks),
+            Reserved0 = resources.PhaseEventCounters is null ? 0u : 1u
         };
         DeviceContext context = resources.Context;
         context.ClearUnorderedAccessView(resources.PhaseSummary.UnorderedView, new RawInt4(0, 0, 0, 0));
@@ -2735,6 +2736,7 @@ public sealed class SimulationDispatchCoordinator
             0,
             resources.Grid.ReadUnorderedView,
             resources.PhaseSummary.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(2, resources.PhaseEventCounters?.UnorderedView);
         context.Dispatch(
             DivideRoundUp(resources.Width, 16),
             DivideRoundUp(resources.Height, 16),
@@ -2745,7 +2747,7 @@ public sealed class SimulationDispatchCoordinator
             context.End(resources.PhaseTimestampDisjointQuery);
             phaseTimingPending = true;
         }
-        Unbind(context, 1, 2);
+        Unbind(context, 1, 3);
 
         Span<bool> pendingSlots = stackalloc bool[resources.PhaseSummaryReadbackSlots.Length];
         for (int index = 0; index < pendingSlots.Length; index++)

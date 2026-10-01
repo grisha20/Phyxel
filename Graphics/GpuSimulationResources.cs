@@ -77,6 +77,8 @@ public sealed class GpuSimulationResources : IDisposable
     public required Buffer ContactTransitionConstants { get; init; }
     public required Buffer PhaseConstants { get; init; }
     public required GpuStructuredBuffer<uint> PhaseSummary { get; init; }
+    public GpuStructuredBuffer<uint>? PhaseEventCounters { get; init; }
+    public Buffer? PhaseEventStaging { get; init; }
     public required GpuPhaseSummaryReadbackSlot[] PhaseSummaryReadbackSlots { get; init; }
     public required Buffer CombustionConstants { get; init; }
     public required GpuStructuredBuffer<uint> CombustionSummary { get; init; }
@@ -287,6 +289,8 @@ public sealed class GpuSimulationResources : IDisposable
             slot.Dispose();
         }
         PhaseSummary.Dispose();
+        PhaseEventCounters?.Dispose();
+        PhaseEventStaging?.Dispose();
         PhaseConstants.Dispose();
         foreach (GpuPhaseSummaryReadbackSlot slot in CombustionSummaryReadbackSlots)
         {

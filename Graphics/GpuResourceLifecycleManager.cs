@@ -234,6 +234,11 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         Buffer contactTransitionConstants = CreateConstantBuffer<ContactTransitionConstants>();
         Buffer phaseConstants = CreateConstantBuffer<PhaseTransitionConstants>();
         GpuStructuredBuffer<uint> phaseSummary = new(Device, 1);
+        GpuStructuredBuffer<uint>? phaseEvents = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_MODE") == "steam_cycle"
+            ? new(Device, 4) : null;
+        Buffer? phaseEventStaging = phaseEvents is null ? null : CreateReadStagingBuffer(4 * sizeof(uint));
+        if (phaseEvents is not null)
+            Device.ImmediateContext.ClearUnorderedAccessView(phaseEvents.UnorderedView, new SharpDX.Mathematics.Interop.RawInt4());
         GpuPhaseSummaryReadbackSlot[] phaseSummaryReadbackSlots = new GpuPhaseSummaryReadbackSlot[3];
         for (int index = 0; index < phaseSummaryReadbackSlots.Length; index++)
         {
@@ -471,6 +476,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ContactTransitionConstants = contactTransitionConstants,
             PhaseConstants = phaseConstants,
             PhaseSummary = phaseSummary,
+            PhaseEventCounters = phaseEvents,
+            PhaseEventStaging = phaseEventStaging,
             PhaseSummaryReadbackSlots = phaseSummaryReadbackSlots,
             CombustionConstants = combustionConstants,
             CombustionSummary = combustionSummary,

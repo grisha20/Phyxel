@@ -15,6 +15,7 @@ RWStructuredBuffer<GridCell> DestinationGrid : register(u0);
 static const float MinimumThermalMass = 0.0001;
 static const float MaximumExchangeFraction = 0.80;
 static const float SameGasConductivityFloor = 0.16;
+static const float GasSurfaceConductivityFloor = 0.16;
 static const float DiagonalGasContactWeight = 0.5;
 static const float InteriorAmbientExposure = 0.04;
 
@@ -31,12 +32,24 @@ bool IsSameGas(GridCell cell, GridCell neighbor)
         (material.Flags & MaterialFlagFlame) == 0;
 }
 
+bool IsOrdinaryGasSurface(GridCell cell, GridCell neighbor)
+{
+    MaterialProperties a = Materials[cell.MaterialIndex];
+    MaterialProperties b = Materials[neighbor.MaterialIndex];
+    bool gasA = a.SimulationKind == SimulationKindGas &&
+        (a.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0;
+    bool gasB = b.SimulationKind == SimulationKindGas &&
+        (b.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0;
+    return (gasA && b.SimulationKind == SimulationKindSolid) ||
+        (gasB && a.SimulationKind == SimulationKindSolid);
+}
+
 float ContactHeatFlow(
     GridCell cell,
     float capacity,
     uint neighborIndex,
     float contactWeight,
-    bool sameGasOnly)
+    bool diagonalContact)
 {
     GridCell neighbor = SourceGrid[neighborIndex];
     if (neighbor.IsActive == 0)
@@ -45,7 +58,8 @@ float ContactHeatFlow(
     }
 
     bool sameGas = IsSameGas(cell, neighbor);
-    if (sameGasOnly && !sameGas)
+    bool gasSurface = IsOrdinaryGasSurface(cell, neighbor);
+    if (diagonalContact && !sameGas && !gasSurface)
     {
         return 0;
     }
@@ -67,13 +81,23 @@ float ContactHeatFlow(
         // molecular mixing without introducing mass redistribution here.
         contactConductivity = max(contactConductivity, SameGasConductivityFloor);
     }
+    if (gasSurface)
+    {
+        // Particle/wall contact represents unresolved gas mixing at a surface,
+        // not conduction through two stationary material slabs. Bound the
+        // interface by the solid's conductivity so insulators still insulate.
+        float solidConductivity = Materials[cell.MaterialIndex].SimulationKind == SimulationKindSolid
+            ? conductivityA : conductivityB;
+        contactConductivity = max(contactConductivity,
+            min(solidConductivity, GasSurfaceConductivityFloor));
+    }
     float neighborCapacity = EffectiveCapacity(neighbor);
     float exchangeFraction = min(
         MaximumExchangeFraction,
         ThermalExchangeRate * ThermalDeltaTime);
     float edgeCoefficient =
         min(capacity, neighborCapacity) * contactConductivity * exchangeFraction *
-        contactWeight / 4;
+        contactWeight / (gasSurface ? 6 : 4);
     return edgeCoefficient * (neighbor.Temperature - cell.Temperature);
 }
 
@@ -153,9 +177,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
 
-    // Diagonal contact is limited to identical gases. It removes visible
-    // thermal stripes between sequential packets while leaving solid/liquid
-    // thermal behavior unchanged.
+    // Include diagonal gas/surface contacts on both endpoints. The symmetric
+    // coefficient conserves exchanged energy; division by six bounds the
+    // four cardinal plus four half-weight diagonal contacts. Solid/liquid
+    // and combustion contacts retain their existing stencil and coefficients.
     if (coordinate.x > 0 && coordinate.y > 0)
         heatFlow += ContactHeatFlow(cell, capacity, index - ThermalWidth - 1,
             DiagonalGasContactWeight, true);

@@ -59,6 +59,9 @@ public sealed class AcceptanceRegressionHarness
             "slope" or "acceptance_slope" => AcceptanceScenarioMode.Slope,
             "gas" or "acceptance_gas" => AcceptanceScenarioMode.Gas,
             "gas_brush_fps" => AcceptanceScenarioMode.GasBrushFps,
+            "co2_layer" => AcceptanceScenarioMode.Co2Layer,
+            "steam_cycle" => AcceptanceScenarioMode.SteamCycle,
+            "steam_surface" => AcceptanceScenarioMode.SteamSurface,
             "water_stress" or "stress_water" => AcceptanceScenarioMode.WaterStress,
             "flat_surface" or "surface" => AcceptanceScenarioMode.FlatSurface,
             "water_drain" or "drain" => AcceptanceScenarioMode.WaterDrain,
@@ -228,6 +231,8 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.ContinuousBrushStroke => 3,
                 AcceptanceScenarioMode.CoalTypes => uint.MaxValue,
                 AcceptanceScenarioMode.GasUniformDistribution => 600,
+                AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle => 3600,
+                AcceptanceScenarioMode.SteamSurface => 180,
                 AcceptanceScenarioMode.SteamDistributionAndCooling => uint.MaxValue,
                 AcceptanceScenarioMode.SteamCloudTemperature => uint.MaxValue,
                 AcceptanceScenarioMode.PhaseDispatchSmoke => 240,
@@ -257,6 +262,7 @@ public sealed class AcceptanceRegressionHarness
                 CoalTypesAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry) ??
                 GasUniformDistributionAcceptanceScenario.CreateInitialWorld(
                     Mode, width, height, materialRegistry) ??
+                GasCycleAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry) ??
                 SteamDistributionAndCoolingAcceptanceScenario.CreateInitialWorld(
                     Mode, width, height, materialRegistry) ??
                 SteamCloudTemperatureAcceptanceScenario.CreateInitialWorld(
@@ -328,6 +334,8 @@ public sealed class AcceptanceRegressionHarness
 
     public void RecordAirPressureTrace(uint frame, GpuSimulationResources resources)
     {
+        if (Mode == AcceptanceScenarioMode.SteamCycle && frame % 300 == 0)
+            GasCycleAcceptanceScenario.RecordCounters(frame, resources);
         int airY = Mode switch
         {
             // Fine y=107 directly below the plate maps to coarse y=26.
@@ -484,6 +492,13 @@ public sealed class AcceptanceRegressionHarness
         if (Mode == AcceptanceScenarioMode.Gas)
         {
             bool ready = thermalCheckpoints.Count == 0 && frame >= 2;
+            if (ready) checkpointTick = frame;
+            return ready;
+        }
+        if (Mode is AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle)
+        {
+            uint[] frames = [2, 300, 600, 1200, 1800, 2400, 3000, 3600];
+            bool ready = thermalCheckpoints.Count < frames.Length && frame >= frames[thermalCheckpoints.Count];
             if (ready) checkpointTick = frame;
             return ready;
         }
@@ -699,6 +714,8 @@ public sealed class AcceptanceRegressionHarness
         }
         string? label = Mode switch
         {
+            AcceptanceScenarioMode.Co2Layer when frame % 600 == 599 => $"co2_layer_{frame + 1}",
+            AcceptanceScenarioMode.SteamCycle when frame % 600 == 599 => $"steam_cycle_{frame + 1}",
             AcceptanceScenarioMode.Bowl when frame == 125 => "A_water_2s",
             AcceptanceScenarioMode.Bowl when frame == 999 => "A_water_sand",
             AcceptanceScenarioMode.SolidGravity when frame == 59 => "B_gravity_off",

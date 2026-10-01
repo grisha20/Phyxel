@@ -15,14 +15,22 @@ if ($LASTEXITCODE -ne 0) { throw 'Gas review build failed' }
 foreach ($taskCheck in @('GAS_BRUSH','WORLD_CODEC','THERMAL_MATERIALS','THERMAL_DIFFUSION','PHASE_MATERIALS','PHASE_RUNTIME','COMBUSTION_MATERIALS')) {
     $taskVariable = 'Env:PHYXEL_VERIFY_' + $taskCheck
     Set-Item $taskVariable '1'
+    $taskCpuPreference = $ErrorActionPreference
     try {
+        # PowerShell 5 treats expected migration warnings on stderr as errors.
+        # Collect them, then decide success from the verifier's process exit.
+        $ErrorActionPreference = 'Continue'
         $taskCpuOutput = @(& dotnet (Join-Path $taskRepo 'bin/Debug/net8.0-windows/Phyxel.dll') 2>&1 | ForEach-Object { "$_" })
         $taskCpuExit = $LASTEXITCODE
+        $ErrorActionPreference = $taskCpuPreference
         $taskCpuOutput | Set-Content -LiteralPath (Join-Path $taskArtifacts ($taskCheck + '.log')) -Encoding UTF8
         if ($taskCpuExit -ne 0) { throw "CPU regression failed: $taskCheck" }
         Write-Host "GAS_REVIEW cpu=$taskCheck passed=True"
     }
-    finally { Remove-Item $taskVariable -ErrorAction SilentlyContinue }
+    finally {
+        $ErrorActionPreference = $taskCpuPreference
+        Remove-Item $taskVariable -ErrorAction SilentlyContinue
+    }
 }
 
 function Invoke-GasReviewCase([string]$mode, [string]$label, [int]$frames, [int]$fps=60, [int]$air=1, [int]$seed=71001, [bool]$effects=$false, [bool]$external=$false, [bool]$paused=$false) {
