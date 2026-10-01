@@ -151,6 +151,7 @@ public sealed class UiValueSlider
         float normalized = presets is null
             ? (Value - Minimum) / (Maximum - Minimum)
             : FindNearestPresetIndex(Value) / (float)(presets.Length - 1);
+        normalized = Math.Clamp(normalized, 0f, 1f);
         int filledWidth = (int)(Bounds.Width * normalized);
         if (filledWidth > 0)
         {

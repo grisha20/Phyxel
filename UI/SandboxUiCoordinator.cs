@@ -43,7 +43,9 @@ public sealed class SandboxUiCoordinator : IDisposable
         string temperature = value.Temperature.ToString(
             "0.0",
             System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
-        return $"Материал: {material.Name}   Температура: {temperature} °C";
+        string device = material.ThermalRegulator is null ? "" :
+            $"   Уставка: {((int)(value.Reserved & 0xffff) - 2732) / 10f:0.#} °C   Мощность: {(value.Reserved >> 16) / 10f:0.#}";
+        return $"Материал: {material.Name}   Температура: {temperature} °C{device}";
     }
     private readonly MaterialRegistry materialRegistry;
     private readonly UiFontSet fonts;
@@ -102,6 +104,8 @@ public sealed class SandboxUiCoordinator : IDisposable
     public bool TemperatureToolActive => leftToolbar.ActiveTool == PhyxelToolId.Temperature;
     public bool PanToolActive => leftToolbar.ActiveTool == PhyxelToolId.Pan;
     public float TargetTemperature => propertiesPanel.TargetTemperature;
+    public float DeviceTargetTemperature => propertiesPanel.DeviceTargetTemperature;
+    public float DeviceMaximumPower => propertiesPanel.DeviceMaximumPower;
     public float CameraZoom { get; set; } = 1f;
     internal PhyxelToolId ActiveTool
     {

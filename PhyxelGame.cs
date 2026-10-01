@@ -135,6 +135,17 @@ public sealed class PhyxelGame : Game
         resourceManager.PrepareSimulation(settings);
         dispatchCoordinator = new SimulationDispatchCoordinator(resourceManager, materialRegistry);
         userInterface = new SandboxUiCoordinator(materialRegistry, fonts, resourceManager);
+        if (!string.IsNullOrEmpty(uiScreenshotPath) &&
+            Environment.GetEnvironmentVariable("PHYXEL_UI_PREVIEW_MATERIAL") is { } previewId)
+        {
+            MaterialDefinition preview = materialRegistry[previewId];
+            userInterface.SelectedMaterial = preview.RuntimeIndex;
+            userInterface.ActiveTool = PhyxelToolId.Brush;
+            var layout = UiLayoutCalculator.Calculate(GraphicsDevice.Viewport, uiDpiOverride ?? 1);
+            var tab = userInterface.CategoryPalette.GetCategoryTabBounds(layout.BottomPalette, MaterialCategoryResolver.Resolve(preview));
+            var click = default(RawInputSnapshot) with { MousePosition = tab.Center, LeftDown = true, LeftPressed = true };
+            userInterface.CategoryPalette.Update(click, layout.BottomPalette, preview.RuntimeIndex, false, out _);
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_UI") == "1")
         {
             UiLayoutRegressionTests.RunAllTests(materialRegistry, fonts, userInterface);
@@ -215,7 +226,10 @@ public sealed class PhyxelGame : Game
                     .Properties.SimulationKind == MaterialSimulationKind.Tool,
                 userInterface.TemperatureToolActive,
                 userInterface.TargetTemperature,
-                userInterface.BlocksBrushInput);
+                userInterface.BlocksBrushInput,
+                materialRegistry[userInterface.SelectedMaterial].ThermalRegulator is not null,
+                userInterface.DeviceTargetTemperature,
+                userInterface.DeviceMaximumPower);
         try
         {
             uint acceptanceFrame = frameIndex;
@@ -421,7 +435,8 @@ public sealed class PhyxelGame : Game
 
     private void CaptureUiScreenshotIfRequested()
     {
-        if (uiScreenshotCaptured || string.IsNullOrWhiteSpace(uiScreenshotPath))
+        uint captureFrame = uint.TryParse(Environment.GetEnvironmentVariable("PHYXEL_UI_CAPTURE_FRAME"), out uint requestedFrame) ? requestedFrame : 1;
+        if (uiScreenshotCaptured || string.IsNullOrWhiteSpace(uiScreenshotPath) || frameIndex < captureFrame)
         {
             return;
         }
@@ -599,6 +614,7 @@ public sealed class PhyxelGame : Game
             $"solidSleeping={dispatchCoordinator.SolidSleeping} " +
             $"solidNeedsCellular={dispatchCoordinator.SolidMotionNeedsCellular} " +
             $"settledObservations={dispatchCoordinator.SettledObservations}");
+        ThermalDeviceAcceptance.CaptureLedger(currentResources, dispatchCoordinator.ThermalTicks);
         stateSerializer.BeginWorldCapture(currentResources);
         pendingWorldCapture = true;
         Console.WriteLine("PHYXEL_ACCEPTANCE_CAPTURE_BEGIN");

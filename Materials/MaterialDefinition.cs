@@ -46,7 +46,9 @@ public enum MaterialFlags : uint
     Smoke = 1u << 4,
 
     /// <summary>Reversible latent-heat liquid/vapour pair, without lifecycle.</summary>
-    PhaseEnthalpy = 1u << 5
+    PhaseEnthalpy = 1u << 5,
+    ThermalHeater = 1u << 6,
+    ThermalCooler = 1u << 7
 }
 
 public static class CoreMaterialIds
@@ -67,6 +69,8 @@ public static class CoreMaterialIds
     public const string Smoke = "core:smoke";
     public const string Co2 = "core:co2";
     public const string Fire = "core:fire";
+    public const string Heater = "core:heater";
+    public const string Cooler = "core:cooler";
     public const string Gunpowder = "core:gunpowder";
     public static IReadOnlyList<string> Required { get; } =
     [
@@ -85,7 +89,9 @@ public static class CoreMaterialIds
         StoneCoal,
         Smoke,
         Co2,
-        Fire
+        Fire,
+        Heater,
+        Cooler
     ];
 }
 
@@ -133,6 +139,8 @@ public sealed record MaterialMotionDefinition(
     float Loss,
     float Collision);
 
+public sealed record MaterialThermalRegulatorDefinition(bool Heating, float TargetTemperature, float MaximumPower);
+
 public sealed record MaterialDefinition(
     string Id,
     ushort RuntimeIndex,
@@ -149,6 +157,7 @@ public sealed record MaterialDefinition(
     public MaterialLifecycleDefinition? Lifecycle { get; init; }
     public MaterialLiquidContactTransitionDefinition? LiquidContactTransition { get; init; }
     public MaterialGasDefinition? Gas { get; init; }
+    public MaterialThermalRegulatorDefinition? ThermalRegulator { get; init; }
     public MaterialMotionDefinition Motion { get; init; } = new(
         MaterialRegistry.DefaultMotionAdvection,
         MaterialRegistry.DefaultMotionAirDrag,

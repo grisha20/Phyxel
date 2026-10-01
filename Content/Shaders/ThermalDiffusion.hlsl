@@ -6,11 +6,17 @@ cbuffer ThermalConstants : register(b0)
     float ThermalExchangeRate;
     uint ThermalWidth;
     uint ThermalHeight;
+    uint ObserveThermalEnergy;
+    uint ThermalReserved0;
+    uint ThermalReserved1;
+    uint ThermalReserved2;
 };
 
 StructuredBuffer<GridCell> SourceGrid : register(t0);
 StructuredBuffer<MaterialProperties> Materials : register(t1);
 RWStructuredBuffer<GridCell> DestinationGrid : register(u0);
+struct ThermalEnergyLedgerCell { float DeviceHeat; float AmbientHeat; };
+RWStructuredBuffer<ThermalEnergyLedgerCell> EnergyLedger : register(u1);
 
 #include "PhaseEnthalpy.hlsli"
 
@@ -197,6 +203,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             DiagonalGasContactWeight, true);
 
     MaterialProperties material = Materials[cell.MaterialIndex];
+    float ambientHeat = 0;
+    float deviceHeat = 0;
     if (HasPhaseEnthalpy(material))
         cell = SetCellSpecificEnthalpy(cell,
             CellSpecificEnthalpy(cell) + heatFlow / max(cell.Mass, MinimumThermalMass));
@@ -208,11 +216,29 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         float ambientFactor = 1.0 - exp(-ambientRate * ThermalDeltaTime);
         float temperatureChange =
             (material.AmbientTemperature - cell.Temperature) * saturate(ambientFactor);
+        ambientHeat = capacity * temperatureChange;
         if (HasPhaseEnthalpy(material))
             cell = SetCellSpecificEnthalpy(cell,
                 CellSpecificEnthalpy(cell) + material.HeatCapacity * temperatureChange);
         else
             cell.Temperature += temperatureChange;
+    }
+    if ((material.Flags & (MaterialFlagThermalHeater | MaterialFlagThermalCooler)) != 0)
+    {
+        float target = clamp(cell.Pressure, -273.15, 5000.0);
+        float limit = clamp(cell.Lifetime, 0, 3600.0) * ThermalDeltaTime;
+        float required = capacity * (target - cell.Temperature);
+        deviceHeat = (material.Flags & MaterialFlagThermalHeater) != 0
+            ? clamp(required, 0, limit) : clamp(required, -limit, 0);
+        cell.Temperature += deviceHeat / capacity;
+    }
+    if (ObserveThermalEnergy != 0)
+    {
+        // One invocation owns each entry; this observer never feeds physics.
+        ThermalEnergyLedgerCell ledger = EnergyLedger[index];
+        ledger.DeviceHeat += deviceHeat;
+        ledger.AmbientHeat += ambientHeat;
+        EnergyLedger[index] = ledger;
     }
     DestinationGrid[index] = cell;
 }

@@ -38,8 +38,8 @@ internal static class ThermalDiffusionRegressionVerifier
 
     private static void VerifyLayoutsAndShader()
     {
-        Require(Marshal.SizeOf<ThermalSimulationConstants>() == 16,
-            "ThermalSimulationConstants must be 16 bytes.");
+        Require(Marshal.SizeOf<ThermalSimulationConstants>() == 32,
+            "ThermalSimulationConstants must be 32 bytes.");
         Require(Marshal.SizeOf<TemperatureProbeConstants>() == 16,
             "TemperatureProbeConstants must be 16 bytes.");
         Require(Marshal.SizeOf<TemperatureProbeResult>() == 16,
@@ -48,7 +48,7 @@ internal static class ThermalDiffusionRegressionVerifier
             "BrushDrawCommand must be 48 bytes.");
         Require(Enum.GetUnderlyingType(typeof(BrushCommandMode)) == typeof(uint) &&
             (uint)BrushCommandMode.Material == 0 && (uint)BrushCommandMode.Erase == 1 &&
-            (uint)BrushCommandMode.SetTemperature == 2,
+            (uint)BrushCommandMode.SetTemperature == 2 && (uint)BrushCommandMode.ThermalDevice == 3,
             "BrushCommandMode C# values/layout are incorrect.");
         string shaderDirectory = Path.Combine(AppContext.BaseDirectory, "Content", "Shaders");
         string shared = File.ReadAllText(Path.Combine(shaderDirectory, "PhysicsShared.hlsli"));
@@ -193,6 +193,13 @@ internal static class ThermalDiffusionRegressionVerifier
             strokeCommands[0].EndX == 450 && strokeCommands[0].EndY == 170,
             "A fast pointer move was not encoded as one continuous capsule.");
 
+        BrushDrawCommand device = new CanvasBrushController().CreateCommands(
+            left, canvas, settings, 1, false, false, 500, false, true, 240, 600)[0];
+        Require(device.Mode == BrushCommandMode.ThermalDevice && device.TargetTemperature == 240 && BitConverter.UInt32BitsToSingle(device.Reserved) == 600,
+            "Device brush failed to carry independent setpoint and power.");
+        BrushDrawCommand deviceErase = new CanvasBrushController().CreateCommands(
+            right, canvas, settings, 1, false, false, 500, false, true, 240, 600)[0];
+        Require(deviceErase.Mode == BrushCommandMode.Erase, "Right-click did not erase a device.");
         GpuCommandEncoder encoder = new();
         BrushDrawCommand tooHot = temperature;
         tooHot.TargetTemperature = 6000;
@@ -375,6 +382,13 @@ internal static class ThermalDiffusionRegressionVerifier
                 materials,
                 new TemperatureProbeResult());
             string outside = SandboxUiCoordinator.FormatTemperatureProbe(materials, null);
+            string device = UiStatusBar.FormatTemperatureProbe(materials, new TemperatureProbeResult
+            {
+                IsActive = 1, MaterialIndex = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Heater),
+                Temperature = 20, Reserved = (uint)(-200 + 2732) | (5u << 16)
+            });
+            Require(device.Contains("цель -20", StringComparison.Ordinal) && device.Contains("P 0,5", StringComparison.Ordinal),
+                "Actual status bar lost device settings or fractional power.");
             Require(active.Contains("20,0 °C", StringComparison.Ordinal),
                 "Probe temperature is not formatted with one decimal and comma.");
             Require(empty.Contains("Температура: —", StringComparison.Ordinal) &&

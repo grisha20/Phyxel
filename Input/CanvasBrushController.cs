@@ -26,7 +26,10 @@ public sealed class CanvasBrushController
         bool selectedMaterialIsTool,
         bool temperatureToolActive,
         float targetTemperature,
-        bool pointerConsumedByUi)
+        bool pointerConsumedByUi,
+        bool thermalDevice = false,
+        float deviceTargetTemperature = 20,
+        float deviceMaximumPower = 0)
     {
         frameCommands.Clear();
         if (canvasBounds != previousCanvasBounds)
@@ -62,14 +65,14 @@ public sealed class CanvasBrushController
             ? BrushCommandMode.Erase
             : temperatureToolActive
                 ? BrushCommandMode.SetTemperature
-                : BrushCommandMode.Material;
+                : thermalDevice ? BrushCommandMode.ThermalDevice : BrushCommandMode.Material;
         AppendStrokeCommand(
             previousGridPosition,
             gridPosition,
             selectedMaterial,
             mode,
-            targetTemperature,
-            settings);
+            thermalDevice && !temperatureToolActive ? deviceTargetTemperature : targetTemperature,
+            settings, deviceMaximumPower);
         previousGridPosition = gridPosition;
         return frameCommands;
     }
@@ -80,7 +83,8 @@ public sealed class CanvasBrushController
         ushort material,
         BrushCommandMode mode,
         float targetTemperature,
-        SimulationSettings settings)
+        SimulationSettings settings,
+        float deviceMaximumPower)
     {
         frameCommands.Add(new BrushDrawCommand
         {
@@ -94,8 +98,10 @@ public sealed class CanvasBrushController
             Density = settings.SpawnDensity,
             Mode = mode,
             Seed = ++commandSeed,
-            Reserved = activeBodyId,
-            TargetTemperature = mode == BrushCommandMode.SetTemperature
+            Reserved = mode == BrushCommandMode.ThermalDevice
+                ? BitConverter.SingleToUInt32Bits(Math.Clamp(float.IsFinite(deviceMaximumPower) ? deviceMaximumPower : 0,
+                    0, ThermalRegulator.MaximumPower)) : activeBodyId,
+            TargetTemperature = mode is BrushCommandMode.SetTemperature or BrushCommandMode.ThermalDevice
                 ? Math.Clamp(
                     float.IsFinite(targetTemperature) ? targetTemperature : 20f,
                     MaterialRegistry.MinimumInitialTemperature,

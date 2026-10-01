@@ -85,7 +85,7 @@ public sealed class UiStatusBar
         return x + width + 16;
     }
 
-    private static string FormatTemperatureProbe(MaterialRegistry registry, TemperatureProbeResult? probe)
+    internal static string FormatTemperatureProbe(MaterialRegistry registry, TemperatureProbeResult? probe)
     {
         if (probe is null || probe.Value.IsActive == 0)
         {
@@ -101,6 +101,13 @@ public sealed class UiStatusBar
         }
 
         string tempStr = value.Temperature.ToString("0.0", CultureInfo.GetCultureInfo("ru-RU"));
+        if (material.ThermalRegulator is not null)
+        {
+            float target = ((int)(value.Reserved & 0xffff) - 2732) / 10f;
+            float power = (value.Reserved >> 16) / 10f;
+            return string.Create(CultureInfo.GetCultureInfo("ru-RU"),
+                $"{material.Name}: {tempStr} °C · цель {target:0.#} · P {power:0.#}");
+        }
         return $"Под курсором: {material.Name} ({tempStr} °C)";
     }
 }

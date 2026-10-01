@@ -32,6 +32,7 @@ public static class UiLayoutRegressionTests
         TestLayoutResolutionAndDpiMatrix();
         TestTopBarButtons(fonts);
         TestPanelControlBounds(registry, fonts);
+        TestDeviceControlBounds(registry, fonts);
         TestPropertiesActions(registry, fonts);
         TestToolAndMaterialPersistence(registry, fonts, coordinator);
         TestCategoryFiltering(registry, coordinator);
@@ -139,6 +140,37 @@ public static class UiLayoutRegressionTests
         }
 
         Console.WriteLine("[PASS] Top-bar bounds, text fit, and honest Settings behavior.");
+    }
+
+    private static void TestDeviceControlBounds(MaterialRegistry registry, UiFontSet fonts)
+    {
+        foreach ((int width, int height) in Resolutions) foreach (float dpi in DpiScales)
+        {
+            UiLayoutBounds layout = UiLayoutCalculator.Calculate(new Viewport(0, 0, width, height), dpi);
+            SpriteFont font = fonts.Select(dpi, layout.Scale);
+            UiPropertiesPanel panel = new();
+            SimulationSettings settings = new();
+            panel.Update(Input(new Point(-1, -1)), layout.RightPanel, font, settings,
+                PhyxelToolId.Brush, registry[CoreMaterialIds.Heater], out _);
+            Require(panel.DeviceTargetTemperature == 240 && panel.DeviceMaximumPower == 600, "Wrong heater brush defaults.");
+            Rectangle[] controls = [panel.BrushSliderBounds, panel.DeviceTemperatureBounds, panel.DevicePowerBounds,
+                panel.ScaleSliderBounds, panel.GravityToggleBounds, panel.HydraulicsToggleBounds,
+                panel.WithoutEffectsToggleBounds, panel.BoundariesToggleBounds, panel.AirFieldToggleBounds,
+                panel.ResetButtonBounds, panel.ClearButtonBounds];
+            for (int i = 0; i < controls.Length; i++)
+            {
+                Require(IsInside(controls[i], layout.RightPanel), $"Device control escaped {width}x{height} DPI {dpi}.");
+                for (int j = i + 1; j < controls.Length; j++)
+                    Require(!controls[i].Intersects(controls[j]), $"Device controls {i}/{j} overlap at {width}x{height} DPI {dpi}: {controls[i]} / {controls[j]}.");
+            }
+            panel.Update(Input(new Point(-1, -1)), layout.RightPanel, font, settings,
+                PhyxelToolId.Brush, registry[CoreMaterialIds.Cooler], out _);
+            Require(panel.DeviceTargetTemperature == 20 && panel.DeviceMaximumPower == 600, "Heater preferences leaked into cooler.");
+            panel.Update(Input(new Point(-1, -1)), layout.RightPanel, font, settings,
+                PhyxelToolId.Brush, registry[CoreMaterialIds.Heater], out _);
+            Require(panel.DeviceTargetTemperature == 240, "Heater preference was lost on selection.");
+        }
+        Console.WriteLine("[PASS] Device controls fit every resolution and DPI, with separate defaults.");
     }
 
     private static void TestPanelControlBounds(MaterialRegistry registry, UiFontSet fonts)
@@ -376,7 +408,7 @@ public static class UiLayoutRegressionTests
             [MaterialCategoryType.Solids] =
                 [CoreMaterialIds.Ice, CoreMaterialIds.Metal, CoreMaterialIds.Stone, CoreMaterialIds.Fixture, CoreMaterialIds.Wood],
             [MaterialCategoryType.Combustion] = [CoreMaterialIds.Fire],
-            [MaterialCategoryType.Tools] = [CoreMaterialIds.Eraser]
+            [MaterialCategoryType.Tools] = [CoreMaterialIds.Eraser, CoreMaterialIds.Heater, CoreMaterialIds.Cooler]
         };
 
         foreach (MaterialCategoryDefinition category in MaterialCategoryResolver.AllCategories)

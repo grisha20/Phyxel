@@ -423,7 +423,7 @@ public sealed class UiCategoryPalette
         if (previewCache.TryGetPreview(material.Id, out Texture2D preview))
         {
             Rectangle source = CalculateAspectFillSource(preview, destination);
-            spriteBatch.Draw(preview, destination, source, Color.White);
+            spriteBatch.Draw(preview, destination, source, material.ThermalRegulator is null ? Color.White : material.Color);
             return;
         }
 

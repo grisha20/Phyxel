@@ -20,7 +20,7 @@ internal static class GasCycleAcceptanceScenario
     public static SimulationWorldSnapshot? CreateInitialWorld(AcceptanceScenarioMode mode,
         int width, int height, MaterialRegistry materials)
     {
-        if (mode is not (AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamSurface or AcceptanceScenarioMode.SteamEnergy)) return null;
+        if (mode is not (AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamSurface or AcceptanceScenarioMode.SteamEnergy or AcceptanceScenarioMode.SteamApparatus or AcceptanceScenarioMode.ThermalDevices)) return null;
         if (width < 480 || height < 270) throw new InvalidOperationException("Gas cycle requires 480x270.");
         Events.Clear();
         byte[] bytes = new byte[width * height * Marshal.SizeOf<GridCell>()];
@@ -34,6 +34,10 @@ internal static class GasCycleAcceptanceScenario
             Fill(cells, width, 356, 80, 359, 243, fixture, 20, 1);
             Fill(cells, width, 228, 180, 251, 219,
                 materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2), 20, 1);
+        }
+        else if (mode == AcceptanceScenarioMode.ThermalDevices)
+        {
+            ThermalDeviceAcceptance.Populate(cells, width, materials);
         }
         else if (mode == AcceptanceScenarioMode.SteamEnergy)
         {
@@ -61,13 +65,24 @@ internal static class GasCycleAcceptanceScenario
             Fill(cells, width, 236, 234, 243, 239,
                 materials.GetRequiredRuntimeIndex(CoreMaterialIds.Water), 95, 1);
         }
+        if (mode == AcceptanceScenarioMode.SteamApparatus)
+        {
+            for (int y = 234; y <= 245; y++) for (int x = 184; x <= 295; x++)
+                if (cells[y * width + x].IsActive != 0) cells[y * width + x].Temperature = 20;
+            ThermalDeviceAcceptance.FillDevices(cells, width, materials, 184, 111, 295, 113, false, 20, 600);
+            ThermalDeviceAcceptance.FillDevices(cells, width, materials, 184, 242, 295, 244, true, 240, 600);
+        }
         var world = new SimulationWorldSnapshot(width, height, bytes);
-        if (mode == AcceptanceScenarioMode.SteamCycle)
+        if (mode == AcceptanceScenarioMode.ThermalDevices && ThermalDeviceAcceptance.Restarting)
+            world = ThermalDeviceAcceptance.Reload(materials);
+        if (mode is AcceptanceScenarioMode.SteamApparatus or AcceptanceScenarioMode.ThermalDevices)
+            ThermalDeviceAcceptance.SetInitial(world);
+        if (mode is AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamApparatus)
         {
             string directory = Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR") ?? "artifacts/gas-cycle";
             // Export on a worker: the game thread owns a synchronization
             // context, so synchronously awaiting file I/O there deadlocks.
-            Task.Run(() => new SimulationStateSerializer().SaveAsync(Path.Combine(directory, "steam-cycle.scene.json"),
+            Task.Run(() => new SimulationStateSerializer().SaveAsync(Path.Combine(directory, mode == AcceptanceScenarioMode.SteamApparatus ? "steam-apparatus.scene.json" : "steam-cycle.scene.json"),
                 new SimulationSettings(), (ushort)materials.GetRequiredRuntimeIndex(CoreMaterialIds.Steam),
                 world, materials)).GetAwaiter().GetResult();
         }
@@ -115,6 +130,8 @@ internal static class GasCycleAcceptanceScenario
         uint water = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
         var cells = MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid);
         Directory.CreateDirectory(directory);
+        if (mode == AcceptanceScenarioMode.ThermalDevices)
+            return ThermalDeviceAcceptance.ValidateDevices(snapshot, materials, directory, checkpoints, out report);
         if (mode == AcceptanceScenarioMode.SteamEnergy)
             return SteamEnergyAcceptance.Validate(snapshot, materials, directory, out report);
         if (mode == AcceptanceScenarioMode.SteamSurface)
@@ -143,7 +160,7 @@ internal static class GasCycleAcceptanceScenario
         {
             GridCell cell = cells[i];
             if (cell.IsActive == 0 || (cell.MaterialIndex != gas &&
-                !(mode == AcceptanceScenarioMode.SteamCycle && cell.MaterialIndex == water))) continue;
+                !(mode is AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamApparatus && cell.MaterialIndex == water))) continue;
             int x = i % snapshot.Width, y = i / snapshot.Width;
             mass += cell.Mass;
             if (cell.MaterialIndex == gas) gasMass += cell.Mass;
@@ -188,7 +205,13 @@ internal static class GasCycleAcceptanceScenario
             $"PHYXEL_STEAM_CYCLE mass={mass} steam={gasMass} evaporations={last.Evap} condensations={last.Cond} coldCondensations={last.Cold} hotEvaporations={last.Hot} leaks={leaks}");
         bool conservedCheckpoints = checkpoints.All(checkpoint =>
             WaterSteamMass(checkpoint.Snapshot, water, gas) is > 47.99 and < 48.01);
-        return Math.Abs(mass - 48) < 0.01 && conservedCheckpoints && leaks == 0 &&
+        bool energy = true;
+        if (mode == AcceptanceScenarioMode.SteamApparatus)
+        {
+            energy = ThermalDeviceAcceptance.Audit(snapshot, materials, directory, out string audit);
+            report += " " + audit;
+        }
+        return energy && Math.Abs(mass - 48) < 0.01 && conservedCheckpoints && leaks == 0 &&
             last.Cold > 48 && last.Hot > 48 && last.Cond > 48;
     }
 

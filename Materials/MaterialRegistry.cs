@@ -682,7 +682,8 @@ public sealed class MaterialRegistry
         float gasHotAir,
         float gasHazeStrength,
         MaterialMotionDefinition motion,
-        Color color)
+        Color color,
+        MaterialThermalRegulatorDefinition? regulator = null)
     {
         return new MaterialProperties
         {
@@ -698,6 +699,8 @@ public sealed class MaterialRegistry
             InitialTemperature = initialTemperature,
             ThermalConductivity = thermalConductivity,
             HeatCapacity = heatCapacity,
+            ThermalDeviceTargetTemperature = regulator?.TargetTemperature ?? 0,
+            ThermalDeviceMaximumPower = regulator?.MaximumPower ?? 0,
             AmbientTemperature = ambientTemperature,
             AmbientCoolingRate = ambientCoolingRate,
             GasDiffusion = gasDiffusion,

@@ -60,6 +60,10 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             0.12f, 0f, 0.8f, "#666666FF", 20f, 0.06f, 0.85f),
         new(CoreMaterialIds.Fire, MaterialSimulationKind.Gas, MaterialFlags.Flame,
             1.0f, 0f, 1.4f, "#FF3A08E8", 420f, 0.35f, 1.0f),
+        new(CoreMaterialIds.Heater, MaterialSimulationKind.Solid, MaterialFlags.ThermalHeater,
+            7.8f, 0.35f, 0f, "#EF734B", 20f, 1f, 0.13f),
+        new(CoreMaterialIds.Cooler, MaterialSimulationKind.Solid, MaterialFlags.ThermalCooler,
+            7.8f, 0.35f, 0f, "#50C9E8", 20f, 1f, 0.13f),
         new(CoreMaterialIds.Eraser, MaterialSimulationKind.Tool, MaterialFlags.None,
             0f, 0f, 0f, "#DE5858", 20f, 0f, 1f)
     ];
@@ -134,6 +138,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             VerifyCoreMaterials(registry);
             VerifyExternalMaterials(registry, materialErrors);
             VerifyGpuTable(registry);
+            await VerifyRegulatorSchemaAsync(directory);
             await VerifyInvalidCoreStopsLoadingAsync(directory);
         }
         finally
@@ -142,9 +147,45 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         }
     }
 
+    private static async Task VerifyRegulatorSchemaAsync(string parentDirectory)
+    {
+        string directory = Path.Combine(parentDirectory, "regulator-schema");
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "heater.json");
+        string original = await File.ReadAllTextAsync(Path.Combine(MaterialRegistry.ResolveCoreDirectory(), "heater.json"));
+        Action<System.Text.Json.Nodes.JsonNode>[] invalid =
+        [
+            n => n["thermal"]!["regulator"]!["maximumPower"] = -1,
+            n => n["thermal"]!["regulator"]!["maximumPower"] = 3601,
+            n => n["thermal"]!["regulator"]!["targetTemperature"] = -274,
+            n => n["thermal"]!["regulator"]!["mode"] = "typo",
+            n => n["thermal"]!["regulator"]!["unknown"] = 1,
+            n => n["kind"] = "liquid",
+            n => n["flags"] = new System.Text.Json.Nodes.JsonArray("movable-solid"),
+            n => n["physics"]!["density"] = 0
+        ];
+        foreach (var change in invalid)
+        {
+            var json = System.Text.Json.Nodes.JsonNode.Parse(original)!;
+            change(json);
+            await File.WriteAllTextAsync(path, json.ToJsonString());
+            bool rejected = false;
+            try { MaterialFileLoader.LoadCore(directory, MaterialRegistry.MaximumMaterials); }
+            catch (InvalidDataException) { rejected = true; }
+            Require(rejected, "Invalid regulator configuration was accepted.");
+        }
+        var disabled = System.Text.Json.Nodes.JsonNode.Parse(original)!;
+        disabled["thermal"]!["regulator"]!["maximumPower"] = 0;
+        await File.WriteAllTextAsync(path, disabled.ToJsonString());
+        var accepted = MaterialFileLoader.LoadCore(directory, MaterialRegistry.MaximumMaterials)[0];
+        Require(accepted.ThermalRegulator?.MaximumPower == 0 &&
+            accepted.Properties.ThermalDeviceTargetTemperature == 240, "Disabled device did not load.");
+        Console.WriteLine("PHYXEL_REGULATOR_SCHEMA invalid=8 disabledAccepted=1");
+    }
+
     private static void VerifyCoreMaterials(MaterialRegistry registry)
     {
-        Require(ExpectedCoreMaterials.Length == 18, "Expected bundled core material count changed.");
+        Require(ExpectedCoreMaterials.Length == 20, "Expected bundled core material count changed.");
         foreach (ExpectedMaterial expected in ExpectedCoreMaterials)
         {
             MaterialDefinition actual = registry[expected.Id];

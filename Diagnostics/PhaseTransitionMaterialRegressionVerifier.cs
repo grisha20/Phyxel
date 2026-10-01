@@ -61,6 +61,10 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             0.12f, 0, 0.8f, "#666666FF", 20, 0.06f, 0.85f),
         new(CoreMaterialIds.Fire, MaterialSimulationKind.Gas, MaterialFlags.Flame,
             1.0f, 0, 1.4f, "#FF3A08E8", 420, 0.35f, 1.0f),
+        new(CoreMaterialIds.Heater, MaterialSimulationKind.Solid, MaterialFlags.ThermalHeater,
+            7.8f, 0.35f, 0f, "#EF734B", 20f, 1f, 0.13f),
+        new(CoreMaterialIds.Cooler, MaterialSimulationKind.Solid, MaterialFlags.ThermalCooler,
+            7.8f, 0.35f, 0f, "#50C9E8", 20f, 1f, 0.13f),
         new(CoreMaterialIds.Eraser, MaterialSimulationKind.Tool, MaterialFlags.None,
             0, 0, 0, "#DE5858", 20, 0, 1)
     ];

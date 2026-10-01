@@ -30,18 +30,18 @@
 | 4 | `Mass` | `float` | Масса/заполнение. |
 | 8 | `VelocityX` | `float` | Горизонтальный импульс. |
 | 12 | `VelocityY` | `float` | Вертикальный импульс. |
-| 16 | `Pressure` | `float` | Гидравлическое состояние. |
+| 16 | `Pressure` | `float` | Гидравлика; у fixed thermal regulator — уставка. |
 | 20 | `IsActive` | `uint` | Нулевая клетка является empty. |
 | 24 | `BodyId` | `uint` | Принадлежность movable-solid body. |
 | 28 | `RestFrames` | `uint` | Состояние покоя. |
 | 32 | `Temperature` | `float` | Температура, °C. |
-| 36 | `Lifetime` | `float` | Остаточное время transient-материала. |
+| 36 | `Lifetime` | `float` | Lifecycle; у phase-enthalpy — фазовый прогресс, у regulator — мощность. |
 
 `LegacyGridCellV3V4` навсегда остаётся 32-байтным. Legacy v5 имеет stride 36. Codec переводит каждый layout по полям, без предположения о совпадении памяти.
 
 ## Таблица материалов
 
-`MaterialProperties` — packed структура 120 байт (30 четырёхбайтных полей). Порядок в C# и HLSL одинаков:
+`MaterialProperties` — packed структура 176 байт (44 четырёхбайтных поля). Порядок в C# и HLSL одинаков:
 
 1. flags, kind, density, friction, flow rate и RGBA;
 2. initial temperature, conductivity, heat capacity;
@@ -50,7 +50,9 @@
 5. minimum/maximum lifetime и decay target;
 6. maximum combustion temperature и latent heat;
 7. ambient temperature/cooling rate;
-8. liquid-contact target/rate.
+8. liquid-contact target/rate;
+9. gas diffusion/buoyancy/hot air и motion coefficients;
+10. gas haze strength, default device target/power (последние два поля — offsets 168/172).
 
 Отдельная `MaterialEmissionProperties` хранит runtime targets/rates для smoke, gas и flame. JSON всегда хранит string IDs; registry разрешает их только после стабилизации полного набора материалов.
 
@@ -86,6 +88,33 @@
 ```
 
 Текущая модель поддерживает общий переход granular-источника при контакте с liquid. Target должен быть granular; rate конечный и находится в `(0, 100]`. Вероятность считается из фиксированного `dt`, поэтому результат не зависит от render FPS.
+
+## Управляемые источники тепла
+
+`thermal.regulator` задаёт `mode: heating/cooling`, `targetTemperature` и
+`maximumPower`. Parser допускает только fixed solid с положительной плотностью,
+без phases, lifecycle, combustion, emissions и contact transition.
+Auto flags `ThermalHeater/ThermalCooler` исключают зависимость шейдера от core ID.
+
+Thermal pass работает с dt 0.05: после обычного теплообмена источник добавляет
+`q = clamp(C*(target-T), 0, power*dt)` или удаляет `q = clamp(..., -power*dt, 0)`.
+Это внешний источник/сток энергии; соседям тепло передаётся через контакт.
+Нулевая мощность оставляет устройство пассивным проводником.
+
+Brush mode 3 создаёт устройство либо меняет настройки того же материала,
+сохраняя его температуру и массу. `TargetTemperature` — уставка, `Reserved`
+передаёт IEEE float bits мощности; в остальных modes этот слот сохраняет BodyId.
+Temperature tool остаётся независимым внешним воздействием. Настройки блока
+записываются в существующие Pressure/Lifetime slots world v6.
+
+Probe SRV1 читает материал. Существующий 16-байтный результат использует
+Reserved только для regulator: low 16 bits — уставка в десятых градуса с
+offset 2732, high 16 bits — мощность в десятых единицы/с.
+
+Только acceptance modes `thermal_devices/steam_apparatus` выделяют observer
+UAV и staging для накопления Q устройства и Q среды. ThermalConstants теперь
+32 байта, C#/HLSL синхронны. Observer не участвует в физических решениях;
+обычная игра не выделяет его и не делает эти readbacks.
 
 ## GPU-ресурсы
 

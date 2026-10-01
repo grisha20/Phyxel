@@ -48,6 +48,7 @@ internal static partial class MaterialFileLoader
         public float HeatCapacity { get; set; } = MaterialRegistry.DefaultHeatCapacity;
         public JsonElement Transitions { get; set; }
         public JsonElement AmbientCooling { get; set; }
+        public JsonElement Regulator { get; set; }
 
         [JsonExtensionData]
         public Dictionary<string, JsonElement>? UnknownFields { get; set; }
@@ -363,11 +364,22 @@ internal static partial class MaterialFileLoader
             kind);
         MaterialEmissionDefinition? emissions = ParseEmissions(document.Emissions, id, combustion);
         MaterialLifecycleDefinition? lifecycle = ParseLifecycle(document.Lifecycle, id, kind);
+        MaterialThermalRegulatorDefinition? regulator = ParseRegulator(thermal.Regulator);
+        if (regulator is not null)
+        {
+            if (kind != MaterialSimulationKind.Solid || (flags & MaterialFlags.MovableSolid) != 0 ||
+                lifecycle is not null || transitions is not null || combustion is not null ||
+                physics.Density <= 0 || (flags & MaterialFlags.PhaseEnthalpy) != 0)
+                throw new InvalidDataException("thermal.regulator requires a fixed, positive-density solid without phases, combustion or lifecycle.");
+            flags |= regulator.Heating ? MaterialFlags.ThermalHeater : MaterialFlags.ThermalCooler;
+        }
         if ((flags & MaterialFlags.PhaseEnthalpy) != 0 &&
             (lifecycle is not null || kind is not (MaterialSimulationKind.Liquid or MaterialSimulationKind.Gas)))
             throw new InvalidDataException("phase-enthalpy requires an infinite-lived liquid or gas.");
         MaterialLiquidContactTransitionDefinition? liquidContactTransition =
             ParseContactTransitions(document.ContactTransitions, id, kind);
+        if (regulator is not null && (liquidContactTransition is not null || emissions is not null))
+            throw new InvalidDataException("thermal.regulator cannot emit or transform on liquid contact.");
         // Запрет на combustion + movable-solid снят вместе с разрешением
         // горения для granular: шейдер обрабатывает подвижную клетку так же,
         // как неподвижную, потому что проход горения выполняется отдельным
@@ -440,7 +452,7 @@ internal static partial class MaterialFileLoader
                     motion.AirLoss,
                     motion.Loss,
                     motion.Collision),
-                color),
+                color, regulator),
             ui.Order,
             ui.Hidden,
             ui.Category)
@@ -449,6 +461,7 @@ internal static partial class MaterialFileLoader
             Combustion = combustion,
             Emissions = emissions,
             Lifecycle = lifecycle,
+            ThermalRegulator = regulator,
             LiquidContactTransition = liquidContactTransition,
             Gas = gas is null ? null : new MaterialGasDefinition(
                 gas.Diffusion,
@@ -463,6 +476,29 @@ internal static partial class MaterialFileLoader
                 motion.Collision),
             SourcePath = path
         };
+    }
+
+    private static MaterialThermalRegulatorDefinition? ParseRegulator(JsonElement value)
+    {
+        if (value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null) return null;
+        if (value.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("thermal.regulator must be an object.");
+        Dictionary<string, JsonElement> fields = new(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonProperty property in value.EnumerateObject())
+            if (!fields.TryAdd(property.Name, property.Value) ||
+                property.Name.ToLowerInvariant() is not ("mode" or "targettemperature" or "maximumpower"))
+                throw new InvalidDataException($"Unknown or duplicate thermal.regulator field '{property.Name}'.");
+        if (!fields.TryGetValue("mode", out var mode) || mode.ValueKind != JsonValueKind.String ||
+            mode.GetString() is not ("heating" or "cooling") ||
+            !fields.TryGetValue("targetTemperature", out var target) ||
+            target.ValueKind != JsonValueKind.Number || !target.TryGetSingle(out float temperature) ||
+            !float.IsFinite(temperature) || temperature < MaterialRegistry.MinimumInitialTemperature ||
+            temperature > MaterialRegistry.MaximumInitialTemperature ||
+            !fields.TryGetValue("maximumPower", out var power) || power.ValueKind != JsonValueKind.Number ||
+            !power.TryGetSingle(out float maximumPower) || !float.IsFinite(maximumPower) ||
+            maximumPower < 0 || maximumPower > ThermalRegulator.MaximumPower)
+            throw new InvalidDataException("thermal.regulator requires mode heating/cooling, a valid targetTemperature and maximumPower in 0..3600.");
+        return new(mode.GetString() == "heating", temperature, maximumPower);
     }
 
     private sealed class MaterialGasDocument

@@ -234,7 +234,13 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         Buffer contactTransitionConstants = CreateConstantBuffer<ContactTransitionConstants>();
         Buffer phaseConstants = CreateConstantBuffer<PhaseTransitionConstants>();
         GpuStructuredBuffer<uint> phaseSummary = new(Device, 1);
-        GpuStructuredBuffer<uint>? phaseEvents = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_MODE") == "steam_cycle"
+        string? thermalTestMode = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_MODE");
+        GpuStructuredBuffer<ThermalEnergyLedgerCell>? thermalLedger = thermalTestMode is "thermal_devices" or "steam_apparatus"
+            ? new(Device, width * height) : null;
+        Buffer? thermalEnergyStaging = thermalLedger is null ? null : CreateReadStagingBuffer(width * height * 8);
+        if (thermalLedger is not null)
+            Device.ImmediateContext.ClearUnorderedAccessView(thermalLedger.UnorderedView, new SharpDX.Mathematics.Interop.RawInt4());
+        GpuStructuredBuffer<uint>? phaseEvents = thermalTestMode is "steam_cycle" or "steam_apparatus"
             ? new(Device, 4) : null;
         Buffer? phaseEventStaging = phaseEvents is null ? null : CreateReadStagingBuffer(4 * sizeof(uint));
         if (phaseEvents is not null)
@@ -478,6 +484,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             PhaseSummary = phaseSummary,
             PhaseEventCounters = phaseEvents,
             PhaseEventStaging = phaseEventStaging,
+            ThermalEnergyLedger = thermalLedger,
+            ThermalEnergyStaging = thermalEnergyStaging,
             PhaseSummaryReadbackSlots = phaseSummaryReadbackSlots,
             CombustionConstants = combustionConstants,
             CombustionSummary = combustionSummary,

@@ -18,6 +18,9 @@ public struct GridCell
 
     // Tagged by MaterialFlags.PhaseEnthalpy; no additional serialized field.
     public float PhaseProgress { readonly get => Lifetime; set => Lifetime = value; }
+    // Fixed thermal devices tag unused solid pressure/lifetime slots.
+    public float DeviceTargetTemperature { readonly get => Pressure; set => Pressure = value; }
+    public float DeviceMaximumPower { readonly get => Lifetime; set => Lifetime = value; }
 }
 
 /// <summary>
@@ -356,14 +359,14 @@ public struct MaterialProperties
     // occupies the first former tail-padding scalar so the GPU table remains
     // 176 bytes; no physics pass reads it.
     public float GasHazeStrength;
-    public float LayoutReserved1;
-    public float LayoutReserved2;
+    public float ThermalDeviceTargetTemperature;
+    public float ThermalDeviceMaximumPower;
 }
 
 public static class MaterialPropertiesLayout
 {
-    // Forty-two semantic material fields plus two tail-padding scalars.
-    public const int FieldCount = 42;
+    // All forty-four scalars are semantic; byte layout stays unchanged.
+    public const int FieldCount = 44;
     public const int ByteSize = 176;
 }
 
@@ -371,7 +374,8 @@ public enum BrushCommandMode : uint
 {
     Material = 0,
     Erase = 1,
-    SetTemperature = 2
+    SetTemperature = 2,
+    ThermalDevice = 3
 }
 
 public enum BrushCommandShape : uint
@@ -390,7 +394,7 @@ public struct BrushDrawCommand
     public float Density;
     public BrushCommandMode Mode;
     public uint Seed;
-    public uint Reserved;
+    public uint Reserved; // ThermalDevice: IEEE float bits of power; otherwise BodyId.
     public float TargetTemperature;
     public int EndX;
     public int EndY;
@@ -450,6 +454,17 @@ public struct ThermalSimulationConstants
     public float ExchangeRate;
     public uint Width;
     public uint Height;
+    public uint ObserveEnergy;
+    public uint Reserved0;
+    public uint Reserved1;
+    public uint Reserved2;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ThermalEnergyLedgerCell
+{
+    public float DeviceHeat;
+    public float AmbientHeat;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

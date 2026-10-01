@@ -17,6 +17,8 @@ public sealed class MaterialCardPreviewCache : IDisposable
             ["core:co2"] = "co2.png",
             ["core:ice"] = "ice.png",
             ["core:metal"] = "metal.png",
+            ["core:heater"] = "metal.png",
+            ["core:cooler"] = "metal.png",
             ["core:stone"] = "stone.png",
             ["core:wood"] = "wood.png",
             ["core:fire"] = "fire.png",

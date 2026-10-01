@@ -425,6 +425,9 @@ public sealed class SimulationStateSerializer
             }
             uint runtimeIndex = sceneToRuntime[sceneIndex];
             cells[index].MaterialIndex = runtimeIndex;
+            if (ThermalRegulator.Enabled(materialRegistry[runtimeIndex].Properties) &&
+                !ThermalRegulator.ValidCellSettings(cells[index]))
+                throw new InvalidDataException($"Invalid thermal device settings in world cell {index}.");
             if (initializeLegacyTemperature)
             {
                 cells[index].Temperature = materialRegistry[runtimeIndex].Properties.InitialTemperature;

@@ -1491,7 +1491,7 @@ public sealed class SimulationDispatchCoordinator
                 thermalActive |= worldHasMatter;
                 continue;
             }
-            if (command.Mode != BrushCommandMode.Material &&
+            if (command.Mode != BrushCommandMode.Material && command.Mode != BrushCommandMode.ThermalDevice &&
                 command.Mode != BrushCommandMode.Erase)
             {
                 continue;
@@ -1590,7 +1590,8 @@ public sealed class SimulationDispatchCoordinator
             DeltaTime = FixedThermalStep,
             ExchangeRate = ThermalExchangeRate,
             Width = (uint)resources.Width,
-            Height = (uint)resources.Height
+            Height = (uint)resources.Height,
+            ObserveEnergy = resources.ThermalEnergyLedger is null ? 0u : 1u
         };
         DeviceContext context = resources.Context;
         if (measure)
@@ -1606,6 +1607,8 @@ public sealed class SimulationDispatchCoordinator
             resources.Grid.ReadView,
             resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.WriteUnorderedView);
+        if (resources.ThermalEnergyLedger is not null)
+            context.ComputeShader.SetUnorderedAccessView(1, resources.ThermalEnergyLedger.UnorderedView);
         context.Dispatch(
             DivideRoundUp(resources.Width, 16),
             DivideRoundUp(resources.Height, 16),
@@ -1616,7 +1619,7 @@ public sealed class SimulationDispatchCoordinator
             context.End(resources.ThermalTimestampDisjointQuery);
             thermalTimingPending = true;
         }
-        Unbind(context, 2, 1);
+        Unbind(context, 2, resources.ThermalEnergyLedger is null ? 1 : 2);
         resources.Grid.Swap();
     }
 
@@ -2932,7 +2935,7 @@ public sealed class SimulationDispatchCoordinator
     {
         foreach (BrushDrawCommand command in commands)
         {
-            if (command.Mode == BrushCommandMode.Material)
+            if (command.Mode is BrushCommandMode.Material or BrushCommandMode.ThermalDevice)
             {
                 return true;
             }
@@ -2944,7 +2947,7 @@ public sealed class SimulationDispatchCoordinator
     {
         foreach (BrushDrawCommand command in commands)
         {
-            if (command.Mode is BrushCommandMode.Material or BrushCommandMode.Erase)
+            if (command.Mode is BrushCommandMode.Material or BrushCommandMode.Erase or BrushCommandMode.ThermalDevice)
             {
                 return true;
             }

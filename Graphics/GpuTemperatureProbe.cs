@@ -143,6 +143,7 @@ public sealed class GpuTemperatureProbe
         context.ComputeShader.Set(resources.TemperatureProbeShader);
         context.ComputeShader.SetConstantBuffer(0, resources.TemperatureProbeConstants);
         context.ComputeShader.SetShaderResource(0, resources.Grid.ReadView);
+        context.ComputeShader.SetShaderResource(1, resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.TemperatureProbeResult.UnorderedView);
         context.Begin(resources.ProbeTimestampDisjointQuery);
         context.End(resources.ProbeTimestampStartQuery);
@@ -151,6 +152,7 @@ public sealed class GpuTemperatureProbe
         context.End(resources.ProbeTimestampDisjointQuery);
         timingPending = true;
         context.ComputeShader.SetShaderResource(0, null);
+        context.ComputeShader.SetShaderResource(1, null);
         context.ComputeShader.SetUnorderedAccessView(0, null);
         context.ComputeShader.Set(null);
         context.CopyResource(

@@ -63,6 +63,8 @@ public sealed class AcceptanceRegressionHarness
             "steam_cycle" => AcceptanceScenarioMode.SteamCycle,
             "steam_surface" => AcceptanceScenarioMode.SteamSurface,
             "steam_energy" => AcceptanceScenarioMode.SteamEnergy,
+            "thermal_devices" => AcceptanceScenarioMode.ThermalDevices,
+            "steam_apparatus" => AcceptanceScenarioMode.SteamApparatus,
             "water_stress" or "stress_water" => AcceptanceScenarioMode.WaterStress,
             "flat_surface" or "surface" => AcceptanceScenarioMode.FlatSurface,
             "water_drain" or "drain" => AcceptanceScenarioMode.WaterDrain,
@@ -233,7 +235,8 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.CoalTypes => uint.MaxValue,
                 AcceptanceScenarioMode.GasUniformDistribution => 600,
                 AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle => 3600,
-                AcceptanceScenarioMode.SteamSurface or AcceptanceScenarioMode.SteamEnergy => 900,
+                AcceptanceScenarioMode.SteamApparatus => 14400,
+                AcceptanceScenarioMode.SteamSurface or AcceptanceScenarioMode.SteamEnergy or AcceptanceScenarioMode.ThermalDevices => 900,
                 AcceptanceScenarioMode.SteamDistributionAndCooling => uint.MaxValue,
                 AcceptanceScenarioMode.SteamCloudTemperature => uint.MaxValue,
                 AcceptanceScenarioMode.PhaseDispatchSmoke => 240,
@@ -272,6 +275,7 @@ public sealed class AcceptanceRegressionHarness
     public Point? GetProbeCoordinate(uint frame) => Mode switch
     {
         AcceptanceScenarioMode.ThermalUniform => new Point(200, 120),
+        AcceptanceScenarioMode.ThermalDevices => new Point(180, 120),
         AcceptanceScenarioMode.TemperatureTool => new Point(252, 135),
         AcceptanceScenarioMode.TemperatureProbeGpu when frame < 30 => new Point(60, 235),
         AcceptanceScenarioMode.TemperatureProbeGpu when frame < 60 => new Point(120, 235),
@@ -282,7 +286,7 @@ public sealed class AcceptanceRegressionHarness
     };
     public bool OwnsTemperatureProbe => Mode is
         AcceptanceScenarioMode.ThermalUniform or AcceptanceScenarioMode.TemperatureTool or
-        AcceptanceScenarioMode.TemperatureProbeGpu;
+        AcceptanceScenarioMode.TemperatureProbeGpu or AcceptanceScenarioMode.ThermalDevices;
 
     public void ApplyRuntimeControls(
         uint frame,
@@ -323,6 +327,7 @@ public sealed class AcceptanceRegressionHarness
 
     public void ObserveTemperatureProbe(uint frame, TemperatureProbeResult? result)
     {
+        if (Mode == AcceptanceScenarioMode.ThermalDevices) ThermalDeviceAcceptance.ObserveProbe(result);
         if (Mode == AcceptanceScenarioMode.TemperatureProbeGpu)
         {
             temperatureProbeTrace.Observe(frame, result);
@@ -335,7 +340,7 @@ public sealed class AcceptanceRegressionHarness
 
     public void RecordAirPressureTrace(uint frame, GpuSimulationResources resources)
     {
-        if (Mode == AcceptanceScenarioMode.SteamCycle && frame % 300 == 0)
+        if (Mode is AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamApparatus && frame % 300 == 0)
             GasCycleAcceptanceScenario.RecordCounters(frame, resources);
         int airY = Mode switch
         {
@@ -496,9 +501,9 @@ public sealed class AcceptanceRegressionHarness
             if (ready) checkpointTick = frame;
             return ready;
         }
-        if (Mode is AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle)
+        if (Mode is AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamApparatus or AcceptanceScenarioMode.ThermalDevices)
         {
-            uint[] frames = [2, 300, 600, 1200, 1800, 2400, 3000, 3600, 5400, 7200, 9000, 10800];
+            uint[] frames = [2, 300, 600, 1200, 1800, 2400, 3000, 3600, 5400, 7200, 9000, 10800, 12600, 14400];
             bool ready = thermalCheckpoints.Count < frames.Length && frame >= frames[thermalCheckpoints.Count];
             if (ready) checkpointTick = frame;
             return ready;
@@ -677,7 +682,11 @@ public sealed class AcceptanceRegressionHarness
         {
             settings.SolidGravity = frame >= 30;
         }
-        if (Mode == AcceptanceScenarioMode.TemperatureTool)
+        if (Mode == AcceptanceScenarioMode.ThermalDevices)
+        {
+            settings.Paused = frame < ThermalDeviceAcceptance.FramesAt60(30);
+        }
+        else if (Mode == AcceptanceScenarioMode.TemperatureTool)
         {
             settings.Paused = frame < 20;
         }
@@ -717,6 +726,7 @@ public sealed class AcceptanceRegressionHarness
         {
             AcceptanceScenarioMode.Co2Layer when frame % 600 == 599 => $"co2_layer_{frame + 1}",
             AcceptanceScenarioMode.SteamCycle when frame % 600 == 599 => $"steam_cycle_{frame + 1}",
+            AcceptanceScenarioMode.SteamApparatus when frame % 1800 == 1799 => $"apparatus_{frame + 1}",
             AcceptanceScenarioMode.Bowl when frame == 125 => "A_water_2s",
             AcceptanceScenarioMode.Bowl when frame == 999 => "A_water_sand",
             AcceptanceScenarioMode.SolidGravity when frame == 59 => "B_gravity_off",

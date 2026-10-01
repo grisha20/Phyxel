@@ -9,7 +9,7 @@ struct GridCell
     uint BodyId;
     uint RestFrames;
     float Temperature;
-    float Lifetime; // PhaseEnthalpy: latent progress per mass; otherwise remaining lifetime.
+    float Lifetime; // PhaseEnthalpy: latent progress; thermal regulator: power; otherwise lifetime.
 };
 
 // One cell of the coarse air field. Blocked is a float rather than a bool or a
@@ -158,12 +158,12 @@ struct MaterialProperties
     float MotionReserved1;
     float MotionReserved2;
     float GasHazeStrength;
-    float LayoutReserved1;
-    float LayoutReserved2;
+    float ThermalDeviceTargetTemperature;
+    float ThermalDeviceMaximumPower;
 };
 
-// Mirrors Physics.MaterialPropertiesLayout.ByteSize. Forty-two semantic
-// material fields and two tail-padding scalars produce a 176-byte
+// Mirrors Physics.MaterialPropertiesLayout.ByteSize. Forty-four semantic
+// material fields produce a 176-byte
 // structured-buffer stride (a multiple of sixteen).
 static const uint MaterialPropertiesByteSize = 176;
 
@@ -207,6 +207,8 @@ static const uint MaterialFlagSelfOxidizing = 1u << 2;
 static const uint MaterialFlagBlocksAir = 1u << 3;
 static const uint MaterialFlagSmoke = 1u << 4;
 static const uint MaterialFlagPhaseEnthalpy = 1u << 5;
+static const uint MaterialFlagThermalHeater = 1u << 6;
+static const uint MaterialFlagThermalCooler = 1u << 7;
 static const uint PhaseSummaryPhaseOccurred = 1u << 0;
 static const uint PhaseSummaryTargetCellular = 1u << 1;
 static const uint PhaseSummaryTargetLiquid = 1u << 2;
@@ -222,6 +224,7 @@ static const float GasVisibleMassThreshold = 0.001;
 static const uint BrushCommandModeMaterial = 0;
 static const uint BrushCommandModeErase = 1;
 static const uint BrushCommandModeSetTemperature = 2;
+static const uint BrushCommandModeThermalDevice = 3;
 static const uint BrushCommandShapePoint = 0;
 static const uint BrushCommandShapeSegment = 1;
 
@@ -234,7 +237,7 @@ struct BrushDrawCommand
     float Density;
     uint Mode;
     uint Seed;
-    uint Reserved;
+    uint Reserved; // ThermalDevice: IEEE float bits of power; otherwise BodyId.
     float TargetTemperature;
     int EndX;
     int EndY;

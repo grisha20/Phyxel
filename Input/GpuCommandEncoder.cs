@@ -19,7 +19,7 @@ public sealed class GpuCommandEncoder
             if (command.Mode is not (
                 BrushCommandMode.Material or
                 BrushCommandMode.Erase or
-                BrushCommandMode.SetTemperature))
+                BrushCommandMode.SetTemperature or BrushCommandMode.ThermalDevice))
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(source),
@@ -33,7 +33,7 @@ public sealed class GpuCommandEncoder
                     command.Shape,
                     "Unsupported brush command shape.");
             }
-            if (command.Mode == BrushCommandMode.SetTemperature)
+            if (command.Mode is BrushCommandMode.SetTemperature or BrushCommandMode.ThermalDevice)
             {
                 if (!float.IsFinite(command.TargetTemperature))
                 {
@@ -46,6 +46,12 @@ public sealed class GpuCommandEncoder
                     command.TargetTemperature,
                     MaterialRegistry.MinimumInitialTemperature,
                     MaterialRegistry.MaximumInitialTemperature);
+            }
+            if (command.Mode == BrushCommandMode.ThermalDevice)
+            {
+                float power = BitConverter.UInt32BitsToSingle(command.Reserved);
+                if (!float.IsFinite(power)) throw new ArgumentOutOfRangeException(nameof(source), "Device power must be finite.");
+                command.Reserved = BitConverter.SingleToUInt32Bits(Math.Clamp(power, 0, ThermalRegulator.MaximumPower));
             }
             commands[index] = command;
         }

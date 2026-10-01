@@ -73,18 +73,28 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         Grid[index] = CreateEmptyCell();
         return;
     }
-    if (command.Mode != BrushCommandModeMaterial)
+    if (command.Mode != BrushCommandModeMaterial && command.Mode != BrushCommandModeThermalDevice)
     {
         return;
     }
 
     MaterialProperties material = Materials[command.MaterialIndex];
+    bool device = (material.Flags & (MaterialFlagThermalHeater | MaterialFlagThermalCooler)) != 0;
+    if (command.Mode == BrushCommandModeThermalDevice && !device) return;
     if (material.SimulationKind == SimulationKindTool)
     {
         return;
     }
     if (existing.IsActive != 0)
     {
+        if (command.Mode == BrushCommandModeThermalDevice && existing.MaterialIndex == command.MaterialIndex)
+        {
+            // Configuration changes no material, mass or stored heat.
+            existing.Pressure = clamp(command.TargetTemperature, -273.15, 5000.0);
+            existing.Lifetime = clamp(asfloat(command.Reserved), 0, 3600.0);
+            Grid[index] = existing;
+            return;
+        }
         MaterialProperties existingMaterial = Materials[existing.MaterialIndex];
         bool replaceableInvisibleGas =
             existingMaterial.SimulationKind == SimulationKindGas &&
@@ -117,5 +127,12 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     cell.BodyId = IsMovableSolidMaterial(material) ? command.Reserved : 0;
     cell.Temperature = material.InitialTemperature;
     cell.Lifetime = InitialMaterialLifetime(material, index ^ command.Seed ^ FrameIndex);
+    if (device)
+    {
+        cell.Pressure = command.Mode == BrushCommandModeThermalDevice
+            ? clamp(command.TargetTemperature, -273.15, 5000.0) : material.ThermalDeviceTargetTemperature;
+        cell.Lifetime = command.Mode == BrushCommandModeThermalDevice
+            ? clamp(asfloat(command.Reserved), 0, 3600.0) : material.ThermalDeviceMaximumPower;
+    }
     Grid[index] = cell;
 }
