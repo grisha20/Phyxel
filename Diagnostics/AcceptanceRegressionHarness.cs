@@ -56,6 +56,8 @@ public sealed class AcceptanceRegressionHarness
             "solid_gravity" or "acceptance_solid_gravity" => AcceptanceScenarioMode.SolidGravity,
             "sand" or "acceptance_sand" => AcceptanceScenarioMode.Sand,
             "hydro" or "acceptance_hydro" => AcceptanceScenarioMode.Hydro,
+            "hydraulic_surface" => AcceptanceScenarioMode.HydraulicSurface,
+            "hydraulic_balance" => AcceptanceScenarioMode.HydraulicBalance,
             "slope" or "acceptance_slope" => AcceptanceScenarioMode.Slope,
             "gas" or "acceptance_gas" => AcceptanceScenarioMode.Gas,
             "gas_brush_fps" => AcceptanceScenarioMode.GasBrushFps,
@@ -191,6 +193,8 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.SolidGravity => 360,
                 AcceptanceScenarioMode.Sand => 190,
                 AcceptanceScenarioMode.Hydro => 1200,
+                AcceptanceScenarioMode.HydraulicSurface => 900,
+                AcceptanceScenarioMode.HydraulicBalance => 1200,
                 AcceptanceScenarioMode.Slope => 600,
                 AcceptanceScenarioMode.Gas => 900,
                 AcceptanceScenarioMode.GasBrushFps => (uint)(4 * (int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_TARGET_FPS"), out int fps) ? fps : 60)),
@@ -266,6 +270,7 @@ public sealed class AcceptanceRegressionHarness
             ? null
             : OxidizerAcceptance.Create(Mode, width, height, materialRegistry) ??
                 CoalFireAcceptance.Create(Mode, width, height, materialRegistry) ??
+                HydraulicsAcceptance.Create(Mode, width, height, materialRegistry) ??
                 ThermalAcceptanceScenario.Create(Mode, width, height, materialRegistry) ??
                 BrushEmptyOnlyAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry) ??
                 ContinuousBrushStrokeAcceptanceScenario.CreateInitialWorld(
@@ -467,6 +472,14 @@ public sealed class AcceptanceRegressionHarness
         out ulong checkpointTick)
     {
         checkpointTick = 0;
+        uint[] hydraulicFrames = HydraulicsAcceptance.Checkpoints(Mode);
+        if (hydraulicFrames.Length > 0)
+        {
+            bool ready = thermalCheckpoints.Count < hydraulicFrames.Length &&
+                frame >= hydraulicFrames[thermalCheckpoints.Count];
+            if (ready) checkpointTick = frame;
+            return ready;
+        }
         if (phaseAcceptance.ShouldCaptureCheckpoint(frame, dispatchCoordinator))
         {
             checkpointTick = dispatchCoordinator.ThermalTicks;
@@ -679,6 +692,8 @@ public sealed class AcceptanceRegressionHarness
 
         bool scenarioHydraulics = Mode is
             AcceptanceScenarioMode.Hydro or
+            AcceptanceScenarioMode.HydraulicSurface or
+            AcceptanceScenarioMode.HydraulicBalance or
             AcceptanceScenarioMode.WaterDrain or
             AcceptanceScenarioMode.CommunicatingVessels or
             AcceptanceScenarioMode.PressureTube or
@@ -773,6 +788,8 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.Hydro when frame == 125 => "D_equal_2s",
             AcceptanceScenarioMode.Hydro when frame == 15 => "D_waterfall",
             AcceptanceScenarioMode.Hydro when frame == 1199 => "D_rest",
+            AcceptanceScenarioMode.HydraulicSurface when frame + 1 == CaptureFrame => "hydraulic-surface-final",
+            AcceptanceScenarioMode.HydraulicBalance when frame + 1 == CaptureFrame => "hydraulic-balance-final",
             AcceptanceScenarioMode.Slope when frame == 20 => "E_slope_fall",
             AcceptanceScenarioMode.Slope when frame == 599 => "E_slope_rest",
             AcceptanceScenarioMode.Gas when frame == 30 => "F_gas_rise",

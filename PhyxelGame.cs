@@ -88,6 +88,9 @@ public sealed class PhyxelGame : Game
         Window.Title = "Phyxel";
         if (acceptance.Active)
         {
+            // Acceptance windows may be hidden/unfocused. Keep their fixed-
+            // step benchmark from being throttled by the inactive-window sleep.
+            InactiveSleepTime = TimeSpan.Zero;
             string? requestedScale = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_SCALE");
             float acceptanceScale = float.TryParse(
                 requestedScale,

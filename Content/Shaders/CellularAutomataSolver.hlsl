@@ -650,6 +650,21 @@ bool OrdinaryWaterCanLeaveLedge(uint2 source)
         Grid[sourceIndex].Pressure >= OrdinaryLandingFrames;
 }
 
+bool WaterCanDrainSurfaceFilm(uint2 source, uint2 destination)
+{
+    if (abs(int(destination.x) - int(source.x)) != 1 || source.y + 1 >= Height)
+    {
+        return false;
+    }
+    uint bed = CellKindAt(source + uint2(0, 1));
+    // A one-cell film on a descending bed has no same-row water behind it.
+    // Let it join the adjacent water one row below; vertical/diagonal gravity
+    // then drains the small stack. Isolated drops on a flat shelf do not pass.
+    return (bed == SimulationKindSolid || bed == SimulationKindGranular) &&
+        IsWaterAt(int(destination.x), int(destination.y) + 1) &&
+        abs(Grid[FlattenCoordinate(source)].VelocityY) <= 8;
+}
+
 bool WaterCanFlowSide(
     uint2 source,
     uint2 destination,
@@ -676,6 +691,10 @@ bool WaterCanFlowSide(
     }
     int direction = destination.x > source.x ? 1 : -1;
     if (IsWaterAt(int(source.x), int(source.y) - 1))
+    {
+        return true;
+    }
+    if (WaterCanDrainSurfaceFilm(source, destination))
     {
         return true;
     }
@@ -713,6 +732,10 @@ bool WaterCanFlowSideOpt(
         return stride == 1 && OrdinaryWaterCanLeaveLedge(source);
     }
     if (hasWaterAbove)
+    {
+        return true;
+    }
+    if (WaterCanDrainSurfaceFilm(source, destination))
     {
         return true;
     }

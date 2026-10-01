@@ -13,6 +13,8 @@ public enum AcceptanceScenarioMode
     SolidGravity,
     Sand,
     Hydro,
+    HydraulicSurface,
+    HydraulicBalance,
     Slope,
     Gas,
     GasBrushFps,

@@ -107,6 +107,7 @@ public static class AcceptanceRegressionVerifier
             return Fail(out report);
         }
         materials = new AcceptanceMaterialIndices(materialRegistry);
+        HydraulicsAcceptance.WriteTrace(mode, snapshot, materialRegistry, thermalCheckpoints, artifactDirectory);
         return mode switch
         {
             AcceptanceScenarioMode.Bowl => ValidateBowl(snapshot, artifactDirectory, out report),
@@ -116,8 +117,11 @@ public static class AcceptanceRegressionVerifier
                 snapshot,
                 statistics,
                 framesPerSecond,
+                thermalCheckpoints,
                 artifactDirectory,
                 out report),
+            AcceptanceScenarioMode.HydraulicSurface or AcceptanceScenarioMode.HydraulicBalance =>
+                HydraulicsAcceptance.Validate(mode, snapshot, materialRegistry, thermalCheckpoints, out report),
             AcceptanceScenarioMode.Slope => MaterialRegressionVerifier.ValidateSlope(
                 snapshot,
                 materials.Sand,
@@ -3614,6 +3618,7 @@ public static class AcceptanceRegressionVerifier
         SimulationWorldSnapshot snapshot,
         SimulationStatistics statistics,
         double framesPerSecond,
+        IReadOnlyList<ThermalAcceptanceCheckpoint> checkpoints,
         string artifactDirectory,
         out string report)
     {
@@ -3673,16 +3678,22 @@ public static class AcceptanceRegressionVerifier
         int imageRight = ImageSurfaceTop(equalImage, 148, 250, 100, 245);
         WaterVisualMetrics leftVisual = AnalyzeWater(equalImage, 25, 128, 100, 245);
         WaterVisualMetrics rightVisual = AnalyzeWater(equalImage, 148, 250, 100, 245);
+        string restImage = Path.Combine(artifactDirectory, "D_rest.png");
+        WaterVisualMetrics restingLeftVisual = AnalyzeWater(restImage, 25, 128, 100, 245);
+        WaterVisualMetrics restingRightVisual = AnalyzeWater(restImage, 148, 250, 100, 245);
         int fallingWater = CountColor(waterfallImage, 330, 80, 415, 220, IsBlue);
         ColorMetrics colors = AnalyzeColors(Path.Combine(artifactDirectory, "D_rest.png"));
+        // Verify finite transfer from the initially high side and conserved
+        // mass, rather than requiring a residual imbalance at one late image.
+        bool trajectory = HydraulicsAcceptance.ValidateHydroTrace(snapshot, materials.Water, checkpoints, out string trace);
         bool passed = water > 5000 && Math.Abs(leftTop - rightTop) <= 3 &&
-            imageLeft > 0 && imageRight > 0 && Math.Abs(imageLeft - imageRight) >= 4 &&
+            imageLeft > 0 && imageRight > 0 && trajectory && wallGaps == 0 &&
             waterfallTop > 0 &&
-            leftVisual.Gaps == 0 && rightVisual.Gaps == 0 &&
+            restingLeftVisual.Gaps == 0 && restingRightVisual.Gaps == 0 &&
             resting >= water * 0.99 && moving == 0 && leaks == 0 &&
             framesPerSecond >= 55 && colors.Red == 0 && colors.Blue > 500 &&
             fallingWater > 100;
-        report = $"PHYXEL_D water={water} leftTop={leftTop} rightTop={rightTop} image2s={imageLeft}/{imageRight} waterfallTop={waterfallTop} fallingWater={fallingWater} resting={resting} moving={moving} leaks={leaks} leakMass={leakedMass:0.000} leakBounds={minimumLeakX},{minimumLeakY}-{maximumLeakX},{maximumLeakY} wallGaps={wallGaps} fps={framesPerSecond:0.0} statsMoving={statistics.MovingCells} red={colors.Red}";
+        report = $"PHYXEL_D water={water} leftTop={leftTop} rightTop={rightTop} image2s={imageLeft}/{imageRight} waterfallTop={waterfallTop} fallingWater={fallingWater} resting={resting} moving={moving} leaks={leaks} leakMass={leakedMass:0.000} leakBounds={minimumLeakX},{minimumLeakY}-{maximumLeakX},{maximumLeakY} wallGaps={wallGaps} fps={framesPerSecond:0.0} statsMoving={statistics.MovingCells} red={colors.Red} visualGaps={restingLeftVisual.Gaps}/{restingRightVisual.Gaps} transientGaps={leftVisual.Gaps}/{rightVisual.Gaps} blue={colors.Blue} {trace}";
         return passed;
     }
 
