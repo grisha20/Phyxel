@@ -26,18 +26,18 @@ public sealed record SimulationSceneState(
     bool SolidGravity,
     ushort SelectedMaterial,
     DateTimeOffset SavedAt,
-    bool HydraulicPressure = false);
+    bool HydraulicPressure = false,
+    bool OpenBoundaries = true);
 
-// Air is an optional diagnostic readback.  It is deliberately not part of the
-// persisted world format: saved worlds still contain only the 40-byte GridCell
-// grid.  Acceptance scenarios use it to report the coarse pressure field that
-// was present at the same capture point as the grid.
+// Air and GasMotion are diagnostic readbacks. Oxidizer is persisted independently
+// of the unchanged 40-byte GridCell in world v7; v3-v6 load fresh ambient air.
 public sealed record SimulationWorldSnapshot(
     int Width,
     int Height,
     byte[] Grid,
     byte[]? Air = null,
-    byte[]? GasMotion = null);
+    byte[]? GasMotion = null,
+    byte[]? Oxidizer = null);
 
 public sealed record LoadedSimulationScene(
     SimulationSceneState State,
@@ -57,13 +57,14 @@ public sealed class SimulationStateSerializer
         public string SelectedMaterialId { get; set; } = CoreMaterialIds.Sand;
         public DateTimeOffset SavedAt { get; set; }
         public bool HydraulicPressure { get; set; }
+        public bool OpenBoundaries { get; set; } = true;
         public string[] MaterialPalette { get; set; } = [];
     }
 
     private const uint WorldFileMagic = 0x5058594C;
     private const int LegacyWorldHeaderSize = 20;
-    private const int CurrentWorldHeaderSize = 24;
-    private const int CurrentVersion = 6;
+    private const int CurrentWorldHeaderSize = 28;
+    private const int CurrentVersion = 7;
     private const string RemovedGoldSandId = "core:gold_sand";
     private const string RenamedConcreteId = "core:concrete";
     private const string RenamedGasId = "core:gas";
@@ -91,6 +92,7 @@ public sealed class SimulationStateSerializer
         resources.Context.CopyResource(resources.Grid.ReadBuffer, resources.GridStaging);
         resources.Context.CopyResource(resources.Air.Buffer, resources.AirStaging);
         resources.Context.CopyResource(resources.GasMotion.Buffer, resources.GasMotionStaging);
+        resources.Context.CopyResource(resources.Oxidizer.ReadBuffer, resources.OxidizerStaging);
         resources.Context.End(resources.SceneTransferQuery);
         resources.Context.Flush();
         capturePending = true;
@@ -125,7 +127,8 @@ public sealed class SimulationStateSerializer
             resources.Height,
             ReadBuffer(resources.Context, resources.GridStaging),
             ReadBuffer(resources.Context, resources.AirStaging),
-            ReadBuffer(resources.Context, resources.GasMotionStaging));
+            ReadBuffer(resources.Context, resources.GasMotionStaging),
+            ReadBuffer(resources.Context, resources.OxidizerStaging));
         capturePending = false;
         return true;
     }
@@ -155,6 +158,7 @@ public sealed class SimulationStateSerializer
             SelectedMaterialId = selectedDefinition.Id,
             SavedAt = DateTimeOffset.UtcNow,
             HydraulicPressure = settings.HydraulicPressure,
+            OpenBoundaries = settings.OpenBoundaries,
             MaterialPalette = palette
         };
         string directory = Path.GetDirectoryName(path) ?? AppContext.BaseDirectory;
@@ -208,7 +212,7 @@ public sealed class SimulationStateSerializer
                 warnings,
                 options),
             4 => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, true),
-            5 or CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
+            5 or 6 or CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
             _ => null
         };
     }
@@ -223,7 +227,16 @@ public sealed class SimulationStateSerializer
         {
             return;
         }
+        ValidateSnapshotSize(world);
         UploadBuffer(resources.Context, resources.GridStaging, world.Grid, resources.Grid.Buffers);
+        if (world.Oxidizer is { Length: > 0 } oxygen)
+            UploadBuffer(resources.Context, resources.OxidizerStaging, oxygen, resources.Oxidizer.Buffers);
+        else
+        {
+            float[] freshAir = new float[resources.Oxidizer.Count];
+            Array.Fill(freshAir, 1f);
+            foreach (Buffer buffer in resources.Oxidizer.Buffers) resources.Context.UpdateSubresource(freshAir, buffer);
+        }
     }
 
     public static void Apply(SimulationSceneState state, SimulationSettings settings)
@@ -234,6 +247,7 @@ public sealed class SimulationStateSerializer
         settings.SpawnDensity = Math.Clamp(state.SpawnDensity, 0.05f, 1);
         settings.SolidGravity = state.SolidGravity;
         settings.HydraulicPressure = state.HydraulicPressure;
+        settings.OpenBoundaries = state.OpenBoundaries;
     }
 
     public static bool ContainsMatter(SimulationWorldSnapshot world)
@@ -317,7 +331,8 @@ public sealed class SimulationStateSerializer
                 state.SolidGravity,
                 selectedMaterial,
                 state.SavedAt,
-                state.HydraulicPressure),
+                state.HydraulicPressure,
+                state.OpenBoundaries),
             world,
             warnings);
     }
@@ -370,7 +385,7 @@ public sealed class SimulationStateSerializer
             uint runtimeIndex = encodedCells[index].MaterialIndex;
             encodedCells[index].MaterialIndex = runtimeToScene[runtimeIndex];
         }
-        return (new SimulationWorldSnapshot(world.Width, world.Height, encodedGrid), palette.ToArray());
+        return (new SimulationWorldSnapshot(world.Width, world.Height, encodedGrid, Oxidizer: world.Oxidizer), palette.ToArray());
     }
 
     private static void RemapSnapshotToRuntime(
@@ -474,6 +489,7 @@ public sealed class SimulationStateSerializer
 
     internal static void ValidateSnapshotSize(SimulationWorldSnapshot world)
     {
+        WorldCellCodec.ValidateOxidizer(world.Width, world.Height, world.Oxidizer);
         int expected = checked(world.Width * world.Height * Marshal.SizeOf<GridCell>());
         if (world.Grid.Length != 0 && world.Grid.Length != expected)
         {
@@ -524,9 +540,11 @@ public sealed class SimulationStateSerializer
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(12, 4), world.Height);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(16, 4), WorldCellCodec.CurrentCellStride);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(20, 4), world.Grid.Length);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(24, 4), world.Oxidizer?.Length ?? 0);
         await using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, true);
         await stream.WriteAsync(header, cancellationToken);
         await stream.WriteAsync(world.Grid, cancellationToken);
+        if (world.Oxidizer is { Length: > 0 }) await stream.WriteAsync(world.Oxidizer, cancellationToken);
     }
 
     internal static async Task<RawWorldFile?> ReadWorldAsync(
@@ -550,13 +568,13 @@ public sealed class SimulationStateSerializer
 
         uint magic = BinaryPrimitives.ReadUInt32LittleEndian(prefix.AsSpan(0, 4));
         int version = BinaryPrimitives.ReadInt32LittleEndian(prefix.AsSpan(4, 4));
-        if (magic != WorldFileMagic || version is not (3 or 4 or 5 or CurrentVersion))
+        if (magic != WorldFileMagic || version is not (3 or 4 or 5 or 6 or CurrentVersion))
         {
             throw new InvalidDataException("Формат снимка мира не поддерживается.");
         }
 
         bool extendedHeader = version >= 5;
-        int headerSize = extendedHeader ? CurrentWorldHeaderSize : LegacyWorldHeaderSize;
+        int headerSize = version == 7 ? CurrentWorldHeaderSize : extendedHeader ? 24 : LegacyWorldHeaderSize;
         byte[] remainder = new byte[headerSize - prefix.Length];
         try
         {
@@ -576,7 +594,11 @@ public sealed class SimulationStateSerializer
             remainder.AsSpan(extendedHeader ? 12 : 8, 4));
         WorldCellCodec.ValidateStoredWorld(version, width, height, storedCellStride, length);
 
-        long expectedFileLength = checked((long)headerSize + length);
+        int oxygenLength = version == 7 ? BinaryPrimitives.ReadInt32LittleEndian(remainder.AsSpan(16, 4)) : 0;
+        long expectedOxygenLength = (long)width * height * sizeof(float);
+        if (oxygenLength < 0 || (oxygenLength != 0 && oxygenLength != expectedOxygenLength))
+            throw new InvalidDataException("Invalid oxidizer section length.");
+        long expectedFileLength = checked((long)headerSize + length + oxygenLength);
         if (stream.Length < expectedFileLength)
         {
             throw new InvalidDataException("Секция клеток файла мира обрезана.");
@@ -595,6 +617,9 @@ public sealed class SimulationStateSerializer
         {
             throw new InvalidDataException("Секция клеток файла мира обрезана.", exception);
         }
-        return new RawWorldFile(version, width, height, storedCellStride, grid);
+        byte[]? oxygen = oxygenLength == 0 ? null : new byte[oxygenLength];
+        if (oxygen is not null) await stream.ReadExactlyAsync(oxygen, cancellationToken);
+        WorldCellCodec.ValidateOxidizer(width, height, oxygen);
+        return new RawWorldFile(version, width, height, storedCellStride, grid, oxygen);
     }
 }

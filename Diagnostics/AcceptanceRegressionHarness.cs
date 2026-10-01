@@ -65,6 +65,7 @@ public sealed class AcceptanceRegressionHarness
             "steam_energy" => AcceptanceScenarioMode.SteamEnergy,
             "thermal_devices" => AcceptanceScenarioMode.ThermalDevices,
             "steam_apparatus" => AcceptanceScenarioMode.SteamApparatus,
+            "oxidizer" => AcceptanceScenarioMode.Oxidizer,
             "water_stress" or "stress_water" => AcceptanceScenarioMode.WaterStress,
             "flat_surface" or "surface" => AcceptanceScenarioMode.FlatSurface,
             "water_drain" or "drain" => AcceptanceScenarioMode.WaterDrain,
@@ -151,7 +152,8 @@ public sealed class AcceptanceRegressionHarness
     public bool RequiresNativeResolution => Mode == AcceptanceScenarioMode.WaterStress;
     public bool RequiresSavedScene => Mode is
         AcceptanceScenarioMode.SavedPressure or AcceptanceScenarioMode.SavedIsolation or
-        AcceptanceScenarioMode.SavedGravity or AcceptanceScenarioMode.SavedSandWater;
+        AcceptanceScenarioMode.SavedGravity or AcceptanceScenarioMode.SavedSandWater ||
+        (Mode == AcceptanceScenarioMode.Oxidizer && OxidizerAcceptance.EmptyLoad);
     public bool IsPhaseRoundTripSaving => phaseAcceptance.IsRoundTripSaving;
     public bool IsPhaseRoundTripLoading => phaseAcceptance.IsRoundTripLoading;
     public bool InitialWorldStartsDormant => Mode is
@@ -236,6 +238,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.GasUniformDistribution => 600,
                 AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle => 3600,
                 AcceptanceScenarioMode.SteamApparatus => 14400,
+                AcceptanceScenarioMode.Oxidizer => OxidizerAcceptance.Restarting ? OxidizerAcceptance.Frame(10) : OxidizerAcceptance.Frame(60),
                 AcceptanceScenarioMode.SteamSurface or AcceptanceScenarioMode.SteamEnergy or AcceptanceScenarioMode.ThermalDevices => 900,
                 AcceptanceScenarioMode.SteamDistributionAndCooling => uint.MaxValue,
                 AcceptanceScenarioMode.SteamCloudTemperature => uint.MaxValue,
@@ -259,7 +262,8 @@ public sealed class AcceptanceRegressionHarness
     public SimulationWorldSnapshot? CreateInitialWorld(int width, int height) =>
         materialRegistry is null
             ? null
-            : ThermalAcceptanceScenario.Create(Mode, width, height, materialRegistry) ??
+            : OxidizerAcceptance.Create(Mode, width, height, materialRegistry) ??
+                ThermalAcceptanceScenario.Create(Mode, width, height, materialRegistry) ??
                 BrushEmptyOnlyAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry) ??
                 ContinuousBrushStrokeAcceptanceScenario.CreateInitialWorld(
                     Mode, width, height, materialRegistry) ??
@@ -501,6 +505,22 @@ public sealed class AcceptanceRegressionHarness
             if (ready) checkpointTick = frame;
             return ready;
         }
+        if (Mode == AcceptanceScenarioMode.Oxidizer)
+        {
+            uint[] frames = OxidizerAcceptance.Restarting ? [OxidizerAcceptance.Frame(1), OxidizerAcceptance.Frame(5)] :
+                [OxidizerAcceptance.Frame(1), OxidizerAcceptance.Frame(5), OxidizerAcceptance.Frame(10),
+                 OxidizerAcceptance.Frame(20), OxidizerAcceptance.Frame(30), OxidizerAcceptance.Frame(39),
+                 OxidizerAcceptance.Frame(40), OxidizerAcceptance.Frame(50)];
+            bool ready = thermalCheckpoints.Count < frames.Length && frame >= frames[thermalCheckpoints.Count];
+            if (ready) checkpointTick = frame;
+            return ready;
+        }
+        if (Mode == AcceptanceScenarioMode.CombustionQuench)
+        {
+            bool ready = thermalCheckpoints.Count == 0 && frame >= 99;
+            if (ready) checkpointTick = frame;
+            return ready;
+        }
         if (Mode is AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamApparatus or AcceptanceScenarioMode.ThermalDevices)
         {
             uint[] frames = [2, 300, 600, 1200, 1800, 2400, 3000, 3600, 5400, 7200, 9000, 10800, 12600, 14400];
@@ -602,12 +622,15 @@ public sealed class AcceptanceRegressionHarness
     }
 
     public float AdjustElapsedSeconds(float elapsedSeconds) =>
+        Mode == AcceptanceScenarioMode.Oxidizer ? 1f / OxidizerAcceptance.Fps :
         Mode == AcceptanceScenarioMode.GasBrushFps
             ? 1f / (int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_TARGET_FPS"), out int fps) ? fps : 60)
             : phaseAcceptance.AdjustElapsedSeconds(elapsedSeconds);
 
     public bool CanBeginFinalCapture(uint frame, SimulationDispatchCoordinator dispatchCoordinator) =>
-        Mode == AcceptanceScenarioMode.SteamSelfCooling
+        Mode == AcceptanceScenarioMode.Oxidizer
+            ? dispatchCoordinator.CombustionDispatches >= (ulong)(OxidizerAcceptance.Restarting ? 600 : 3600)
+            : Mode == AcceptanceScenarioMode.SteamSelfCooling
             ? thermalCheckpoints.Count >= SteamCoolingCheckpointTicks.Length &&
                 dispatchCoordinator.ThermalTicks >= SteamCoolingCheckpointTicks[^1]
             : Mode == AcceptanceScenarioMode.CoalTypes

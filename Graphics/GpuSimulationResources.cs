@@ -29,6 +29,12 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuUploadBuffer<MaterialEmissionProperties> Emissions { get; init; }
     public required Buffer FrameConstants { get; init; }
     public required Buffer ThermalConstants { get; init; }
+    public required GpuBufferPair<float> Oxidizer { get; init; }
+    public required GpuStructuredBuffer<float> OxidizerDemand { get; init; }
+    public required Buffer OxidizerConstants { get; init; }
+    public required Buffer OxidizerStaging { get; init; }
+    public ComputeShader? OxidizerTransportShader { get; init; }
+    public ComputeShader? OxidizerConsumeShader { get; init; }
     public required int AirWidth { get; init; }
     public required int AirHeight { get; init; }
     public required Buffer AirConstants { get; init; }
@@ -244,6 +250,12 @@ public sealed class GpuSimulationResources : IDisposable
         TemperatureProbeResult.Dispose();
         TemperatureProbeConstants.Dispose();
         ThermalConstants.Dispose();
+        OxidizerTransportShader?.Dispose();
+        OxidizerConsumeShader?.Dispose();
+        Oxidizer.Dispose();
+        OxidizerDemand.Dispose();
+        OxidizerConstants.Dispose();
+        OxidizerStaging.Dispose();
         FireGlowScratch.Dispose();
         GasVisual.Dispose();
         GasVisualScratch.Dispose();

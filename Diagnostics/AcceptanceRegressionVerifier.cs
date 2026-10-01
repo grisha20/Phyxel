@@ -258,6 +258,7 @@ public static class AcceptanceRegressionVerifier
                 materialRegistry,
                 combustionGpuTiming,
                 combustionDispatches,
+                thermalCheckpoints,
                 out report),
             AcceptanceScenarioMode.FireObstacle => ValidateFireObstacle(
                 snapshot,
@@ -318,6 +319,7 @@ public static class AcceptanceRegressionVerifier
                     materialRegistry,
                     thermalCheckpoints,
                     out report),
+            AcceptanceScenarioMode.Oxidizer => OxidizerAcceptance.Validate(snapshot, materialRegistry, thermalCheckpoints, artifactDirectory, out report),
             AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamSurface or AcceptanceScenarioMode.SteamEnergy or AcceptanceScenarioMode.SteamApparatus or AcceptanceScenarioMode.ThermalDevices =>
                 GasCycleAcceptanceScenario.Validate(mode, snapshot, materialRegistry, thermalCheckpoints,
                     artifactDirectory, out report),
@@ -465,6 +467,7 @@ public static class AcceptanceRegressionVerifier
         MaterialRegistry registry,
         ThermalGpuTimingStatistics timing,
         ulong dispatches,
+        IReadOnlyList<ThermalAcceptanceCheckpoint> checkpoints,
         out string report)
     {
         uint wood = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Wood);
@@ -494,12 +497,30 @@ public static class AcceptanceRegressionVerifier
         }
         double averageMass = woodMass / Math.Max(1, woodCount);
         double averageTemperature = woodTemperature / Math.Max(1, woodCount);
+        int beforeWoodCount = 0;
+        double beforeWoodTemperature = 0;
+        if (checkpoints.Count == 1 && checkpoints[0].Frame < 100)
+        {
+            foreach (GridCell cell in Cells(checkpoints[0].Snapshot))
+            {
+                if (cell.IsActive == 0 || cell.MaterialIndex != wood) continue;
+                beforeWoodCount++;
+                beforeWoodTemperature += cell.Temperature;
+            }
+        }
+        double beforeTemperature = beforeWoodTemperature / Math.Max(1, beforeWoodCount);
+        double cooling = beforeTemperature - averageTemperature;
+        // A stronger quench may leave no steam in the final frame: less fuel
+        // burns, and the new phase enthalpy requires actual heat for boiling.
+        // Measure the response to water, rather than require a vapor residue.
         bool passed = woodCount > 20 && cooledWood > 20 &&
             averageMass > registry[CoreMaterialIds.Coal].Properties.Density + 0.05 &&
             averageTemperature < registry[CoreMaterialIds.Wood].Properties.MaximumCombustionTemperature - 25 &&
-            waterCount > 0 && steamCount > 0 && dispatches > 0 && timing.Samples > 0;
+            beforeWoodCount > 0 && cooling > 25 && woodCount >= beforeWoodCount * .9 &&
+            waterCount > 0 && dispatches > 0 && timing.Samples > 0;
         report = $"PHYXEL_COMBUSTION_QUENCH wood={woodCount} cooled={cooledWood} " +
             $"averageMass={averageMass:0.000} averageTemperature={averageTemperature:0.0} " +
+            $"beforeWood={beforeWoodCount} beforeTemperature={beforeTemperature:0.0} cooling={cooling:0.0} " +
             $"water={waterCount} steam={steamCount} dispatches={dispatches} " +
             $"gpuSamples={timing.Samples}";
         return passed;

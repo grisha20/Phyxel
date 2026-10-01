@@ -1,4 +1,5 @@
 #include "PhysicsShared.hlsli"
+#include "OxidizerShared.hlsli"
 
 cbuffer EmissionConstants : register(b0)
 {
@@ -53,7 +54,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     destination.VelocityY = -8;
     destination.Pressure = 0;
     destination.IsActive = destination.Mass > 0 ? 1 : 0;
-    destination.BodyId = 0;
+    destination.BodyId = (product.Flags & MaterialFlagFlame) != 0
+        ? request.SourceIndex & SelfOxidizingFlameMarker : 0;
     destination.RestFrames = 0;
     destination.Temperature = request.Temperature;
     destination.Lifetime = InitialMaterialLifetime(

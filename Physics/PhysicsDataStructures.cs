@@ -359,7 +359,8 @@ public struct MaterialProperties
     // occupies the first former tail-padding scalar so the GPU table remains
     // 176 bytes; no physics pass reads it.
     public float GasHazeStrength;
-    public float ThermalDeviceTargetTemperature;
+    public float ThermalDeviceTargetTemperature; // Fixed regulator target; gas oxidizer displacement.
+    public float GasOxidizerDisplacement { readonly get => ThermalDeviceTargetTemperature; set => ThermalDeviceTargetTemperature = value; }
     public float ThermalDeviceMaximumPower;
 }
 
@@ -490,6 +491,15 @@ public struct PhaseTransitionConstants
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct OxidizerConstants
+{
+    public uint Width;
+    public uint Height;
+    public uint OpenEdges;
+    public float DeltaTime;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct CombustionConstants
 {
     public float DeltaTime;
@@ -522,7 +532,7 @@ public struct EmissionRequest
     public uint MaterialIndex;
     public float Mass;
     public float Temperature;
-    public uint SourceIndex;
+    public uint SourceIndex; // High bit marks flame emitted by self-oxidizing fuel.
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

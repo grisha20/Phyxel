@@ -166,7 +166,8 @@ public sealed class PhyxelGame : Game
                 SimulationStateSerializer.ContainsContactTransitionSource(
                     initialAcceptanceWorld,
                     materialRegistry),
-                settings.HydraulicPressure);
+                settings.HydraulicPressure,
+                initialAcceptanceWorld.Oxidizer is { Length: > 0 });
         }
         if (acceptance.RequiresSavedScene)
         {
@@ -571,7 +572,8 @@ public sealed class PhyxelGame : Game
             if (loaded.World is not null && resourceManager is not null && materialRegistry is not null)
             {
                 bool containsMatter = SimulationStateSerializer.ContainsMatter(loaded.World);
-                currentResources = resourceManager.CreateOrResize(settings, containsMatter);
+                bool preserveOxidizer = loaded.World.Oxidizer is { Length: > 0 };
+                currentResources = resourceManager.CreateOrResize(settings, containsMatter || preserveOxidizer);
                 stateSerializer.ApplyWorldSnapshot(currentResources, loaded.World);
                 dispatchCoordinator?.RestoreWorldActivity(
                     currentResources,
@@ -579,7 +581,8 @@ public sealed class PhyxelGame : Game
                     SimulationStateSerializer.ContainsContactTransitionSource(
                         loaded.World,
                         materialRegistry),
-                    settings.HydraulicPressure);
+                    settings.HydraulicPressure,
+                    preserveOxidizer);
                 if (acceptance.IsPhaseRoundTripLoading)
                 {
                     acceptance.MarkPhaseRoundTripLoaded(frameIndex);

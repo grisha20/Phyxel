@@ -55,6 +55,7 @@ internal static class WorldCellCodecRegressionVerifier
             await VerifyV5RoundTripAsync(directory, serializer, materials);
             VerifyV5Migration();
             await VerifyV5RuntimeRemapAsync(directory);
+            await VerifyOxidizerAsync(directory, serializer, materials);
             await VerifyCorruptWorldsAsync(directory);
         }
         finally
@@ -271,10 +272,10 @@ internal static class WorldCellCodecRegressionVerifier
         string worldPath = Path.ChangeExtension(scenePath, ".world");
         RawWorldFile raw = await SimulationStateSerializer.ReadWorldAsync(worldPath, CancellationToken.None) ??
             throw new InvalidOperationException("Saved v5 world file is missing.");
-        Require(raw.Version == 6, "CurrentVersion is not 6.");
+        Require(raw.Version == 7, "CurrentVersion is not 7.");
         Require(raw.StoredCellStride == 40, "v6 did not store the explicit 40-byte stride.");
-        Require(new FileInfo(worldPath).Length == CurrentHeaderSize + raw.CellBytes.Length,
-            "v6 world header is not 24 bytes.");
+        Require(new FileInfo(worldPath).Length == CurrentHeaderSize + 4 + raw.CellBytes.Length,
+            "v7 world header is not 28 bytes.");
 
         LoadedSimulationScene loaded = await serializer.LoadAsync(scenePath, materials) ??
             throw new InvalidOperationException("Saved v5 scene did not reload.");
@@ -339,6 +340,46 @@ internal static class WorldCellCodecRegressionVerifier
             throw new InvalidOperationException("Runtime-remap v5 scene did not load.");
         sourceCell.MaterialIndex = secondIndex;
         AssertCells(loaded.World, sourceCell);
+    }
+
+    private static async Task VerifyOxidizerAsync(string directory, SimulationStateSerializer serializer, MaterialRegistry materials)
+    {
+        float[] concentrations = [0, .1234567f, 1];
+        byte[] oxygen = MemoryMarshal.AsBytes(concentrations.AsSpan()).ToArray();
+        GridCell cell = new() { MaterialIndex = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Sand),
+            IsActive = 1, Mass = 1, Temperature = 20 };
+        SimulationWorldSnapshot world = CreateSnapshot(3, 1, cell, default, default) with { Oxidizer = oxygen };
+        string path = Path.Combine(directory, "oxidizer-v7.json");
+        await serializer.SaveAsync(path, new SimulationSettings { OpenBoundaries = false }, (ushort)cell.MaterialIndex, world, materials);
+        var scene = await serializer.LoadAsync(path, materials);
+        Require(scene?.State.OpenBoundaries == false, "v7 did not preserve the oxygen boundary condition.");
+        var loaded = scene?.World;
+        Require(loaded?.Oxidizer is not null && loaded.Oxidizer.AsSpan().SequenceEqual(oxygen),
+            "World v7 did not preserve exhausted, fractional and fresh oxidizer byte-for-byte.");
+        var raw = await SimulationStateSerializer.ReadWorldAsync(Path.ChangeExtension(path, ".world"), CancellationToken.None);
+        Require(raw?.Version == 7 && raw.StoredCellStride == 40 && raw.Oxidizer is not null,
+            "v7 changed GridCell layout or omitted the oxidizer section.");
+        Require(WorldCellCodec.Decode(new RawWorldFile(6, 1, 1, 40, EncodeCurrentCells(cell))).Oxidizer is null,
+            "v6 must remain loadable without an oxidizer section.");
+        foreach (float invalid in new[] { float.NaN, float.PositiveInfinity, -.01f, 1.01f })
+        {
+            float[] values = [invalid, 0, 1];
+            ExpectInvalid(() => WorldCellCodec.ValidateOxidizer(3, 1, MemoryMarshal.AsBytes(values.AsSpan()).ToArray()));
+        }
+        ExpectInvalid(() => WorldCellCodec.ValidateOxidizer(3, 1, new byte[4]));
+        byte[] original = await File.ReadAllBytesAsync(Path.ChangeExtension(path, ".world"));
+        foreach (int length in new[] { -1, 4, int.MaxValue })
+        {
+            byte[] corrupt = (byte[])original.Clone();
+            BinaryPrimitives.WriteInt32LittleEndian(corrupt.AsSpan(24, 4), length);
+            string bad = Path.Combine(directory, $"oxidizer-length-{length}.world");
+            await File.WriteAllBytesAsync(bad, corrupt);
+            await ExpectInvalidAsync(() => SimulationStateSerializer.ReadWorldAsync(bad, CancellationToken.None));
+        }
+        string truncated = Path.Combine(directory, "oxidizer-truncated.world");
+        await File.WriteAllBytesAsync(truncated, original[..^1]);
+        await ExpectInvalidAsync(() => SimulationStateSerializer.ReadWorldAsync(truncated, CancellationToken.None));
+        Console.WriteLine("PHYXEL_OXIDIZER_CODEC v7RoundTrip=True v6Compatible=True invalidValuesAndLengthsRejected=True");
     }
 
     private static async Task VerifyCorruptWorldsAsync(string directory)

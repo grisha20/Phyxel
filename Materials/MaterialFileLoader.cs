@@ -305,6 +305,8 @@ internal static partial class MaterialFileLoader
                     $"gas.hotAir must be finite and between " +
                     $"{MaterialRegistry.MinimumGasHotAir} and {MaterialRegistry.MaximumGasHotAir}.");
             }
+            if (!float.IsFinite(gas.OxidizerDisplacement) || gas.OxidizerDisplacement < 0 || gas.OxidizerDisplacement > 1)
+                throw new InvalidDataException("gas.oxidizerDisplacement must be finite and in 0..1.");
             if (!float.IsFinite(gas.HazeStrength) ||
                 gas.HazeStrength < MaterialRegistry.MinimumGasHazeStrength ||
                 gas.HazeStrength > MaterialRegistry.MaximumGasHazeStrength)
@@ -452,7 +454,7 @@ internal static partial class MaterialFileLoader
                     motion.AirLoss,
                     motion.Loss,
                     motion.Collision),
-                color, regulator),
+                color, regulator, gas?.OxidizerDisplacement ?? 1),
             ui.Order,
             ui.Hidden,
             ui.Category)
@@ -467,7 +469,7 @@ internal static partial class MaterialFileLoader
                 gas.Diffusion,
                 gas.Buoyancy,
                 gas.HotAir,
-                gas.HazeStrength),
+                gas.HazeStrength, gas.OxidizerDisplacement),
             Motion = new MaterialMotionDefinition(
                 motion.Advection,
                 motion.AirDrag,
@@ -507,6 +509,7 @@ internal static partial class MaterialFileLoader
         public float Buoyancy { get; set; }
         public float HotAir { get; set; } = MaterialRegistry.DefaultGasHotAir;
         public float HazeStrength { get; set; } = MaterialRegistry.DefaultGasHazeStrength;
+        public float OxidizerDisplacement { get; set; } = 1;
 
         [JsonExtensionData]
         public Dictionary<string, JsonElement>? UnknownFields { get; set; }

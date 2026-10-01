@@ -1,4 +1,5 @@
 #include "PhysicsShared.hlsli"
+#include "OxidizerShared.hlsli"
 
 cbuffer CombustionConstants : register(b0)
 {
@@ -14,10 +15,12 @@ cbuffer CombustionConstants : register(b0)
 
 StructuredBuffer<MaterialProperties> Materials : register(t0);
 StructuredBuffer<MaterialEmissionProperties> Emissions : register(t1);
+StructuredBuffer<float> Oxidizer : register(t2);
 RWStructuredBuffer<GridCell> Grid : register(u0);
 RWStructuredBuffer<uint> CombustionSummary : register(u1);
 RWStructuredBuffer<uint> EmissionClaims : register(u2);
 RWStructuredBuffer<EmissionRequest> EmissionRequests : register(u3);
+RWStructuredBuffer<float> OxidizerDemand : register(u4);
 
 static const float CombustionMassEpsilon = 0.0001;
 static const float MinimumCombustionTemperature = -273.15;
@@ -94,7 +97,8 @@ void ProposeEmission(
     float rate,
     float elapsedSeconds,
     uint requestIndex,
-    float temperature)
+    float temperature,
+    bool selfOxidizing)
 {
     if (productIndex == 0xffffffffu || productIndex >= CombustionMaterialCount || rate <= 0 ||
         destinationIndex == sourceIndex)
@@ -128,7 +132,7 @@ void ProposeEmission(
     request.MaterialIndex = productIndex;
     request.Mass = discreteFlame ? product.Density : min(product.Density, rate * elapsedSeconds);
     request.Temperature = temperature;
-    request.SourceIndex = sourceIndex;
+    request.SourceIndex = sourceIndex | (discreteFlame && selfOxidizing ? SelfOxidizingFlameMarker : 0);
     EmissionRequests[requestIndex] = request;
     uint ignored;
     InterlockedMin(EmissionClaims[destinationIndex], requestIndex, ignored);
@@ -143,12 +147,12 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
     if (y > 0 && emission.SmokeIntoMaterialIndex < CombustionMaterialCount)
     {
         ProposeEmission(sourceIndex, sourceIndex - width, emission.SmokeIntoMaterialIndex,
-            emission.SmokeRate, CombustionDeltaTime, sourceIndex, sourceCell.Temperature);
+            emission.SmokeRate, CombustionDeltaTime, sourceIndex, sourceCell.Temperature, (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0);
     }
     if (x + 1 < width)
     {
         ProposeEmission(sourceIndex, sourceIndex + 1, emission.GasIntoMaterialIndex,
-            emission.GasRate, CombustionDeltaTime, worldCellCount + sourceIndex, sourceCell.Temperature);
+            emission.GasRate, CombustionDeltaTime, worldCellCount + sourceIndex, sourceCell.Temperature, (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0);
     }
     if (emission.FlameIntoMaterialIndex < CombustionMaterialCount)
     {
@@ -194,50 +198,23 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
         {
             ProposeEmission(sourceIndex, flameDestination, emission.FlameIntoMaterialIndex,
                 emission.FlameRate, CombustionDeltaTime, worldCellCount * 2 + sourceIndex,
-                max(sourceCell.Temperature, Materials[emission.FlameIntoMaterialIndex].InitialTemperature));
+                max(sourceCell.Temperature, Materials[emission.FlameIntoMaterialIndex].InitialTemperature),
+                (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0);
         }
     }
 }
 
-// Number of neighbouring cells that can supply air: empty space or any gas.
-// Fuel packed on all eight sides has no oxygen and cannot burn, which is why a
-// heap burns inward from its surface instead of igniting all at once. Without
-// this the whole pile reached its combustion ceiling simultaneously and glowed
-// uniformly, because every buried cell was heated past its ignition point by
-// conduction and then started burning on its own.
-uint CountOpenNeighbours(uint2 coordinate)
+// Four face-connected donors; walls and full inert-gas cells were already
+// excluded by the immutable fine-grid oxidizer transport pass.
+float AvailableOxidizer(uint2 p)
 {
-    uint open = 0;
-    [unroll]
-    for (int offsetY = -1; offsetY <= 1; offsetY++)
-    {
-        [unroll]
-        for (int offsetX = -1; offsetX <= 1; offsetX++)
-        {
-            if (offsetX == 0 && offsetY == 0)
-            {
-                continue;
-            }
-            int2 sample = int2(coordinate) + int2(offsetX, offsetY);
-            if (sample.x < 0 || sample.y < 0 ||
-                sample.x >= int(CombustionWidth) || sample.y >= int(CombustionHeight))
-            {
-                continue;
-            }
-            GridCell neighbor = Grid[uint(sample.y) * CombustionWidth + uint(sample.x)];
-            if (neighbor.IsActive == 0)
-            {
-                open++;
-                continue;
-            }
-            if (neighbor.MaterialIndex < CombustionMaterialCount &&
-                Materials[neighbor.MaterialIndex].SimulationKind == SimulationKindGas)
-            {
-                open++;
-            }
-        }
-    }
-    return open;
+    uint i = p.y * CombustionWidth + p.x;
+    float sum = 0;
+    if (p.x > 0) sum += Oxidizer[i - 1];
+    if (p.x + 1 < CombustionWidth) sum += Oxidizer[i + 1];
+    if (p.y > 0) sum += Oxidizer[i - CombustionWidth];
+    if (p.y + 1 < CombustionHeight) sum += Oxidizer[i + CombustionWidth];
+    return sum;
 }
 
 bool HasLiveFlame(uint2 coordinate)
@@ -312,41 +289,32 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
+    bool selfOxidizing = (source.Flags & MaterialFlagSelfOxidizing) != 0;
+    float oxygen = selfOxidizing ? 4 : AvailableOxidizer(coordinate);
+    // Gate ignition as well as fuel loss/heat/emissions. A flame in inert gas
+    // must not ignite an otherwise cold piece of wood for one frame.
+    if (!selfOxidizing && oxygen / 4 <= OxidizerExtinctionThreshold) return;
+
     if (cell.Temperature <= source.IgnitionTemperature && source.FlameSpreadRate > 0 &&
         HasLiveFlame(coordinate))
     {
         float ignitionChance = saturate(source.FlameSpreadRate * CombustionDeltaTime);
         uint ignitionSeed = index ^ (CombustionTickIndex * 0x9e3779b9u);
         if (HashUnitFloat(ignitionSeed) < ignitionChance)
-        {
             cell.Temperature = min(MaximumCombustionTemperature, source.IgnitionTemperature + 1.0);
-        }
     }
-    if (cell.Temperature <= source.IgnitionTemperature)
-    {
-        return;
-    }
+    if (cell.Temperature <= source.IgnitionTemperature) return;
 
-    // Air supply. Self-oxidising fuel such as gunpowder ignores it entirely:
-    // it carries its own oxidiser and detonates even when fully buried.
-    float exposure = 1.0;
-    if ((source.Flags & MaterialFlagSelfOxidizing) == 0)
-    {
-        uint openNeighbours = CountOpenNeighbours(coordinate);
-        if (openNeighbours == 0)
-        {
-            return;
-        }
-        // Three open sides already give a fully developed flame; a single
-        // exposed corner smoulders at a third of the rate.
-        exposure = saturate(float(openNeighbours) / 3.0);
-    }
-
+    float exposure = selfOxidizing ? 1 : saturate(oxygen / 3);
     float burnedMass = min(availableFuel, source.BurnRate * exposure * CombustionDeltaTime);
-    if (burnedMass <= 0)
+    if (!selfOxidizing)
     {
-        return;
+        // A donor has at most four fuel neighbours and one flame. Reserving
+        // 1/5 per consumer prevents overdraw without float atomics or races.
+        burnedMass = min(burnedMass, oxygen / (5 * OxidizerPerFuelMass));
+        OxidizerDemand[index] = burnedMass * OxidizerPerFuelMass;
     }
+    if (burnedMass <= 0) return;
 
     float capacityMass = max(cell.Mass, source.Density);
     float capacity = max(0.01, source.HeatCapacity * capacityMass);
@@ -391,7 +359,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
                         flame,
                         index ^ (CombustionTickIndex * 0x9e3779b9u));
                     cell.RestFrames = 0;
-                    cell.BodyId = 0;
+                    cell.BodyId = selfOxidizing ? SelfOxidizingFlameMarker : 0;
                     cell.VelocityX = 0;
                     cell.VelocityY = 0;
                     cell.Pressure = 0;

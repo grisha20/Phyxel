@@ -139,6 +139,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             VerifyExternalMaterials(registry, materialErrors);
             VerifyGpuTable(registry);
             await VerifyRegulatorSchemaAsync(directory);
+            await VerifyOxidizerGasSchemaAsync(directory);
             await VerifyInvalidCoreStopsLoadingAsync(directory);
         }
         finally
@@ -181,6 +182,34 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         Require(accepted.ThermalRegulator?.MaximumPower == 0 &&
             accepted.Properties.ThermalDeviceTargetTemperature == 240, "Disabled device did not load.");
         Console.WriteLine("PHYXEL_REGULATOR_SCHEMA invalid=8 disabledAccepted=1");
+    }
+
+    private static async Task VerifyOxidizerGasSchemaAsync(string parentDirectory)
+    {
+        string directory = Path.Combine(parentDirectory, "oxidizer-gas-schema");
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "gas.json");
+        string original = await File.ReadAllTextAsync(Path.Combine(MaterialRegistry.ResolveCoreDirectory(), "co2.json"));
+        foreach (float value in new[] { 0f, .05f, 1f })
+        {
+            var json = System.Text.Json.Nodes.JsonNode.Parse(original)!;
+            json["gas"]!["oxidizerDisplacement"] = value;
+            await File.WriteAllTextAsync(path, json.ToJsonString());
+            var accepted = MaterialFileLoader.LoadCore(directory, MaterialRegistry.MaximumMaterials)[0];
+            Require(Same(accepted.Properties.GasOxidizerDisplacement, value) && accepted.Gas?.OxidizerDisplacement == value,
+                "Gas oxidizer displacement did not reach metadata and GPU properties.");
+        }
+        foreach (float value in new[] { -.01f, 1.01f })
+        {
+            var json = System.Text.Json.Nodes.JsonNode.Parse(original)!;
+            json["gas"]!["oxidizerDisplacement"] = value;
+            await File.WriteAllTextAsync(path, json.ToJsonString());
+            bool rejected = false;
+            try { MaterialFileLoader.LoadCore(directory, MaterialRegistry.MaximumMaterials); }
+            catch (InvalidDataException) { rejected = true; }
+            Require(rejected, "Invalid gas oxidizer displacement was accepted.");
+        }
+        Console.WriteLine("PHYXEL_OXIDIZER_GAS_SCHEMA accepted=3 rejected=2");
     }
 
     private static void VerifyCoreMaterials(MaterialRegistry registry)
@@ -247,6 +276,10 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             "core:smoke hazeStrength is incorrect.");
         Require(Same(registry[CoreMaterialIds.Co2].Properties.GasHazeStrength, 1f),
             "core:co2 hazeStrength is incorrect.");
+        Require(Same(registry[CoreMaterialIds.Co2].Properties.GasOxidizerDisplacement, 1) &&
+            Same(steam.Properties.GasOxidizerDisplacement, 1) &&
+            Same(registry[CoreMaterialIds.Smoke].Properties.GasOxidizerDisplacement, .05f),
+            "CO2/steam and aerosol smoke must not displace the same amount of ambient air.");
         Require(water.UiOrder == 20 && ice.UiOrder == 21 && steam.UiOrder == 22,
             "Water/Ice/Steam UI order is not 20/21/22.");
         Require(!water.Hidden && !ice.Hidden && !steam.Hidden,

@@ -32,7 +32,7 @@
 | 12 | `VelocityY` | `float` | Вертикальный импульс. |
 | 16 | `Pressure` | `float` | Гидравлика; у fixed thermal regulator — уставка. |
 | 20 | `IsActive` | `uint` | Нулевая клетка является empty. |
-| 24 | `BodyId` | `uint` | Принадлежность movable-solid body. |
+| 24 | `BodyId` | `uint` | Принадлежность movable-solid body; на flame — marker собственного окислителя. |
 | 28 | `RestFrames` | `uint` | Состояние покоя. |
 | 32 | `Temperature` | `float` | Температура, °C. |
 | 36 | `Lifetime` | `float` | Lifecycle; у phase-enthalpy — фазовый прогресс, у regulator — мощность. |
@@ -52,7 +52,7 @@
 7. ambient temperature/cooling rate;
 8. liquid-contact target/rate;
 9. gas diffusion/buoyancy/hot air и motion coefficients;
-10. gas haze strength, default device target/power (последние два поля — offsets 168/172).
+10. gas haze strength, tagged device target/gas oxidizer displacement и device power (offsets 168/172).
 
 Отдельная `MaterialEmissionProperties` хранит runtime targets/rates для smoke, gas и flame. JSON всегда хранит string IDs; registry разрешает их только после стабилизации полного набора материалов.
 
@@ -167,13 +167,39 @@ T += (ambientTemperature - T) * factor
 
 Combustion pass использует данные материала: ignition threshold, burn rate, heat per mass, burned-into target и emissions. `core:fire` имеет флаг `flame`, собственный lifetime и decay target. Emission resolve создаёт продукты только в разрешённых destination-клетках.
 
+`OxidizerTransport.hlsl` ведёт отдельное float-поле на мелкой сетке: свежий
+воздух 1, истощённый/вытесненный 0. На каждом 60 Hz combustion tick сначала
+четырёхгранная диффузия между проницаемыми клетками, затем реакция и запись
+demand, затем списание с соседних доноров. Solid/granular/liquid блокируют
+перенос; открытые внешние края восполняют воздух. Поле не зависит от
+включения грубого AirSimulation и не восстанавливается при движении газа.
+`gas.oxidizerDisplacement` (default 1, 0..1) задаёт вытеснение пакетом;
+core:smoke=0.05. Для gas это tagged alias поля at offset 168; fixed regulator
+использует тот же слот как уставку. Layout 176/44 сохранён.
+
+Горение и ignition обычного топлива требуют окислителя; burnedMass
+ограничивается безопасным бюджетом соседей, heat/emissions масштабируются
+тем же расходом. Обычный FIRE при нехватке окислителя раньше превращается
+в decay product. `self-oxidizing` fuel освобождён; только его flame products
+несут marker `BodyId=0x80000000` до обычного decay, чтобы сохранить цепь
+реакции без воздуха. EmissionRequest использует высокий бит SourceIndex
+для переноса маркера, не меняя 20-byte layout. Это нормированный игровой
+ресурс, не полноценная химическая смесь; перенос пока диффузионный.
+При снижении ёмкости движущимся газом вытесненный запас пока не переносится
+соседям: сумма поля не является количеством O₂ в движущейся смеси.
+Пустой сохранённый мир с полем сохраняет GPU-ресурс и его clock; particle
+sleep не восстанавливает свежий воздух. OpenBoundaries открывает стороны
+и потолок для пополнения; пол остаётся закрытым.
+Подробности и проверки: [OXIDIZER_RESULTS.md](OXIDIZER_RESULTS.md).
+
 Обычная material-кисть пишет только в empty. Между предыдущей и текущей позициями указателя передаётся одна capsule-команда в координатах симуляции, поэтому быстрый штрих непрерывен и не зависит от FPS. Тот же segment-путь используют температура и ластик. Исключение не является заменой материала: кисть flame при попадании в combustible fixed solid повышает его температуру выше ignition threshold, сохраняя `MaterialIndex`, массу и геометрию.
 
 ## Сохранения
 
 - v3/v4: header 20 байт, неявный stride 32; v3 использует изолированную legacy palette, v4 — строковую scene palette.
 - v5: header с явным stride 36, клетка содержит temperature.
-- v6: текущий writer, явный stride 40, клетка содержит temperature и lifetime.
+- v6: header 24 байта, явный stride 40, клетка содержит temperature и lifetime.
+- v7: текущий writer, header 28 байт; тот же grid stride 40 и отдельная float-секция окислителя. Scene сохраняет OpenBoundaries. V3-v6 читаются, недостающий запас инициализируется свежим воздухом.
 
 Сцена хранит `MaterialPalette` как массив string IDs, где позиция — компактный scene index. При сохранении отдельная копия snapshot преобразуется runtime→scene числовой таблицей. При загрузке palette один раз преобразуется string→runtime, затем grid remap выполняется численно. Живая сетка не перекодируется.
 

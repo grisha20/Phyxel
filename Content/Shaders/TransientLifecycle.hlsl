@@ -1,4 +1,5 @@
 #include "PhysicsShared.hlsli"
+#include "OxidizerShared.hlsli"
 
 cbuffer TransientConstants : register(b0)
 {
@@ -13,6 +14,7 @@ cbuffer TransientConstants : register(b0)
 };
 
 StructuredBuffer<MaterialProperties> Materials : register(t0);
+StructuredBuffer<float> Oxidizer : register(t1);
 RWStructuredBuffer<GridCell> Grid : register(u0);
 RWStructuredBuffer<uint> CombustionSummary : register(u1);
 
@@ -46,7 +48,14 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     bool flame = (material.Flags & MaterialFlagFlame) != 0;
-    cell.Lifetime = max(0, cell.Lifetime - TransientDeltaTime);
+    float oxygen = Oxidizer[index];
+    if (coordinate.x > 0) oxygen += Oxidizer[index - 1];
+    if (coordinate.x + 1 < TransientWidth) oxygen += Oxidizer[index + 1];
+    if (coordinate.y > 0) oxygen += Oxidizer[index - TransientWidth];
+    if (coordinate.y + 1 < TransientHeight) oxygen += Oxidizer[index + TransientWidth];
+    bool extinguished = flame && cell.BodyId != SelfOxidizingFlameMarker &&
+        oxygen / 5 <= OxidizerExtinctionThreshold;
+    cell.Lifetime = extinguished ? 0 : max(0, cell.Lifetime - TransientDeltaTime);
     if (cell.Lifetime > 0)
     {
         Grid[index] = cell;
@@ -56,7 +65,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     // Hot FIRE is killed when its resource expires.  Only cooled FIRE becomes
     // SMKE; converting every expired flame made smoke originate at the brush
     // rather than at the cooled perimeter of the flow.
-    if (flame && cell.Temperature >= FireToSmokeTemperature)
+    if (flame && !extinguished && cell.Temperature >= FireToSmokeTemperature)
     {
         Grid[index] = CreateEmptyCell();
         InterlockedOr(CombustionSummary[0], CombustionOccurred | TargetCellular);

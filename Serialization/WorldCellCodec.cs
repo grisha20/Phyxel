@@ -11,7 +11,8 @@ internal sealed record RawWorldFile(
     int Width,
     int Height,
     int StoredCellStride,
-    byte[] CellBytes);
+    byte[] CellBytes,
+    byte[]? Oxidizer = null);
 
 internal static class WorldCellCodec
 {
@@ -58,7 +59,7 @@ internal static class WorldCellCodec
         {
             3 or 4 => LegacyCellStride,
             5 => V5CellStride,
-            6 => CurrentCellStride,
+            6 or 7 => CurrentCellStride,
             _ => throw new InvalidDataException($"Unsupported world version {version}.")
         };
         if (storedCellStride != expectedStride)
@@ -114,7 +115,7 @@ internal static class WorldCellCodec
         {
             3 or 4 => DecodeLegacy(world),
             5 => DecodeV5(world),
-            6 => DecodeCurrent(world),
+            6 or 7 => DecodeCurrent(world),
             _ => throw new InvalidDataException($"Unsupported world version {world.Version}.")
         };
     }
@@ -145,8 +146,19 @@ internal static class WorldCellCodec
         return new SimulationWorldSnapshot(world.Width, world.Height, currentBytes);
     }
 
+    internal static void ValidateOxidizer(int width, int height, byte[]? bytes)
+    {
+        if (bytes is null || bytes.Length == 0) return;
+        if (bytes.Length != (long)width * height * sizeof(float))
+            throw new InvalidDataException("Oxidizer section does not match world dimensions.");
+        foreach (float value in MemoryMarshal.Cast<byte, float>(bytes))
+            if (!float.IsFinite(value) || value < 0 || value > 1)
+                throw new InvalidDataException("Oxidizer concentration must be finite and in 0..1.");
+    }
+
     private static SimulationWorldSnapshot DecodeCurrent(RawWorldFile world)
     {
+        ValidateOxidizer(world.Width, world.Height, world.Oxidizer);
         byte[] currentBytes = (byte[])world.CellBytes.Clone();
         Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(currentBytes.AsSpan());
         for (int index = 0; index < cells.Length; index++)
@@ -171,7 +183,7 @@ internal static class WorldCellCodec
                     $"World cell {index} contains invalid lifetime {lifetime}.");
             }
         }
-        return new SimulationWorldSnapshot(world.Width, world.Height, currentBytes);
+        return new SimulationWorldSnapshot(world.Width, world.Height, currentBytes, Oxidizer: world.Oxidizer is null ? null : (byte[])world.Oxidizer.Clone());
     }
 
     private static SimulationWorldSnapshot DecodeV5(RawWorldFile world)

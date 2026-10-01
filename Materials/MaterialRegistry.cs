@@ -683,7 +683,8 @@ public sealed class MaterialRegistry
         float gasHazeStrength,
         MaterialMotionDefinition motion,
         Color color,
-        MaterialThermalRegulatorDefinition? regulator = null)
+        MaterialThermalRegulatorDefinition? regulator = null,
+        float gasOxidizerDisplacement = 1)
     {
         return new MaterialProperties
         {
@@ -699,7 +700,8 @@ public sealed class MaterialRegistry
             InitialTemperature = initialTemperature,
             ThermalConductivity = thermalConductivity,
             HeatCapacity = heatCapacity,
-            ThermalDeviceTargetTemperature = regulator?.TargetTemperature ?? 0,
+            ThermalDeviceTargetTemperature = regulator?.TargetTemperature ??
+                (kind == MaterialSimulationKind.Gas ? gasOxidizerDisplacement : 0),
             ThermalDeviceMaximumPower = regulator?.MaximumPower ?? 0,
             AmbientTemperature = ambientTemperature,
             AmbientCoolingRate = ambientCoolingRate,

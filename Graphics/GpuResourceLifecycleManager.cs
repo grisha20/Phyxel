@@ -135,6 +135,13 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             StructureByteStride = 0
         });
         Buffer thermalConstants = CreateConstantBuffer<ThermalSimulationConstants>();
+        GpuBufferPair<float> oxidizer = new(Device, cellCount);
+        GpuStructuredBuffer<float> oxidizerDemand = new(Device, cellCount);
+        Buffer oxidizerConstants = CreateConstantBuffer<OxidizerConstants>();
+        Buffer oxidizerStaging = CreateStagingBuffer(cellCount * sizeof(float));
+        float[] freshAir = new float[cellCount];
+        Array.Fill(freshAir, 1f);
+        foreach (Buffer buffer in oxidizer.Buffers) Device.ImmediateContext.UpdateSubresource(freshAir, buffer);
         // The air field is solved on a coarse grid: one air cell covers
         // AirCellSize x AirCellSize simulation cells, as CELL = 4 does in
         // The Powder Toy. DivideRoundUp so the right and bottom edges of a
@@ -436,6 +443,10 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Emissions = emissions,
             FrameConstants = constants,
             ThermalConstants = thermalConstants,
+            Oxidizer = oxidizer,
+            OxidizerDemand = oxidizerDemand,
+            OxidizerConstants = oxidizerConstants,
+            OxidizerStaging = oxidizerStaging,
             AirWidth = airWidth,
             AirHeight = airHeight,
             AirConstants = airConstants,
@@ -550,6 +561,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SolidDisplacementApplyShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "ApplyHullWaterDisplacement") : null,
             CompositionShader = allocateSimulation ? CompileShader("RenderComposition.hlsl") : null,
             ThermalDiffusionShader = allocateSimulation ? CompileShader("ThermalDiffusion.hlsl") : null,
+            OxidizerTransportShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSTransport") : null,
+            OxidizerConsumeShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSConsume") : null,
             AirInjectShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSInject") : null,
             AirPressureShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSPressure") : null,
             AirVelocityShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSVelocity") : null,
@@ -600,7 +613,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             "#include \"PhysicsShared.hlsli\"",
             sharedStructures,
             StringComparison.Ordinal).Replace("#include \"PhaseEnthalpy.hlsli\"", phaseEnthalpy,
-                StringComparison.Ordinal);
+                StringComparison.Ordinal).Replace("#include \"OxidizerShared.hlsli\"",
+                    File.ReadAllText(Path.Combine(shaderDirectory, "OxidizerShared.hlsli")), StringComparison.Ordinal);
         string cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"phyxel-compute-shader-v1\0{entryPoint}\0{shaderSource}")));
         string cachePath = Path.Combine(

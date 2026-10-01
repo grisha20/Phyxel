@@ -130,7 +130,8 @@ public sealed record MaterialGasDefinition(
     float Diffusion,
     float Buoyancy,
     float HotAir,
-    float HazeStrength);
+    float HazeStrength,
+    float OxidizerDisplacement = 1);
 
 public sealed record MaterialMotionDefinition(
     float Advection,
