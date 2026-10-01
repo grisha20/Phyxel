@@ -9,7 +9,7 @@ struct GridCell
     uint BodyId;
     uint RestFrames;
     float Temperature;
-    float Lifetime;
+    float Lifetime; // PhaseEnthalpy: latent progress per mass; otherwise remaining lifetime.
 };
 
 // One cell of the coarse air field. Blocked is a float rather than a bool or a
@@ -206,6 +206,7 @@ static const uint MaterialFlagSelfOxidizing = 1u << 2;
 // such as METL let the field pass and are collided with by the particles.
 static const uint MaterialFlagBlocksAir = 1u << 3;
 static const uint MaterialFlagSmoke = 1u << 4;
+static const uint MaterialFlagPhaseEnthalpy = 1u << 5;
 static const uint PhaseSummaryPhaseOccurred = 1u << 0;
 static const uint PhaseSummaryTargetCellular = 1u << 1;
 static const uint PhaseSummaryTargetLiquid = 1u << 2;

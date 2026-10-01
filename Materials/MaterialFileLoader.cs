@@ -363,6 +363,9 @@ internal static partial class MaterialFileLoader
             kind);
         MaterialEmissionDefinition? emissions = ParseEmissions(document.Emissions, id, combustion);
         MaterialLifecycleDefinition? lifecycle = ParseLifecycle(document.Lifecycle, id, kind);
+        if ((flags & MaterialFlags.PhaseEnthalpy) != 0 &&
+            (lifecycle is not null || kind is not (MaterialSimulationKind.Liquid or MaterialSimulationKind.Gas)))
+            throw new InvalidDataException("phase-enthalpy requires an infinite-lived liquid or gas.");
         MaterialLiquidContactTransitionDefinition? liquidContactTransition =
             ParseContactTransitions(document.ContactTransitions, id, kind);
         // Запрет на combustion + movable-solid снят вместе с разрешением
@@ -1111,6 +1114,7 @@ internal static partial class MaterialFileLoader
                 "self-oxidizing" => MaterialFlags.SelfOxidizing,
                 "blocks-air" => MaterialFlags.BlocksAir,
                 "smoke" => MaterialFlags.Smoke,
+                "phase-enthalpy" => MaterialFlags.PhaseEnthalpy,
                 _ => throw new InvalidDataException($"Неизвестный flag '{value}'.")
             };
             if ((flags & flag) != 0)

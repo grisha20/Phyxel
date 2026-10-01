@@ -236,6 +236,12 @@ public sealed class MaterialRegistry
             throw new InvalidDataException(
                 $"Core phase transitions contain an instantaneous cycle: {string.Join(", ", cycles.OrderBy(id => id, StringComparer.Ordinal))}.");
         }
+        foreach (MaterialDefinition source in coreDefinitions)
+        {
+            string? error = FindPhaseEnthalpyError(source, coreById);
+            if (error is not null)
+                throw new InvalidDataException($"Invalid phase enthalpy in '{source.Id}': {error}");
+        }
     }
 
     private static void ValidateCoreCombustion(IReadOnlyCollection<MaterialDefinition> coreDefinitions)
@@ -315,6 +321,7 @@ public sealed class MaterialRegistry
                 .Select(source => (
                     Source: source,
                     Error: FindPhaseTransitionReferenceError(source, available, requireBundledTarget: false) ??
+                        FindPhaseEnthalpyError(source, available) ??
                         FindCombustionReferenceError(source, available, requireBundledTarget: false) ??
                         FindEmissionReferenceError(source, available, requireBundledTarget: false) ??
                         FindLifecycleReferenceError(source, available, requireBundledTarget: false) ??
@@ -395,6 +402,36 @@ public sealed class MaterialRegistry
             {
                 return $"{direction} target cannot be the source material itself ('{source.Id}').";
             }
+        }
+        return null;
+    }
+
+    private static string? FindPhaseEnthalpyError(
+        MaterialDefinition source, IReadOnlyDictionary<string, MaterialDefinition> available)
+    {
+        if (PhaseEnthalpy.Enabled(source.Properties))
+        {
+            bool liquidSource = source.Properties.SimulationKind == (uint)MaterialSimulationKind.Liquid;
+            MaterialTransitionRule? rule = liquidSource ? source.PhaseTransitions?.Above : source.PhaseTransitions?.Below;
+            if (rule is null || !available.TryGetValue(rule.IntoId, out MaterialDefinition? partner) ||
+                !PhaseEnthalpy.Enabled(partner.Properties) || partner.Lifecycle is not null)
+                return "phase-enthalpy requires an infinite-lived, flagged reversible liquid/gas pair.";
+            MaterialDefinition liquid = liquidSource ? source : partner;
+            MaterialDefinition vapour = liquidSource ? partner : source;
+            MaterialTransitionRule? boiling = liquid.PhaseTransitions?.Above;
+            MaterialTransitionRule? condensing = vapour.PhaseTransitions?.Below;
+            if (liquid.Properties.SimulationKind != (uint)MaterialSimulationKind.Liquid ||
+                vapour.Properties.SimulationKind != (uint)MaterialSimulationKind.Gas ||
+                vapour.PhaseTransitions?.Above is not null ||
+                boiling is null || condensing is null || boiling.IntoId != vapour.Id ||
+                condensing.IntoId != liquid.Id || boiling.LatentHeat <= 0 ||
+                condensing.Temperature >= boiling.Temperature)
+                return "phase-enthalpy requires positive latent heat and separated reversible thresholds.";
+            float condensingRange = boiling.LatentHeat +
+                (liquid.Properties.HeatCapacity - vapour.Properties.HeatCapacity) *
+                (boiling.Temperature - condensing.Temperature);
+            if (boiling.LatentHeat > MaximumLifetime || condensingRange <= 0 || condensingRange > MaximumLifetime)
+                return "phase-enthalpy progress must fit the serialized auxiliary range (0..3600).";
         }
         return null;
     }

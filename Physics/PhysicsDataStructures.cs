@@ -15,6 +15,9 @@ public struct GridCell
     public uint RestFrames;
     public float Temperature;
     public float Lifetime;
+
+    // Tagged by MaterialFlags.PhaseEnthalpy; no additional serialized field.
+    public float PhaseProgress { readonly get => Lifetime; set => Lifetime = value; }
 }
 
 /// <summary>

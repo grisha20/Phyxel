@@ -113,7 +113,7 @@ internal static class CorePhaseAcceptanceVerifier
         GridCell oneTransition = Cell(checkpoints[0].Snapshot, 260, 160);
         GridCell twoTransitions = Cell(checkpoints[1].Snapshot, 260, 160);
         Require(oneTransition.MaterialIndex == materials.GetRequiredRuntimeIndex(CoreMaterialIds.Water),
-            "ice at 110 C skipped water in the first dispatch", errors);
+            "ice at 650 C skipped water in the first dispatch", errors);
         ValidateNormalized(oneTransition, twoTransitions, materials, CoreMaterialIds.Steam,
             "second dispatch water -> steam", errors);
 
@@ -216,7 +216,7 @@ internal static class CorePhaseAcceptanceVerifier
         GridCell coldBefore = Cell(initial, 220, 135);
         coldBefore.Temperature = -10;
         GridCell hotBefore = Cell(initial, 260, 135);
-        hotBefore.Temperature = 110;
+        hotBefore.Temperature = 650;
         Require(CellEquals(coldBefore, Cell(checkpoints[0].Snapshot, 220, 135)) &&
             CellEquals(hotBefore, Cell(checkpoints[0].Snapshot, 260, 135)),
             "temperature brush changed fields other than Temperature while paused", errors);
@@ -360,16 +360,21 @@ internal static class CorePhaseAcceptanceVerifier
         // phase contract still requires every non-temperature field and the
         // locally cooled temperature to be preserved by normalization.
         const float ambientTemperatureTolerance = 0.05f;
-        bool fieldsMatch = hasAmbientCooling
+        bool fieldsMatch = hasAmbientCooling || PhaseEnthalpy.Enabled(sourceProperties)
             ? CellEqualsExceptTemperature(expected, actual) &&
                 Math.Abs(expected.Temperature - actual.Temperature) <= ambientTemperatureTolerance
             : CellEquals(expected, actual);
         Require(fieldsMatch,
             $"{label} fields expected={Describe(expected)} actual={Describe(actual)}", errors);
+        bool energyPair = PhaseEnthalpy.Enabled(sourceProperties) &&
+            PhaseEnthalpy.Enabled(materials[target].Properties);
         bool latentBoil = sourceProperties.TransitionAboveLatentHeat > 0 &&
             materials[target].Properties.SimulationKind == (uint)MaterialSimulationKind.Gas;
         Require(SameBits(source.Mass, actual.Mass) &&
-            (latentBoil
+            (energyPair
+                ? Math.Abs(PhaseEnthalpy.TransitionTemperature(sourceAtPhasePass, sourceProperties,
+                    materials[target].Properties) - actual.Temperature) <= ambientTemperatureTolerance
+                : latentBoil
                 ? SameBits(actual.Temperature,
                     sourceProperties.TransitionAboveTemperature)
                 : hasAmbientCooling
@@ -484,6 +489,7 @@ internal static class CorePhaseAcceptanceVerifier
         left.IsActive == right.IsActive &&
         left.BodyId == right.BodyId &&
         left.RestFrames == right.RestFrames &&
+        SameBits(left.Lifetime, right.Lifetime) &&
         SameBits(left.Temperature, right.Temperature);
 
     private static bool SamePhaseState(GridCell left, GridCell right) =>

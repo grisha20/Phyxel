@@ -17,6 +17,8 @@ RWStructuredBuffer<GridCell> Grid : register(u0);
 RWStructuredBuffer<uint> PhaseSummary : register(u1);
 RWStructuredBuffer<uint> PhaseEventCounters : register(u2);
 
+#include "PhaseEnthalpy.hlsli"
+
 // Continuum gas leaves a very dilute numerical tail far beyond its visible
 // cloud. That tail must not nucleate liquid by itself when it touches a cold
 // wall: condensation requires both a real cell contribution and a coherent
@@ -123,8 +125,14 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     MaterialProperties source = Materials[cell.MaterialIndex];
+    bool phaseEnthalpy = HasPhaseEnthalpy(source);
+    if (phaseEnthalpy)
+    {
+        cell = SetCellSpecificEnthalpy(cell, CellSpecificEnthalpy(cell));
+        Grid[index] = cell;
+    }
     bool latentTransitionAccepted = false;
-    if (source.TransitionAboveLatentHeat > 0 &&
+    if (!phaseEnthalpy && source.TransitionAboveLatentHeat > 0 &&
         source.TransitionAboveMaterialIndex != 0xffffffffu &&
         cell.Temperature > source.TransitionAboveTemperature)
     {
@@ -144,7 +152,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
         latentTransitionAccepted = true;
     }
-    uint targetIndex = latentTransitionAccepted
+    uint targetIndex = phaseEnthalpy ? SelectEnthalpyPhaseTarget(cell) : latentTransitionAccepted
         ? source.TransitionAboveMaterialIndex
         : SelectPhaseTarget(cell, source);
     if (!IsValidPhaseTarget(targetIndex))
@@ -161,6 +169,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     bool sourceCellular = IsCellularMaterial(source.SimulationKind);
     bool targetCellular = IsCellularMaterial(target.SimulationKind);
+    if (phaseEnthalpy && HasPhaseEnthalpy(target))
+        cell.Temperature = EnthalpyTransitionTemperature(cell, source, target);
     cell.MaterialIndex = targetIndex;
     cell.IsActive = 1;
     cell.BodyId = 0;

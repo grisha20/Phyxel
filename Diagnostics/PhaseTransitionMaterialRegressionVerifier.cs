@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using Microsoft.Xna.Framework;
 using Phyxel.Materials;
@@ -32,11 +33,11 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             1.5f, 0.75f, 0.18f, "#DAB85C", 20, 0.15f, 0.83f),
         new("core:gunpowder", MaterialSimulationKind.Granular, MaterialFlags.SelfOxidizing,
             1.4f, 0.80f, 0.15f, "#505358", 20f, 0.25f, 0.90f),
-        new(CoreMaterialIds.Water, MaterialSimulationKind.Liquid, MaterialFlags.None,
+        new(CoreMaterialIds.Water, MaterialSimulationKind.Liquid, MaterialFlags.PhaseEnthalpy,
             1, 0.025f, 0.92f, "#2B84CF", 20, 0.60f, 4.18f),
         new(CoreMaterialIds.Ice, MaterialSimulationKind.Solid, MaterialFlags.None,
             0.92f, 0.10f, 0, "#A9DDF2", -5, 0.80f, 2.10f),
-        new(CoreMaterialIds.Steam, MaterialSimulationKind.Gas, MaterialFlags.None,
+        new(CoreMaterialIds.Steam, MaterialSimulationKind.Gas, MaterialFlags.PhaseEnthalpy,
             0.03f, 0.005f, 1.20f, "#A0A0FFFF", 122, 0.04f, 2.08f),
         new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
             7.8f, 0.35f, 0, "#8E9CA6", 20, 1, 0.13f),
@@ -95,10 +96,36 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             await VerifyExternalDependencyCascadeAsync(root, coreDirectory);
             await VerifyCoreFailuresAsync(root, coreDirectory);
             await VerifyCycleValidationAsync(root, coreDirectory);
+            await VerifyEnthalpyValidationAsync(root, coreDirectory);
         }
         finally
         {
             Directory.Delete(root, true);
+        }
+    }
+
+    private static async Task VerifyEnthalpyValidationAsync(string root, string sourceCoreDirectory)
+    {
+        (string Label, string File, string Expected, Action<JsonNode> Change)[] cases =
+        [
+            ("enthalpy-lifecycle", "steam.json", "infinite-lived", node =>
+                node["lifecycle"] = new JsonObject { ["minimum"] = 1, ["maximum"] = 2, ["decayInto"] = CoreMaterialIds.Co2 }),
+            ("enthalpy-unflagged", "steam.json", "flagged reversible", node =>
+                node["flags"] = new JsonArray()),
+            ("enthalpy-overflow", "water.json", "serialized auxiliary range", node =>
+                node["thermal"]!["transitions"]!["above"]!["latentHeat"] = 10000),
+            ("enthalpy-extra-phase", "steam.json", "phase-enthalpy", node =>
+                node["thermal"]!["transitions"]!["above"] = new JsonObject {
+                    ["temperature"] = 500, ["into"] = CoreMaterialIds.Co2 })
+        ];
+        foreach (var test in cases)
+        {
+            string directory = await CopyCoreDirectoryAsync(root, test.Label, sourceCoreDirectory);
+            string path = Path.Combine(directory, test.File);
+            JsonNode node = JsonNode.Parse(await File.ReadAllTextAsync(path))!;
+            test.Change(node);
+            await File.WriteAllTextAsync(path, node.ToJsonString());
+            ExpectRegistryFailure(directory, CreateDirectory(root, test.Label + "-external"), test.Expected);
         }
     }
 

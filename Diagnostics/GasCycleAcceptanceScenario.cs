@@ -20,7 +20,7 @@ internal static class GasCycleAcceptanceScenario
     public static SimulationWorldSnapshot? CreateInitialWorld(AcceptanceScenarioMode mode,
         int width, int height, MaterialRegistry materials)
     {
-        if (mode is not (AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamSurface)) return null;
+        if (mode is not (AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamSurface or AcceptanceScenarioMode.SteamEnergy)) return null;
         if (width < 480 || height < 270) throw new InvalidOperationException("Gas cycle requires 480x270.");
         Events.Clear();
         byte[] bytes = new byte[width * height * Marshal.SizeOf<GridCell>()];
@@ -35,9 +35,19 @@ internal static class GasCycleAcceptanceScenario
             Fill(cells, width, 228, 180, 251, 219,
                 materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2), 20, 1);
         }
+        else if (mode == AcceptanceScenarioMode.SteamEnergy)
+        {
+            SteamEnergyAcceptance.Populate(cells, width, materials);
+        }
         else if (mode == AcceptanceScenarioMode.SteamSurface)
         {
             Pocket(cells, width, materials, 200, 122, 20);
+            // A finite condenser must have capacity for the vapour's latent
+            // energy; the old 8*7.8 mass pocket only tested instant conversion.
+            uint coldMetal = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Metal);
+            for (int y = 119; y <= 121; y++) for (int x = 199; x <= 201; x++)
+                if (cells[y * width + x].MaterialIndex == coldMetal)
+                    cells[y * width + x].Mass = 78;
             Pocket(cells, width, materials, 300, 122, 122);
             Pocket(cells, width, materials, 400, 200, 180);
         }
@@ -92,6 +102,8 @@ internal static class GasCycleAcceptanceScenario
         Marshal.Copy(mapped.DataPointer, counts, 0, 4);
         context.UnmapSubresource(resources.PhaseEventStaging, 0);
         Events.Add((frame, (uint)counts[0], (uint)counts[1], (uint)counts[2], (uint)counts[3]));
+        if (frame % 1800 == 0)
+            Console.WriteLine($"PHYXEL_STEAM_CYCLE_PROGRESS frame={frame} evaporations={counts[0]} condensations={counts[1]} upper={counts[2]}");
     }
 
     public static bool Validate(AcceptanceScenarioMode mode, SimulationWorldSnapshot snapshot,
@@ -103,6 +115,8 @@ internal static class GasCycleAcceptanceScenario
         uint water = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
         var cells = MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid);
         Directory.CreateDirectory(directory);
+        if (mode == AcceptanceScenarioMode.SteamEnergy)
+            return SteamEnergyAcceptance.Validate(snapshot, materials, directory, out report);
         if (mode == AcceptanceScenarioMode.SteamSurface)
         {
             GridCell cold = cells[120 * snapshot.Width + 200], warm = cells[120 * snapshot.Width + 300];

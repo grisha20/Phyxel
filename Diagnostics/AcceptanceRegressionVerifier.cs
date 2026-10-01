@@ -318,7 +318,7 @@ public static class AcceptanceRegressionVerifier
                     materialRegistry,
                     thermalCheckpoints,
                     out report),
-            AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamSurface =>
+            AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamSurface or AcceptanceScenarioMode.SteamEnergy =>
                 GasCycleAcceptanceScenario.Validate(mode, snapshot, materialRegistry, thermalCheckpoints,
                     artifactDirectory, out report),
             AcceptanceScenarioMode.SteamDistributionAndCooling =>

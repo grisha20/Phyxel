@@ -587,10 +587,12 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         string shaderDirectory = Path.Combine(AppContext.BaseDirectory, "Content", "Shaders");
         string path = Path.Combine(shaderDirectory, fileName);
         string sharedStructures = File.ReadAllText(Path.Combine(shaderDirectory, "PhysicsShared.hlsli"));
+        string phaseEnthalpy = File.ReadAllText(Path.Combine(shaderDirectory, "PhaseEnthalpy.hlsli"));
         string shaderSource = File.ReadAllText(path).Replace(
             "#include \"PhysicsShared.hlsli\"",
             sharedStructures,
-            StringComparison.Ordinal);
+            StringComparison.Ordinal).Replace("#include \"PhaseEnthalpy.hlsli\"", phaseEnthalpy,
+                StringComparison.Ordinal);
         string cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"phyxel-compute-shader-v1\0{entryPoint}\0{shaderSource}")));
         string cachePath = Path.Combine(

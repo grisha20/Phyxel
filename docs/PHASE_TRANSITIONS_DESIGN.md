@@ -1,5 +1,12 @@
 # Универсальные фазовые переходы
 
+> **Обновление 2026-10-01:** для opt-in пары вода/пар действует баланс
+> энтальпии и накопление скрытой теплоты, описанные в
+> [STEAM_ENERGY_RESULTS.md](STEAM_ENERGY_RESULTS.md). Исторический Model A
+> ниже сохраняется для остальных фаз. Фактический MaterialProperties —
+> 176 байт, GridCell — 40; текущие ordinary-газы используют GasMotionState,
+> см. [GAS_SIMULATION.md](GAS_SIMULATION.md).
+
 > **Актуальное состояние (2026-07-20).** Универсальная схема, GPU pass,
 > координация и acceptance-матрица реализованы. Текущий writer создаёт сцены
 > v6 с 40-байтным `GridCell` (`Temperature` и `Lifetime`); v3/v4/v5 являются

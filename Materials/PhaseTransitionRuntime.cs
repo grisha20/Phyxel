@@ -32,7 +32,7 @@ public static class PhaseTransitionRuntime
         }
 
         MaterialProperties source = materials[(int)cell.MaterialIndex];
-        uint targetIndex = SelectTarget(cell.Temperature, source);
+        uint targetIndex = PhaseEnthalpy.SelectTarget(ref cell, materials);
         if (!IsValidTarget(targetIndex, materials))
         {
             return false;
@@ -85,6 +85,9 @@ public static class PhaseTransitionRuntime
         bool targetMovableSolid = targetKind == MaterialSimulationKind.Solid &&
             ((MaterialFlags)target.Flags & MaterialFlags.MovableSolid) != 0;
 
+        bool enthalpyTransition = PhaseEnthalpy.Enabled(source) && PhaseEnthalpy.Enabled(target);
+        if (enthalpyTransition)
+            cell.Temperature = PhaseEnthalpy.TransitionTemperature(cell, source, target);
         cell.MaterialIndex = targetIndex;
         cell.IsActive = 1;
         cell.BodyId = 0;
@@ -102,7 +105,7 @@ public static class PhaseTransitionRuntime
             ? 2u
             : 0u;
         cell.Lifetime = target.MinimumLifetime;
-        if (source.TransitionAboveLatentHeat > 0 &&
+        if (!enthalpyTransition && source.TransitionAboveLatentHeat > 0 &&
             targetKind == MaterialSimulationKind.Gas)
         {
             cell.Temperature = source.TransitionAboveTemperature;

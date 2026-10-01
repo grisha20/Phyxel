@@ -62,6 +62,7 @@ public sealed class AcceptanceRegressionHarness
             "co2_layer" => AcceptanceScenarioMode.Co2Layer,
             "steam_cycle" => AcceptanceScenarioMode.SteamCycle,
             "steam_surface" => AcceptanceScenarioMode.SteamSurface,
+            "steam_energy" => AcceptanceScenarioMode.SteamEnergy,
             "water_stress" or "stress_water" => AcceptanceScenarioMode.WaterStress,
             "flat_surface" or "surface" => AcceptanceScenarioMode.FlatSurface,
             "water_drain" or "drain" => AcceptanceScenarioMode.WaterDrain,
@@ -232,7 +233,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.CoalTypes => uint.MaxValue,
                 AcceptanceScenarioMode.GasUniformDistribution => 600,
                 AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle => 3600,
-                AcceptanceScenarioMode.SteamSurface => 180,
+                AcceptanceScenarioMode.SteamSurface or AcceptanceScenarioMode.SteamEnergy => 900,
                 AcceptanceScenarioMode.SteamDistributionAndCooling => uint.MaxValue,
                 AcceptanceScenarioMode.SteamCloudTemperature => uint.MaxValue,
                 AcceptanceScenarioMode.PhaseDispatchSmoke => 240,
@@ -497,7 +498,7 @@ public sealed class AcceptanceRegressionHarness
         }
         if (Mode is AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle)
         {
-            uint[] frames = [2, 300, 600, 1200, 1800, 2400, 3000, 3600];
+            uint[] frames = [2, 300, 600, 1200, 1800, 2400, 3000, 3600, 5400, 7200, 9000, 10800];
             bool ready = thermalCheckpoints.Count < frames.Length && frame >= frames[thermalCheckpoints.Count];
             if (ready) checkpointTick = frame;
             return ready;

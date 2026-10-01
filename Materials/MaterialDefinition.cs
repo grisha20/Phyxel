@@ -43,7 +43,10 @@ public enum MaterialFlags : uint
     /// Газ визуализируется через FIRE_BLEND-поле, а не собственной дискретной
     /// текстурой частиц. Это соответствует SMKE в The Powder Toy.
     /// </summary>
-    Smoke = 1u << 4
+    Smoke = 1u << 4,
+
+    /// <summary>Reversible latent-heat liquid/vapour pair, without lifecycle.</summary>
+    PhaseEnthalpy = 1u << 5
 }
 
 public static class CoreMaterialIds

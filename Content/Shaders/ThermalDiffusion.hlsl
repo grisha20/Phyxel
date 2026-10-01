@@ -12,6 +12,8 @@ StructuredBuffer<GridCell> SourceGrid : register(t0);
 StructuredBuffer<MaterialProperties> Materials : register(t1);
 RWStructuredBuffer<GridCell> DestinationGrid : register(u0);
 
+#include "PhaseEnthalpy.hlsli"
+
 static const float MinimumThermalMass = 0.0001;
 static const float MaximumExchangeFraction = 0.80;
 static const float SameGasConductivityFloor = 0.16;
@@ -194,14 +196,23 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         heatFlow += ContactHeatFlow(cell, capacity, index + ThermalWidth + 1,
             DiagonalGasContactWeight, true);
 
-    cell.Temperature += heatFlow / capacity;
     MaterialProperties material = Materials[cell.MaterialIndex];
+    if (HasPhaseEnthalpy(material))
+        cell = SetCellSpecificEnthalpy(cell,
+            CellSpecificEnthalpy(cell) + heatFlow / max(cell.Mass, MinimumThermalMass));
+    else
+        cell.Temperature += heatFlow / capacity;
     if (material.AmbientCoolingRate > 0)
     {
         float ambientRate = material.AmbientCoolingRate * AmbientSurfaceExposure(coordinate);
         float ambientFactor = 1.0 - exp(-ambientRate * ThermalDeltaTime);
-        cell.Temperature +=
+        float temperatureChange =
             (material.AmbientTemperature - cell.Temperature) * saturate(ambientFactor);
+        if (HasPhaseEnthalpy(material))
+            cell = SetCellSpecificEnthalpy(cell,
+                CellSpecificEnthalpy(cell) + material.HeatCapacity * temperatureChange);
+        else
+            cell.Temperature += temperatureChange;
     }
     DestinationGrid[index] = cell;
 }

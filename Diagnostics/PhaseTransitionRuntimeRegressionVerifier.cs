@@ -15,6 +15,7 @@ internal static class PhaseTransitionRuntimeRegressionVerifier
             VerifyLayoutsAndDeclarations();
             VerifyPredicatesAndPriority();
             VerifyNormalizationMatrix();
+            VerifyPhaseEnthalpy();
             VerifySummaryFlags();
             VerifyDispatchPolicyAndFallback();
             Console.WriteLine("PHYXEL_PHASE_RUNTIME_SUCCESS");
@@ -25,6 +26,48 @@ internal static class PhaseTransitionRuntimeRegressionVerifier
             Console.Error.WriteLine($"PHYXEL_PHASE_RUNTIME_FAILED {exception}");
             return 1;
         }
+    }
+
+    private static void VerifyPhaseEnthalpy()
+    {
+        MaterialRegistry registry = new();
+        MaterialProperties[] materials = registry.CreateGpuTable();
+        uint water = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
+        uint steam = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
+        GridCell cell = Cell(water, 100);
+        float start = PhaseEnthalpy.SpecificEnergy(cell, materials);
+        int boils = 0, condensations = 0;
+        for (int cycle = 0; cycle < 100; cycle++)
+        {
+            // Heat input/output is independently known, not inferred from
+            // observed phase counters. Partial progress must be reversible.
+            PhaseEnthalpy.SetSpecificEnergy(ref cell, start + 1000, materials);
+            Require(!PhaseTransitionRuntime.TryApply(ref cell, materials, out _) &&
+                cell.MaterialIndex == water && Math.Abs(cell.Temperature - 100) < .001 &&
+                Math.Abs(cell.PhaseProgress - 1000) < .001, "Partial boil erased heat or changed phase.");
+            PhaseEnthalpy.SetSpecificEnergy(ref cell, start, materials);
+            Require(cell.PhaseProgress == 0, "Partial boiling cannot be reversed by withdrawing heat.");
+            PhaseEnthalpy.SetSpecificEnergy(ref cell, start + 2256 + 41.6f, materials);
+            Require(PhaseTransitionRuntime.TryApply(ref cell, materials, out _) &&
+                cell.MaterialIndex == steam && Math.Abs(cell.Temperature - 120) < .002,
+                "Boiling did not retain latent heat and excess heat.");
+            boils++;
+            float high = PhaseEnthalpy.SpecificEnergy(cell, materials);
+            Require(Math.Abs(high - (start + 2256 + 41.6f)) < .001, "Boiling changed enthalpy.");
+            PhaseEnthalpy.SetSpecificEnergy(ref cell, high - 1000, materials);
+            Require(!PhaseTransitionRuntime.TryApply(ref cell, materials, out _) &&
+                cell.MaterialIndex == steam && Math.Abs(cell.Temperature - 98) < .002,
+                "Partial condensation discarded latent energy.");
+            PhaseEnthalpy.SetSpecificEnergy(ref cell, 4.18f * 90, materials);
+            Require(PhaseTransitionRuntime.TryApply(ref cell, materials, out _) &&
+                cell.MaterialIndex == water && Math.Abs(cell.Temperature - 90) < .002,
+                "Condensation changed the remaining energy.");
+            condensations++;
+            PhaseEnthalpy.SetSpecificEnergy(ref cell, start, materials);
+            Require(Math.Abs(PhaseEnthalpy.SpecificEnergy(cell, materials) - start) < .001,
+                "Closed phase cycle changed energy.");
+        }
+        Console.WriteLine($"PHYXEL_PHASE_ENTHALPY cycles=100 boils={boils} condensations={condensations}");
     }
 
     private static void VerifyLayoutsAndDeclarations()

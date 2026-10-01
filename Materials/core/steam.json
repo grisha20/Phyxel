@@ -6,6 +6,7 @@
     "en": "Steam"
   },
   "kind": "gas",
+  "flags": ["phase-enthalpy"],
   "color": "#A0A0FFFF",
   "physics": {
     "density": 0.03,

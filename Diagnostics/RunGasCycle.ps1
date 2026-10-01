@@ -18,10 +18,10 @@ try {
     Remove-Item Env:PHYXEL_MATERIALS_PATH,Env:PHYXEL_ACCEPTANCE_WORLD_WIDTH,Env:PHYXEL_ACCEPTANCE_WORLD_HEIGHT -ErrorAction SilentlyContinue
     $env:PHYXEL_ACCEPTANCE_RENDER_EFFECTS='0'
     foreach($taskCase in @(
-        @{Mode='steam_surface';Frames=180;Air=1},
+        @{Mode='steam_surface';Frames=900;Air=1},
         @{Mode='co2_layer';Frames=3600;Air=0},
         @{Mode='co2_layer';Frames=3600;Air=1},
-        @{Mode='steam_cycle';Frames=3600;Air=1}
+        @{Mode='steam_cycle';Frames=10800;Air=1}
     )) {
         $taskLabel="$($taskCase.Mode)-air-$($taskCase.Air)"
         $taskDirectory=Join-Path $taskRoot $taskLabel
