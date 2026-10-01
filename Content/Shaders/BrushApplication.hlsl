@@ -102,11 +102,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             existing.Mass < GasVisibleMassThreshold;
         if (!replaceableInvisibleGas && (material.Flags & MaterialFlagFlame) != 0)
         {
-            if (existingMaterial.SimulationKind == SimulationKindSolid &&
+            bool combustibleKind = existingMaterial.SimulationKind == SimulationKindSolid ||
+                existingMaterial.SimulationKind == SimulationKindGranular;
+            if (combustibleKind &&
                 existingMaterial.BurnedIntoMaterialIndex != 0xffffffffu &&
                 existingMaterial.FlameSpreadRate > 0)
             {
-                // Flame tools ignite combustible solids in place. Every other
+                // Flame tools ignite combustible solids/powders in place. Every other
                 // material command is strictly empty-only.
                 existing.Temperature = max(
                     existing.Temperature,

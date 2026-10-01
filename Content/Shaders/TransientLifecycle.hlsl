@@ -25,6 +25,12 @@ static const uint TargetGas = 1u << 4;
 // temperatures in Celsius, hence this exact equivalent threshold.
 static const float FireToSmokeTemperature = 351.85;
 
+float2 OxidizerAt(uint index)
+{
+    GridCell cell = Grid[index];
+    return float2(Oxidizer[index], OxidizerSpace(cell, Materials[cell.MaterialIndex]));
+}
+
 [numthreads(16, 16, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -48,13 +54,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     bool flame = (material.Flags & MaterialFlagFlame) != 0;
-    float oxygen = Oxidizer[index];
-    if (coordinate.x > 0) oxygen += Oxidizer[index - 1];
-    if (coordinate.x + 1 < TransientWidth) oxygen += Oxidizer[index + 1];
-    if (coordinate.y > 0) oxygen += Oxidizer[index - TransientWidth];
-    if (coordinate.y + 1 < TransientHeight) oxygen += Oxidizer[index + TransientWidth];
+    float2 supply = OxidizerAt(index);
+    if (coordinate.x > 0) supply += OxidizerAt(index - 1);
+    if (coordinate.x + 1 < TransientWidth) supply += OxidizerAt(index + 1);
+    if (coordinate.y > 0) supply += OxidizerAt(index - TransientWidth);
+    if (coordinate.y + 1 < TransientHeight) supply += OxidizerAt(index + TransientWidth);
     bool extinguished = flame && cell.BodyId != SelfOxidizingFlameMarker &&
-        oxygen / 5 <= OxidizerExtinctionThreshold;
+        supply.x <= max(supply.y, 1) * OxidizerExtinctionThreshold;
     cell.Lifetime = extinguished ? 0 : max(0, cell.Lifetime - TransientDeltaTime);
     if (cell.Lifetime > 0)
     {

@@ -204,16 +204,22 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
     }
 }
 
-// Four face-connected donors; walls and full inert-gas cells were already
-// excluded by the immutable fine-grid oxidizer transport pass.
-float AvailableOxidizer(uint2 p)
+// Four face-connected donors. Transport masks unavailable oxidizer; count
+// gas space separately so walls do not dilute concentration, while CO2 does.
+float2 OxidizerAt(uint index)
+{
+    GridCell cell = Grid[index];
+    return float2(Oxidizer[index], OxidizerSpace(cell, Materials[cell.MaterialIndex]));
+}
+
+float2 AvailableOxidizer(uint2 p)
 {
     uint i = p.y * CombustionWidth + p.x;
-    float sum = 0;
-    if (p.x > 0) sum += Oxidizer[i - 1];
-    if (p.x + 1 < CombustionWidth) sum += Oxidizer[i + 1];
-    if (p.y > 0) sum += Oxidizer[i - CombustionWidth];
-    if (p.y + 1 < CombustionHeight) sum += Oxidizer[i + CombustionWidth];
+    float2 sum = 0;
+    if (p.x > 0) sum += OxidizerAt(i - 1);
+    if (p.x + 1 < CombustionWidth) sum += OxidizerAt(i + 1);
+    if (p.y > 0) sum += OxidizerAt(i - CombustionWidth);
+    if (p.y + 1 < CombustionHeight) sum += OxidizerAt(i + CombustionWidth);
     return sum;
 }
 
@@ -290,10 +296,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     bool selfOxidizing = (source.Flags & MaterialFlagSelfOxidizing) != 0;
-    float oxygen = selfOxidizing ? 4 : AvailableOxidizer(coordinate);
+    float2 supply = selfOxidizing ? float2(4, 4) : AvailableOxidizer(coordinate);
+    float oxygen = supply.x;
     // Gate ignition as well as fuel loss/heat/emissions. A flame in inert gas
     // must not ignite an otherwise cold piece of wood for one frame.
-    if (!selfOxidizing && oxygen / 4 <= OxidizerExtinctionThreshold) return;
+    if (!selfOxidizing && oxygen <= max(supply.y, 1) * OxidizerExtinctionThreshold) return;
 
     if (cell.Temperature <= source.IgnitionTemperature && source.FlameSpreadRate > 0 &&
         HasLiveFlame(coordinate))

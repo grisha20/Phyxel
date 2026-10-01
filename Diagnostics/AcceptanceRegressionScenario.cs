@@ -23,6 +23,7 @@ public enum AcceptanceScenarioMode
     ThermalDevices,
     SteamApparatus,
     Oxidizer,
+    CoalFire,
     WaterStress,
     FlatSurface,
     WaterDrain,
@@ -177,6 +178,7 @@ public static class AcceptanceRegressionScenario
             AcceptanceScenarioMode.ThermalGas or
             AcceptanceScenarioMode.TemperatureProbeGpu => [],
             AcceptanceScenarioMode.CombustionChain => CreateCombustionChain(frame),
+            AcceptanceScenarioMode.CoalFire => CoalFireAcceptance.Commands(frame, materialRegistry),
             AcceptanceScenarioMode.CombustionQuench => CreateCombustionQuench(frame),
             AcceptanceScenarioMode.FireObstacle => CreateFireObstacle(frame, scenarioSeed),
             AcceptanceScenarioMode.FireOpen => CreateFireOpen(frame, scenarioSeed),

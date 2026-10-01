@@ -24,7 +24,9 @@ internal static class BrushEmptyOnlyAcceptanceVerifier
         double initialMass = 0;
         double finalMass = 0;
         int ignitedWood = 0;
+        int ignitedCoal = 0;
         uint wood = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Wood);
+        uint coal = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Coal);
         float ignitionTemperature = materials[CoreMaterialIds.Wood].Properties.IgnitionTemperature + 1;
 
         foreach ((string id, int centerX, int centerY) in BrushEmptyOnlyAcceptanceScenario.PreservationBlocks)
@@ -40,12 +42,15 @@ internal static class BrushEmptyOnlyAcceptanceVerifier
                     int index = y * snapshot.Width + x;
                     GridCell expected = before[index];
                     GridCell actual = after[index];
-                    if (expected.MaterialIndex == wood)
+                    if (expected.MaterialIndex == wood || expected.MaterialIndex == coal)
                     {
-                        expected.Temperature = Math.Max(expected.Temperature, ignitionTemperature);
+                        float targetTemperature = expected.MaterialIndex == wood ? ignitionTemperature :
+                            materials[CoreMaterialIds.Coal].Properties.IgnitionTemperature + 1;
+                        expected.Temperature = Math.Max(expected.Temperature, targetTemperature);
                         if (SameBits(actual.Temperature, expected.Temperature))
                         {
-                            ignitedWood++;
+                            if (expected.MaterialIndex == wood) ignitedWood++;
+                            else ignitedCoal++;
                         }
                     }
                     Require(CellEquals(expected, actual),
@@ -104,6 +109,8 @@ internal static class BrushEmptyOnlyAcceptanceVerifier
             $"overlapping commands were not deterministic first-writer-wins: {Describe(overlap)}", errors);
         Require(ignitedWood == 13 * 13,
             $"flame brush did not ignite wood in place expected=169 actual={ignitedWood}", errors);
+        Require(ignitedCoal == 13 * 13,
+            $"flame brush did not ignite charcoal in place expected=169 actual={ignitedCoal}", errors);
         Require(Math.Abs(initialMass - finalMass) <= 0.0001,
             $"occupied-region mass changed before={initialMass:F4} after={finalMass:F4}", errors);
         Require(Math.Abs(largeSandInitialMass - largeSandFinalMass) <= 0.0001,
@@ -112,7 +119,7 @@ internal static class BrushEmptyOnlyAcceptanceVerifier
         report = $"PHYXEL_BRUSH_EMPTY_ONLY preservedCells={preservedCells} " +
             $"initialMass={initialMass:F3} finalMass={finalMass:F3} " +
             $"sandCells={largeSandCells} sandMass={largeSandInitialMass:F3}/{largeSandFinalMass:F3} " +
-            $"ignitedWood={ignitedWood} emptyDraw={materials[emptyDraw.MaterialIndex].Id} " +
+            $"ignitedWood={ignitedWood} ignitedCoal={ignitedCoal} emptyDraw={materials[emptyDraw.MaterialIndex].Id} " +
             $"overlap={materials[overlap.MaterialIndex].Id}";
         if (errors.Count == 0)
         {

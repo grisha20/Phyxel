@@ -66,6 +66,7 @@ public sealed class AcceptanceRegressionHarness
             "thermal_devices" => AcceptanceScenarioMode.ThermalDevices,
             "steam_apparatus" => AcceptanceScenarioMode.SteamApparatus,
             "oxidizer" => AcceptanceScenarioMode.Oxidizer,
+            "coal_fire" => AcceptanceScenarioMode.CoalFire,
             "water_stress" or "stress_water" => AcceptanceScenarioMode.WaterStress,
             "flat_surface" or "surface" => AcceptanceScenarioMode.FlatSurface,
             "water_drain" or "drain" => AcceptanceScenarioMode.WaterDrain,
@@ -239,6 +240,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle => 3600,
                 AcceptanceScenarioMode.SteamApparatus => 14400,
                 AcceptanceScenarioMode.Oxidizer => OxidizerAcceptance.Restarting ? OxidizerAcceptance.Frame(10) : OxidizerAcceptance.Frame(60),
+                AcceptanceScenarioMode.CoalFire => CoalFireAcceptance.Frame(CoalFireAcceptance.FinalSecond),
                 AcceptanceScenarioMode.SteamSurface or AcceptanceScenarioMode.SteamEnergy or AcceptanceScenarioMode.ThermalDevices => 900,
                 AcceptanceScenarioMode.SteamDistributionAndCooling => uint.MaxValue,
                 AcceptanceScenarioMode.SteamCloudTemperature => uint.MaxValue,
@@ -263,6 +265,7 @@ public sealed class AcceptanceRegressionHarness
         materialRegistry is null
             ? null
             : OxidizerAcceptance.Create(Mode, width, height, materialRegistry) ??
+                CoalFireAcceptance.Create(Mode, width, height, materialRegistry) ??
                 ThermalAcceptanceScenario.Create(Mode, width, height, materialRegistry) ??
                 BrushEmptyOnlyAcceptanceScenario.CreateInitialWorld(Mode, width, height, materialRegistry) ??
                 ContinuousBrushStrokeAcceptanceScenario.CreateInitialWorld(
@@ -521,6 +524,13 @@ public sealed class AcceptanceRegressionHarness
             if (ready) checkpointTick = frame;
             return ready;
         }
+        if (Mode == AcceptanceScenarioMode.CoalFire)
+        {
+            var frames = CoalFireAcceptance.Checkpoints;
+            bool ready = thermalCheckpoints.Count < frames.Length && frame >= frames[thermalCheckpoints.Count];
+            if (ready) checkpointTick = frame;
+            return ready;
+        }
         if (Mode is AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamApparatus or AcceptanceScenarioMode.ThermalDevices)
         {
             uint[] frames = [2, 300, 600, 1200, 1800, 2400, 3000, 3600, 5400, 7200, 9000, 10800, 12600, 14400];
@@ -622,6 +632,7 @@ public sealed class AcceptanceRegressionHarness
     }
 
     public float AdjustElapsedSeconds(float elapsedSeconds) =>
+        Mode == AcceptanceScenarioMode.CoalFire ? 1f / CoalFireAcceptance.Fps :
         Mode == AcceptanceScenarioMode.Oxidizer ? 1f / OxidizerAcceptance.Fps :
         Mode == AcceptanceScenarioMode.GasBrushFps
             ? 1f / (int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_TARGET_FPS"), out int fps) ? fps : 60)
@@ -630,6 +641,8 @@ public sealed class AcceptanceRegressionHarness
     public bool CanBeginFinalCapture(uint frame, SimulationDispatchCoordinator dispatchCoordinator) =>
         Mode == AcceptanceScenarioMode.Oxidizer
             ? dispatchCoordinator.CombustionDispatches >= (ulong)(OxidizerAcceptance.Restarting ? 600 : 3600)
+            : Mode == AcceptanceScenarioMode.CoalFire
+            ? dispatchCoordinator.CombustionDispatches >= (ulong)(CoalFireAcceptance.FinalSecond * 60)
             : Mode == AcceptanceScenarioMode.SteamSelfCooling
             ? thermalCheckpoints.Count >= SteamCoolingCheckpointTicks.Length &&
                 dispatchCoordinator.ThermalTicks >= SteamCoolingCheckpointTicks[^1]
@@ -802,6 +815,8 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.SteamObstacle when frame == 299 => "AA_steam_obstacle_300",
             AcceptanceScenarioMode.SteamObstacle when frame == 599 => "AA_steam_obstacle_600",
             AcceptanceScenarioMode.SteamObstacle when frame == 1199 => "AA_steam_obstacle_1200",
+            AcceptanceScenarioMode.CoalFire when frame == CoalFireAcceptance.Frame(CoalFireAcceptance.ReleaseSecond) - 1 => "coal-fire-held",
+            AcceptanceScenarioMode.CoalFire when frame == CoalFireAcceptance.Frame(CoalFireAcceptance.FinalSecond) - 1 => "coal-fire-final",
             _ => null
         };
         if (label is null)

@@ -3,6 +3,14 @@
 static const float OxidizerExtinctionThreshold = 0.20;
 static const float OxidizerPerFuelMass = 20.0;
 
+// Space that can contain gas, regardless of its composition. A solid face
+// blocks supply, but is not a zero-oxygen volume diluting the other faces.
+// Inert gas still counts as space, so CO2/steam really lower concentration.
+float OxidizerSpace(GridCell cell, MaterialProperties material)
+{
+    return cell.IsActive == 0 || material.SimulationKind == SimulationKindGas ? 1 : 0;
+}
+
 float OxidizerCapacity(GridCell cell, MaterialProperties material)
 {
     if (cell.IsActive == 0) return 1;
