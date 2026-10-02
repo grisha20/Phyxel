@@ -16,7 +16,9 @@ public sealed class AcceptanceRegressionHarness
     private static readonly ulong[] ThermalContactCheckpointTicks = [20, 40, 60, 80];
     private static readonly ulong[] SteamCoolingCheckpointTicks = [0, 1, 20, 40, 60, 80];
     private static readonly ulong[] CoalCheckpointTicks = [0, 20, 120, 240];
-    private static readonly ulong[] GasCheckpointTicks = [120];
+    // CO2 warms beside 200 C steam and settles more slowly as its density falls.
+    // Keep the same layering/mass criteria, observing after four gas seconds.
+    private static readonly ulong[] GasCheckpointTicks = [240];
     private static readonly ulong[] SteamDistributionCheckpointTicks = [20, 40, 80, 200];
     private static readonly uint[] SteamPuffCheckpointFrames = [1, 30, 60, 90, 120, 150, 300];
     // The jet can reach a short diagnostic world's ceiling before frame 600.
@@ -72,6 +74,11 @@ public sealed class AcceptanceRegressionHarness
             "steam_apparatus" => AcceptanceScenarioMode.SteamApparatus,
             "oxidizer" => AcceptanceScenarioMode.Oxidizer,
             "coal_fire" => AcceptanceScenarioMode.CoalFire,
+            "saved_furnace" => AcceptanceScenarioMode.SavedFurnace,
+            "air_wall" => AcceptanceScenarioMode.AirWall,
+            "co2_thermal" => AcceptanceScenarioMode.Co2Thermal,
+            "transient_heat" => AcceptanceScenarioMode.TransientHeat,
+            "gas_coflow" => AcceptanceScenarioMode.GasCoFlow,
             "water_stress" or "stress_water" => AcceptanceScenarioMode.WaterStress,
             "flat_surface" or "surface" => AcceptanceScenarioMode.FlatSurface,
             "water_drain" or "drain" => AcceptanceScenarioMode.WaterDrain,
@@ -158,7 +165,7 @@ public sealed class AcceptanceRegressionHarness
     public bool RequiresNativeResolution => Mode == AcceptanceScenarioMode.WaterStress;
     public bool RequiresSavedScene => Mode is
         AcceptanceScenarioMode.SavedPressure or AcceptanceScenarioMode.SavedIsolation or
-        AcceptanceScenarioMode.SavedGravity or AcceptanceScenarioMode.SavedSandWater ||
+        AcceptanceScenarioMode.SavedGravity or AcceptanceScenarioMode.SavedSandWater or AcceptanceScenarioMode.SavedFurnace ||
         (Mode == AcceptanceScenarioMode.Oxidizer && OxidizerAcceptance.EmptyLoad);
     public bool IsPhaseRoundTripSaving => phaseAcceptance.IsRoundTripSaving;
     public bool IsPhaseRoundTripLoading => phaseAcceptance.IsRoundTripLoading;
@@ -250,6 +257,11 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.SteamApparatus => 14400,
                 AcceptanceScenarioMode.Oxidizer => OxidizerAcceptance.Restarting ? OxidizerAcceptance.Frame(10) : OxidizerAcceptance.Frame(60),
                 AcceptanceScenarioMode.CoalFire => CoalFireAcceptance.Frame(CoalFireAcceptance.FinalSecond),
+                AcceptanceScenarioMode.SavedFurnace => SavedFurnaceAcceptance.FinalFrame,
+                AcceptanceScenarioMode.AirWall => 180,
+                AcceptanceScenarioMode.Co2Thermal => 60,
+                AcceptanceScenarioMode.TransientHeat => 3,
+                AcceptanceScenarioMode.GasCoFlow => 1,
                 AcceptanceScenarioMode.SteamSurface or AcceptanceScenarioMode.SteamEnergy or AcceptanceScenarioMode.ThermalDevices => 900,
                 AcceptanceScenarioMode.SteamDistributionAndCooling => uint.MaxValue,
                 AcceptanceScenarioMode.SteamCloudTemperature => uint.MaxValue,
@@ -267,14 +279,20 @@ public sealed class AcceptanceRegressionHarness
 
     public IReadOnlyList<BrushDrawCommand> CreateCommands(uint frame)
     {
+        if (Mode == AcceptanceScenarioMode.SavedFurnace && materialRegistry is not null)
+            return SavedFurnaceAcceptance.Commands(frame, materialRegistry);
         return AcceptanceRegressionScenario.CreateCommands(Mode, frame, materialRegistry, scenarioSeed);
     }
+
+    public void InitializeDiagnosticFields(GpuSimulationResources resources) =>
+        GasFlowAcceptance.InitializeFields(Mode, resources);
 
     public SimulationWorldSnapshot? CreateInitialWorld(int width, int height) =>
         materialRegistry is null
             ? null
             : OxidizerAcceptance.Create(Mode, width, height, materialRegistry) ??
                 CoalFireAcceptance.Create(Mode, width, height, materialRegistry) ??
+                GasFlowAcceptance.Create(Mode, width, height, materialRegistry) ??
                 HydraulicsAcceptance.Create(Mode, width, height, materialRegistry) ??
                 WaterConvectionAcceptance.Create(Mode, width, height, materialRegistry) ??
                 ThermalAcceptanceScenario.Create(Mode, width, height, materialRegistry) ??
@@ -551,6 +569,13 @@ public sealed class AcceptanceRegressionHarness
             if (ready) checkpointTick = frame;
             return ready;
         }
+        if (Mode == AcceptanceScenarioMode.SavedFurnace)
+        {
+            var frames = SavedFurnaceAcceptance.Frames;
+            bool ready = thermalCheckpoints.Count < frames.Length && frame >= frames[thermalCheckpoints.Count];
+            if (ready) checkpointTick = frame;
+            return ready;
+        }
         if (Mode == AcceptanceScenarioMode.CoalFire)
         {
             var frames = CoalFireAcceptance.Checkpoints;
@@ -659,6 +684,11 @@ public sealed class AcceptanceRegressionHarness
     }
 
     public float AdjustElapsedSeconds(float elapsedSeconds) =>
+        // Cycle frame numbers denote fixed 60 Hz simulation steps. Keeping
+        // that clock explicit also permits faster rendering during diagnostics.
+        Mode is AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamApparatus ? 1f / 60 :
+        Mode == AcceptanceScenarioMode.GasCoFlow ? 1f / 60 :
+        Mode == AcceptanceScenarioMode.SavedFurnace ? 1f / SavedFurnaceAcceptance.Fps :
         WaterConvectionAcceptance.IsMode(Mode) ? 1f / WaterConvectionAcceptance.Fps :
         Mode == AcceptanceScenarioMode.CoalFire ? 1f / CoalFireAcceptance.Fps :
         Mode == AcceptanceScenarioMode.Oxidizer ? 1f / OxidizerAcceptance.Fps :
@@ -794,6 +824,7 @@ public sealed class AcceptanceRegressionHarness
         }
         string? label = Mode switch
         {
+            AcceptanceScenarioMode.SavedFurnace when frame > 0 && frame % (uint)SavedFurnaceAcceptance.Fps == 0 => $"saved-furnace-{frame / SavedFurnaceAcceptance.Fps:D2}s",
             AcceptanceScenarioMode.Co2Layer when frame % 600 == 599 => $"co2_layer_{frame + 1}",
             AcceptanceScenarioMode.SteamCycle when frame % 600 == 599 => $"steam_cycle_{frame + 1}",
             AcceptanceScenarioMode.SteamApparatus when frame % 1800 == 1799 => $"apparatus_{frame + 1}",

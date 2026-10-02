@@ -201,14 +201,14 @@ static const uint MaterialFlagFlame = 1u << 1;
 // grain buried in the middle of a heap must still detonate.
 static const uint MaterialFlagSelfOxidizing = 1u << 2;
 
-// Airtight: blocks the coarse air field. Only structural walls carry this.
-// The Powder Toy blocks its air map with special walls alone; ordinary solids
-// such as METL let the field pass and are collided with by the particles.
+// Extra airtight tag; ordinary solids/liquids also seal fine-grid flow links.
 static const uint MaterialFlagBlocksAir = 1u << 3;
 static const uint MaterialFlagSmoke = 1u << 4;
 static const uint MaterialFlagPhaseEnthalpy = 1u << 5;
 static const uint MaterialFlagThermalHeater = 1u << 6;
 static const uint MaterialFlagThermalCooler = 1u << 7;
+static const uint MaterialFlagThermalCarbonDioxide = 1u << 8;
+static const uint MaterialFlagPersistentCoalIgnition = 1u << 9;
 static const uint PhaseSummaryPhaseOccurred = 1u << 0;
 static const uint PhaseSummaryTargetCellular = 1u << 1;
 static const uint PhaseSummaryTargetLiquid = 1u << 2;

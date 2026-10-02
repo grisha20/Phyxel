@@ -4,14 +4,15 @@
 // simulation cells. This is the missing substrate that makes fire read as a
 // drawn plume instead of a swarm of independent sparks.
 //
-// The Powder Toy runs the same four steps in Air::update_air, in this order:
+// The first four stages are inspired by Air::update_air in The Powder Toy:
 //   1. pressure is adjusted from the divergence of velocity;
 //   2. velocity is adjusted from the gradient of pressure;
 //   3. both are advected with a 3x3 gaussian kernel and a semi-Lagrangian
 //      backtrace;
 //   4. walls zero the flow across them.
-// Constants are taken from SimulationConfig.h and are per fixed 60 Hz tick,
-// not per second, so this pass must run on the fixed schedule.
+// A matching face-flux pressure projection then couples the two ends of a
+// sealed channel. Fine-grid metal blocks this field, unlike ordinary TPT metal.
+// Coefficients are per fixed 60 Hz tick, not per render frame.
 //
 // Every pass reads one buffer and writes the other. Reading and writing the
 // same buffer would be a data race here: on the CPU the loops run in order and
@@ -32,9 +33,59 @@ cbuffer AirSimulationConstants : register(b0)
 
 StructuredBuffer<MaterialProperties> AirMaterials : register(t0);
 StructuredBuffer<GridCell> AirGrid : register(t1);
+StructuredBuffer<GasMotionState> AirGasMotion : register(t2);
 RWStructuredBuffer<AirCell> Air : register(u0);
 RWStructuredBuffer<AirCell> AirScratch : register(u1);
 RWStructuredBuffer<GasAirImpulse> AirGasImpulse : register(u2);
+RWStructuredBuffer<uint> AirFlowLinks : register(u3);
+// Low-Mach pressure correction: (potential, divergence), temporary only.
+RWStructuredBuffer<float2> ProjectionA : register(u4);
+RWStructuredBuffer<float2> ProjectionB : register(u5);
+
+// The pressure grid is coarse, but a thin ordinary metal wall must still
+// disconnect its two sides. Bake eight reciprocal links from the fine grid
+// once per tick; all pressure, smoothing and backtrace paths use them.
+#define FineAirWidth AirGridWidth
+#define FineAirHeight AirGridHeight
+#define FineAirMaterialAt(p) AirGrid[uint((p).y) * AirGridWidth + uint((p).x)].MaterialIndex
+#define FineAirMaterials AirMaterials
+#include "FineAirGeometry.hlsli"
+
+uint AirLinkBit(int2 delta)
+{
+    return 1u << uint((delta.y + 1) * 3 + delta.x + 1);
+}
+
+bool AirFineLinkOpen(int2 a, int2 b)
+{
+    int2 start = a * int(AirCellSize) + int(AirCellSize / 2);
+    int2 end = b * int(AirCellSize) + int(AirCellSize / 2);
+    return AirFineSegmentOpen(start, end);
+}
+
+bool AirLinkOpen(int2 a, int2 delta)
+{
+    int2 b = a + delta;
+    if (a.x < 0 || a.y < 0 || a.x >= int(AirWidth) || a.y >= int(AirHeight) ||
+        b.x < 0 || b.y < 0 || b.x >= int(AirWidth) || b.y >= int(AirHeight)) return false;
+    uint aLinks = AirFlowLinks[uint(a.y) * AirWidth + uint(a.x)];
+    uint bLinks = AirFlowLinks[uint(b.y) * AirWidth + uint(b.x)];
+    return (aLinks & AirLinkBit(delta)) != 0 && (bLinks & AirLinkBit(-delta)) != 0;
+}
+
+bool AirPathOpen(int2 a, int2 b)
+{
+    int2 difference = b - a;
+    int steps = max(abs(difference.x), abs(difference.y));
+    int2 previous = a;
+    for (int k = 1; k <= steps; k++)
+    {
+        int2 next = a + int2(round(float2(difference) * float(k) / float(steps)));
+        if (!AirLinkOpen(previous, next - previous)) return false;
+        previous = next;
+    }
+    return true;
+}
 
 // Air::make_kernel builds a normalised 3x3 gaussian with exp(-2*(i*i+j*j)).
 // Precomputed here so the shader does not recompute it per cell.
@@ -101,12 +152,10 @@ static const float AirMaximumHotness = 4.0;
 // the screen. Worse, speed scales with how much flame sits in a coarse cell,
 // so a slightly larger brush pushed it well past the edge.
 //
-// These are scaled for the 4x4 cellular carrier.  Literal TPT values
-// (10000/0.01) leave this model with a one-cell-tall flame because its
-// particles do not retain TPT's sub-cell velocity; 800/1.0 restores the same
-// observable rise distance while pressure still supplies the lateral turn.
-static const float AirConvectionDivisor = 10000.0;
-static const float AirConvectionMaximum = 0.01;
+// Keep the original bounded convection coefficients. Furnace circulation
+// additionally depends on connected geometry, gas drag and sustained fuel heat.
+static const float AirConvectionDivisor = 2000.0;
+static const float AirConvectionMaximum = 0.05;
 
 // Particle drag, from the main particle loop in Simulation.cpp. FIRE and SMKE
 // both use AirLoss 0.97 and AirDrag 0.04.
@@ -177,10 +226,10 @@ AirCell ReadScratch(int2 coordinate)
 
 float AirVorticity(int2 coordinate)
 {
-    float rightY = ReadAir(coordinate + int2(1, 0)).VelocityY;
-    float leftY = ReadAir(coordinate + int2(-1, 0)).VelocityY;
-    float downX = ReadAir(coordinate + int2(0, 1)).VelocityX;
-    float upX = ReadAir(coordinate + int2(0, -1)).VelocityX;
+    float rightY = AirLinkOpen(coordinate, int2(1, 0)) ? ReadAir(coordinate + int2(1, 0)).VelocityY : 0;
+    float leftY = AirLinkOpen(coordinate, int2(-1, 0)) ? ReadAir(coordinate + int2(-1, 0)).VelocityY : 0;
+    float downX = AirLinkOpen(coordinate, int2(0, 1)) ? ReadAir(coordinate + int2(0, 1)).VelocityX : 0;
+    float upX = AirLinkOpen(coordinate, int2(0, -1)) ? ReadAir(coordinate + int2(0, -1)).VelocityX : 0;
     return 0.5 * (rightY - leftY - downX + upX);
 }
 
@@ -193,8 +242,7 @@ bool AirBlockedAt(int2 coordinate)
     return ReadAir(coordinate).Blocked > 0.5;
 }
 
-// Sample the fine simulation grid and produce, for one coarse cell, how much of
-// it is solid and how much heat it is releasing into the air.
+// Bake fine geometry and collect connected gas pressure, heat and drag sources.
 [numthreads(8, 8, 1)]
 void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -206,67 +254,77 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     uint index = AirIndex(coordinate);
     AirCell cell = Air[index];
-    GasAirImpulse gasImpulse = AirGasImpulse[index];
-    // The cellular pass writes impulses after this air pass. Consume the prior
-    // tick exactly once, including when this cell has since become empty.
+    uint links = 0;
+    [unroll] for (int dy = -1; dy <= 1; dy++)
+    [unroll] for (int dx = -1; dx <= 1; dx++)
+    {
+        int2 delta = int2(dx, dy);
+        if ((dx != 0 || dy != 0) && AirFineLinkOpen(int2(coordinate), int2(coordinate) + delta))
+            links |= AirLinkBit(delta);
+    }
+    AirFlowLinks[index] = links;
+    // The move accumulator remains available to diagnostic observers, but
+    // physical drag below reads one previous velocity at its current location.
+    // Clear prior move statistics exactly once, even if this node is now empty.
     AirGasImpulse[index] = (GasAirImpulse)0;
 
     uint left = coordinate.x * AirCellSize;
     uint top = coordinate.y * AirCellSize;
-    uint solid = 0;
-    uint counted = 0;
+    uint counted = min(AirCellSize, AirGridWidth - left) * min(AirCellSize, AirGridHeight - top);
     uint gasCount = 0;
     float airLossProduct = 1.0;
+    float airDragSum = 0;
+    float2 particleDrag = float2(0, 0);
     float heat = 0;
     float hotAirInjection = 0;
 
-    for (uint offsetY = 0; offsetY < AirCellSize; offsetY++)
+    [loop] for (int offsetY = -2; offsetY <= int(AirCellSize) + 2; offsetY++)
     {
-        uint y = top + offsetY;
-        if (y >= AirGridHeight)
+        int y = int(top) + offsetY;
+        if (y < 0 || y >= int(AirGridHeight))
         {
             continue;
         }
-        for (uint offsetX = 0; offsetX < AirCellSize; offsetX++)
+        [loop] for (int offsetX = -2; offsetX <= int(AirCellSize) + 2; offsetX++)
         {
-            uint x = left + offsetX;
-            if (x >= AirGridWidth)
+            int x = int(left) + offsetX;
+            if (x < 0 || x >= int(AirGridWidth))
             {
                 continue;
             }
-            counted++;
-            GridCell source = AirGrid[y * AirGridWidth + x];
+            GridCell source = AirGrid[uint(y) * AirGridWidth + uint(x)];
             if (source.IsActive == 0)
             {
                 continue;
             }
             MaterialProperties material = AirMaterials[source.MaterialIndex];
+            if (material.SimulationKind == SimulationKindSolid || material.SimulationKind == SimulationKindLiquid) continue;
+            int2 sourceNode;
+            if (!AirFineNodeFor(int2(x, y), sourceNode) || any(sourceNode != int2(coordinate))) continue;
             if (material.SimulationKind == SimulationKindGas)
             {
                 gasCount++;
                 airLossProduct *= material.MotionAirLoss;
-                if (material.HotAir != 0.0)
+                airDragSum += material.MotionAirDrag;
+                GasMotionState motion = AirGasMotion[uint(y) * AirGridWidth + uint(x)];
+                // Drag responds to slip, rather than adding the carrier's own
+                // velocity back into itself at every occupied particle.
+                particleDrag += (clamp(float2(motion.VelocityX, motion.VelocityY),
+                    -AirGasMaximumSpeed, AirGasMaximumSpeed) -
+                    float2(cell.VelocityX, cell.VelocityY)) * material.MotionAirDrag;
+                if (material.HotAir != 0.0 &&
+                    (material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0)
                 {
-                    // TPT applies pv += 4 * HotAir per particle. FIRE/SMKE
-                    // remain exactly 4 * 0.001 = 0.004; WTRV now contributes
-                    // its original 4 * 0.0003 = 0.0012 as well.
+                    // Phase gases retain their calibrated pressure source.
+                    // A flame's continuous expansion source cannot be added
+                    // every tick to the same carrier volume without bound;
+                    // FIRE/SMKE drive buoyancy and slip drag instead.
                     hotAirInjection += 4.0 * material.HotAir;
                 }
             }
             if (material.SimulationKind == SimulationKindSolid)
             {
-                // Only a material explicitly marked as airtight blocks the
-                // field. In The Powder Toy the air map is blocked by special
-                // walls alone -- ordinary METL is not in it, so the coarse
-                // field passes straight through a metal bar and it is the FIRE
-                // particles themselves that collide with it. Treating every
-                // solid as a wall turned a plate into a 4x4 pressure chamber
-                // that does not exist there, with a boundary that depended on
-                // how the metal happened to align to the grid.
-                if ((material.Flags & MaterialFlagBlocksAir) != 0)
-                {
-                    solid++;
-                }
+                // Solid temperatures do not directly inject a gas impulse.
                 continue;
             }
             // Temperature drives the optional Boussinesq convection term below.
@@ -275,10 +333,9 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
     }
 
-    // A coarse cell blocks the flow once it is mostly solid. Anything less and
-    // air still finds its way between the grains.
-    float solidFraction = counted > 0 ? float(solid) / float(counted) : 0;
-    cell.Blocked = solidFraction >= 0.75 ? 1.0 : 0.0;
+    // Occupied pressure nodes are disabled; fine-grid links additionally seal
+    // thin walls between nodes, independent of the old 75% occupancy threshold.
+    cell.Blocked = AirFineBlocked(int2(coordinate) * int(AirCellSize) + int(AirCellSize / 2)) ? 1.0 : 0.0;
 
     if (cell.Blocked > 0.5)
     {
@@ -289,23 +346,12 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    // Heat is summed over the coarse cell, never averaged over its area.
-    // Averaging silently divided a lone flame pixel by the sixteen sub-cells
-    // around it, so a 1800 degree flame arrived as 111 degrees and the field it
-    // produced was thirteen times too weak to see. The Powder Toy adds
-    // pv += 4.0f * HotAir once per particle, with no area term at all: two
-    // flames in one cell push twice as hard as one.
-    // The pressure ceiling below is what keeps this from running away.
-    // FIRE.cpp and SMKE.cpp both set HotAir = 0.001. Simulation.cpp applies
-    // pv += 4 * HotAir for every such particle, with no source-cell ceiling.
-    // The former 3.5 cap erased precisely the pressure gradient that turns a
-    // plume sideways below a plate. Pressure transport/loss below is its only
-    // limiter, as it is in TPT.
+    // Keep phase-gas pressure separate from temperature-driven buoyancy.
     cell.Pressure += hotAirInjection;
 
-    // Convection. Driven by the mean temperature of the cell and hard-capped,
-    // exactly as The Powder Toy does it. The y axis grows downward, so rising
-    // air is a subtraction.
+    // Bounded temperature-driven convection. These coefficients are calibrated
+    // for our sealed fine-grid passages, rather than TPT's air-transparent
+    // ordinary metal. The y axis grows downward, so rising air is negative.
     float meanOverheat = heat / max(1.0, float(counted));
     float convection = min(AirConvectionMaximum, meanOverheat / AirConvectionDivisor);
     cell.VelocityY = clamp(
@@ -313,16 +359,18 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
         -AirMaximumVelocity,
         AirMaximumVelocity);
 
-    // The impulse was pre-weighted by the source material's motion.airDrag
-    // when the successful gas step occurred. Each currently occupied gas cell
-    // contributes its own motion.airLoss to the coarse air retention.
-    float retained = airLossProduct;
+    // Read previous particle velocity once at its current location, rather than
+    // summing repeated moves whose particles have already left this air node.
+    // Air is one carrier volume. Per-particle drag is proportional to loading;
+    // the ambient loss acts once on that volume, not once per drawn pixel.
+    float retained = gasCount > 0 ? pow(airLossProduct, 1.0 / float(gasCount)) : 1.0;
+    float dragAttenuation = airDragSum > 0.9 ? 0.9 / airDragSum : 1.0;
     cell.VelocityX = clamp(
-        cell.VelocityX * retained + float(gasImpulse.X) / GasAirImpulseFixedPointScale,
+        cell.VelocityX * retained + particleDrag.x * dragAttenuation,
         -AirMaximumVelocity,
         AirMaximumVelocity);
     cell.VelocityY = clamp(
-        cell.VelocityY * retained + float(gasImpulse.Y) / GasAirImpulseFixedPointScale,
+        cell.VelocityY * retained + particleDrag.y * dragAttenuation,
         -AirMaximumVelocity,
         AirMaximumVelocity);
 
@@ -361,15 +409,21 @@ void CSPressure(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    float divergence =
-        ReadAir(signedCoordinate + int2(-1, 0)).VelocityX -
-        ReadAir(signedCoordinate + int2(1, 0)).VelocityX +
-        ReadAir(signedCoordinate + int2(0, -1)).VelocityY -
-        ReadAir(signedCoordinate + int2(0, 1)).VelocityY;
+    // Face flux is exactly zero at a wall, rather than borrowing the pressure
+    // or velocity from the chamber on its other side.
+    float leftFlux = AirLinkOpen(signedCoordinate, int2(-1, 0)) ?
+        (cell.VelocityX + ReadAir(signedCoordinate + int2(-1, 0)).VelocityX) * 0.5 : 0;
+    float rightFlux = AirLinkOpen(signedCoordinate, int2(1, 0)) ?
+        (cell.VelocityX + ReadAir(signedCoordinate + int2(1, 0)).VelocityX) * 0.5 : 0;
+    float upFlux = AirLinkOpen(signedCoordinate, int2(0, -1)) ?
+        (cell.VelocityY + ReadAir(signedCoordinate + int2(0, -1)).VelocityY) * 0.5 : 0;
+    float downFlux = AirLinkOpen(signedCoordinate, int2(0, 1)) ?
+        (cell.VelocityY + ReadAir(signedCoordinate + int2(0, 1)).VelocityY) * 0.5 : 0;
+    float divergence = leftFlux - rightFlux + upFlux - downFlux;
 
     cell.Pressure = lerp(AirEdgePressure, cell.Pressure, AirPressureLoss);
     cell.Pressure = clamp(
-        cell.Pressure + divergence * AirStepPressure * 0.5,
+        cell.Pressure + divergence * AirStepPressure,
         -AirMaximumPressure,
         AirMaximumPressure);
     AirScratch[AirIndex(coordinate)] = cell;
@@ -404,28 +458,27 @@ void CSVelocity(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    float gradientX =
-        ReadScratch(signedCoordinate + int2(-1, 0)).Pressure -
-        ReadScratch(signedCoordinate + int2(1, 0)).Pressure;
-    float gradientY =
-        ReadScratch(signedCoordinate + int2(0, -1)).Pressure -
-        ReadScratch(signedCoordinate + int2(0, 1)).Pressure;
+    float leftP = cell.Pressure, rightP = cell.Pressure, upP = cell.Pressure, downP = cell.Pressure;
+    if (AirLinkOpen(signedCoordinate, int2(-1, 0))) leftP = ReadScratch(signedCoordinate + int2(-1, 0)).Pressure;
+    if (AirLinkOpen(signedCoordinate, int2(1, 0))) rightP = ReadScratch(signedCoordinate + int2(1, 0)).Pressure;
+    if (AirLinkOpen(signedCoordinate, int2(0, -1))) upP = ReadScratch(signedCoordinate + int2(0, -1)).Pressure;
+    if (AirLinkOpen(signedCoordinate, int2(0, 1))) downP = ReadScratch(signedCoordinate + int2(0, 1)).Pressure;
+    float gradientX = leftP - rightP;
+    float gradientY = upP - downP;
 
     cell.VelocityX = lerp(AirEdgeVelocity, cell.VelocityX, AirVelocityLoss) +
         gradientX * AirStepVelocity * 0.5;
     cell.VelocityY = lerp(AirEdgeVelocity, cell.VelocityY, AirVelocityLoss) +
         gradientY * AirStepVelocity * 0.5;
 
-    // A wall stops the component of the flow that would cross it. Checking both
-    // neighbours, not just the cell itself, prevents air from streaming along
-    // the inside face of a container.
-    if (AirBlockedAt(signedCoordinate + int2(-1, 0)) ||
-        AirBlockedAt(signedCoordinate + int2(1, 0)))
+    // A wall stops the component that would cross it; tangential flow remains.
+    if ((cell.VelocityX < 0 && !AirLinkOpen(signedCoordinate, int2(-1, 0))) ||
+        (cell.VelocityX > 0 && !AirLinkOpen(signedCoordinate, int2(1, 0))))
     {
         cell.VelocityX = 0;
     }
-    if (AirBlockedAt(signedCoordinate + int2(0, -1)) ||
-        AirBlockedAt(signedCoordinate + int2(0, 1)))
+    if ((cell.VelocityY < 0 && !AirLinkOpen(signedCoordinate, int2(0, -1))) ||
+        (cell.VelocityY > 0 && !AirLinkOpen(signedCoordinate, int2(0, 1))))
     {
         cell.VelocityY = 0;
     }
@@ -469,7 +522,7 @@ void CSAdvect(uint3 dispatchThreadId : SV_DispatchThreadID)
             // Written as an if rather than ?: on purpose: HLSL has no ternary
             // operator for struct types, only for scalars and vectors.
             AirCell neighbor = cell;
-            if (AirInside(sample) && !AirBlockedAt(sample))
+            if (AirInside(sample) && AirPathOpen(signedCoordinate, sample))
             {
                 neighbor = ReadAir(sample);
             }
@@ -512,10 +565,10 @@ void CSAdvect(uint3 dispatchThreadId : SV_DispatchThreadID)
         AirCell s10 = cell;
         AirCell s01 = cell;
         AirCell s11 = cell;
-        if (!AirBlockedAt(corner)) s00 = ReadAir(corner);
-        if (!AirBlockedAt(corner + int2(1, 0))) s10 = ReadAir(corner + int2(1, 0));
-        if (!AirBlockedAt(corner + int2(0, 1))) s01 = ReadAir(corner + int2(0, 1));
-        if (!AirBlockedAt(corner + int2(1, 1))) s11 = ReadAir(corner + int2(1, 1));
+        if (AirPathOpen(signedCoordinate, corner)) s00 = ReadAir(corner);
+        if (AirPathOpen(signedCoordinate, corner + int2(1, 0))) s10 = ReadAir(corner + int2(1, 0));
+        if (AirPathOpen(signedCoordinate, corner + int2(0, 1))) s01 = ReadAir(corner + int2(0, 1));
+        if (AirPathOpen(signedCoordinate, corner + int2(1, 1))) s11 = ReadAir(corner + int2(1, 1));
 
         float w00 = (1.0 - f.x) * (1.0 - f.y);
         float w10 = f.x * (1.0 - f.y);
@@ -545,11 +598,14 @@ void CSAdvect(uint3 dispatchThreadId : SV_DispatchThreadID)
         coordinate.y > 1 && coordinate.y + 2 < AirHeight)
     {
         int2 signedCoordinate = int2(coordinate);
-        float dwx = (abs(AirVorticity(signedCoordinate + int2(1, 0))) -
-            abs(AirVorticity(signedCoordinate + int2(-1, 0)))) * 0.5;
-        float dwy = (abs(AirVorticity(signedCoordinate + int2(0, 1))) -
-            abs(AirVorticity(signedCoordinate + int2(0, -1)))) * 0.5;
         float w = AirVorticity(signedCoordinate);
+        float centerCurl = abs(w);
+        float rightCurl = AirLinkOpen(signedCoordinate, int2(1, 0)) ? abs(AirVorticity(signedCoordinate + int2(1, 0))) : centerCurl;
+        float leftCurl = AirLinkOpen(signedCoordinate, int2(-1, 0)) ? abs(AirVorticity(signedCoordinate + int2(-1, 0))) : centerCurl;
+        float downCurl = AirLinkOpen(signedCoordinate, int2(0, 1)) ? abs(AirVorticity(signedCoordinate + int2(0, 1))) : centerCurl;
+        float upCurl = AirLinkOpen(signedCoordinate, int2(0, -1)) ? abs(AirVorticity(signedCoordinate + int2(0, -1))) : centerCurl;
+        float dwx = (rightCurl - leftCurl) * 0.5;
+        float dwy = (downCurl - upCurl) * 0.5;
         float norm = sqrt(dwx * dwx + dwy * dwy);
         velocityX += AirVorticityCoefficient / 5.0 * dwy / (norm + 0.001) * w;
         velocityY += AirVorticityCoefficient / 5.0 * (-dwx) / (norm + 0.001) * w;
@@ -572,6 +628,97 @@ void CSCommit(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     uint index = AirIndex(coordinate);
     Air[index] = AirScratch[index];
+}
+
+bool ProjectionBoundary(int2 p)
+{
+    return p.x < 1 || p.y < 1 || p.x + 1 >= int(AirWidth) || p.y + 1 >= int(AirHeight);
+}
+
+[numthreads(8, 8, 1)]
+void CSFaces(uint3 id : SV_DispatchThreadID)
+{
+    int2 p = int2(id.xy);
+    if (!AirInside(p)) return;
+    uint i = AirIndex(id.xy);
+    AirCell c = Air[i];
+    AirCell faces = c;
+    faces.VelocityX = AirLinkOpen(p, int2(1, 0))
+        ? (c.VelocityX + ReadAir(p + int2(1, 0)).VelocityX) * 0.5 : 0;
+    faces.VelocityY = AirLinkOpen(p, int2(0, 1))
+        ? (c.VelocityY + ReadAir(p + int2(0, 1)).VelocityY) * 0.5 : 0;
+    AirScratch[i] = faces;
+}
+
+[numthreads(8, 8, 1)]
+void CSDivergence(uint3 id : SV_DispatchThreadID)
+{
+    int2 p = int2(id.xy);
+    if (!AirInside(p)) return;
+    uint i = AirIndex(id.xy);
+    AirCell c = Air[i];
+    if (c.Blocked > 0.5 || ProjectionBoundary(p)) { ProjectionA[i] = 0; return; }
+    float l = AirLinkOpen(p, int2(-1, 0)) ? AirScratch[i - 1].VelocityX : 0;
+    float r = AirScratch[i].VelocityX;
+    float u = AirLinkOpen(p, int2(0, -1)) ? AirScratch[i - AirWidth].VelocityY : 0;
+    float d = AirScratch[i].VelocityY;
+    // Divergence and the pressure gradient act on the SAME face fluxes.
+    // Their composition is exactly the Laplacian solved below. A collocated
+    // central gradient instead leaves unresolved alternating pressure modes.
+    ProjectionA[i] = float2(ProjectionA[i].x, r - l + d - u);
+}
+
+float2 Jacobi(int2 p, bool readA)
+{
+    uint i = uint(p.y) * AirWidth + uint(p.x);
+    if (Air[i].Blocked > 0.5 || ProjectionBoundary(p)) return 0;
+    float2 own = readA ? ProjectionA[i] : ProjectionB[i];
+    float sum = 0, faces = 0;
+    [unroll] for (int k = 0; k < 4; k++)
+    {
+        int2 delta = k == 0 ? int2(-1, 0) : k == 1 ? int2(1, 0) : k == 2 ? int2(0, -1) : int2(0, 1);
+        if (!AirLinkOpen(p, delta)) continue;
+        uint j = uint(p.y + delta.y) * AirWidth + uint(p.x + delta.x);
+        sum += readA ? ProjectionA[j].x : ProjectionB[j].x;
+        faces += 1;
+    }
+    return float2(faces > 0 ? (sum - own.y) / faces : 0, own.y);
+}
+[numthreads(8, 8, 1)]
+void CSJacobiAB(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= AirWidth || id.y >= AirHeight) return;
+    ProjectionB[AirIndex(id.xy)] = Jacobi(int2(id.xy), true);
+}
+[numthreads(8, 8, 1)]
+void CSJacobiBA(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= AirWidth || id.y >= AirHeight) return;
+    ProjectionA[AirIndex(id.xy)] = Jacobi(int2(id.xy), false);
+}
+[numthreads(8, 8, 1)]
+void CSProject(uint3 id : SV_DispatchThreadID)
+{
+    int2 p = int2(id.xy);
+    if (!AirInside(p)) return;
+    uint i = AirIndex(id.xy);
+    AirCell c = Air[i];
+    if (c.Blocked > 0.5 || ProjectionBoundary(p)) return;
+    float own = ProjectionA[i].x;
+    float l = own, r = own, u = own, d = own;
+    if (AirLinkOpen(p, int2(-1, 0))) l = ProjectionA[i - 1].x;
+    if (AirLinkOpen(p, int2(1, 0))) r = ProjectionA[i + 1].x;
+    if (AirLinkOpen(p, int2(0, -1))) u = ProjectionA[i - AirWidth].x;
+    if (AirLinkOpen(p, int2(0, 1))) d = ProjectionA[i + AirWidth].x;
+    float leftFlux = AirLinkOpen(p, int2(-1, 0)) ? AirScratch[i - 1].VelocityX - (own - l) : 0;
+    float rightFlux = AirLinkOpen(p, int2(1, 0)) ? AirScratch[i].VelocityX - (r - own) : 0;
+    float upFlux = AirLinkOpen(p, int2(0, -1)) ? AirScratch[i - AirWidth].VelocityY - (own - u) : 0;
+    float downFlux = AirLinkOpen(p, int2(0, 1)) ? AirScratch[i].VelocityY - (d - own) : 0;
+    c.VelocityX = (leftFlux + rightFlux) * 0.5;
+    c.VelocityY = (upFlux + downFlux) * 0.5;
+    if ((c.VelocityX < 0 && !AirLinkOpen(p, int2(-1, 0))) || (c.VelocityX > 0 && !AirLinkOpen(p, int2(1, 0)))) c.VelocityX = 0;
+    if ((c.VelocityY < 0 && !AirLinkOpen(p, int2(0, -1))) || (c.VelocityY > 0 && !AirLinkOpen(p, int2(0, 1)))) c.VelocityY = 0;
+    Air[i] = c;
 }
 
 // Zero the whole field, used on world reset and when the feature is switched

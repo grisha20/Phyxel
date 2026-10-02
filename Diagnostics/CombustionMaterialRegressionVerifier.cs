@@ -112,6 +112,20 @@ internal static class CombustionMaterialRegressionVerifier
         GridCell cooled = new() { MaterialIndex = 1, Mass = 0.8f, IsActive = 1, Temperature = 299.9f };
         Require(!CombustionRuntime.TryApply(ref cooled, materials, 0.05f, out _, out _),
             "Cooling below ignition did not stop combustion.");
+        MaterialProperties latchedCoal = source;
+        latchedCoal.SimulationKind = (uint)MaterialSimulationKind.Granular;
+        latchedCoal.Flags |= (uint)MaterialFlags.PersistentCoalIgnition;
+        MaterialProperties[] coalMaterials = [new MaterialProperties(), latchedCoal, coal];
+        GridCell coldCoal = new() { MaterialIndex = 1, Mass = 0.8f, IsActive = 1, Temperature = 20f };
+        Require(!CombustionRuntime.IsBurning(coldCoal, coalMaterials), "Cold coal ignited without a source.");
+        coldCoal.Temperature = 301f;
+        Require(CombustionRuntime.TryApply(ref coldCoal, coalMaterials, 0.05f, out _, out _) && coldCoal.Lifetime == 1,
+            "Ignited granular coal did not retain ignition.");
+        coldCoal.Temperature = 100f;
+        Require(CombustionRuntime.TryApply(ref coldCoal, coalMaterials, 0.05f, out _, out _) && coldCoal.Temperature > 100f,
+            "Ignited coal stopped reacting when its surface cooled.");
+        coldCoal.Lifetime = 0;
+        Require(!CombustionRuntime.IsBurning(coldCoal, coalMaterials), "Extinguished cold coal restarted by itself.");
         GridCell hotMetal = new() { MaterialIndex = 3, Mass = 7.8f, IsActive = 1, Temperature = 900f };
         Require(!CombustionRuntime.IsBurning(hotMetal, materials),
             "Hot non-combustible metal was treated as burning.");
@@ -129,6 +143,7 @@ internal static class CombustionMaterialRegressionVerifier
             SimulationKind = (uint)MaterialSimulationKind.Gas,
             Density = 0.12f,
             InitialTemperature = 650f,
+            HeatCapacity = 1f,
             FlameSpreadRate = 3f,
             MinimumLifetime = 2f,
             MaximumLifetime = 2.8f,
@@ -136,6 +151,8 @@ internal static class CombustionMaterialRegressionVerifier
         };
         MaterialProperties smoke = new()
         {
+            Flags = (uint)MaterialFlags.Smoke,
+            HeatCapacity = 2f,
             SimulationKind = (uint)MaterialSimulationKind.Gas,
             Density = 0.04f,
             MinimumLifetime = 4f,
@@ -165,8 +182,16 @@ internal static class CombustionMaterialRegressionVerifier
         cooledFlame.Temperature = 50f;
         Require(TransientMaterialRuntime.TryAdvance(ref cooledFlame, transientMaterials, 0.05f) &&
             cooledFlame.MaterialIndex == 2 && cooledFlame.IsActive != 0 &&
-            Same(cooledFlame.Lifetime, 4f) && Same(cooledFlame.Mass, smoke.Density),
+            Same(cooledFlame.Lifetime, 4f) && Same(cooledFlame.Mass, liveFlame.Mass) &&
+            Same(cooledFlame.Temperature, 35f),
             "Cooling did not extinguish a flame into its lifecycle target.");
+        GridCell hotExpiredFlame = liveFlame;
+        hotExpiredFlame.Lifetime = 0.01f;
+        float initialHeat = hotExpiredFlame.Mass * flame.HeatCapacity * (hotExpiredFlame.Temperature - 20);
+        Require(TransientMaterialRuntime.TryAdvance(ref hotExpiredFlame, transientMaterials, 0.05f) &&
+            hotExpiredFlame.MaterialIndex == 2 && hotExpiredFlame.IsActive != 0 &&
+            Same(initialHeat, hotExpiredFlame.Mass * smoke.HeatCapacity * (hotExpiredFlame.Temperature - 20)),
+            "Hot flame expiry must carry its sensible heat into the smoke packet.");
         GridCell expiredSmoke = new()
         {
             MaterialIndex = 2,

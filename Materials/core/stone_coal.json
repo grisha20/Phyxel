@@ -11,7 +11,7 @@
     "burnRate": 0.030,
     "heatPerMass": 3000.0,
     "burnedInto": "core:empty",
-    "spreadRate": 1.0,
+    "spreadRate": 2.0,
     "maximumTemperature": 1400.0
   },
   "emissions": {

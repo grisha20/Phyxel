@@ -62,6 +62,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     cell.MaterialIndex = source.ContactLiquidIntoMaterialIndex;
+    cell.Lifetime = 0; // Wet fuel loses the retained coal ignition state.
     cell.BodyId = 0;
     cell.Pressure = 0;
     cell.RestFrames = 0;

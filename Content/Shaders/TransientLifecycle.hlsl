@@ -21,9 +21,6 @@ RWStructuredBuffer<uint> CombustionSummary : register(u1);
 static const uint CombustionOccurred = 1u << 0;
 static const uint TargetCellular = 1u << 2;
 static const uint TargetGas = 1u << 4;
-// FIRE.cpp converts expired FIRE to SMKE only below 625 K.  Phyxel stores
-// temperatures in Celsius, hence this exact equivalent threshold.
-static const float FireToSmokeTemperature = 351.85;
 
 float2 OxidizerAt(uint index)
 {
@@ -68,16 +65,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    // Hot FIRE is killed when its resource expires.  Only cooled FIRE becomes
-    // SMKE; converting every expired flame made smoke originate at the brush
-    // rather than at the cooled perimeter of the flow.
-    if (flame && !extinguished && cell.Temperature >= FireToSmokeTemperature)
-    {
-        Grid[index] = CreateEmptyCell();
-        InterlockedOr(CombustionSummary[0], CombustionOccurred | TargetCellular);
-        return;
-    }
-
     uint targetIndex = material.DecayIntoMaterialIndex;
     if (targetIndex == 0 || targetIndex >= TransientMaterialCount ||
         Materials[targetIndex].SimulationKind == SimulationKindNone)
@@ -89,10 +76,15 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     MaterialProperties target = Materials[targetIndex];
     cell.MaterialIndex = targetIndex;
-    // A discrete transient becomes one target particle. Carrying FIRE's unit
-    // mass into low-density smoke would make the gas solver split it into
-    // dozens of smoke cells and overwhelm the visible flame.
-    cell.Mass = target.Density;
+    // Ordinary motion gas carries whole packets without splitting by density.
+    // Flame -> smoke must carry its heat rather than deleting the hot packet
+    // or discarding 96% of its thermal capacity when changing material.
+    bool carryHeat = flame && (target.Flags & MaterialFlagSmoke) != 0 &&
+        material.HeatCapacity > 0 && target.HeatCapacity > 0;
+    if (carryHeat)
+        cell.Temperature = 20.0 + (cell.Temperature - 20.0) * material.HeatCapacity / target.HeatCapacity;
+    else
+        cell.Mass = target.Density;
     cell.Pressure = 0;
     cell.IsActive = 1;
     cell.BodyId = 0;

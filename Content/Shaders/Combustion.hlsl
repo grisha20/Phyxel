@@ -147,12 +147,12 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
     if (y > 0 && emission.SmokeIntoMaterialIndex < CombustionMaterialCount)
     {
         ProposeEmission(sourceIndex, sourceIndex - width, emission.SmokeIntoMaterialIndex,
-            emission.SmokeRate, CombustionDeltaTime, sourceIndex, sourceCell.Temperature, (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0);
+            emission.SmokeRate, CombustionDeltaTime, worldCellCount + sourceIndex, sourceCell.Temperature, (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0);
     }
     if (x + 1 < width)
     {
         ProposeEmission(sourceIndex, sourceIndex + 1, emission.GasIntoMaterialIndex,
-            emission.GasRate, CombustionDeltaTime, worldCellCount + sourceIndex, sourceCell.Temperature, (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0);
+            emission.GasRate, CombustionDeltaTime, worldCellCount * 2 + sourceIndex, sourceCell.Temperature, (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0);
     }
     if (emission.FlameIntoMaterialIndex < CombustionMaterialCount)
     {
@@ -197,7 +197,10 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
         if (flameDestination != sourceIndex)
         {
             ProposeEmission(sourceIndex, flameDestination, emission.FlameIntoMaterialIndex,
-                emission.FlameRate, CombustionDeltaTime, worldCellCount * 2 + sourceIndex,
+                // Claims select the lowest request index. A surface with only
+                // one open cell must not lose every flame to its own smoke or
+                // CO2 proposal; flame contacts are what propagate ignition.
+                emission.FlameRate, CombustionDeltaTime, sourceIndex,
                 max(sourceCell.Temperature, Materials[emission.FlameIntoMaterialIndex].InitialTemperature),
                 (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0);
         }
@@ -223,8 +226,9 @@ float2 AvailableOxidizer(uint2 p)
     return sum;
 }
 
-bool HasLiveFlame(uint2 coordinate)
+uint LiveFlameCount(uint2 coordinate)
 {
+    uint count = 0;
     [unroll]
     for (int offsetY = -2; offsetY <= 2; offsetY++)
     {
@@ -246,11 +250,11 @@ bool HasLiveFlame(uint2 coordinate)
                 neighbor.Lifetime > 0 &&
                 (Materials[neighbor.MaterialIndex].Flags & MaterialFlagFlame) != 0)
             {
-                return true;
+                count++;
             }
         }
     }
-    return false;
+    return count;
 }
 
 [numthreads(16, 16, 1)]
@@ -300,17 +304,29 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float oxygen = supply.x;
     // Gate ignition as well as fuel loss/heat/emissions. A flame in inert gas
     // must not ignite an otherwise cold piece of wood for one frame.
-    if (!selfOxidizing && oxygen <= max(supply.y, 1) * OxidizerExtinctionThreshold) return;
-
-    if (cell.Temperature <= source.IgnitionTemperature && source.FlameSpreadRate > 0 &&
-        HasLiveFlame(coordinate))
+    bool persistentIgnition = (source.Flags & MaterialFlagPersistentCoalIgnition) != 0;
+    if (!selfOxidizing && oxygen <= max(supply.y, 1) * OxidizerExtinctionThreshold)
     {
-        float ignitionChance = saturate(source.FlameSpreadRate * CombustionDeltaTime);
+        if (persistentIgnition && cell.Lifetime != 0) { cell.Lifetime = 0; Grid[index] = cell; }
+        return;
+    }
+
+    uint flameContacts = cell.Temperature <= source.IgnitionTemperature && source.FlameSpreadRate > 0
+        ? LiveFlameCount(coordinate) : 0;
+    if (flameContacts > 0)
+    {
+        // TPT checks coal ignition from every nearby FIRE particle, rather
+        // than giving one particle and a dense burning front the same chance.
+        // Keep the existing contact rate for other fuels.
+        float contacts = persistentIgnition ? float(flameContacts) : 1.0;
+        float ignitionChance = 1.0 - exp(-source.FlameSpreadRate * contacts * CombustionDeltaTime);
         uint ignitionSeed = index ^ (CombustionTickIndex * 0x9e3779b9u);
         if (HashUnitFloat(ignitionSeed) < ignitionChance)
             cell.Temperature = min(MaximumCombustionTemperature, source.IgnitionTemperature + 1.0);
     }
-    if (cell.Temperature <= source.IgnitionTemperature) return;
+    if (cell.Temperature <= source.IgnitionTemperature &&
+        !(persistentIgnition && cell.Lifetime > 0)) return;
+    if (persistentIgnition) cell.Lifetime = 1;
 
     float exposure = selfOxidizing ? 1 : saturate(oxygen / 3);
     float burnedMass = min(availableFuel, source.BurnRate * exposure * CombustionDeltaTime);

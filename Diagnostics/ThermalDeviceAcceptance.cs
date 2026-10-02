@@ -118,13 +118,21 @@ internal static class ThermalDeviceAcceptance
             ? 7.8 * .13 * 20 : 0;
         double residual = after - before - heat - ambient - creation;
         double scale = Math.Max(1, Math.Max(Math.Abs(before), Math.Abs(after)));
+        // The world codec deliberately canonicalizes inactive cells to zero.
+        // Compare every active byte and the oxidizer, not stale velocities in
+        // empty cells left by cellular motion between thermal passes.
+        byte[] normalizedGrid = (byte[])snapshot.Grid.Clone();
+        var normalizedCells = MemoryMarshal.Cast<byte, GridCell>(normalizedGrid.AsSpan());
+        for (int i = 0; i < normalizedCells.Length; i++)
+            if (normalizedCells[i].IsActive == 0) normalizedCells[i] = default;
         bool saved = Task.Run(async () => {
             var serializer = new SimulationStateSerializer();
             string path = Path.Combine(directory, "final.scene.json");
             await serializer.SaveAsync(path, new SimulationSettings(),
                 (ushort)materials.GetRequiredRuntimeIndex(CoreMaterialIds.Heater), snapshot, materials);
             var loaded = await serializer.LoadAsync(path, materials);
-            return loaded?.World is { } world && world.Grid.AsSpan().SequenceEqual(snapshot.Grid);
+            return loaded?.World is { } world && world.Grid.AsSpan().SequenceEqual(normalizedGrid) &&
+                (world.Oxidizer ?? []).AsSpan().SequenceEqual(snapshot.Oxidizer ?? []);
         }).GetAwaiter().GetResult();
         report = string.Create(CultureInfo.InvariantCulture,
             $"energyBefore={before:F6} energyAfter={after:F6} deviceHeat={heat:F6} heatingHeat={heating:F6} coolingHeat={cooling:F6} ambientHeat={ambient:F6} creationHeat={creation:F6} residual={residual:F6} relativeError={Math.Abs(residual)/scale:E4} saved={saved} thermalTicks={ticks}");

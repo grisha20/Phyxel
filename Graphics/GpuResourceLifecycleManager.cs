@@ -156,6 +156,11 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         Buffer airConstants = CreateConstantBuffer<AirSimulationConstants>();
         GpuStructuredBuffer<AirCell> air = new(Device, airCellCount);
         GpuStructuredBuffer<AirCell> airScratch = new(Device, airCellCount);
+        GpuStructuredBuffer<uint> airFlowLinks = new(Device, airCellCount);
+        GpuStructuredBuffer<System.Numerics.Vector2> airProjectionA = new(Device, airCellCount);
+        GpuStructuredBuffer<System.Numerics.Vector2> airProjectionB = new(Device, airCellCount);
+        Device.ImmediateContext.ClearUnorderedAccessView(airProjectionA.UnorderedView, new SharpDX.Mathematics.Interop.RawInt4(0, 0, 0, 0));
+        Device.ImmediateContext.ClearUnorderedAccessView(airProjectionB.UnorderedView, new SharpDX.Mathematics.Interop.RawInt4(0, 0, 0, 0));
         GpuStructuredBuffer<GasAirImpulse> gasAirImpulse = new(Device, airCellCount);
         Buffer airStaging = CreateStagingBuffer(air.Buffer.Description.SizeInBytes);
         GpuStructuredBuffer<GasMotionState> gasMotion = new(Device, cellCount);
@@ -453,6 +458,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             AirConstants = airConstants,
             Air = air,
             AirScratch = airScratch,
+            AirFlowLinks = airFlowLinks,
+            AirProjectionA = airProjectionA,
+            AirProjectionB = airProjectionB,
             GasAirImpulse = gasAirImpulse,
             AirStaging = airStaging,
             GasMotion = gasMotion,
@@ -571,6 +579,11 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             AirAdvectShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSAdvect") : null,
             AirCommitShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSCommit") : null,
             AirClearShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSClear") : null,
+            AirDivergenceShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSDivergence") : null,
+            AirFacesShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSFaces") : null,
+            AirJacobiABShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSJacobiAB") : null,
+            AirJacobiBAShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSJacobiBA") : null,
+            AirProjectShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSProject") : null,
             FireGlowDepositShader = allocateSimulation ? CompileShader("FireGlow.hlsl", "CSDeposit") : null,
             FireGlowDiffuseShader = allocateSimulation ? CompileShader("FireGlow.hlsl", "CSDiffuse") : null,
             FireGlowCommitShader = allocateSimulation ? CompileShader("FireGlow.hlsl", "CSCommitGlow") : null,
@@ -616,7 +629,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             sharedStructures,
             StringComparison.Ordinal).Replace("#include \"PhaseEnthalpy.hlsli\"", phaseEnthalpy,
                 StringComparison.Ordinal).Replace("#include \"OxidizerShared.hlsli\"",
-                    File.ReadAllText(Path.Combine(shaderDirectory, "OxidizerShared.hlsli")), StringComparison.Ordinal);
+                    File.ReadAllText(Path.Combine(shaderDirectory, "OxidizerShared.hlsli")), StringComparison.Ordinal)
+            .Replace("#include \"FineAirGeometry.hlsli\"",
+                File.ReadAllText(Path.Combine(shaderDirectory, "FineAirGeometry.hlsli")), StringComparison.Ordinal);
         string cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"phyxel-compute-shader-v1\0{entryPoint}\0{shaderSource}")));
         string cachePath = Path.Combine(

@@ -31,11 +31,9 @@ public enum MaterialFlags : uint
     SelfOxidizing = 1u << 2,
 
     /// <summary>
-    /// Материал непроницаем для поля воздуха. Несут только конструкционные
-    /// стены. В The Powder Toy карту воздуха перекрывают исключительно
-    /// специальные стены: обычный металл поле пропускает, и о него сталкиваются
-    /// сами частицы. Пока непроницаемым считался любой solid, металлическая
-    /// пластина превращалась в камеру давления с границей по сетке 4x4.
+    /// Дополнительная непроницаемость для поля воздуха. Обычные solid/liquid
+    /// перекрывают связи потока по геометрии мелкой сетки; этот флаг также
+    /// позволяет блокировать воздух материалам иных типов.
     /// </summary>
     BlocksAir = 1u << 3,
 
@@ -48,7 +46,11 @@ public enum MaterialFlags : uint
     /// <summary>Reversible latent-heat liquid/vapour pair, without lifecycle.</summary>
     PhaseEnthalpy = 1u << 5,
     ThermalHeater = 1u << 6,
-    ThermalCooler = 1u << 7
+    ThermalCooler = 1u << 7,
+    // Runtime tag for the CO2/ambient-air density ratio; no layout expansion.
+    ThermalCarbonDioxide = 1u << 8,
+    // Coal retains ignition like TPT's burning life counter.
+    PersistentCoalIgnition = 1u << 9
 }
 
 public static class CoreMaterialIds

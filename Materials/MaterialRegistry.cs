@@ -611,6 +611,10 @@ public sealed class MaterialRegistry
         IReadOnlyDictionary<string, MaterialDefinition> indexedById)
     {
         MaterialProperties properties = source.Properties;
+        if (source.Id == CoreMaterialIds.Co2)
+            properties.Flags |= (uint)MaterialFlags.ThermalCarbonDioxide;
+        if (source.Id is CoreMaterialIds.Coal or CoreMaterialIds.StoneCoal)
+            properties.Flags |= (uint)MaterialFlags.PersistentCoalIgnition;
         properties.TransitionBelowTemperature = source.PhaseTransitions?.Below?.Temperature ?? 0;
         properties.TransitionBelowMaterialIndex = source.PhaseTransitions?.Below is { } below
             ? indexedById[below.IntoId].RuntimeIndex

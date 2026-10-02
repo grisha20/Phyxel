@@ -9,9 +9,9 @@
   "combustion": {
     "ignitionTemperature": 400.0,
     "burnRate": 0.012,
-    "heatPerMass": 2000.0,
+    "heatPerMass": 30000.0,
     "burnedInto": "core:empty",
-    "spreadRate": 1.5,
+    "spreadRate": 3.0,
     "maximumTemperature": 1100.0
   },
   "emissions": {

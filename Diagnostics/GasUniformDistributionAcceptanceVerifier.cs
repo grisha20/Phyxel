@@ -57,6 +57,7 @@ internal static class GasUniformDistributionAcceptanceVerifier
         GasMetrics steam = default;
         GasMetrics ordinary = default;
         GasMetrics co2 = default;
+        double mixedCo2Temperature = 0;
         if (checkpoints.Count > 0)
         {
             SimulationWorldSnapshot layered = checkpoints[0].Snapshot;
@@ -69,6 +70,15 @@ internal static class GasUniformDistributionAcceptanceVerifier
             ordinary = Measure(layered, gas, left, top, right, bottom);
             co2 = Measure(layered, materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2),
                 left, top, right, bottom);
+            int co2Count = 0;
+            var layeredCells = MemoryMarshal.Cast<byte, GridCell>(layered.Grid);
+            for (int y = top; y <= bottom; y++) for (int x = left; x <= right; x++)
+            {
+                var c = layeredCells[y * layered.Width + x];
+                if (c.IsActive != 0 && c.MaterialIndex == co2Material)
+                { mixedCo2Temperature += c.Temperature; co2Count++; }
+            }
+            mixedCo2Temperature /= Math.Max(1, co2Count);
             foreach ((string name, GasMetrics metrics) in new[]
             {
                 ("steam", steam), ("gas", ordinary), ("co2", co2)
@@ -98,7 +108,7 @@ internal static class GasUniformDistributionAcceptanceVerifier
             "gas solver removed liquid mass", errors);
 
         report = $"PHYXEL_GAS_UNIFORM single={single} obstacle={obstacle} " +
-            $"layers=steam({steam}) gas({ordinary}) co2({co2})";
+            $"layers=steam({steam}) gas({ordinary}) co2({co2}) co2MeanT={mixedCo2Temperature:F2}";
         if (errors.Count == 0)
         {
             return true;

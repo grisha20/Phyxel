@@ -40,6 +40,10 @@ public sealed class GpuSimulationResources : IDisposable
     public required Buffer AirConstants { get; init; }
     public required GpuStructuredBuffer<AirCell> Air { get; init; }
     public required GpuStructuredBuffer<AirCell> AirScratch { get; init; }
+    // Derived from the current fine grid each air tick, never persisted.
+    public required GpuStructuredBuffer<uint> AirFlowLinks { get; init; }
+    public required GpuStructuredBuffer<System.Numerics.Vector2> AirProjectionA { get; init; }
+    public required GpuStructuredBuffer<System.Numerics.Vector2> AirProjectionB { get; init; }
     public required GpuStructuredBuffer<GasAirImpulse> GasAirImpulse { get; init; }
     public required Buffer AirStaging { get; init; }
     public required GpuStructuredBuffer<GasMotionState> GasMotion { get; init; }
@@ -157,6 +161,11 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? AirAdvectShader { get; init; }
     public ComputeShader? AirCommitShader { get; init; }
     public ComputeShader? AirClearShader { get; init; }
+    public ComputeShader? AirDivergenceShader { get; init; }
+    public ComputeShader? AirFacesShader { get; init; }
+    public ComputeShader? AirJacobiABShader { get; init; }
+    public ComputeShader? AirJacobiBAShader { get; init; }
+    public ComputeShader? AirProjectShader { get; init; }
     public ComputeShader? FireGlowDepositShader { get; init; }
     public ComputeShader? FireGlowDiffuseShader { get; init; }
     public ComputeShader? FireGlowCommitShader { get; init; }
@@ -190,6 +199,11 @@ public sealed class GpuSimulationResources : IDisposable
         AirAdvectShader?.Dispose();
         AirCommitShader?.Dispose();
         AirClearShader?.Dispose();
+        AirDivergenceShader?.Dispose();
+        AirFacesShader?.Dispose();
+        AirJacobiABShader?.Dispose();
+        AirJacobiBAShader?.Dispose();
+        AirProjectShader?.Dispose();
         FireGlowDepositShader?.Dispose();
         FireGlowDiffuseShader?.Dispose();
         FireGlowCommitShader?.Dispose();
@@ -264,6 +278,9 @@ public sealed class GpuSimulationResources : IDisposable
         FireGlow.Dispose();
         FireGlowConstants.Dispose();
         AirScratch.Dispose();
+        AirFlowLinks.Dispose();
+        AirProjectionA.Dispose();
+        AirProjectionB.Dispose();
         Air.Dispose();
         GasAirImpulse.Dispose();
         AirStaging.Dispose();

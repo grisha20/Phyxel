@@ -24,6 +24,9 @@ static const float MinimumThermalMass = 0.0001;
 static const float MaximumExchangeFraction = 0.80;
 static const float SameGasConductivityFloor = 0.16;
 static const float GasSurfaceConductivityFloor = 0.16;
+// Condensable vapour also exchanges latent heat at a resolved surface. Keep
+// the pair symmetric and bounded by the solid; dry gases retain their floor.
+static const float PhaseVapourSurfaceConductivityFloor = 0.20;
 static const float DiagonalGasContactWeight = 0.5;
 static const float InteriorAmbientExposure = 0.04;
 
@@ -96,8 +99,12 @@ float ContactHeatFlow(
         // interface by the solid's conductivity so insulators still insulate.
         float solidConductivity = Materials[cell.MaterialIndex].SimulationKind == SimulationKindSolid
             ? conductivityA : conductivityB;
+        uint gasFlags = Materials[cell.MaterialIndex].SimulationKind == SimulationKindGas
+            ? Materials[cell.MaterialIndex].Flags : Materials[neighbor.MaterialIndex].Flags;
+        float surfaceFloor = (gasFlags & MaterialFlagPhaseEnthalpy) != 0
+            ? PhaseVapourSurfaceConductivityFloor : GasSurfaceConductivityFloor;
         contactConductivity = max(contactConductivity,
-            min(solidConductivity, GasSurfaceConductivityFloor));
+            min(solidConductivity, surfaceFloor));
     }
     float neighborCapacity = EffectiveCapacity(neighbor);
     float exchangeFraction = min(

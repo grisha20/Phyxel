@@ -22,6 +22,12 @@ RWStructuredBuffer<GasAirImpulse> GasAirImpulses : register(u9);
 RWStructuredBuffer<GasVerticalMotionStatistics> GasVerticalMotionStatisticsBuffer : register(u10);
 RWStructuredBuffer<uint> GasVerticalBlockFrameMarkers : register(u11);
 
+#define FineAirWidth Width
+#define FineAirHeight Height
+#define FineAirMaterialAt(p) CellMaterials[uint((p).y) * Width + uint((p).x)]
+#define FineAirMaterials Materials
+#include "FineAirGeometry.hlsli"
+
 static const uint MetalChimneyInnerLeft = 221;
 static const uint MetalChimneyInnerRight = 258;
 
@@ -143,10 +149,9 @@ float2 FlameAirDrift(uint2 coordinate)
 {
     uint airWidth = (Width + AirCellSize - 1) / AirCellSize;
     uint airHeight = (Height + AirCellSize - 1) / AirCellSize;
-    uint2 airCoordinate = min(
-        coordinate / AirCellSize,
-        uint2(airWidth - 1, airHeight - 1));
-    AirCell air = Air[airCoordinate.y * airWidth + airCoordinate.x];
+    int2 airCoordinate;
+    if (!AirFineNodeFor(int2(coordinate), airCoordinate)) return 0;
+    AirCell air = Air[uint(airCoordinate.y) * airWidth + uint(airCoordinate.x)];
     return float2(air.VelocityX, air.VelocityY);
 }
 
@@ -308,8 +313,9 @@ void RecordGasAirStep(uint sourceIndex, uint targetIndex, uint material)
     }
 
     uint airWidth = (Width + AirCellSize - 1) / AirCellSize;
-    uint airIndex = (uint(sourceY) / AirCellSize) * airWidth +
-        uint(sourceX) / AirCellSize;
+    int2 airCoordinate;
+    if (!AirFineNodeFor(int2(sourceX, sourceY), airCoordinate)) return;
+    uint airIndex = uint(airCoordinate.y) * airWidth + uint(airCoordinate.x);
     int ignored;
     float airDrag = Materials[material].MotionAirDrag;
     if (stepX != 0)
@@ -1203,6 +1209,18 @@ void IntegrateGasMotion(uint2 coordinate)
     // GasBuoyancy now has TPT gravity semantics: it is a velocity increment
     // per fixed tick and negative values rise because the y axis points down.
     float2 gravity = float2(0, material.GasBuoyancy);
+    if ((material.Flags & MaterialFlagThermalCarbonDioxide) != 0)
+    {
+        // Ideal-gas density relative to ambient dry air at equal pressure.
+        // Preserve the calibrated cold CO2 increment at 20 C, but let hot
+        // combustion CO2 rise and regain its weight as it cools.
+        float referenceKelvin = 293.15;
+        float relativeMolecularMass = 44.0095 / 28.97;
+        float relativeDensity = relativeMolecularMass * referenceKelvin /
+            max(1.0, cell.Temperature + 273.15);
+        gravity.y = clamp(material.GasBuoyancy *
+            (relativeDensity - 1.0) / (relativeMolecularMass - 1.0), -0.25, 0.25);
+    }
     float lateralPressure = 0;
     if (material.GasBuoyancy > 0 && !legacySurfaceCarrier)
     {
@@ -1211,14 +1229,20 @@ void IntegrateGasMotion(uint2 coordinate)
         if (leftDensity >= 0 && rightDensity >= 0)
             lateralPressure = (leftDensity - rightDensity) * material.GasDiffusion * 1.5;
     }
+    // Stable gases relax toward the common carrier velocity. Applying CO2's
+    // TPT Advection=2 as an additive acceleration makes it overtake both air
+    // and steam indefinitely even while cold. Flame/smoke retain their
+    // calibrated transient-particle response and drive carrier slip drag.
+    float airCoupling = legacySurfaceCarrier ? material.MotionAdvection :
+        min(1.0, material.MotionAdvection) * (1.0 - material.MotionLoss);
     state.VelocityX = clamp(
         state.VelocityX * material.MotionLoss +
-            drift.x * material.MotionAdvection * GasAirVelocityScale + lateralPressure + diffusionImpulse.x,
+            drift.x * airCoupling * GasAirVelocityScale + lateralPressure + diffusionImpulse.x,
         -GasMaximumSpeed,
         GasMaximumSpeed);
     state.VelocityY = clamp(
         state.VelocityY * material.MotionLoss +
-            drift.y * material.MotionAdvection * GasAirVelocityScale + gravity.y + diffusionImpulse.y,
+            drift.y * airCoupling * GasAirVelocityScale + gravity.y + diffusionImpulse.y,
         -GasMaximumSpeed,
         GasMaximumSpeed);
     state.OffsetX = clamp(
@@ -1524,6 +1548,16 @@ bool OrdinaryGasBlocked(uint material, int2 target)
     return neighbor.IsActive != 0 && !GasCanEnter(material, neighbor.MaterialIndex);
 }
 
+float2 OrdinaryGasCollisionCarrier(int2 target)
+{
+    if (target.x < 0 || target.y < 0 || target.x >= int(Width) || target.y >= int(Height)) return 0;
+    GridCell neighbor = Grid[FlattenCoordinate(uint2(target))];
+    // Gas contact is relative to the common carrier, not a stationary wall.
+    // Read stable Air/Grid rather than a neighbour's concurrently written motion.
+    return neighbor.IsActive != 0 && CellKind(neighbor) == SimulationKindGas
+        ? FlameAirDrift(uint2(target)) : float2(0, 0);
+}
+
 // Run once after all movement passes. No cell is moved here: Grid is stable,
 // and each thread writes only its own motion. An occupied target may become
 // free during the eight carrier substeps; only the remaining blocked intent
@@ -1541,13 +1575,19 @@ void ResolveOrdinaryGasCollision(uint2 coordinate)
     if (abs(state.OffsetX) >= 0.5 && OrdinaryGasBlocked(cell.MaterialIndex,
         int2(coordinate) + int2(state.OffsetX > 0 ? 1 : -1, 0)))
     {
-        state.VelocityX *= material.MotionCollision;
+        float carrierX = OrdinaryGasCollisionCarrier(int2(coordinate) + int2(state.OffsetX > 0 ? 1 : -1, 0)).x;
+        carrierX = clamp(carrierX, -GasMaximumSpeed, GasMaximumSpeed);
+        state.VelocityX = clamp(carrierX + (state.VelocityX - carrierX) * material.MotionCollision,
+            -GasMaximumSpeed, GasMaximumSpeed);
         state.OffsetX = 0;
     }
     if (abs(state.OffsetY) >= 0.5 && OrdinaryGasBlocked(cell.MaterialIndex,
         int2(coordinate) + int2(0, state.OffsetY > 0 ? 1 : -1)))
     {
-        state.VelocityY *= material.MotionCollision;
+        float carrierY = OrdinaryGasCollisionCarrier(int2(coordinate) + int2(0, state.OffsetY > 0 ? 1 : -1)).y;
+        carrierY = clamp(carrierY, -GasMaximumSpeed, GasMaximumSpeed);
+        state.VelocityY = clamp(carrierY + (state.VelocityY - carrierY) * material.MotionCollision,
+            -GasMaximumSpeed, GasMaximumSpeed);
         state.OffsetY = 0;
     }
     GasMotion[index] = state;

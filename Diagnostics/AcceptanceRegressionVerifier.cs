@@ -327,6 +327,8 @@ public static class AcceptanceRegressionVerifier
                     out report),
             AcceptanceScenarioMode.Oxidizer => OxidizerAcceptance.Validate(snapshot, materialRegistry, thermalCheckpoints, artifactDirectory, out report),
             AcceptanceScenarioMode.CoalFire => CoalFireAcceptance.Validate(snapshot, materialRegistry, thermalCheckpoints, artifactDirectory, out report),
+            AcceptanceScenarioMode.SavedFurnace => SavedFurnaceAcceptance.Validate(snapshot, materialRegistry, thermalCheckpoints, artifactDirectory, out report),
+            AcceptanceScenarioMode.AirWall or AcceptanceScenarioMode.Co2Thermal or AcceptanceScenarioMode.TransientHeat or AcceptanceScenarioMode.GasCoFlow => GasFlowAcceptance.Validate(mode, snapshot, materialRegistry, artifactDirectory, out report),
             AcceptanceScenarioMode.Co2Layer or AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamSurface or AcceptanceScenarioMode.SteamEnergy or AcceptanceScenarioMode.SteamApparatus or AcceptanceScenarioMode.ThermalDevices =>
                 GasCycleAcceptanceScenario.Validate(mode, snapshot, materialRegistry, thermalCheckpoints,
                     artifactDirectory, out report),

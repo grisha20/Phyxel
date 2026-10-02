@@ -113,10 +113,13 @@ public sealed class PhyxelGame : Game
             }
         }
         scenePath = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SCENE_PATH") ??
-            Path.Combine(
+            (acceptance.Active && !acceptance.RequiresSavedScene
+                ? Path.Combine(Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR") ??
+                    Path.Combine(AppContext.BaseDirectory, "artifacts"), "roundtrip-scene.json")
+                : Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Phyxel",
-                "scene.json");
+                "scene.json"));
         uiScreenshotPath = Environment.GetEnvironmentVariable("PHYXEL_UI_SCREENSHOT_PATH");
     }
 
@@ -171,6 +174,7 @@ public sealed class PhyxelGame : Game
                     materialRegistry),
                 settings.HydraulicPressure,
                 initialAcceptanceWorld.Oxidizer is { Length: > 0 });
+            acceptance.InitializeDiagnosticFields(currentResources);
         }
         if (acceptance.RequiresSavedScene)
         {

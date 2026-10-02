@@ -834,6 +834,11 @@ public sealed class SimulationDispatchCoordinator
             new RawInt4(0, 0, 0, 0));
         boundResources = resources;
         worldHasMatter = containsMatter;
+        // The pressure correction is a solver guess for the old geometry,
+        // not saved physical state. Never reuse it after loading/resetting a
+        // world in an allocation with the same dimensions.
+        resources.Context.ClearUnorderedAccessView(resources.AirProjectionA.UnorderedView, new RawInt4());
+        resources.Context.ClearUnorderedAccessView(resources.AirProjectionB.UnorderedView, new RawInt4());
         retainOxidizerField = preserveOxidizer;
         thermalActive = containsMatter;
         contactTransitionPotential = containsContactTransitionSource;
@@ -1700,12 +1705,16 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetShaderResources(
             0,
             resources.Materials.View,
-            resources.Grid.ReadView);
+            resources.Grid.ReadView,
+            resources.GasMotion.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Air.UnorderedView,
             resources.AirScratch.UnorderedView,
-            resources.GasAirImpulse.UnorderedView);
+            resources.GasAirImpulse.UnorderedView,
+            resources.AirFlowLinks.UnorderedView,
+            resources.AirProjectionA.UnorderedView,
+            resources.AirProjectionB.UnorderedView);
 
         int groupsX = DivideRoundUp(resources.AirWidth, 8);
         int groupsY = DivideRoundUp(resources.AirHeight, 8);
@@ -1715,8 +1724,16 @@ public sealed class SimulationDispatchCoordinator
         RunAirPass(context, resources.AirVelocityShader, groupsX, groupsY);
         RunAirPass(context, resources.AirAdvectShader, groupsX, groupsY);
         RunAirPass(context, resources.AirCommitShader, groupsX, groupsY);
+        RunAirPass(context, resources.AirFacesShader, groupsX, groupsY);
+        RunAirPass(context, resources.AirDivergenceShader, groupsX, groupsY);
+        for (int iteration = 0; iteration < 64; iteration++)
+        {
+            RunAirPass(context, resources.AirJacobiABShader, groupsX, groupsY);
+            RunAirPass(context, resources.AirJacobiBAShader, groupsX, groupsY);
+        }
+        RunAirPass(context, resources.AirProjectShader, groupsX, groupsY);
 
-        Unbind(context, 2, 3);
+        Unbind(context, 3, 6);
     }
 
     private static void RunAirPass(
@@ -2305,6 +2322,8 @@ public sealed class SimulationDispatchCoordinator
             resources.Air.UnorderedView,
             resources.AirScratch.UnorderedView);
         context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, new RawInt4(0, 0, 0, 0));
+        context.ClearUnorderedAccessView(resources.AirProjectionA.UnorderedView, new RawInt4(0, 0, 0, 0));
+        context.ClearUnorderedAccessView(resources.AirProjectionB.UnorderedView, new RawInt4(0, 0, 0, 0));
         context.Dispatch(
             DivideRoundUp(resources.AirWidth, 8),
             DivideRoundUp(resources.AirHeight, 8),

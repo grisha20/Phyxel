@@ -34,7 +34,8 @@ public static class CombustionRuntime
         }
 
         MaterialProperties source = materials[(int)cell.MaterialIndex];
-        if (source.SimulationKind != (uint)MaterialSimulationKind.Solid ||
+        if ((source.SimulationKind != (uint)MaterialSimulationKind.Solid &&
+             source.SimulationKind != (uint)MaterialSimulationKind.Granular) ||
             source.BurnedIntoMaterialIndex == MissingMaterialIndex ||
             source.BurnedIntoMaterialIndex >= materials.Length)
         {
@@ -46,7 +47,8 @@ public static class CombustionRuntime
             ? 0
             : target.Density;
         return cell.Mass > residueMass + MassEpsilon &&
-            cell.Temperature > source.IgnitionTemperature;
+            (cell.Temperature > source.IgnitionTemperature ||
+             ((source.Flags & (uint)MaterialFlags.PersistentCoalIgnition) != 0 && cell.Lifetime > 0));
     }
 
     public static bool TryApply(
@@ -65,6 +67,7 @@ public static class CombustionRuntime
 
         MaterialProperties source = materials[(int)cell.MaterialIndex];
         MaterialProperties target = materials[(int)source.BurnedIntoMaterialIndex];
+        if ((source.Flags & (uint)MaterialFlags.PersistentCoalIgnition) != 0) cell.Lifetime = 1;
         float residueMass = target.SimulationKind == (uint)MaterialSimulationKind.None
             ? 0
             : Math.Max(0, target.Density);
@@ -203,7 +206,12 @@ public static class TransientMaterialRuntime
         }
         MaterialProperties target = materials[(int)targetIndex];
         cell.MaterialIndex = targetIndex;
-        cell.Mass = target.Density;
+        bool carryHeat = flame && ((MaterialFlags)target.Flags & MaterialFlags.Smoke) != 0 &&
+            source.HeatCapacity > 0 && target.HeatCapacity > 0;
+        if (carryHeat)
+            cell.Temperature = 20 + (cell.Temperature - 20) * source.HeatCapacity / target.HeatCapacity;
+        else
+            cell.Mass = target.Density;
         cell.Pressure = 0;
         cell.IsActive = 1;
         cell.BodyId = 0;
