@@ -82,7 +82,11 @@ float Limited(float flux,int2 a,int2 b)
     int2 donor=flux>0 ? a : b;
     // Both ends apply the identical donor limiter. Four competing faces
     // cannot overdraw a cell; there are no atomics or upper inventory clamps.
-    return flux*min(1,Amount(Index(donor))/max(Outgoing(donor),1e-20));
+    // Keep the multidimensional explicit step below its donor CFL limit.
+    // Exhausting a donor in one step makes alternating empty/compressed
+    // cells under convergent carrier flow, falsely extinguishing hot FIRE.
+    // Both endpoints use this same face flux, so the reserve creates no air.
+    return flux*min(1,.5*Amount(Index(donor))/max(Outgoing(donor),1e-20));
 }
 [numthreads(16,16,1)]
 void CSTransport(uint3 tid : SV_DispatchThreadID)

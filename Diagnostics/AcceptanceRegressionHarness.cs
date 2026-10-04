@@ -709,7 +709,9 @@ public sealed class AcceptanceRegressionHarness
         WaterConvectionAcceptance.IsMode(Mode) ? 1f / WaterConvectionAcceptance.Fps :
         Mode == AcceptanceScenarioMode.CoalFire ? 1f / CoalFireAcceptance.Fps :
         Mode == AcceptanceScenarioMode.Oxidizer ? 1f / OxidizerAcceptance.Fps :
-        Mode == AcceptanceScenarioMode.GasBrushFps
+        (Mode == AcceptanceScenarioMode.GasBrushFps ||
+         (Mode is AcceptanceScenarioMode.FireOpen or AcceptanceScenarioMode.FireObstacle &&
+          Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE") != "1"))
             ? 1f / (int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_TARGET_FPS"), out int fps) ? fps : 60)
             : phaseAcceptance.AdjustElapsedSeconds(elapsedSeconds);
 
@@ -894,8 +896,8 @@ public sealed class AcceptanceRegressionHarness
             AcceptanceScenarioMode.GranularWaterDisplacement when frame == 12 => "V_granular_displacement",
             AcceptanceScenarioMode.GranularBarrier when frame == 899 => "W_granular_barrier_off",
             AcceptanceScenarioMode.GranularBarrierHydraulic when frame == 899 => "X_granular_barrier_on",
-            AcceptanceScenarioMode.FireObstacle when frame == 359 => "Y_fire_obstacle",
-            AcceptanceScenarioMode.FireOpen when frame == 359 => "Y_fire_open",
+            AcceptanceScenarioMode.FireObstacle when frame + 1 == CaptureFrame => "Y_fire_obstacle",
+            AcceptanceScenarioMode.FireOpen when frame + 1 == CaptureFrame => "Y_fire_open",
             AcceptanceScenarioMode.Furnace when frame == 599 => "Z_furnace",
             AcceptanceScenarioMode.MetalChimney when frame == 599 => "Z_metal_chimney",
             AcceptanceScenarioMode.SteamPuff when frame == 599 => "AA_steam_puff",

@@ -1,5 +1,13 @@
 # Зафиксированные источники паспортов
 
+OC/OL2026-10-05: прочитаны TPT FIRE/SMKE/OIL.cpp, общий перенос
+Simulation.cpp2341–2367,2448–2462 и жидкостное движение3095+;
+Air.cpp73–189. FIRE/SMKE: Advection.9/Loss.2/Gravity−.1/HotAir.001;
+стандартного конечного фонового O₂ нет. Это игровые коэффициенты,
+не СИ. Лимит количества донора Phyxel — собственное численное решение,
+не перенесённая из TPT химия. [Хеши прочитанных файлов](../../artifacts/open-combustion-20261005/source-hashes.json),
+[OC](../OPEN_COMBUSTION_RESULTS.md), [OL](../OIL_LOCALITY_RESULTS.md).
+
 WL2026-10-05: локальные WATR/ICEI/OIL.cpp и Simulation.cpp3120+
 (Falldown/боковой поиск/вертикальный выход), flood_water695–760 прочитаны.
 ICEI неподвижен; OIL не имеет нашей замёрзшей фазы. Плавающие связанные

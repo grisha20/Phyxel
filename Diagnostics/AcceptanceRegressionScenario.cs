@@ -271,6 +271,9 @@ public static class AcceptanceRegressionScenario
         return [];
     }
 
+    private static int FireDiagnosticFrames => 6 * (int.TryParse(
+        Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_TARGET_FPS"), out int fps) ? fps : 60);
+
     private static IReadOnlyList<BrushDrawCommand> CreateFireObstacle(uint frame, uint scenarioSeed)
     {
         List<BrushDrawCommand> commands = [];
@@ -282,7 +285,7 @@ public static class AcceptanceRegressionScenario
             (int plateLeft, int plateRight) = GetFireObstaclePlateBounds();
             AddLine(commands, plateLeft, 100, plateRight, 100, 5, 6, materials.Metal, 19101);
         }
-        if (frame < 360)
+        if (frame < FireDiagnosticFrames)
         {
             // Holding the brush is part of the experiment. A one-frame puff can
             // expire before reaching the plate and does not test a furnace.
@@ -296,7 +299,7 @@ public static class AcceptanceRegressionScenario
 
     private static IReadOnlyList<BrushDrawCommand> CreateFireOpen(uint frame, uint scenarioSeed)
     {
-        if (frame >= 360 && Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE") != "1")
+        if (frame >= FireDiagnosticFrames && Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE") != "1")
         {
             return [];
         }

@@ -1073,6 +1073,11 @@ public static class AcceptanceRegressionVerifier
         uint smoke)
     {
         Directory.CreateDirectory(artifactDirectory);
+        if (Environment.GetEnvironmentVariable("PHYXEL_FIRE_STATE_DUMP") == "1")
+        {
+            File.WriteAllBytes(Path.Combine(artifactDirectory, "grid.bin"), snapshot.Grid);
+            if (snapshot.Oxidizer is not null) File.WriteAllBytes(Path.Combine(artifactDirectory, "oxygen.bin"), snapshot.Oxidizer);
+        }
         WriteAirFieldDump(snapshot, artifactDirectory, "air-pressure.txt", cell => cell.Pressure);
         WriteAirFieldDump(snapshot, artifactDirectory, "air-velocity-x.txt", cell => cell.VelocityX);
         WriteAirFieldDump(snapshot, artifactDirectory, "air-velocity-y.txt", cell => cell.VelocityY);
@@ -2083,7 +2088,11 @@ public static class AcceptanceRegressionVerifier
             $"fireColumnsH20={fireColumnsH20} fireColumnsH40={fireColumnsH40} " +
             $"image={image} airProfiles={airProfiles} airPressure={pressureProfile} " +
             $"fireAirPairsH20={fireAirPairsH20} fireAirPairsH40={fireAirPairsH40}";
-        return fireCells > 0 && pressureProfile is not "unavailable" and not "invalid";
+        bool strict = Environment.GetEnvironmentVariable("PHYXEL_FIRE_OPEN_STRICT") == "1";
+        OpenFlameSliceMetrics at20 = MeasureOpenFlameSlice(grid,snapshot.Width,snapshot.Height,sourceY-20,fire,smoke,false);
+        OpenFlameSliceMetrics at40 = MeasureOpenFlameSlice(grid,snapshot.Width,snapshot.Height,sourceY-40,fire,smoke,false);
+        return fireCells > 0 && pressureProfile is not "unavailable" and not "invalid" &&
+            (!strict || (fireCells>=100 && at20.Occupied>0 && at40.Occupied>0 && at40.Width<=2*brushWidth));
     }
 
     private readonly record struct GasMotionRatioMetrics(
