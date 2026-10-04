@@ -13,10 +13,11 @@ internal static class GasFlowAcceptance
 {
     private static int Shift => int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_AIR_WALL_SHIFT"), out int n) ? n : 0;
     private static bool Horizontal => Environment.GetEnvironmentVariable("PHYXEL_AIR_WALL_HORIZONTAL") == "1";
+    private static bool ExplicitAirWall => Environment.GetEnvironmentVariable("PHYXEL_AIR_WALL_EXPLICIT") == "1";
     internal static SimulationWorldSnapshot? Create(AcceptanceScenarioMode mode, int width, int height, MaterialRegistry registry)
     {
-        if (mode is not (AcceptanceScenarioMode.AirWall or AcceptanceScenarioMode.Co2Thermal or AcceptanceScenarioMode.TransientHeat or AcceptanceScenarioMode.GasCoFlow)) return null;
-        byte[] bytes = new byte[width * height * 40];
+        if (mode is not (AcceptanceScenarioMode.AirWall or AcceptanceScenarioMode.Co2Thermal or AcceptanceScenarioMode.TransientHeat or AcceptanceScenarioMode.GasCoFlow or AcceptanceScenarioMode.SmokeRender)) return null;
+        byte[] bytes = new byte[width * height * System.Runtime.InteropServices.Marshal.SizeOf<GridCell>()];
         void Put(int x, int y, string id, float t = 20)
         {
             var m = registry[id].Properties;
@@ -24,10 +25,25 @@ internal static class GasFlowAcceptance
             { IsActive = 1, MaterialIndex = registry.GetRequiredRuntimeIndex(id), Mass = m.Density,
                 Temperature = t, Lifetime = m.MaximumLifetime };
         }
-        if (mode == AcceptanceScenarioMode.AirWall)
+        if (mode == AcceptanceScenarioMode.SmokeRender)
         {
-            if (Horizontal) for (int x = 0; x < width; x++) Put(x, 132 + Shift, CoreMaterialIds.Metal);
-            else for (int y = 0; y < height; y++) Put(240 + Shift, y, CoreMaterialIds.Metal);
+            Put(101, 101, CoreMaterialIds.Smoke);
+            Put(201, 101, CoreMaterialIds.Smoke);
+            var grid = MemoryMarshal.Cast<byte, GridCell>(bytes.AsSpan());
+            grid[101 * width + 101].Mass = .12f;
+            grid[101 * width + 201].Mass = .24f;
+            if (Environment.GetEnvironmentVariable("PHYXEL_SMOKE_RENDER_DENSE") == "1")
+                for(int y=150;y<158;y++) for(int x=300;x<308;x++)
+                {
+                    Put(x,y,CoreMaterialIds.Smoke); Put(x+48,y,CoreMaterialIds.Smoke);
+                    grid[y*width+x].Mass=1; grid[y*width+x+48].Mass=.04f;
+                }
+        }
+        else if (mode == AcceptanceScenarioMode.AirWall)
+        {
+            string wallId = ExplicitAirWall ? CoreMaterialIds.Fixture : CoreMaterialIds.Metal;
+            if (Horizontal) for (int x = 0; x < width; x++) Put(x, 132 + Shift, wallId);
+            else for (int y = 0; y < height; y++) Put(240 + Shift, y, wallId);
         }
         else if (mode == AcceptanceScenarioMode.GasCoFlow)
         {
@@ -98,6 +114,30 @@ internal static class GasFlowAcceptance
     }
     internal static bool Validate(AcceptanceScenarioMode mode, SimulationWorldSnapshot world, MaterialRegistry registry, string directory, out string report)
     {
+        if (mode == AcceptanceScenarioMode.SmokeRender)
+        {
+            using var image = new System.Drawing.Bitmap(System.IO.Path.Combine(directory, "smoke-render.png"));
+            bool effects = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_RENDER_EFFECTS") == "1";
+            var smokeGrid = MemoryMarshal.Cast<byte, GridCell>(world.Grid);
+            int particles = 0; double mass = 0, peak = 0; bool visible = true;
+            foreach (var c in smokeGrid) if (c.IsActive != 0) { particles++; mass += c.Mass; }
+            foreach (int x in new[] { 101, 201 })
+            {
+                double center = image.GetPixel(x, 101).R;
+                double neighbors = (image.GetPixel(x - 1, 101).R + image.GetPixel(x + 1, 101).R +
+                    image.GetPixel(x, 100).R + image.GetPixel(x, 102).R) / 4.0;
+                peak = Math.Max(peak, center - neighbors);
+                visible &= effects ? neighbors > image.GetPixel(x + 16, 101).R + 1
+                    : center == 55 && neighbors < 20;
+            }
+            bool dense = Environment.GetEnvironmentVariable("PHYXEL_SMOKE_RENDER_DENSE") == "1";
+            double densityLayerDifference = dense ? Math.Abs(image.GetPixel(305,155).R-image.GetPixel(353,155).R) : 0;
+            bool unchanged = particles == (dense?130:2) && Math.Abs(mass - (dense?66.92:.36)) < 1e-5 &&
+                smokeGrid[101 * world.Width + 101].MaterialIndex == registry.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke) &&
+                smokeGrid[101 * world.Width + 201].MaterialIndex == registry.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke);
+            report = FormattableString.Invariant($"PHYXEL_SMOKE_RENDER effects={effects} particlePeak={peak:F3} haloVisible={visible} unchanged={unchanged} mass={mass:F6} duplicateDensityLayer={densityLayerDifference:F3}");
+            return unchanged && visible && (!effects || (peak <= 2 && densityLayerDifference <= 1));
+        }
         if (mode == AcceptanceScenarioMode.GasCoFlow)
         {
             var motion = MemoryMarshal.Cast<byte, GasMotionState>(world.GasMotion!);
@@ -145,11 +185,13 @@ internal static class GasFlowAcceptance
                 int x = i % world.Width, y = i / world.Width;
                 bool onWall = Horizontal ? y == 132 + Shift : x == 240 + Shift;
                 bool far = Horizontal ? y < 132 + Shift : x > 240 + Shift;
-                if (onWall && cells[i].MaterialIndex == registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal)) wall++;
+                if (onWall && cells[i].MaterialIndex == registry.GetRequiredRuntimeIndex(ExplicitAirWall ? CoreMaterialIds.Fixture : CoreMaterialIds.Metal)) wall++;
                 if (far && registry[cells[i].MaterialIndex].Properties.SimulationKind == (uint)MaterialSimulationKind.Gas) crossedGas++;
             }
-            report = string.Create(CultureInfo.InvariantCulture, $"PHYXEL_AIR_WALL horizontal={Horizontal} shift={Shift} wallCells={wall} crossedGas={crossedGas} leak={leak:R} drive={drive:R} leakX={leakIndex%width*4+2} leakY={leakIndex/width*4+2}");
-            return leak == 0 && drive > .01 && wall == (Horizontal ? world.Width : world.Height) && crossedGas == 0;
+            bool sandbox = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_SIMULATION_MODE") == "sandbox";
+            report = string.Create(CultureInfo.InvariantCulture, $"PHYXEL_AIR_WALL sandbox={sandbox} explicitWall={ExplicitAirWall} horizontal={Horizontal} shift={Shift} wallCells={wall} crossedGas={crossedGas} leak={leak:R} drive={drive:R} leakX={leakIndex%width*4+2} leakY={leakIndex/width*4+2}");
+            return leak == 0 && drive > .01 &&
+                wall == (Horizontal ? world.Width : world.Height) && crossedGas == 0;
         }
         var grid = MemoryMarshal.Cast<byte, GridCell>(world.Grid); double coldY = 0, hotY = 0; int cold = 0, hot = 0;
         for (int i = 0; i < grid.Length; i++) if (grid[i].IsActive != 0 && grid[i].MaterialIndex == registry.GetRequiredRuntimeIndex(CoreMaterialIds.Co2))

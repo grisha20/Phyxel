@@ -50,11 +50,12 @@ function Invoke-GasReviewCase([string]$mode, [string]$label, [int]$frames, [int]
     if ($external) { $env:PHYXEL_MATERIALS_PATH=Join-Path $taskRepo 'Diagnostics/AcceptanceMaterials' }
     else { Remove-Item Env:PHYXEL_MATERIALS_PATH -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Force -Path $env:PHYXEL_ARTIFACT_DIR | Out-Null
-    $taskPreviousPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $taskOutput = @(& $taskExe 2>&1 | ForEach-Object { "$_" })
-    $taskExit = $LASTEXITCODE
-    $ErrorActionPreference = $taskPreviousPreference
+    $taskProcess = Start-Process -FilePath $taskExe -WorkingDirectory $taskRepo -WindowStyle Hidden -Wait -PassThru `
+        -RedirectStandardOutput (Join-Path $env:PHYXEL_ARTIFACT_DIR 'stdout.log') `
+        -RedirectStandardError (Join-Path $env:PHYXEL_ARTIFACT_DIR 'stderr.log')
+    $taskOutput = @(Get-Content (Join-Path $env:PHYXEL_ARTIFACT_DIR 'stdout.log')) +
+        @(Get-Content (Join-Path $env:PHYXEL_ARTIFACT_DIR 'stderr.log'))
+    $taskExit = $taskProcess.ExitCode
     $taskOutput | Set-Content -LiteralPath (Join-Path $env:PHYXEL_ARTIFACT_DIR 'run.log') -Encoding UTF8
     $taskPass = $taskExit -eq 0 -and $taskOutput -contains 'PHYXEL_ACCEPTANCE_SUCCESS'
     $taskResults.Add([pscustomobject]@{case=$label;passed=$taskPass;exit=$taskExit})

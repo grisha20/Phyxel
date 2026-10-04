@@ -5,10 +5,20 @@ StructuredBuffer<uint> SourceParents : register(t1);
 StructuredBuffer<MaterialProperties> Materials : register(t2);
 RWStructuredBuffer<uint> Parents : register(u0);
 RWStructuredBuffer<GridCell> WritableGrid : register(u1);
+RWStructuredBuffer<uint> WritableOrigins : register(u2);
 
 bool IsComponentCell(GridCell cell)
 {
     return cell.IsActive != 0 && IsMovableSolidMaterial(Materials[cell.MaterialIndex]);
+}
+
+bool SameBodyClass(GridCell first, GridCell second)
+{
+    // Contact with a vessel must not weld a free frozen piece into its hull.
+    uint firstFlags = Materials[first.MaterialIndex].Flags;
+    uint secondFlags = Materials[second.MaterialIndex].Flags;
+    return ((firstFlags ^ secondFlags) & MaterialFlagDensityBody) == 0 &&
+        ((firstFlags & MaterialFlagDensityBody) == 0 || first.MaterialIndex == second.MaterialIndex);
 }
 
 uint FindRoot(uint index)
@@ -64,13 +74,24 @@ void UnionComponents(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         return;
     }
-    if (coordinate.x + 1 < Width && IsComponentCell(Grid[index + 1]))
+    if (coordinate.x + 1 < Width && IsComponentCell(Grid[index + 1]) && SameBodyClass(Grid[index], Grid[index + 1]))
     {
         Join(index, index + 1);
     }
-    if (coordinate.y + 1 < Height && IsComponentCell(Grid[index + Width]))
+    if (coordinate.y + 1 < Height && IsComponentCell(Grid[index + Width]) && SameBodyClass(Grid[index], Grid[index + Width]))
     {
         Join(index, index + Width);
+    }
+    // A rotated raster may contain diagonal contacts. Preserve contacts of
+    // the same existing body; do not weld unrelated corner-touching pieces.
+    if(coordinate.y+1<Height && Grid[index].BodyId!=0)
+    {
+        if(coordinate.x+1<Width && IsComponentCell(Grid[index+Width+1]) &&
+            Grid[index+Width+1].BodyId==Grid[index].BodyId && SameBodyClass(Grid[index],Grid[index+Width+1]))
+            Join(index,index+Width+1);
+        if(coordinate.x>0 && IsComponentCell(Grid[index+Width-1]) &&
+            Grid[index+Width-1].BodyId==Grid[index].BodyId && SameBodyClass(Grid[index],Grid[index+Width-1]))
+            Join(index,index+Width-1);
     }
 }
 
@@ -96,6 +117,7 @@ void FinalizeComponents(uint3 dispatchThreadId : SV_DispatchThreadID)
     GridCell cell = WritableGrid[index];
     if (IsComponentCell(cell))
     {
+        if(cell.BodyId==0)WritableOrigins[index]=0;
         cell.BodyId = SourceParents[index] + 1;
         WritableGrid[index] = cell;
     }

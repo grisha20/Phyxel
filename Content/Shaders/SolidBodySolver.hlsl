@@ -7,17 +7,26 @@ StructuredBuffer<uint> SourceDisplacementReservations : register(t3);
 StructuredBuffer<uint> SourceBodyGeometry : register(t4);
 StructuredBuffer<MaterialProperties> Materials : register(t5);
 StructuredBuffer<uint> SourceBodyMass : register(t6);
+StructuredBuffer<uint> SourceOrigins : register(t7);
+StructuredBuffer<GasMotionState> SourceParticleMotion : register(t8);
 RWStructuredBuffer<uint> BodyFlags : register(u0);
 RWStructuredBuffer<GridCell> DestinationGrid : register(u1);
 RWStructuredBuffer<uint> BodyBuoyancy : register(u2);
 RWStructuredBuffer<uint> DisplacementReservations : register(u3);
 RWStructuredBuffer<uint> BodyGeometry : register(u4);
 RWStructuredBuffer<uint> BodyMass : register(u5);
+RWStructuredBuffer<uint> DestinationOrigins : register(u6);
+RWStructuredBuffer<GasMotionState> DestinationParticleMotion : register(u7);
 
 static const uint BodyBlocked = 1;
 static const uint BodyActive = 4;
+static const uint BodyBlockedUp = 8;
 static const uint BodyTouchesWater = 16;
+static const uint BodyPartlyExposed = 32;
+static const uint BodyAtSurface = 64;
 static const uint GeometryHasHull = 2;
+static const uint GeometryDensityBody = 1;
+static const float DensityScale = 256.0;
 static const uint GeometrySpanShift = 2;
 static const uint GeometrySpanMask = 0x3ff;
 static const uint GeometryCellCountShift = 12;
@@ -42,6 +51,36 @@ bool IsSolidMaterial(uint materialId)
     return IsSolidMaterial(Materials[materialId]);
 }
 
+// Returns -1 (rise), +1 (fall), or 0. Existing hulls keep their old model.
+int DensityBodyForceDirection(GridCell cell)
+{
+    uint body = cell.BodyId - 1;
+    uint geometry = SourceBodyGeometry[body];
+    if ((geometry & GeometryDensityBody) == 0)
+        return 0;
+    uint flags = SourceBodyFlags[body];
+    if ((flags & BodyActive) == 0) return 0;
+    float weight = float(SourceBodyMass[body]);
+    float displacement = float(SourceBodyBuoyancy[body]);
+    uint cells = max(geometry >> GeometryCellCountShift, 1);
+    uint span = max((geometry >> GeometrySpanShift) & GeometrySpanMask, 1);
+    // A half-row dead band represents the discrete waterline. Never suppress
+    // rising of a wholly immersed lightweight body, even one pixel tall.
+    float tolerance = weight * float(span) / float(cells) * 0.5;
+    bool fullyImmersed = (flags & BodyPartlyExposed) == 0;
+    float riseTolerance = fullyImmersed && (flags & BodyAtSurface) == 0 ? 0.0 : tolerance;
+    if (displacement > weight + riseTolerance)
+        return (flags & BodyBlockedUp) == 0 ? -1 : 0;
+    if (weight > displacement + (fullyImmersed ? 0.0 : tolerance))
+        return (flags & BodyBlocked) == 0 ? 1 : 0;
+    return 0;
+}
+
+int DensityBodyDirection(GridCell cell)
+{
+    return (SolidPass & 2) != 0 ? DensityBodyForceDirection(cell) : 0;
+}
+
 bool BodyMoves(GridCell cell)
 {
     if (!IsMovableSolid(cell))
@@ -50,6 +89,9 @@ bool BodyMoves(GridCell cell)
     }
     uint flags = SourceBodyFlags[cell.BodyId - 1];
     uint geometry = SourceBodyGeometry[cell.BodyId - 1];
+    if ((geometry & GeometryDensityBody) != 0)
+        return DensityBodyDirection(cell) == 1;
+    if (SolidGravity == 0) return false;
     if ((flags & (BodyBlocked | BodyActive)) != BodyActive)
     {
         return false;
@@ -233,6 +275,24 @@ void AnalyzeSolidGeometry(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         return;
     }
+    if ((Materials[cell.MaterialIndex].Flags & MaterialFlagDensityBody) != 0)
+    {
+        uint bodyIndex = cell.BodyId - 1;
+        uint ignored;
+        InterlockedAdd(BodyGeometry[bodyIndex], GeometryCellCountUnit, ignored);
+        InterlockedOr(BodyGeometry[bodyIndex], GeometryDensityBody, ignored);
+        InterlockedAdd(BodyMass[bodyIndex],
+            max(1u, uint(round(ValidatedMaterialDensity(Materials[cell.MaterialIndex]) * DensityScale))), ignored);
+        uint span = 1;
+        for (uint x = coordinate.x + 1; x < Width; x++)
+        {
+            GridCell next = SourceGrid[coordinate.y * Width + x];
+            if (!IsMovableSolid(next) || next.BodyId != cell.BodyId) break;
+            span++;
+        }
+        AtomicMaxGeometrySpan(bodyIndex, span);
+        return;
+    }
     uint horizontalSpan = BodyHorizontalHullSpan(coordinate, cell.BodyId);
     uint geometryFlags = 0;
     if (BodyHasHullSpace(coordinate, cell.BodyId, horizontalSpan))
@@ -250,6 +310,32 @@ void AnalyzeSolidGeometry(uint3 dispatchThreadId : SV_DispatchThreadID)
 bool IsBetweenBodyWalls(uint2 coordinate, uint bodyId);
 uint CargoColumnQuarterMass(uint2 floorCoordinate, uint bodyId);
 
+float ImmersedLiquidDensity(uint2 coordinate, uint bodyId)
+{
+    // Infer the liquid occupying this solid row from the first free cells at
+    // its sides. No scan through another solid or around a vessel wall.
+    float density = 0;
+    for (int direction = -1; direction <= 1; direction += 2)
+    {
+        for (int x = int(coordinate.x) + direction; x >= 0 && x < int(Width); x += direction)
+        {
+            GridCell sample = SourceGrid[coordinate.y * Width + uint(x)];
+            if (IsMovableSolid(sample) && sample.BodyId == bodyId) continue;
+            if (sample.IsActive != 0 && Materials[sample.MaterialIndex].SimulationKind == SimulationKindLiquid)
+                density = max(density, ValidatedMaterialDensity(Materials[sample.MaterialIndex]));
+            break;
+        }
+    }
+    return density;
+}
+
+bool CompactObstacle(GridCell sample, uint bodyId)
+{
+    return sample.IsActive != 0 && sample.BodyId != bodyId &&
+        Materials[sample.MaterialIndex].SimulationKind != SimulationKindLiquid &&
+        Materials[sample.MaterialIndex].SimulationKind != SimulationKindGas;
+}
+
 [numthreads(16, 16, 1)]
 void AnalyzeSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -264,7 +350,25 @@ void AnalyzeSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         return;
     }
-    if (SolidPass == 0 && cell.RestFrames >= 2)
+    if ((Materials[cell.MaterialIndex].Flags & MaterialFlagDensityBody) != 0)
+    {
+        uint flags = BodyActive;
+        if (coordinate.y == 0 || CompactObstacle(SourceGrid[index - Width], cell.BodyId)) flags |= BodyBlockedUp;
+        if (coordinate.y + 1 >= Height || CompactObstacle(SourceGrid[index + Width], cell.BodyId)) flags |= BodyBlocked;
+        float density = ImmersedLiquidDensity(coordinate, cell.BodyId);
+        if (density == 0) flags |= BodyPartlyExposed;
+        if (coordinate.y > 0 && density > 0)
+        {
+            GridCell above = SourceGrid[index - Width];
+            if (above.IsActive == 0 || Materials[above.MaterialIndex].SimulationKind == SimulationKindGas)
+                flags |= BodyAtSurface;
+        }
+        uint ignored;
+        InterlockedOr(BodyFlags[cell.BodyId - 1], flags, ignored);
+        InterlockedAdd(BodyBuoyancy[cell.BodyId - 1], uint(round(density * DensityScale)), ignored);
+        return;
+    }
+    if (SolidGravity == 0 || ((SolidPass & 1) == 0 && cell.RestFrames >= 2))
     {
         return;
     }
@@ -639,6 +743,22 @@ void MoveSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     uint index = FlattenCoordinate(coordinate);
     GridCell current = SourceGrid[index];
+    DestinationOrigins[index] = IsMovableSolid(current) ? SourceOrigins[index] : 0;
+    DestinationParticleMotion[index] = (GasMotionState)0;
+    if(current.IsActive!=0 && Materials[current.MaterialIndex].SimulationKind==SimulationKindGas)
+        DestinationParticleMotion[index] = SourceParticleMotion[index];
+    if (coordinate.y + 1 < Height)
+    {
+        GridCell below = SourceGrid[index + Width];
+        if (IsMovableSolid(below) && DensityBodyDirection(below) == -1)
+        {
+            below.RestFrames = 0;
+            DestinationGrid[index] = below;
+            DestinationOrigins[index] = SourceOrigins[index + Width];
+            DestinationParticleMotion[index] = (GasMotionState)0;
+            return;
+        }
+    }
     bool aboveMoves = coordinate.y > 0 &&
         BodyMovesWithDisplacement(SourceGrid[index - Width]);
     if (aboveMoves)
@@ -646,13 +766,38 @@ void MoveSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
         GridCell moved = SourceGrid[index - Width];
         moved.RestFrames = 0;
         DestinationGrid[index] = moved;
+        DestinationOrigins[index] = SourceOrigins[index - Width];
+        DestinationParticleMotion[index] = (GasMotionState)0;
         return;
     }
     if (!BodyMovesWithDisplacement(current))
     {
+        if (IsMovableSolid(current) && DensityBodyDirection(current) == -1)
+        {
+            GridCell replacement = CreateEmptyCell();
+            for (int y = int(coordinate.y) - 1; y >= 0; y--)
+            {
+                GridCell sample = SourceGrid[uint(y) * Width + coordinate.x];
+                if (!IsMovableSolid(sample) || sample.BodyId != current.BodyId)
+                {
+                    replacement = sample;
+                    replacement.RestFrames = 0;
+                    replacement.VelocityX = 0;
+                    replacement.VelocityY = 0;
+                    DestinationParticleMotion[index] = (GasMotionState)0;
+                    if(sample.IsActive!=0 && Materials[sample.MaterialIndex].SimulationKind==SimulationKindGas)
+                        DestinationParticleMotion[index] = SourceParticleMotion[uint(y)*Width+coordinate.x];
+                    break;
+                }
+            }
+            DestinationGrid[index] = replacement;
+            DestinationOrigins[index] = 0;
+            return;
+        }
         if (IsMovableSolid(current))
         {
-            current.RestFrames = min(current.RestFrames + 1, 2);
+            current.RestFrames = DensityBodyForceDirection(current) != 0
+                ? 0 : min(current.RestFrames + 1, 2);
         }
         DestinationGrid[index] = current;
         return;
@@ -668,6 +813,9 @@ void MoveSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
             replacement.RestFrames = 0;
             replacement.VelocityX = 0;
             replacement.VelocityY = 0;
+            DestinationParticleMotion[index] = (GasMotionState)0;
+            if(sample.IsActive!=0 && Materials[sample.MaterialIndex].SimulationKind==SimulationKindGas)
+                DestinationParticleMotion[index] = SourceParticleMotion[y*Width+coordinate.x];
             uint geometry = SourceBodyGeometry[current.BodyId - 1];
             if ((geometry & GeometryHasHull) != 0 && sample.IsActive != 0 &&
                 Materials[sample.MaterialIndex].SimulationKind == SimulationKindLiquid)
@@ -681,6 +829,7 @@ void MoveSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
     }
     DestinationGrid[index] = replacement;
+    DestinationOrigins[index] = 0;
 }
 
 [numthreads(16, 16, 1)]
@@ -716,4 +865,5 @@ void ApplyHullWaterDisplacement(uint3 dispatchThreadId : SV_DispatchThreadID)
     displaced.VelocityY = 0;
     displaced.Pressure = 0;
     DestinationGrid[index] = displaced;
+    DestinationParticleMotion[index] = (GasMotionState)0;
 }

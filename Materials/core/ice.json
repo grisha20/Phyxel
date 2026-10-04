@@ -6,6 +6,7 @@
     "en": "Ice"
   },
   "kind": "solid",
+  "flags": ["fusion-enthalpy", "movable-solid", "density-body"],
   "color": "#A9DDF2",
   "physics": {
     "density": 0.92,
@@ -18,8 +19,9 @@
     "heatCapacity": 2.10,
     "transitions": {
       "above": {
-        "temperature": 2.0,
-        "into": "core:water"
+        "temperature": 0.0,
+        "into": "core:water",
+        "latentHeat": 333.4
       }
     }
   },

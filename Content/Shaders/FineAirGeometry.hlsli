@@ -1,13 +1,19 @@
 // The caller supplies FineAirWidth/Height, FineAirMaterialAt and FineAirMaterials.
 // Use the same fine geometry for air links, particle sampling and drag injection:
 // a coarse 4x4 node can otherwise mix particles on opposite sides of a thin wall.
+#ifndef FineAirBlockGranular
+#define FineAirBlockGranular false
+#endif
 bool AirFineBlocked(int2 p)
 {
     if (p.x < 0 || p.y < 0 || p.x >= int(FineAirWidth) || p.y >= int(FineAirHeight)) return true;
     uint material = FineAirMaterialAt(p);
     if (material == 0) return false;
     MaterialProperties m = FineAirMaterials[material];
-    return m.SimulationKind == SimulationKindSolid || m.SimulationKind == SimulationKindLiquid ||
+    // The oxygen transport treats occupied grains as closed faces too. Letting
+    // the carrier flow through a packed fuel heap compresses stock against
+    // those same faces and leaves its exposed surface falsely starved.
+    return (FineAirBlockGranular && m.SimulationKind == SimulationKindGranular) || m.SimulationKind == SimulationKindSolid || m.SimulationKind == SimulationKindLiquid ||
         (m.Flags & MaterialFlagBlocksAir) != 0;
 }
 
@@ -59,3 +65,4 @@ bool AirFineNodeFor(int2 p, out int2 node)
 #undef FineAirHeight
 #undef FineAirMaterialAt
 #undef FineAirMaterials
+#undef FineAirBlockGranular

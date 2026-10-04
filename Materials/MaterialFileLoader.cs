@@ -28,6 +28,8 @@ internal static partial class MaterialFileLoader
         public JsonElement Emissions { get; set; }
         public JsonElement Lifecycle { get; set; }
         public JsonElement ContactTransitions { get; set; }
+        public JsonElement Moisture { get; set; }
+        public JsonElement FuelAbsorption { get; set; }
         public MaterialUiDocument? Ui { get; set; }
 
         [JsonExtensionData]
@@ -39,6 +41,7 @@ internal static partial class MaterialFileLoader
         public float Density { get; set; } = 1f;
         public float Friction { get; set; }
         public float FlowRate { get; set; }
+        public JsonElement LiquidFlow { get; set; }
     }
 
     private sealed class MaterialThermalDocument
@@ -360,6 +363,8 @@ internal static partial class MaterialFileLoader
             thermal.AmbientCooling);
 
         MaterialFlags flags = ParseFlags(document.Flags, kind);
+        if ((flags & MaterialFlags.LiquidConvection) != 0 && kind != MaterialSimulationKind.Liquid)
+            throw new InvalidDataException("liquid-convection requires a liquid.");
         MaterialCombustionDefinition? combustion = ParseCombustion(
             document.Combustion,
             id,
@@ -371,13 +376,17 @@ internal static partial class MaterialFileLoader
         {
             if (kind != MaterialSimulationKind.Solid || (flags & MaterialFlags.MovableSolid) != 0 ||
                 lifecycle is not null || transitions is not null || combustion is not null ||
-                physics.Density <= 0 || (flags & MaterialFlags.PhaseEnthalpy) != 0)
+                physics.Density <= 0 || (flags & (MaterialFlags.PhaseEnthalpy | MaterialFlags.FusionEnthalpy)) != 0)
                 throw new InvalidDataException("thermal.regulator requires a fixed, positive-density solid without phases, combustion or lifecycle.");
             flags |= regulator.Heating ? MaterialFlags.ThermalHeater : MaterialFlags.ThermalCooler;
         }
         if ((flags & MaterialFlags.PhaseEnthalpy) != 0 &&
             (lifecycle is not null || kind is not (MaterialSimulationKind.Liquid or MaterialSimulationKind.Gas)))
             throw new InvalidDataException("phase-enthalpy requires an infinite-lived liquid or gas.");
+        if ((flags & MaterialFlags.FusionEnthalpy) != 0 &&
+            (lifecycle is not null ||
+             kind is not (MaterialSimulationKind.Solid or MaterialSimulationKind.Liquid)))
+            throw new InvalidDataException("fusion-enthalpy requires an infinite-lived solid or liquid.");
         MaterialLiquidContactTransitionDefinition? liquidContactTransition =
             ParseContactTransitions(document.ContactTransitions, id, kind);
         if (regulator is not null && (liquidContactTransition is not null || emissions is not null))
@@ -386,13 +395,19 @@ internal static partial class MaterialFileLoader
         // горения для granular: шейдер обрабатывает подвижную клетку так же,
         // как неподвижную, потому что проход горения выполняется отдельным
         // диспатчем уже после клеточного движения в кадре.
-        // Запрет combustion + thermal.transitions намеренно сохранён до
-        // введения общей таблицы реакций (этап 7 дорожной карты).
-        if (combustion is not null && transitions is not null)
+        // Explicit ignition thresholds allow the validated enthalpy fuel
+        // pairs to share phases and combustion without storing a flame latch
+        // in PhaseProgress. Other phase/combustion combinations stay invalid.
+        bool phasedFuel = combustion is { ContactIgnitionTemperature: > -273.15f } &&
+            (flags & (MaterialFlags.PhaseEnthalpy | MaterialFlags.FusionEnthalpy)) != 0 &&
+            kind is MaterialSimulationKind.Liquid or MaterialSimulationKind.Gas;
+        if (combustion is not null && transitions is not null && !phasedFuel)
         {
             throw new InvalidDataException(
                 $"Материал '{id}' не может одновременно иметь combustion и thermal.transitions в schema combustion v1.");
         }
+        if (combustion is not null && kind == MaterialSimulationKind.Gas && !phasedFuel)
+            throw new InvalidDataException("Gas fuel requires an enthalpy phase pair and explicit contactIgnitionTemperature.");
         if (combustion is not null && physics.Density <= 0)
         {
             throw new InvalidDataException(
@@ -464,7 +479,10 @@ internal static partial class MaterialFileLoader
             Emissions = emissions,
             Lifecycle = lifecycle,
             ThermalRegulator = regulator,
+            LiquidFlow = ParseLiquidFlow(physics.LiquidFlow, kind),
             LiquidContactTransition = liquidContactTransition,
+            Moisture = ParseMoisture(document.Moisture, kind, lifecycle, transitions),
+            FuelAbsorption = ParseFuelAbsorption(document.FuelAbsorption, kind),
             Gas = gas is null ? null : new MaterialGasDefinition(
                 gas.Diffusion,
                 gas.Buoyancy,
@@ -478,6 +496,25 @@ internal static partial class MaterialFileLoader
                 motion.Collision),
             SourcePath = path
         };
+    }
+
+    private static MaterialLiquidFlowDefinition? ParseLiquidFlow(JsonElement value, MaterialSimulationKind kind)
+    {
+        if (value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null) return null;
+        if (kind != MaterialSimulationKind.Liquid || value.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("physics.liquidFlow requires a liquid and an object.");
+        string[] names = ["referenceTemperature", "temperatureSensitivity", "minimumMobility", "maximumMobility"];
+        foreach (var property in value.EnumerateObject())
+            if (!names.Contains(property.Name)) throw new InvalidDataException("Unknown liquidFlow property: " + property.Name);
+        float Read(string name) => value.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.Number && p.TryGetSingle(out float v) && float.IsFinite(v)
+            ? v : throw new InvalidDataException("liquidFlow requires finite " + name);
+        var result = new MaterialLiquidFlowDefinition(Read(names[0]), Read(names[1]), Read(names[2]), Read(names[3]));
+        if (result.ReferenceTemperature < -273.15 || result.ReferenceTemperature > 5000 ||
+            result.TemperatureSensitivity <= 0 || result.TemperatureSensitivity > .1 ||
+            result.MinimumMobility <= 0 || result.MinimumMobility > 1 ||
+            result.MaximumMobility < 1 || result.MaximumMobility > 10)
+            throw new InvalidDataException("liquidFlow: reference -273.15..5000, sensitivity (0,.1], minimum (0,1], maximum [1,10].");
+        return result;
     }
 
     private static MaterialThermalRegulatorDefinition? ParseRegulator(JsonElement value)
@@ -527,6 +564,56 @@ internal static partial class MaterialFileLoader
         public Dictionary<string, JsonElement>? UnknownFields { get; set; }
     }
 
+    private static MaterialFuelAbsorptionDefinition? ParseFuelAbsorption(JsonElement json, MaterialSimulationKind kind)
+    {
+        if (json.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null) return null;
+        if (json.ValueKind != JsonValueKind.Object || kind is not (MaterialSimulationKind.Granular or MaterialSimulationKind.Solid))
+            throw new InvalidDataException("fuelAbsorption requires granular or solid material with shared pores.");
+        foreach (var p in json.EnumerateObject())
+            if (p.Name is not ("liquid" or "capacity" or "absorptionRate" or "saturatedDensity"))
+                throw new InvalidDataException("Unknown fuelAbsorption field: " + p.Name);
+        if (!json.TryGetProperty("liquid", out var id) || id.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(id.GetString())) throw new InvalidDataException("Missing absorbed fuel liquid.");
+        float Number(string key)
+        {
+            if (!json.TryGetProperty(key, out var value) || value.ValueKind != JsonValueKind.Number || !value.TryGetSingle(out float f) ||
+                !float.IsFinite(f) || f <= 0 || f > 10) throw new InvalidDataException("Invalid fuelAbsorption parameter: " + key);
+            return f;
+        }
+        return new(MaterialRegistry.NormalizeId(id.GetString()!), Number("capacity"), Number("absorptionRate"), Number("saturatedDensity"));
+    }
+
+    private static MaterialMoistureDefinition? ParseMoisture(JsonElement json,
+        MaterialSimulationKind kind, MaterialLifecycleDefinition? lifecycle, MaterialTransitionDefinitions? phases)
+    {
+        if (json.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null) return null;
+        if (json.ValueKind != JsonValueKind.Object || kind is not (MaterialSimulationKind.Granular or MaterialSimulationKind.Solid) ||
+            lifecycle is not null || phases is not null)
+            throw new InvalidDataException("moisture requires an infinite-lived granular or solid material without phase transitions.");
+        foreach (var p in json.EnumerateObject())
+            if (p.Name is not ("liquid" or "dry" or "wet" or "capacity" or "absorptionRate" or "dryingRate" or "capillaryRate"))
+                throw new InvalidDataException("Unknown moisture field: " + p.Name);
+        string Id(string key)
+        {
+            if (!json.TryGetProperty(key, out var value) || value.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(value.GetString())) throw new InvalidDataException("Missing moisture ID: " + key);
+            return MaterialRegistry.NormalizeId(value.GetString()!);
+        }
+        float Number(string key)
+        {
+            if (!json.TryGetProperty(key, out var value) || value.ValueKind != JsonValueKind.Number || !value.TryGetSingle(out float f) ||
+                !float.IsFinite(f) || f <= 0 || f > 10) throw new InvalidDataException("Invalid moisture parameter: " + key);
+            return f;
+        }
+        float capillaryRate = 0;
+        if (json.TryGetProperty("capillaryRate", out var capillary) &&
+            (capillary.ValueKind != JsonValueKind.Number || !capillary.TryGetSingle(out capillaryRate) ||
+             !float.IsFinite(capillaryRate) || capillaryRate < 0 || capillaryRate > 10 ||
+             (capillaryRate > 0 && kind != MaterialSimulationKind.Solid)))
+            throw new InvalidDataException("capillaryRate must be 0..10 and positive only for porous solids.");
+        return new(Id("liquid"), Id("dry"), Id("wet"), Number("capacity"), Number("absorptionRate"), Number("dryingRate"), capillaryRate);
+    }
+
     private static MaterialLiquidContactTransitionDefinition? ParseContactTransitions(
         JsonElement value,
         string sourceId,
@@ -569,6 +656,7 @@ internal static partial class MaterialFileLoader
 
         JsonElement intoElement = default;
         JsonElement rateElement = default;
+        JsonElement withElement = default;
         HashSet<string> liquidFields = new(StringComparer.OrdinalIgnoreCase);
         foreach (JsonProperty property in liquidElement.EnumerateObject())
         {
@@ -584,6 +672,10 @@ internal static partial class MaterialFileLoader
             else if (property.Name.Equals("ratePerSecond", StringComparison.OrdinalIgnoreCase))
             {
                 rateElement = property.Value;
+            }
+            else if (property.Name.Equals("with", StringComparison.OrdinalIgnoreCase))
+            {
+                withElement = property.Value;
             }
             else
             {
@@ -612,7 +704,17 @@ internal static partial class MaterialFileLoader
                 $"contactTransitions.liquid.ratePerSecond must be finite, greater than 0, and at most " +
                 $"{MaterialRegistry.MaximumContactTransitionRate}.");
         }
-        return new MaterialLiquidContactTransitionDefinition(intoId, rate);
+        string? withId = null;
+        if (withElement.ValueKind != JsonValueKind.Undefined)
+        {
+            if (withElement.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(withElement.GetString()))
+                throw new InvalidDataException("contactTransitions.liquid.with must be a material ID.");
+            withId = MaterialRegistry.NormalizeId(withElement.GetString()!);
+            if (!MaterialIdPattern().IsMatch(withId))
+                throw new InvalidDataException($"contactTransitions.liquid.with '{withId}' is not a valid material ID.");
+        }
+        return new MaterialLiquidContactTransitionDefinition(intoId, rate, withId);
     }
 
     private static (float Temperature, float Rate) ParseAmbientCooling(JsonElement value)
@@ -685,16 +787,15 @@ internal static partial class MaterialFileLoader
         {
             throw new InvalidDataException("combustion должен быть объектом.");
         }
-        // Горение доступно твёрдым телам и сыпучим материалам. Ограничение
-        // только на solid заставляло объявлять любой горючий порошок твёрдым,
-        // из-за чего порох висел в воздухе вместо того, чтобы сыпаться, а уголь
-        // вообще не мог гореть. Жидкости и газы сохраняют собственные модели.
+        // Liquid fuel uses a gas-face gate. Gas fuel is accepted only with
+        // a validated enthalpy pair and an explicit contact threshold below.
         if (sourceKind != MaterialSimulationKind.Solid &&
-            sourceKind != MaterialSimulationKind.Granular)
+            sourceKind != MaterialSimulationKind.Granular &&
+            sourceKind != MaterialSimulationKind.Liquid && sourceKind != MaterialSimulationKind.Gas)
         {
             throw new InvalidDataException(
                 $"Материал '{sourceId}' с kind '{sourceKind.ToString().ToLowerInvariant()}' " +
-                "не может быть source combustion; требуются kind 'solid' или 'granular'.");
+                "не может быть source combustion; требуются kind 'solid', 'granular' или 'liquid'.");
         }
 
         JsonElement ignitionElement = default;
@@ -703,6 +804,10 @@ internal static partial class MaterialFileLoader
         JsonElement maximumTemperatureElement = default;
         JsonElement burnedIntoElement = default;
         JsonElement spreadRateElement = default;
+        JsonElement pressureElement = default;
+        JsonElement flameLifetimeElement = default;
+        JsonElement oxidizerPerMassElement = default;
+        JsonElement contactIgnitionElement = default;
         HashSet<string> fields = new(StringComparer.OrdinalIgnoreCase);
         foreach (JsonProperty property in value.EnumerateObject())
         {
@@ -712,7 +817,11 @@ internal static partial class MaterialFileLoader
                     $"Дублирующее поле combustion '{property.Name}'.");
             }
 
-            if (property.Name.Equals("ignitionTemperature", StringComparison.OrdinalIgnoreCase))
+            if (property.Name.Equals("contactIgnitionTemperature", StringComparison.OrdinalIgnoreCase))
+            {
+                contactIgnitionElement = property.Value;
+            }
+            else if (property.Name.Equals("ignitionTemperature", StringComparison.OrdinalIgnoreCase))
             {
                 ignitionElement = property.Value;
             }
@@ -735,6 +844,18 @@ internal static partial class MaterialFileLoader
             else if (property.Name.Equals("spreadRate", StringComparison.OrdinalIgnoreCase))
             {
                 spreadRateElement = property.Value;
+            }
+            else if (property.Name.Equals("pressurePerMass", StringComparison.OrdinalIgnoreCase))
+            {
+                pressureElement = property.Value;
+            }
+            else if (property.Name.Equals("flameLifetimeMultiplier", StringComparison.OrdinalIgnoreCase))
+            {
+                flameLifetimeElement = property.Value;
+            }
+            else if (property.Name.Equals("oxidizerPerMass", StringComparison.OrdinalIgnoreCase))
+            {
+                oxidizerPerMassElement = property.Value;
             }
             else
             {
@@ -830,13 +951,40 @@ internal static partial class MaterialFileLoader
                 $"combustion.spreadRate must be a finite number from 0 to {MaterialRegistry.MaximumFlameSpreadRate}.");
         }
 
+        float pressurePerMass = 0;
+        if (pressureElement.ValueKind != JsonValueKind.Undefined &&
+            (pressureElement.ValueKind != JsonValueKind.Number || !pressureElement.TryGetSingle(out pressurePerMass) ||
+             !float.IsFinite(pressurePerMass) || pressurePerMass < 0 || pressurePerMass > 16))
+            throw new InvalidDataException("combustion.pressurePerMass must be finite, from 0 to 16 (gameplay units).");
+        float flameLifetimeMultiplier = 1;
+        if (flameLifetimeElement.ValueKind != JsonValueKind.Undefined &&
+            (flameLifetimeElement.ValueKind != JsonValueKind.Number || !flameLifetimeElement.TryGetSingle(out flameLifetimeMultiplier) ||
+             !float.IsFinite(flameLifetimeMultiplier) || flameLifetimeMultiplier < .1 || flameLifetimeMultiplier > 4))
+            throw new InvalidDataException("combustion.flameLifetimeMultiplier must be finite, from 0.1 to 4.");
+        float oxidizerPerMass = 20;
+        if (oxidizerPerMassElement.ValueKind != JsonValueKind.Undefined &&
+            (oxidizerPerMassElement.ValueKind != JsonValueKind.Number ||
+             !oxidizerPerMassElement.TryGetSingle(out oxidizerPerMass) ||
+             !float.IsFinite(oxidizerPerMass) || oxidizerPerMass <= 0 || oxidizerPerMass > 100))
+            throw new InvalidDataException("combustion.oxidizerPerMass must be finite, greater than 0 and at most 100 (gameplay units).");
+        float contactIgnitionTemperature = -273.15f;
+        if (contactIgnitionElement.ValueKind != JsonValueKind.Undefined &&
+            (contactIgnitionElement.ValueKind != JsonValueKind.Number ||
+             !contactIgnitionElement.TryGetSingle(out contactIgnitionTemperature) ||
+             !float.IsFinite(contactIgnitionTemperature) || contactIgnitionTemperature <= -273.15f ||
+             contactIgnitionTemperature > ignitionTemperature))
+            throw new InvalidDataException("combustion.contactIgnitionTemperature must be finite, above -273.15 and no higher than ignitionTemperature.");
         return new MaterialCombustionDefinition(
             ignitionTemperature,
             burnRate,
             heatPerMass,
             burnedIntoId,
             spreadRate,
-            maximumTemperature);
+            maximumTemperature,
+            pressurePerMass,
+            flameLifetimeMultiplier,
+            oxidizerPerMass,
+            contactIgnitionTemperature);
     }
 
     private static MaterialEmissionDefinition? ParseEmissions(
@@ -924,6 +1072,7 @@ internal static partial class MaterialFileLoader
         JsonElement minimumElement = default;
         JsonElement maximumElement = default;
         JsonElement decayIntoElement = default;
+        JsonElement extinctionElement = default;
         HashSet<string> fields = new(StringComparer.OrdinalIgnoreCase);
         foreach (JsonProperty property in value.EnumerateObject())
         {
@@ -934,6 +1083,7 @@ internal static partial class MaterialFileLoader
             if (property.Name.Equals("minimum", StringComparison.OrdinalIgnoreCase)) minimumElement = property.Value;
             else if (property.Name.Equals("maximum", StringComparison.OrdinalIgnoreCase)) maximumElement = property.Value;
             else if (property.Name.Equals("decayInto", StringComparison.OrdinalIgnoreCase)) decayIntoElement = property.Value;
+            else if (property.Name.Equals("extinctionTemperature", StringComparison.OrdinalIgnoreCase)) extinctionElement = property.Value;
             else throw new InvalidDataException($"Unknown lifecycle field '{property.Name}'.");
         }
 
@@ -953,7 +1103,16 @@ internal static partial class MaterialFileLoader
         {
             throw new InvalidDataException($"lifecycle.decayInto '{decayIntoElement.GetString()}' is invalid.");
         }
-        return new MaterialLifecycleDefinition(minimum, maximum, decayIntoId);
+        float? extinction = null;
+        if (extinctionElement.ValueKind != JsonValueKind.Undefined)
+        {
+            if (extinctionElement.ValueKind != JsonValueKind.Number || !extinctionElement.TryGetSingle(out float temperature) ||
+                !float.IsFinite(temperature) || temperature < MaterialRegistry.MinimumInitialTemperature ||
+                temperature > MaterialRegistry.MaximumInitialTemperature)
+                throw new InvalidDataException("lifecycle.extinctionTemperature must be a finite supported temperature.");
+            extinction = temperature;
+        }
+        return new MaterialLifecycleDefinition(minimum, maximum, decayIntoId, extinction);
     }
 
     private static float ParseLifetime(JsonElement value, string field)
@@ -1149,11 +1308,14 @@ internal static partial class MaterialFileLoader
             MaterialFlags flag = value.Trim().ToLowerInvariant() switch
             {
                 "movable-solid" => MaterialFlags.MovableSolid,
+                "density-body" => MaterialFlags.DensityBody,
                 "flame" => MaterialFlags.Flame,
                 "self-oxidizing" => MaterialFlags.SelfOxidizing,
                 "blocks-air" => MaterialFlags.BlocksAir,
                 "smoke" => MaterialFlags.Smoke,
                 "phase-enthalpy" => MaterialFlags.PhaseEnthalpy,
+                "fusion-enthalpy" => MaterialFlags.FusionEnthalpy,
+                "liquid-convection" => MaterialFlags.LiquidConvection,
                 _ => throw new InvalidDataException($"Неизвестный flag '{value}'.")
             };
             if ((flags & flag) != 0)
@@ -1165,6 +1327,11 @@ internal static partial class MaterialFileLoader
         if ((flags & MaterialFlags.MovableSolid) != 0 && kind != MaterialSimulationKind.Solid)
         {
             throw new InvalidDataException("Flag 'movable-solid' разрешён только для kind 'solid'.");
+        }
+        if ((flags & MaterialFlags.DensityBody) != 0 &&
+            (kind != MaterialSimulationKind.Solid || (flags & MaterialFlags.MovableSolid) == 0))
+        {
+            throw new InvalidDataException("Flag 'density-body' требует kind 'solid' и 'movable-solid'.");
         }
         if ((flags & MaterialFlags.SelfOxidizing) != 0 &&
             kind is not (MaterialSimulationKind.Solid or MaterialSimulationKind.Granular))

@@ -16,6 +16,26 @@ float4 MaterialColor(uint materialId)
     return float4(material.ColorR, material.ColorG, material.ColorB, material.ColorA);
 }
 
+float4 AbsorbentColor(GridCell cell)
+{
+    float4 color = MaterialColor(cell.MaterialIndex);
+    MaterialProperties material = Materials[cell.MaterialIndex];
+    // Colour actual retained stock in both render modes. Early impregnation
+    // must be readable even on nearly black grains; this changes no mass.
+    if (material.SimulationKind == SimulationKindSolid && cell.Mass > 0)
+    {
+        float water = material.MoistureCapacity > 0
+            ? saturate(cell.MoistureMass / (cell.Mass * material.MoistureCapacity)) : 0;
+        color.rgb *= 1.0 - 0.5 * sqrt(water);
+    }
+    if (cell.Mass > 0 && material.FuelCapacity > 0 && cell.FuelMass > 0)
+    {
+        float oil = saturate(cell.FuelMass / (cell.Mass * material.FuelCapacity));
+        color.rgb = lerp(color.rgb, float3(.30, .20, .07), .85 * pow(oil, .4));
+    }
+    return color;
+}
+
 bool IsFlameCell(GridCell cell)
 {
     return cell.IsActive != 0 && cell.Lifetime > 0 &&
@@ -85,6 +105,24 @@ bool IsSmokeCell(GridCell cell)
         (Materials[cell.MaterialIndex].Flags & MaterialFlagSmoke) != 0;
 }
 
+// Sum exp(-.1*k*k) over the four source pixels, with the existing [-4,4)
+// crop. The 2-D Gaussian is separable: its 16-term sum is S(dx)*S(dy).
+// Constants cover every offset used below (-4..7). Quantising the product
+// gives exactly the same 8-bit weights; no per-pixel exp calls are needed.
+float FireKernelSum(int delta)
+{
+    if (delta==-4) return .2018965180;
+    if (delta==-3) return .6084661777;
+    if (delta==-2) return 1.2787862238;
+    if (delta==-1) return 2.1836236418;
+    if (delta==0 || delta==3) return 2.9817271238;
+    if (delta==1 || delta==2) return 3.4799948821;
+    if (delta==4) return 1.9817271238;
+    if (delta==5) return 1.0768897058;
+    if (delta==6) return .4065696597;
+    return 0;
+}
+
 float3 SampleFireGlow(uint2 coordinate, out float smokeCoverage, out float3 gasColor)
 {
     uint glowWidth = (Width + AirCellSize - 1) / AirCellSize;
@@ -108,37 +146,18 @@ float3 SampleFireGlow(uint2 coordinate, out float smokeCoverage, out float3 gasC
             {
                 continue;
             }
+            FireGlowCell glow = FireGlowField[sample.y * glowWidth + sample.x];
+            FireGlowCell gas = GasVisualField[sample.y * glowWidth + sample.x];
+            if (all(float4(glow.Red,glow.Green,glow.Blue,glow.Smoke)==0) &&
+                all(float3(gas.Red,gas.Green,gas.Blue)==0)) continue;
             float2 delta = float2(int(coordinate.x), int(coordinate.y)) -
                 float2(sample * int(AirCellSize));
-            float weight = 0;
-            [unroll]
-            for (int localY = 0; localY < int(AirCellSize); localY++)
-            {
-                [unroll]
-            for (int localX = 0; localX < int(AirCellSize); localX++)
-            {
-                int2 kernelOffset = int2(delta) - int2(localX, localY);
-                // prepare_alpha only emits offsets i,j in [-CELL, CELL).
-                // Without this crop our gather evaluated the gaussian up to
-                // seven pixels from a source particle and made the visible
-                // tongue wider than TPT's 12-by-12 splat.
-                if (kernelOffset.x < -int(AirCellSize) ||
-                    kernelOffset.x >= int(AirCellSize) ||
-                    kernelOffset.y < -int(AirCellSize) ||
-                    kernelOffset.y >= int(AirCellSize))
-                {
-                    continue;
-                }
-                weight += exp(-0.1 * dot(kernelOffset, kernelOffset));
-            }
-        }
+            float weight = FireKernelSum(int(delta.x))*FireKernelSum(int(delta.y));
             // Renderer::prepare_alpha quantises the normalized gaussian to
             // an 8-bit alpha before AddFirePixel consumes it.
             weight = floor(255.0 * weight / float(AirCellSize * AirCellSize)) / 255.0;
-            FireGlowCell glow = FireGlowField[sample.y * glowWidth + sample.x];
             total += float3(glow.Red, glow.Green, glow.Blue) * weight;
             smokeTotal += glow.Smoke * weight;
-            FireGlowCell gas = GasVisualField[sample.y * glowWidth + sample.x];
             gasColor += float3(gas.Red, gas.Green, gas.Blue) * weight;
         }
     }
@@ -297,46 +316,6 @@ void FluidCoverage(
     gasColor = directGasColor.rgb;
 }
 
-// Keep the established smoke haze. Ordinary gases now use GasVisual instead.
-void GasHaze(uint2 coordinate, out float hazeCoverage, out float3 hazeColor)
-{
-    float localDensity = 0;
-    float strengthWeight = 0;
-    float3 weightedColor = 0;
-    for (int y = -3; y <= 3; y++)
-    {
-        for (int x = -3; x <= 3; x++)
-        {
-            int2 sample = int2(coordinate) + int2(x, y);
-            if (sample.x < 0 || sample.y < 0 || sample.x >= int(Width) || sample.y >= int(Height))
-            {
-                continue;
-            }
-            GridCell source = Grid[FlattenCoordinate(uint2(sample))];
-            if (source.IsActive == 0)
-            {
-                continue;
-            }
-            MaterialProperties material = Materials[source.MaterialIndex];
-            if (material.SimulationKind != SimulationKindGas ||
-                (material.Flags & MaterialFlagSmoke) == 0 || material.GasHazeStrength <= 0)
-            {
-                continue;
-            }
-            float kernel = exp(-0.42 * float(x * x + y * y));
-            float contribution = saturate(source.Mass) * kernel;
-            localDensity += contribution;
-            float visualWeight = contribution * material.GasHazeStrength;
-            strengthWeight += visualWeight;
-            weightedColor += MaterialColor(source.MaterialIndex).rgb * visualWeight;
-        }
-    }
-    hazeColor = strengthWeight > 0 ? weightedColor / strengthWeight : 0;
-    // A singleton peaks at density 1 and remains a point. Two or more nearby
-    // cells smoothly build the cloud rather than exposing a square stencil.
-    hazeCoverage = smoothstep(1.15, 2.85, localDensity) * saturate(strengthWeight / 2.0);
-}
-
 void Collect(GridCell cell)
 {
     if (cell.IsActive == 0)
@@ -350,7 +329,9 @@ void Collect(GridCell cell)
     if (kind == SimulationKindLiquid) InterlockedAdd(Statistics[0].LiquidCells, 1, ignored);
     if (kind == SimulationKindGranular) InterlockedAdd(Statistics[0].GranularCells, 1, ignored);
     if (kind == SimulationKindGas) InterlockedAdd(Statistics[0].GasCells, 1, ignored);
-    bool restingSolid = kind == SimulationKindSolid && (SolidGravity == 0 || cell.RestFrames >= 2);
+    bool densityBody = (Materials[cell.MaterialIndex].Flags & MaterialFlagDensityBody) != 0;
+    if (kind == SimulationKindSolid && densityBody) InterlockedAdd(Statistics[0].FreeBodyCells, 1, ignored);
+    bool restingSolid = kind == SimulationKindSolid && ((!densityBody && SolidGravity == 0) || cell.RestFrames >= 2);
     uint cellularRestThreshold = kind == SimulationKindGranular ? 30 : 60;
     bool restingCellular = kind != SimulationKindSolid &&
         (!IsCellularMaterial(kind) || cell.RestFrames >= cellularRestThreshold);
@@ -413,7 +394,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         float4 flatColor = float4(0.035, 0.041, 0.047, 1);
         if (cell.IsActive != 0)
         {
-            flatColor = MaterialColor(cell.MaterialIndex);
+            flatColor = AbsorbentColor(cell);
             flatColor.a = 1;
         }
         OutputTexture[coordinate] = flatColor;
@@ -444,7 +425,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     bool flameCell = cell.IsActive != 0 && IsFlameCell(cell);
     if (cell.IsActive != 0 && !continuumGas && !flameCell)
     {
-        color = MaterialColor(cell.MaterialIndex);
+        color = AbsorbentColor(cell);
         color.rgb += CombustionHeatGlow(cell);
         color.rgb += HotMaterialIncandescence(cell);
     }
@@ -459,10 +440,12 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             color.rgb = lerp(color.rgb, liquidColor, saturate(liquidCoverage * 2.5));
         }
-        if (gasCoverage > 0 && (Materials[cell.MaterialIndex].GasHazeStrength <= 0 || IsSmokeCell(cell)))
+        if (gasCoverage > 0 && Materials[cell.MaterialIndex].GasHazeStrength <= 0)
         {
             // Explicit zero-haze external gases keep their legacy flat path.
-            // Soft gases are drawn only through the coarse RGB field below.
+            // Soft gases, including smoke, use the coarse fields below.
+            // Painting smoke's occupied pixel as well exposed a hard grain
+            // inside every soft splat, especially for whole flame packets.
             float edgeNoise = (HashUnitFloat(
                 FlattenCoordinate(coordinate) ^ 0x6d2b79f5u) - 0.5) * 0.016;
             float gasOpacity = saturate(smoothstep(
@@ -472,13 +455,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             color.rgb = lerp(color.rgb, gasColor, gasOpacity);
         }
     }
-    float smokeHazeCoverage;
-    float3 smokeHazeColor;
-    GasHaze(coordinate, smokeHazeCoverage, smokeHazeColor);
-    if (smokeHazeCoverage > 0)
-    {
-        color.rgb = lerp(color.rgb, smokeHazeColor, smokeHazeCoverage);
-    }
+    // SMKE has one soft FIRE_BLEND field, as in TPT. The old additional
+    // mass-threshold haze produced pale, jagged patches over dense packets.
     float smokeCoverage;
     float3 gasCloudColor;
     float3 fireGlow = SampleFireGlow(coordinate, smokeCoverage, gasCloudColor);
@@ -487,34 +465,30 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         color.rgb += gasCloudColor;
     }
-    // SMKE uses FIRE_BLEND to write charcoal RGB into TPT's fire buffer, and
-    // render_fire() then adds that buffer to the video.  SmokeCoverage is this
-    // already blended luminance, not an alpha; treating it as one made dense
-    // smoke converge to a pale opaque blob instead of a soft dark trail.
-    // Solid material still occludes this layer.
+    // Our smoke buffer is separate from TPT's shared RGB fire buffer. Convert
+    // its smooth density proxy to bounded opacity: adding independent grey
+    // luminance to the fire washed out its orange edges. This is render-only
+    // optical coverage, not physical aerosol density or extra smoke mass.
     bool smokeVisibleHere = cell.IsActive == 0 ||
         Materials[cell.MaterialIndex].SimulationKind == SimulationKindGas;
     if (smokeVisibleHere && smokeCoverage > 0)
     {
-        color.rgb += smokeCoverage.xxx;
+        float smokeOpacity = smokeCoverage / (0.28 + smokeCoverage);
+        color.rgb = lerp(color.rgb, float3(0.38, 0.37, 0.35), smokeOpacity);
     }
 
-    // The flame itself: a gaussian splat of the accumulated light field, added
-    // rather than blended, so overlapping tongues sum towards a white core.
+    // TPT's additive flame display: bright yellow/white cores, orange/red edges.
+    // No per-particle dots, random flicker, new particles or physical forces.
     // The old FlameGlow/FlameTrail pair is gone. Both painted a fixed shape
     // around each cell and combined with max(), so two flames were exactly as
     // bright as one and the result could only ever look like separate sparks.
-    // A FIRE splat is emitted from the gas side of a solid surface.  Letting
-    // the complete additive value pass through the occupied cell made a metal
-    // plate turn into a featureless white ruler even though its own thermal
-    // The plate's colour must be its own temperature-driven hot glow, not a
-    // translucent copy of the saturated FIRE field.  Transmitting 28 percent
-    // through every solid turned a cold metal bar into a white ruler.  TPT's
-    // physical heat transfer warms METL first; that local temperature is what
-    // makes its underside red and then lets it cool again.
+    // Keep the flame on the gas side of occupied matter. This includes coal
+    // grains and water, not just rigid solids: a glow splat through fuel made
+    // the entire mound look like a painted orange plate. Its own temperature
+    // still supplies incandescence above; this changes no heat exchange.
     float fireGlowTransmission = 1.0;
     if (cell.IsActive != 0 &&
-        Materials[cell.MaterialIndex].SimulationKind == SimulationKindSolid)
+        Materials[cell.MaterialIndex].SimulationKind != SimulationKindGas)
     {
         fireGlowTransmission = 0.0;
     }

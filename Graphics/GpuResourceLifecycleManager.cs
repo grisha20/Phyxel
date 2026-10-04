@@ -108,6 +108,11 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         GpuStructuredBuffer<uint> bodyFlags = new(Device, bodyFlagCount);
         GpuStructuredBuffer<uint> solidBodyGeometry = new(Device, cellCount);
         GpuStructuredBuffer<uint> solidBodyMass = new(Device, cellCount);
+        GpuStructuredBuffer<BodyBalanceData> solidBalance = new(Device, cellCount);
+        GpuStructuredBuffer<uint> solidRotationTargets = new(Device, cellCount);
+        GpuStructuredBuffer<uint> solidRotationBlocked = new(Device, cellCount);
+        GpuBufferPair<uint> solidOrigins = new(Device, cellCount);
+        GpuStructuredBuffer<BodyRotationPlan> solidRotationPlans = new(Device, cellCount);
         // One extra element is a persistent diagnostic counter for forbidden
         // non-adjacent column transfers; blocker-mask rebuilds never touch it.
         int blockerMaskCount = allocateSimulation
@@ -137,6 +142,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         Buffer thermalConstants = CreateConstantBuffer<ThermalSimulationConstants>();
         GpuBufferPair<float> oxidizer = new(Device, cellCount);
         GpuStructuredBuffer<float> oxidizerDemand = new(Device, cellCount);
+        GpuStructuredBuffer<float> oxidizerAvailable = new(Device, cellCount);
+        GpuStructuredBuffer<System.Numerics.Vector2> oxidizerFlux = new(Device, cellCount);
         Buffer oxidizerConstants = CreateConstantBuffer<OxidizerConstants>();
         Buffer oxidizerStaging = CreateStagingBuffer(cellCount * sizeof(float));
         float[] freshAir = new float[cellCount];
@@ -154,7 +161,19 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             : 1;
         int airCellCount = checked(airWidth * airHeight);
         Buffer airConstants = CreateConstantBuffer<AirSimulationConstants>();
+        Buffer airThermalConstants = CreateConstantBuffer<AirThermalConstants>();
+        GpuStructuredBuffer<System.Numerics.Vector2> airThermal = new(Device, airCellCount);
+        GpuStructuredBuffer<System.Numerics.Vector4> airThermalFlux = new(Device, airCellCount);
+        var initialAirHeat = new System.Numerics.Vector2[airCellCount];
+        Array.Fill(initialAirHeat, new System.Numerics.Vector2(293.15f * .016f, .016f));
+        Device.ImmediateContext.UpdateSubresource(initialAirHeat, airThermal.Buffer);
+        Buffer airThermalStaging = CreateStagingBuffer(airThermal.Buffer.Description.SizeInBytes);
         GpuStructuredBuffer<AirCell> air = new(Device, airCellCount);
+        GpuStructuredBuffer<System.Numerics.Vector4> reactionPending = new(Device,cellCount);
+        GpuBufferPair<System.Numerics.Vector4> reactionPulse = new(Device,airCellCount);
+        Device.ImmediateContext.ClearUnorderedAccessView(reactionPending.UnorderedView,new SharpDX.Mathematics.Interop.RawInt4());
+        foreach(var view in reactionPulse.UnorderedAccessViews)
+            Device.ImmediateContext.ClearUnorderedAccessView(view,new SharpDX.Mathematics.Interop.RawInt4());
         GpuStructuredBuffer<AirCell> airScratch = new(Device, airCellCount);
         GpuStructuredBuffer<uint> airFlowLinks = new(Device, airCellCount);
         GpuStructuredBuffer<System.Numerics.Vector2> airProjectionA = new(Device, airCellCount);
@@ -246,6 +265,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         Buffer contactTransitionConstants = CreateConstantBuffer<ContactTransitionConstants>();
         Buffer phaseConstants = CreateConstantBuffer<PhaseTransitionConstants>();
         GpuStructuredBuffer<uint> phaseSummary = new(Device, 1);
+        GpuStructuredBuffer<uint> contactSummary = new(Device, 1);
+        Device.ImmediateContext.ClearUnorderedAccessView(contactSummary.UnorderedView,
+            new SharpDX.Mathematics.Interop.RawInt4());
         string? thermalTestMode = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_MODE");
         GpuStructuredBuffer<ThermalEnergyLedgerCell>? thermalLedger = thermalTestMode is "thermal_devices" or "steam_apparatus" or
             "water_convection" or "water_convection_pause" or "water_convection_heated"
@@ -439,6 +461,11 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             BodyFlags = bodyFlags,
             SolidBodyGeometry = solidBodyGeometry,
             SolidBodyMass = solidBodyMass,
+            SolidBalance = solidBalance,
+            SolidRotationTargets = solidRotationTargets,
+            SolidRotationBlocked = solidRotationBlocked,
+            SolidOrigins = solidOrigins,
+            SolidRotationPlans = solidRotationPlans,
             PathBlockerMasks = pathBlockerMasks,
             CellMaterials = cellMaterials,
             WaterPressureRoutes = waterPressureRoutes,
@@ -451,12 +478,32 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ThermalConstants = thermalConstants,
             Oxidizer = oxidizer,
             OxidizerDemand = oxidizerDemand,
+            OxidizerAvailable = oxidizerAvailable,
+            OxidizerFlux = oxidizerFlux,
             OxidizerConstants = oxidizerConstants,
             OxidizerStaging = oxidizerStaging,
             AirWidth = airWidth,
             AirHeight = airHeight,
             AirConstants = airConstants,
+            GasActiveTiles = new(Device, Math.Max(1, ((width+63)/64)*((height+63)/64))),
+            GasActiveTilesShader = allocateSimulation ? CompileShader("GasActiveTiles.hlsl") : null,
+            AirTimer = Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE") == "1" ? new(Device) : null,
+            AirHeatTimer = Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE") == "1" ? new(Device) : null,
+            GasMotionTimer = Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE") == "1" ? new(Device) : null,
+            AirThermalConstants = airThermalConstants, AirThermal = airThermal,
+            AirThermalFlux = airThermalFlux, AirThermalStaging = airThermalStaging,
+            AirHeatExchangeShader = allocateSimulation ? CompileShader("AirThermal.hlsl", "CSExchange") : null,
+            AirHeatFluxShader = allocateSimulation ? CompileShader("AirThermal.hlsl", "CSFlux") : null,
+            AirHeatTransportShader = allocateSimulation ? CompileShader("AirThermal.hlsl", "CSTransport") : null,
             Air = air,
+            ReactionPending = reactionPending,ReactionPulse = reactionPulse,
+            ReactionPulseScratch = new(Device,airCellCount),
+            ReactionPendingStaging = CreateStagingBuffer(cellCount*16),
+            ReactionPulseStaging = CreateStagingBuffer(airCellCount*16),
+            ReactionGatherShader = allocateSimulation ? CompileShader("ReactionPulse.hlsl","CSGather") : null,
+            ReactionClearMappedShader = allocateSimulation ? CompileShader("ReactionPulse.hlsl","CSClearMapped") : null,
+            ReactionFacesShader = allocateSimulation ? CompileShader("ReactionPulse.hlsl","CSFaces") : null,
+            ReactionCommitShader = allocateSimulation ? CompileShader("ReactionPulse.hlsl","CSCommit") : null,
             AirScratch = airScratch,
             AirFlowLinks = airFlowLinks,
             AirProjectionA = airProjectionA,
@@ -502,6 +549,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ContactTransitionConstants = contactTransitionConstants,
             PhaseConstants = phaseConstants,
             PhaseSummary = phaseSummary,
+            ContactSummary = contactSummary,
             PhaseEventCounters = phaseEvents,
             PhaseEventStaging = phaseEventStaging,
             ThermalEnergyLedger = thermalLedger,
@@ -564,6 +612,11 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ComponentCompressShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "CompressComponents") : null,
             ComponentFinalizeShader = allocateSimulation ? CompileShader("SolidComponents.hlsl", "FinalizeComponents") : null,
             SolidGeometryAnalyzeShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "AnalyzeSolidGeometry") : null,
+            SolidBalanceShader = allocateSimulation ? CompileShader("SolidBalance.hlsl", "AnalyzeBalance") : null,
+            SolidRotationPlanShader = allocateSimulation ? CompileShader("SolidBalance.hlsl", "PlanRotation") : null,
+            SolidRotationApplyShader = allocateSimulation ? CompileShader("SolidBalance.hlsl", "ApplyRotation") : null,
+            SolidOriginsInitializeShader = allocateSimulation ? CompileShader("SolidBalance.hlsl", "InitializeOrigins") : null,
+            SolidRotationBuildShader = allocateSimulation ? CompileShader("SolidBalance.hlsl", "BuildRotationPlans") : null,
             SolidAnalyzeShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "AnalyzeSolidBodies") : null,
             SolidDisplacementPlanShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "PlanHullWaterDisplacement") : null,
             SolidMoveShader = allocateSimulation ? CompileShader("SolidBodySolver.hlsl", "MoveSolidBodies") : null,
@@ -572,8 +625,10 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ThermalDiffusionShader = allocateSimulation ? CompileShader("ThermalDiffusion.hlsl") : null,
             WaterConvectionShader = allocateSimulation ? CompileShader("WaterConvection.hlsl") : null,
             OxidizerTransportShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSTransport") : null,
+            OxidizerFluxShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSFlux") : null,
             OxidizerConsumeShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSConsume") : null,
             AirInjectShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSInject") : null,
+            AirFineMaterialsShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSFineMaterials") : null,
             AirPressureShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSPressure") : null,
             AirVelocityShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSVelocity") : null,
             AirAdvectShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSAdvect") : null,
@@ -592,6 +647,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             GasVisualDiffuseShader = allocateSimulation ? CompileShader("GasVisual.hlsl", "CSDiffuse") : null,
             GasVisualCommitShader = allocateSimulation ? CompileShader("GasVisual.hlsl", "CSCommit") : null,
             ContactTransitionShader = allocateSimulation ? CompileShader("ContactTransitions.hlsl") : null,
+            MoistureShader = allocateSimulation ? CompileShader("ContactTransitions.hlsl", "CSMoisture") : null,
             PhaseTransitionShader = allocateSimulation ? CompileShader("PhaseTransitions.hlsl") : null,
             CombustionShader = allocateSimulation ? CompileShader("Combustion.hlsl") : null,
             EmissionResolveShader = allocateSimulation ? CompileShader("EmissionResolve.hlsl") : null,

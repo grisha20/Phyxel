@@ -1,27 +1,53 @@
 {
   "schema": 1,
   "id": "core:gunpowder",
-  "name": { "ru": "Порох", "en": "Gunpowder" },
+  "name": {
+    "ru": "Порох",
+    "en": "Gunpowder"
+  },
   "kind": "granular",
-  "flags": ["self-oxidizing"],
+  "flags": [
+    "self-oxidizing"
+  ],
   "color": "#505358",
-  "physics": { "density": 1.4, "friction": 0.80, "flowRate": 0.15 },
-  "thermal": { "initialTemperature": 20.0, "conductivity": 0.25, "heatCapacity": 0.90 },
+  "physics": {
+    "density": 1.4,
+    "friction": 0.8,
+    "flowRate": 0.15
+  },
+  "thermal": {
+    "initialTemperature": 20.0,
+    "conductivity": 0.25,
+    "heatCapacity": 0.9
+  },
   "combustion": {
     "ignitionTemperature": 250.0,
     "burnRate": 9.0,
-    "heatPerMass": 25000.0,
+    "heatPerMass": 2400.0,
+    "pressurePerMass": 1.0,
+    "flameLifetimeMultiplier": 1.5,
     "burnedInto": "core:empty",
     "spreadRate": 60.0,
     "maximumTemperature": 1800.0
   },
   "emissions": {
     "smokeInto": "core:smoke",
-    "smokeRate": 1.20,
+    "smokeRate": 1.2,
     "gasInto": "core:co2",
-    "gasRate": 0.60,
+    "gasRate": 0.6,
     "flameInto": "core:fire",
     "flameRate": 60.0
   },
-  "ui": { "order": 15, "hidden": false }
+  "ui": {
+    "order": 15,
+    "hidden": false
+  },
+  "moisture": {
+    "liquid": "core:water",
+    "dry": "core:gunpowder",
+    "wet": "core:gunpowder",
+    "capacity": 0.3,
+    "absorptionRate": 0.3,
+    "dryingRate": 0.1
+  }
 }

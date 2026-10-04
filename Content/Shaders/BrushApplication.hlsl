@@ -4,6 +4,8 @@ StructuredBuffer<BrushDrawCommand> Commands : register(t0);
 StructuredBuffer<MaterialProperties> Materials : register(t1);
 RWStructuredBuffer<GridCell> Grid : register(u0);
 
+#include "PhaseEnthalpy.hlsli"
+
 [numthreads(16, 16, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -63,6 +65,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         if (existing.IsActive != 0)
         {
             existing.Temperature = clamp(command.TargetTemperature, -273.15, 5000.0);
+            if(existing.MoistureMass>0)
+                existing=SetCellSpecificEnthalpy(existing,CellSpecificEnthalpy(existing));
             Grid[index] = existing;
         }
         return;
@@ -113,6 +117,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
                 existing.Temperature = max(
                     existing.Temperature,
                     existingMaterial.IgnitionTemperature + 1.0);
+                if(existing.MoistureMass>0)
+                    existing=SetCellSpecificEnthalpy(existing,CellSpecificEnthalpy(existing));
                 Grid[index] = existing;
             }
         }

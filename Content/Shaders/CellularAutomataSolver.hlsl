@@ -2,6 +2,9 @@
 
 StructuredBuffer<MaterialProperties> Materials : register(t0);
 StructuredBuffer<AirCell> Air : register(t1);
+StructuredBuffer<uint> GasActiveTiles : register(t2);
+
+#include "PhaseEnthalpy.hlsli"
 RWStructuredBuffer<GridCell> Grid : register(u0);
 struct WaterPressureRouteData
 {
@@ -26,6 +29,9 @@ RWStructuredBuffer<uint> GasVerticalBlockFrameMarkers : register(u11);
 #define FineAirHeight Height
 #define FineAirMaterialAt(p) CellMaterials[uint((p).y) * Width + uint((p).x)]
 #define FineAirMaterials Materials
+// SolidPass is a tagged selector: solid kernels use its pass number,
+// gas kernels use the finite-carrier geometry flag set just for their dispatch.
+#define FineAirBlockGranular (SolidPass != 0)
 #include "FineAirGeometry.hlsli"
 
 static const uint MetalChimneyInnerLeft = 221;
@@ -149,9 +155,29 @@ float2 FlameAirDrift(uint2 coordinate)
 {
     uint airWidth = (Width + AirCellSize - 1) / AirCellSize;
     uint airHeight = (Height + AirCellSize - 1) / AirCellSize;
-    int2 airCoordinate;
-    if (!AirFineNodeFor(int2(coordinate), airCoordinate)) return 0;
-    AirCell air = Air[uint(airCoordinate.y) * airWidth + uint(airCoordinate.x)];
+    // Interpolate only nodes visible from this particle. Nearest-node reads
+    // made every 4-pixel strip follow one direction through a curved channel.
+    float2 position = (float2(coordinate) - float(AirCellSize / 2)) / float(AirCellSize);
+    int2 origin = int2(floor(position));
+    float2 fraction = frac(position), velocity = 0;
+    float total = 0;
+    [loop] for (int y = 0; y < 2; y++)
+    [loop] for (int x = 0; x < 2; x++)
+    {
+        int2 node = origin + int2(x, y);
+        float weight = (x == 0 ? 1 - fraction.x : fraction.x) *
+            (y == 0 ? 1 - fraction.y : fraction.y);
+        if (weight <= 0 || node.x < 0 || node.y < 0 || node.x >= int(airWidth) || node.y >= int(airHeight)) continue;
+        int2 center = node * int(AirCellSize) + int(AirCellSize / 2);
+        if (!AirFineSegmentOpen(int2(coordinate), center)) continue;
+        AirCell air = Air[uint(node.y) * airWidth + uint(node.x)];
+        velocity += float2(air.VelocityX, air.VelocityY) * weight;
+        total += weight;
+    }
+    if (total > 0.000001) return velocity / total;
+    int2 fallback;
+    if (!AirFineNodeFor(int2(coordinate), fallback)) return 0;
+    AirCell air = Air[uint(fallback.y) * airWidth + uint(fallback.x)];
     return float2(air.VelocityX, air.VelocityY);
 }
 
@@ -173,6 +199,25 @@ uint CellKindAtIndex(uint index)
 uint CellKindAt(uint2 coordinate)
 {
     return CellKindAtIndex(FlattenCoordinate(coordinate));
+}
+
+bool GasNearTransverseWall(uint2 coordinate, float2 carrier)
+{
+    // CW's extra dispersion describes unresolved boundary mixing. Applying
+    // it to an unconfined torch made a Diffusion=0 flame spread everywhere.
+    // Search each fine pixel on the dominant transverse axis so even a
+    // shifted one-pixel wall participates; grains are not channel walls.
+    int2 axis = abs(carrier.y) >= abs(carrier.x) ? int2(1, 0) : int2(0, 1);
+    [loop] for (int distance = 1; distance <= int(AirCellSize) * 4; distance++)
+    {
+        int2 first = int2(coordinate) - axis * distance;
+        int2 second = int2(coordinate) + axis * distance;
+        if (first.x >= 0 && first.y >= 0 && first.x < int(Width) && first.y < int(Height) &&
+            CellKindAt(uint2(first)) == SimulationKindSolid) return true;
+        if (second.x >= 0 && second.y >= 0 && second.x < int(Width) && second.y < int(Height) &&
+            CellKindAt(uint2(second)) == SimulationKindSolid) return true;
+    }
+    return false;
 }
 
 float CellRankFromMaterial(uint materialId)
@@ -200,7 +245,25 @@ float CellRank(GridCell cell)
     {
         return -1;
     }
-    return Materials[cell.MaterialIndex].Density;
+    MaterialProperties material=Materials[cell.MaterialIndex];
+    if(material.MoistureCapacity>0 && cell.Mass>0)
+    {
+        float saturation=saturate(cell.MoistureMass/(cell.Mass*material.MoistureCapacity));
+        float dry=Materials[material.MoistureDryMaterialIndex].Density;
+        float oil=material.FuelCapacity>0 ? saturate(cell.FuelMass/(cell.Mass*material.FuelCapacity)) : 0;
+        return lerp(dry,Materials[material.MoistureWetMaterialIndex].Density,saturation)
+            + oil*(material.FuelSaturatedDensity-dry);
+    }
+    return material.Density;
+}
+
+// Most cells need only the compact material cache. Read moisture fields only
+// for absorbent grains, whose density changes continuously with saturation.
+float CellRankAtIndex(uint index)
+{
+    uint materialId=CellMaterials[index];
+    if(Materials[materialId].MoistureCapacity>0) return CellRank(Grid[index]);
+    return CellRankFromMaterial(materialId);
 }
 
 bool IsSolid(GridCell cell)
@@ -245,10 +308,29 @@ void MarkMovement(inout GridCell first, inout GridCell second, float horizontal,
     }
 }
 
+// A liquid without the optional mobility contract retains its old solver.
+// Rates use elapsed seconds; no oil ID or render-FPS coefficient is involved.
+bool LiquidStepAllowed(uint sourceIndex, uint destinationIndex)
+{
+    GridCell source = Grid[sourceIndex];
+    MaterialProperties material = Materials[source.MaterialIndex];
+    if (material.SimulationKind != SimulationKindLiquid ||
+        material.LiquidFlowTemperatureSensitivity <= 0) return true;
+    float rate = 18.0 * material.FlowRate * LiquidMobility(material, source.Temperature);
+    float chance = 1.0 - exp(-rate * max(0.0, DeltaTime));
+    uint seed = sourceIndex ^ HashValue(destinationIndex + 7919u * SimulationPhase) ^ HashValue(FrameIndex);
+    return HashUnitFloat(seed) < chance;
+}
+
 void SwapCells(uint firstIndex, uint secondIndex, float horizontal, float vertical)
 {
     GridCell first = Grid[firstIndex];
     GridCell second = Grid[secondIndex];
+    // Free downward flight in air is gravity, not supported viscous flow.
+    bool freeFall = horizontal == 0 && CellKind(first) == SimulationKindLiquid &&
+        (CellKind(second) == SimulationKindNone || CellKind(second) == SimulationKindGas);
+    if (!freeFall && (!LiquidStepAllowed(firstIndex, secondIndex) ||
+        !LiquidStepAllowed(secondIndex, firstIndex))) return;
     MarkMovement(first, second, horizontal, vertical);
     Grid[firstIndex] = second;
     Grid[secondIndex] = first;
@@ -341,6 +423,10 @@ void MoveGasCell(
 {
     GridCell mover = Grid[sourceIndex];
     GridCell displaced = Grid[targetIndex];
+    // Only gas/empty pairs enter this helper. Moisture belongs to granular
+    // fuel, so do not carry its two extra words through every gas move.
+    mover.MoistureMass = 0; mover.MoistureEnergy = 0;
+    displaced.MoistureMass = 0; displaced.MoistureEnergy = 0;
     GasMotionState moverMotion = GasMotion[sourceIndex];
     GasMotionState displacedMotion = GasMotion[targetIndex];
 
@@ -383,7 +469,7 @@ void ExchangeGranularWithLiquid(
     liquid.RestFrames = 0;
     liquid.VelocityX = 0;
     liquid.VelocityY = 0;
-    liquid.BodyId = 0;
+    liquid.BodyId &= FuelBurningMarker;
     if (HydraulicPressure == 0)
     {
         liquid.Pressure = 0;
@@ -409,20 +495,24 @@ void TransferLiquidMass(
     {
         return;
     }
+    if (!LiquidStepAllowed(sourceIndex, destinationIndex)) return;
 
-    float heatCapacity = max(0.01, Materials[source.MaterialIndex].HeatCapacity);
-    float destinationEnergy = destinationMass * heatCapacity * destination.Temperature +
-        transferred * heatCapacity * source.Temperature;
-    float destinationLifetime = destinationMass * destination.Lifetime +
+    // Mix total specific enthalpy, then recover a canonical phase state.
+    // Averaging temperature and boiling progress separately can leave liquid
+    // below 100 C carrying latent heat; the next phase pass hides the mistake.
+    float destinationEnergy = destinationMass * CellSpecificEnthalpy(destination) +
+        transferred * CellSpecificEnthalpy(source);
+    float destinationAuxiliary = destinationMass * destination.Lifetime +
         transferred * source.Lifetime;
     source.Mass = sourceMass - transferred;
     destination.Mass = destinationMass + transferred;
-    destination.Temperature = destinationEnergy /
-        max(0.000001, destination.Mass * heatCapacity);
-    destination.Lifetime = destinationLifetime / max(0.000001, destination.Mass);
+    destination = SetCellSpecificEnthalpy(destination,
+        destinationEnergy / max(0.000001, destination.Mass));
+    if (!HasPhaseEnthalpy(Materials[destination.MaterialIndex]))
+        destination.Lifetime = destinationAuxiliary / max(0.000001, destination.Mass);
     destination.VelocityX = 0;
     destination.VelocityY = 0;
-    destination.BodyId = 0;
+    destination.BodyId = (destination.BodyId | source.BodyId) & FuelBurningMarker;
     destination.RestFrames = 0;
     if (HydraulicPressure == 0)
     {
@@ -437,7 +527,7 @@ void TransferLiquidMass(
     {
         source.VelocityX = 0;
         source.VelocityY = 0;
-        source.BodyId = 0;
+        source.BodyId &= FuelBurningMarker;
         source.RestFrames = 0;
         if (HydraulicPressure == 0)
         {
@@ -499,22 +589,82 @@ bool SandSupported(uint2 coordinate)
     return kind == 1 || kind == 2;
 }
 
+// A free grain's density does not include the granular load resting on it.
+// Evaluate that load only at a buoyant grain/liquid boundary, never by
+// exchanging two powders. This is a bounded cell-scale column estimate,
+// not a rigid raft or a pore-pressure solver.
+bool GranularLoadedToSink(uint2 coordinate, uint liquidMaterial)
+{
+    float liquidDensity = CellRankFromMaterial(liquidMaterial);
+    if (CellKindFromMaterial(liquidMaterial) != SimulationKindLiquid ||
+        CellKindAt(coordinate) != SimulationKindGranular ||
+        CellRankAtIndex(FlattenCoordinate(coordinate)) >= liquidDensity || coordinate.y == 0)
+        return false;
+    uint above = CellKindAt(coordinate - uint2(0, 1));
+    if (above != SimulationKindGranular &&
+        !(above == SimulationKindLiquid && coordinate.y > 1 &&
+          CellKindAt(coordinate - uint2(0, 2)) == SimulationKindGranular))
+        return false;
+
+    float load = 0;
+    uint grainCount = 0;
+    uint liquidGaps = 0;
+    bool heavyCover = false;
+    [loop]
+    for (uint distance = 0; distance < 64 && distance <= coordinate.y; distance++)
+    {
+        uint2 loadCoordinate = coordinate - uint2(0, distance);
+        uint material = CellMaterials[FlattenCoordinate(loadCoordinate)];
+        if (CellKindFromMaterial(material) == SimulationKindGranular)
+        {
+            float density = CellRankAtIndex(FlattenCoordinate(loadCoordinate));
+            load += density;
+            grainCount++;
+            heavyCover = heavyCover || (distance > 0 && density > liquidDensity);
+            bool immersed =
+                (loadCoordinate.x > 0 && CellMaterials[FlattenCoordinate(loadCoordinate - uint2(1, 0))] == liquidMaterial) ||
+                (loadCoordinate.x + 1 < Width && CellMaterials[FlattenCoordinate(loadCoordinate + uint2(1, 0))] == liquidMaterial);
+            if (immersed) load -= liquidDensity;
+        }
+        else if (material == liquidMaterial && liquidGaps == 0)
+        {
+            // The water exchanged with the bottom grain momentarily separates
+            // it from its coating; retain the load across that one cell.
+            liquidGaps++;
+        }
+        else break;
+    }
+    return grainCount > 1 && heavyCover && load > liquidDensity * 0.5;
+}
+
 bool GranularCanDisplaceLiquid(uint2 coordinate, uint granularIndex, uint liquidMaterial)
 {
     GridCell granular = Grid[granularIndex];
     if (CellKindFromMaterial(liquidMaterial) != SimulationKindLiquid ||
-        CellRankFromMaterial(granular.MaterialIndex) <= CellRankFromMaterial(liquidMaterial) ||
-        granular.RestFrames >= SandRestThreshold)
+        (CellRank(granular) <= CellRankFromMaterial(liquidMaterial) &&
+         !GranularLoadedToSink(coordinate, liquidMaterial)))
     {
         return false;
     }
 
-    // An unsupported grain has just entered a liquid column even if the brush
-    // created it with zero velocity. Once it reaches granular/solid support it
-    // may keep forming a slope only while it still carries a falling impulse.
-    bool supported = SandSupported(coordinate);
-    bool hasFallingImpulse = granular.VelocityY > 8;
-    return !supported || hasFallingImpulse;
+    // A lower water cell is still a free gravitational path when the grain
+    // touches another grain directly below it. Requiring an old falling
+    // impulse froze vertical cliffs and prevented soaked charcoal sinking.
+    // GranularCanMoveTo retains solid/corner/powder packing restrictions.
+    return true;
+}
+
+// Pressure-producing powder moves on the reaction clock. GasSubStep is
+// otherwise zero in ordinary cellular passes; its high bit tags this pass.
+bool IsPressurePowder(uint material)
+{
+    return CellKindFromMaterial(material) == SimulationKindGranular &&
+        Materials[material].ReactionPressurePerMass > 0;
+}
+
+bool PowderClockAllows(uint material)
+{
+    return IsPressurePowder(material) == ((GasSubStep & 0x80000000u) != 0);
 }
 
 bool GranularCanMoveTo(
@@ -523,9 +673,11 @@ bool GranularCanMoveTo(
     uint2 destination,
     uint targetMaterial)
 {
+    if (!PowderClockAllows(Grid[sourceIndex].MaterialIndex)) return false;
     uint targetKind = CellKindFromMaterial(targetMaterial);
     if (targetKind == SimulationKindSolid ||
-        CellRankFromMaterial(Grid[sourceIndex].MaterialIndex) <= CellRankFromMaterial(targetMaterial))
+        (targetKind != SimulationKindLiquid &&
+         CellRankAtIndex(sourceIndex) <= CellRankAtIndex(FlattenCoordinate(destination))))
     {
         return false;
     }
@@ -564,14 +716,37 @@ bool GranularCanMoveTo(
     return !diagonal || SandSupported(source);
 }
 
+// Density describes a free grain's buoyancy, not permeability of a packed
+// bed. Release a touching grain only where liquid already undercuts it.
+bool LiquidCanDisplaceGrain(uint2 grain, uint liquidMaterial)
+{
+    if(grain.y+1>=Height) return false;
+    // Density sorting is buoyancy only when liquid supports the grain.
+    // A falling drop/film above charcoal must not exchange upward through
+    // an air gap and carry the heap back into its feeding reservoir.
+    bool supportedByLiquid = CellMaterials[FlattenCoordinate(grain+uint2(0,1))] == liquidMaterial;
+    bool surroundedByLiquid = grain.x>0 && grain.x+1<Width &&
+        CellMaterials[FlattenCoordinate(grain-uint2(1,0))] == liquidMaterial &&
+        CellMaterials[FlattenCoordinate(grain+uint2(1,0))] == liquidMaterial;
+    if(!supportedByLiquid && !surroundedByLiquid) return false;
+    uint below=CellKindAt(grain+uint2(0,1));
+    bool packed=below==SimulationKindGranular || (below==SimulationKindSolid &&
+        grain.y>0 && CellKindAt(grain-uint2(0,1))==SimulationKindGranular);
+    if(!packed || below==SimulationKindLiquid) return true;
+    return
+        (grain.x>0 && CellKindAt(grain+uint2(0,1)-uint2(1,0))==SimulationKindLiquid) ||
+        (grain.x+1<Width && CellKindAt(grain+uint2(1,1))==SimulationKindLiquid);
+}
+
 bool GranularCanSpreadThroughLiquidSide(
     uint2 coordinate,
     uint granularMaterial,
     uint liquidMaterial)
 {
+    if (!PowderClockAllows(granularMaterial)) return false;
     if (CellKindFromMaterial(granularMaterial) != SimulationKindGranular ||
         CellKindFromMaterial(liquidMaterial) != SimulationKindLiquid ||
-        CellRankFromMaterial(granularMaterial) >= CellRankFromMaterial(liquidMaterial))
+        CellRankAtIndex(FlattenCoordinate(coordinate)) >= CellRankFromMaterial(liquidMaterial))
     {
         return false;
     }
@@ -579,7 +754,7 @@ bool GranularCanSpreadThroughLiquidSide(
         CellMaterials[FlattenCoordinate(coordinate - uint2(0, 1))] == granularMaterial;
     bool stackedBelow = coordinate.y + 1 < Height &&
         CellMaterials[FlattenCoordinate(coordinate + uint2(0, 1))] == granularMaterial;
-    return stackedAbove || stackedBelow;
+    return (stackedAbove || stackedBelow) && LiquidCanDisplaceGrain(coordinate, liquidMaterial);
 }
 #define MaxSolidDistance 8
 
@@ -599,13 +774,14 @@ uint SolidDistanceBelow(uint2 coordinate)
 
 bool SandCanRoll(uint2 source, uint2 destination, uint sandMaterial, uint targetMaterial)
 {
+    if (!PowderClockAllows(sandMaterial)) return false;
     uint targetKind = CellKindFromMaterial(targetMaterial);
     // Same rule as GranularCanMoveTo: a grain never rolls into another powder,
     // only into empty space. Without this a heavy powder would burrow sideways
     // through a lighter heap instead of resting on its slope.
     if (targetKind == SimulationKindLiquid ||
         targetKind == SimulationKindGranular ||
-        CellRankFromMaterial(sandMaterial) <= CellRankFromMaterial(targetMaterial))
+        CellRankAtIndex(FlattenCoordinate(source)) <= CellRankAtIndex(FlattenCoordinate(destination)))
     {
         return false;
     }
@@ -628,14 +804,15 @@ bool WaterSupported(uint2 coordinate)
     return kind != 0 && kind != 5;
 }
 
-bool WaterCanEnter(uint waterMaterial, uint destinationMaterial)
+bool WaterCanEnter(uint waterMaterial, uint destinationMaterial, uint2 destination)
 {
     uint destinationKind = CellKindFromMaterial(destinationMaterial);
-    if (destinationKind == 2)
+    if (destinationKind == 2 || (destinationKind == SimulationKindGranular &&
+        (!LiquidCanDisplaceGrain(destination, waterMaterial) || GranularLoadedToSink(destination, waterMaterial))))
     {
         return false;
     }
-    return CellRankFromMaterial(waterMaterial) > CellRankFromMaterial(destinationMaterial);
+    return CellRankFromMaterial(waterMaterial) > CellRankAtIndex(FlattenCoordinate(destination));
 }
 
 bool IsWaterAt(int x, int y)
@@ -687,7 +864,7 @@ bool WaterCanFlowSide(
             return false;
         }
     }
-    if (!WaterCanEnter(waterMaterial, targetMaterial))
+    if (!WaterCanEnter(waterMaterial, targetMaterial, destination))
     {
         return false;
     }
@@ -729,7 +906,7 @@ bool WaterCanFlowSideOpt(
             return false;
         }
     }
-    if (!WaterCanEnter(waterMaterial, targetMaterial))
+    if (!WaterCanEnter(waterMaterial, targetMaterial, destination))
     {
         return false;
     }
@@ -808,7 +985,7 @@ bool FindOrdinaryWaterDestination(
             break;
         }
 
-        if (!WaterCanEnter(waterMaterial, candidateMaterial))
+        if (!WaterCanEnter(waterMaterial, candidateMaterial, candidate))
         {
             break;
         }
@@ -829,17 +1006,19 @@ bool FindOrdinaryWaterDestination(
     return found;
 }
 
-void MoveOrdinaryWater(uint sourceIndex, uint destinationIndex, int direction)
+bool MoveOrdinaryWater(uint sourceIndex, uint destinationIndex, int direction)
 {
+    if (!LiquidStepAllowed(sourceIndex, destinationIndex)) return false;
     GridCell water = Grid[sourceIndex];
     GridCell target = Grid[destinationIndex];
     MarkMovement(water, target, direction * 58, 0);
-    water.BodyId = FrameIndex + 1;
+    water.BodyId = (water.BodyId & FuelBurningMarker) | ((FrameIndex + 1) & ~FuelBurningMarker);
     Grid[sourceIndex] = target;
     Grid[destinationIndex] = water;
     uint targetMaterial = CellMaterials[destinationIndex];
     CellMaterials[sourceIndex] = targetMaterial;
     CellMaterials[destinationIndex] = water.MaterialIndex;
+    return true;
 }
 
 void ResolveOrdinaryWaterBlock(uint2 coordinate)
@@ -1110,8 +1289,7 @@ void PlanWaterColumnMove(
 // TPT particles retain a fractional position and update their velocity once
 // per frame.  A stochastic neighbour hop cannot reproduce that: it turns a
 // smooth, symmetric air field into a random walk.  The separate GasMotion
-// buffer is the missing per-particle state while GridCell remains the stable
-// serialized 40-byte world format.
+// buffer keeps per-particle motion separate from the versioned world format.
 
 // A dense heavy gas needs a lateral concentration gradient in addition to
 // single-particle diffusion. Otherwise gravity and excluded grid occupancy
@@ -1156,19 +1334,11 @@ void IntegrateGasMotion(uint2 coordinate)
     }
 
     GasMotionState state = GasMotion[index];
-    // A cell which has already collided with the underside of a solid carries
-    // a pending normal segment (OffsetY == -1).  Letting the coarse air field
-    // overwrite its just-selected tangent on the very next tick made the
-    // direction flip toward the centre of a symmetric plume: a one-cell
-    // right-hand escape was immediately pulled left again, so the front never
-    // travelled along the plate.  A particle in TPT keeps its collision
-    // fallback direction until it has cleared the surface.  Retain that
-    // tangent only while the immediate upper cell is still solid, then return
-    // to ordinary air advection at the plate edge.
-    // OffsetY==0.5 is an internal, one-tick surface-carrier marker.  It is
-    // deliberately neither a pending upward nor downward cell step, so the
-    // four checkerboard collision phases cannot move the same particle twice
-    // in one 60 Hz tick after it changes parity.
+    float2 drift = FlameAirDrift(coordinate);
+    // Preserve the historical Sandbox escape only in nearly still air. In
+    // moving air the actual carrier owns tangential speed and direction.
+    // TPT's collision fallback resets velocity via Collision; this retained
+    // surface escape is a Phyxel game rule, not a literal TPT mechanism.
     bool surfaceCarrierMarker = abs(state.OffsetY - 0.5) < 0.001 &&
         abs(state.VelocityX) >= Materials[cell.MaterialIndex].MotionAdvection;
     bool carriesAlongSurface = coordinate.y > 0 &&
@@ -1183,7 +1353,8 @@ void IntegrateGasMotion(uint2 coordinate)
     // gases keep their diffusion and velocity at a surface, just as in space.
     bool legacySurfaceCarrier = (Materials[cell.MaterialIndex].Flags &
         (MaterialFlagFlame | MaterialFlagSmoke)) != 0;
-    if (legacySurfaceCarrier && carriesAlongSurface && abs(state.VelocityX) > 0.0001)
+    if (SolidPass == 0 && legacySurfaceCarrier && carriesAlongSurface &&
+        abs(state.VelocityX) > 0.0001 && dot(drift, drift) < 0.0025)
     {
         float surfaceAdvection = Materials[cell.MaterialIndex].MotionAdvection;
         state.VelocityX = state.VelocityX > 0 ? surfaceAdvection : -surfaceAdvection;
@@ -1195,17 +1366,30 @@ void IntegrateGasMotion(uint2 coordinate)
     }
 
     MaterialProperties material = Materials[cell.MaterialIndex];
-    float2 drift = FlameAirDrift(coordinate);
     // TPT diffusion is an unbiased random impulse on the velocity of an
     // individual particle.  It is deliberately not a mass-transfer pass:
     // splitting one gas cell into fractional neighbours turns a sparse steam
     // puff into a continuum cloud and introduces stencil-direction bias.
-    uint diffusionTick = (material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0
-        ? FrameIndex : DebugReserved2;
+    // DebugReserved2 is the fixed gas tick; FrameIndex is the presentation
+    // frame and repeats at 30 FPS (or skips at 100 FPS). Both forms of random
+    // transport, including smoke's existing diffusion, use physical time.
+    uint diffusionTick = DebugReserved2;
     uint diffusionSeed = index ^ (diffusionTick * 0x9e3779b9u);
     float2 diffusionImpulse = float2(
         HashUnitFloat(diffusionSeed) * 2.0 - 1.0,
         HashUnitFloat(diffusionSeed ^ 0x85ebca6bu) * 2.0 - 1.0) * material.GasDiffusion;
+    // A resolved carrier advects a narrow tracer strip without spreading it.
+    // Model unresolved transverse boundary dispersion, separately from molecular
+    // diffusion: stronger flow mixes farther, with no longitudinal impulse.
+    // This is a bounded game closure, not a Reynolds/turbulent-energy solver.
+    // Logical ticks keep the same physical pace at every presentation FPS.
+    float carrierSpeed = length(drift);
+    if (carrierSpeed > 0.0001 && GasNearTransverseWall(coordinate, drift))
+    {
+        float transverse = (HashUnitFloat(diffusionSeed ^ 0x27d4eb2du) * 2.0 - 1.0) *
+            min(1.5, carrierSpeed * 1.5);
+        diffusionImpulse += float2(-drift.y, drift.x) * (transverse / carrierSpeed);
+    }
     // GasBuoyancy now has TPT gravity semantics: it is a velocity increment
     // per fixed tick and negative values rise because the y axis points down.
     float2 gravity = float2(0, material.GasBuoyancy);
@@ -1231,10 +1415,12 @@ void IntegrateGasMotion(uint2 coordinate)
     }
     // Stable gases relax toward the common carrier velocity. Applying CO2's
     // TPT Advection=2 as an additive acceleration makes it overtake both air
-    // and steam indefinitely even while cold. Flame/smoke retain their
-    // calibrated transient-particle response and drive carrier slip drag.
+    // and steam indefinitely even while cold. Simulation uses that bounded
+    // wind response for flame/smoke too; Sandbox keeps its calibrated response.
     float airCoupling = legacySurfaceCarrier ? material.MotionAdvection :
         min(1.0, material.MotionAdvection) * (1.0 - material.MotionLoss);
+    if (SolidPass != 0 && legacySurfaceCarrier)
+        airCoupling = min(airCoupling, 1.0 - material.MotionLoss);
     state.VelocityX = clamp(
         state.VelocityX * material.MotionLoss +
             drift.x * airCoupling * GasAirVelocityScale + lateralPressure + diffusionImpulse.x,
@@ -1278,15 +1464,50 @@ void ConsumeGasOffset(uint index, int stepX, int stepY)
     GasMotion[index] = state;
 }
 
-void StopGasMotion(uint index, uint material)
+void SlideGasAtCeiling(uint index)
 {
     GasMotionState state = GasMotion[index];
-    float collision = Materials[material].MotionCollision;
-    state.VelocityX *= collision;
-    state.VelocityY *= collision;
-    state.OffsetX *= collision;
-    state.OffsetY *= collision;
+    // Collision removes the blocked normal intent, not the wind's tangent.
+    // The bypass consumes one pixel; it must not leave an opposite X debt.
+    state.VelocityY = 0;
+    state.OffsetY = 0;
+    state.OffsetX = sign(state.OffsetX) * max(0, abs(state.OffsetX) - 1);
     GasMotion[index] = state;
+}
+
+bool ConsolidateDiluteCombustionGas(uint firstIndex, uint secondIndex)
+{
+    // A tiny emitted CO2 amount must not become an impermeable full-cell
+    // obstacle. Merge neighbouring partial packets, preserving total mass,
+    // sensible heat and momentum. Painted nominal packets are never merged.
+    if (SolidPass == 0) return false; // finite Simulation only
+    GridCell first = Grid[firstIndex], second = Grid[secondIndex];
+    if (first.IsActive == 0 || second.IsActive == 0 || first.MaterialIndex != second.MaterialIndex) return false;
+    MaterialProperties material = Materials[first.MaterialIndex];
+    if ((material.Flags & MaterialFlagThermalCarbonDioxide) == 0 ||
+        first.Mass >= material.Density || second.Mass >= material.Density) return false;
+    float total = first.Mass + second.Mass;
+    if (total <= 0 || total > material.Density) return false;
+    GasMotionState a = GasMotion[firstIndex], b = GasMotion[secondIndex];
+    float2 step = float2(int(secondIndex % Width) - int(firstIndex % Width),
+        int(secondIndex / Width) - int(firstIndex / Width));
+    float2 velocity = (float2(a.VelocityX,a.VelocityY)*first.Mass +
+        float2(b.VelocityX,b.VelocityY)*second.Mass)/total;
+    bool keepSecond = dot(velocity,step) > 0;
+    if (abs(dot(velocity,step)) < 0.0001)
+        keepSecond = HashUnitFloat(firstIndex ^ (DebugReserved2 * 0x9e3779b9u)) < .5;
+    GridCell merged = first;
+    if (keepSecond) merged = second;
+    merged.Mass = total;
+    merged.MoistureMass = 0; merged.MoistureEnergy = 0;
+    merged.Temperature = (first.Mass*first.Temperature + second.Mass*second.Temperature)/total;
+    GasMotionState motion = a;
+    if (keepSecond) motion = b;
+    motion.VelocityX = velocity.x; motion.VelocityY = velocity.y;
+    uint target = keepSecond ? secondIndex : firstIndex, source = keepSecond ? firstIndex : secondIndex;
+    Grid[target] = merged; GasMotion[target] = motion; CellMaterials[target] = merged.MaterialIndex;
+    Grid[source] = (GridCell)0; GasMotion[source] = (GasMotionState)0; CellMaterials[source] = 0;
+    return true;
 }
 
 bool GasPairBranch(uint upperKind, uint lowerKind)
@@ -1313,6 +1534,7 @@ void ResolveGasVerticalPair(uint2 upperCoordinate)
     }
     uint upperIndex = FlattenCoordinate(upperCoordinate);
     uint lowerIndex = upperIndex + Width;
+    if (ConsolidateDiluteCombustionGas(upperIndex, lowerIndex)) return;
     GridCell upperCell = Grid[upperIndex];
     GridCell lowerCell = Grid[lowerIndex];
     uint upperMaterial = upperCell.IsActive != 0 ? upperCell.MaterialIndex : 0;
@@ -1452,7 +1674,7 @@ void ResolveGasObstacleBypass(uint2 coordinate)
             if (GasCanEnter(material, sideMaterial))
             {
                 InterlockedAdd(GasObstacleBypassStatistics[1], 1, ignored);
-                StopGasMotion(index, material);
+                SlideGasAtCeiling(index);
                 MoveGasCell(index, sideIndex, GasLateralPathObstacleX);
                 return;
             }
@@ -1464,7 +1686,7 @@ void ResolveGasObstacleBypass(uint2 coordinate)
     if (GasCanEnter(material, aboveCell.MaterialIndex))
     {
         InterlockedAdd(GasObstacleBypassStatistics[2], 1, ignored);
-        StopGasMotion(index, material);
+        SlideGasAtCeiling(index);
         MoveGasCell(index, aboveIndex, GasLateralPathMotionHorizontal);
         return;
     }
@@ -1473,7 +1695,7 @@ void ResolveGasObstacleBypass(uint2 coordinate)
     // tested if the first is occupied, so packing cannot impose a permanent
     // left/right preference.
     int firstDiagonalDirection = HashUnitFloat((index * 0x85ebca6bu) ^
-        (FrameIndex * 0xc2b2ae35u)) < 0.5 ? -1 : 1;
+        (DebugReserved2 * 0xc2b2ae35u)) < 0.5 ? -1 : 1;
     [unroll]
     for (int attempt = 0; attempt < 2; attempt++)
     {
@@ -1489,7 +1711,7 @@ void ResolveGasObstacleBypass(uint2 coordinate)
         if (GasCanEnter(material, diagonalMaterial))
         {
             InterlockedAdd(GasObstacleBypassStatistics[3], 1, ignored);
-            StopGasMotion(index, material);
+            SlideGasAtCeiling(index);
             MoveGasCell(index, diagonalIndex, GasLateralPathObstacleDiagonal);
             return;
         }
@@ -1505,6 +1727,7 @@ void ResolveGasHorizontalPair(uint2 leftCoordinate)
     }
     uint leftIndex = FlattenCoordinate(leftCoordinate);
     uint rightIndex = leftIndex + 1;
+    if (ConsolidateDiluteCombustionGas(leftIndex, rightIndex)) return;
     GridCell leftCell = Grid[leftIndex];
     GridCell rightCell = Grid[rightIndex];
     uint leftMaterial = leftCell.IsActive != 0 ? leftCell.MaterialIndex : 0;
@@ -1628,6 +1851,7 @@ void ResolveVerticalPair(uint2 upperCoordinate)
     uint lowerMaterial = CellMaterials[lowerIndex];
     uint upperKind = CellKindFromMaterial(upperMaterial);
     uint lowerKind = CellKindFromMaterial(lowerMaterial);
+    if ((GasSubStep & 0x80000000u) != 0 && !IsPressurePowder(upperMaterial)) return;
     if (upperKind == SimulationKindLiquid && lowerKind == SimulationKindLiquid &&
         upperMaterial == lowerMaterial && ConsolidateLiquidDown(upperIndex, lowerIndex))
     {
@@ -1653,7 +1877,10 @@ void ResolveVerticalPair(uint2 upperCoordinate)
             upperCoordinate + uint2(0, 1),
             lowerMaterial)
         : upperKind != SimulationKindNone &&
-            CellRankFromMaterial(upperMaterial) > CellRankFromMaterial(lowerMaterial);
+            (upperKind!=SimulationKindLiquid || lowerKind!=SimulationKindGranular ||
+                (LiquidCanDisplaceGrain(upperCoordinate+uint2(0,1), upperMaterial) &&
+                 !GranularLoadedToSink(upperCoordinate+uint2(0,1), upperMaterial))) &&
+            CellRankAtIndex(upperIndex) > CellRankAtIndex(lowerIndex);
     if (canMove)
     {
         if (upperKind == SimulationKindGranular && lowerKind == SimulationKindLiquid)
@@ -1673,6 +1900,7 @@ void ResolveDiagonalPair(uint2 upperCoordinate, uint2 lowerCoordinate)
     uint lowerMaterial = CellMaterials[lowerIndex];
     uint upperKind = CellKindFromMaterial(upperMaterial);
     uint lowerKind = CellKindFromMaterial(lowerMaterial);
+    if ((GasSubStep & 0x80000000u) != 0 && !IsPressurePowder(upperMaterial)) return;
     if (upperKind == SimulationKindLiquid && lowerKind == SimulationKindLiquid &&
         upperMaterial == lowerMaterial && ConsolidateLiquidDown(upperIndex, lowerIndex))
     {
@@ -1705,7 +1933,9 @@ void ResolveDiagonalPair(uint2 upperCoordinate, uint2 lowerCoordinate)
     bool canMove = upperKind == SimulationKindGranular
         ? GranularCanMoveTo(upperCoordinate, upperIndex, lowerCoordinate, lowerMaterial)
         : upperKind == SimulationKindLiquid && WaterSupported(upperCoordinate) &&
-            CellRankFromMaterial(upperMaterial) > CellRankFromMaterial(lowerMaterial);
+            (lowerKind!=SimulationKindGranular || (LiquidCanDisplaceGrain(lowerCoordinate, upperMaterial) &&
+                !GranularLoadedToSink(lowerCoordinate, upperMaterial))) &&
+            CellRankAtIndex(upperIndex) > CellRankAtIndex(lowerIndex);
     if (canMove)
     {
         float direction = lowerCoordinate.x > upperCoordinate.x ? 32 : -32;
@@ -1726,6 +1956,8 @@ void ResolveHorizontalPair(uint2 leftCoordinate)
     uint rightMaterial = CellMaterials[rightIndex];
     uint leftKind = CellKindFromMaterial(leftMaterial);
     uint rightKind = CellKindFromMaterial(rightMaterial);
+    if ((GasSubStep & 0x80000000u) != 0 &&
+        !IsPressurePowder(leftMaterial) && !IsPressurePowder(rightMaterial)) return;
     if (leftKind == SimulationKindLiquid && rightKind == SimulationKindLiquid &&
         leftMaterial == rightMaterial && ConsolidateLiquidSide(leftIndex, rightIndex))
     {
@@ -2075,7 +2307,7 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight)
         return false;
     }
     int direction = destinationX > sourceX ? 1 : -1;
-    MoveOrdinaryWater(sourceIndex, destinationIndex, direction);
+    if (!MoveOrdinaryWater(sourceIndex, destinationIndex, direction)) return false;
     WaterColumnState[sourceX] = sourceTop == sourceBase
         ? 0
         : PackWaterColumn(sourceTop + 1, sourceBase);
@@ -2214,6 +2446,7 @@ void ApplyWaterColumnMove(uint x)
     GridCell water = Grid[sourceIndex];
     GridCell empty = CreateEmptyCell();
     float horizontal = destinationX > sourceX ? 54 : -54;
+    if (!LiquidStepAllowed(sourceIndex, destinationIndex)) return;
     MarkMovement(water, empty, horizontal, 36);
     Grid[sourceIndex] = empty;
     Grid[destinationIndex] = water;
@@ -2725,6 +2958,7 @@ void ApplyPressurizedWaterReturnSlot(uint sourceX, uint lane, uint donorParity)
     GridCell water = Grid[sourceWaterIndex];
     GridCell empty = CreateEmptyCell();
     float horizontal = sourceX == sourceWaterX ? 0 : sourceX > sourceWaterX ? 54 : -54;
+    if (!LiquidStepAllowed(sourceWaterIndex, destinationIndex)) return;
     MarkMovement(water, empty, horizontal, 38);
     Grid[sourceWaterIndex] = empty;
     Grid[destinationIndex] = water;
@@ -2802,6 +3036,11 @@ void ApplyPressurizedWaterMoveSlot(uint sourceX, uint lane)
     GridCell empty = CreateEmptyCell();
     uint destinationX = destinationIndex % Width;
     float horizontal = destinationX == sourceX ? 0 : destinationX > sourceX ? 54 : -54;
+    if (!LiquidStepAllowed(sourceIndex, destinationIndex))
+    {
+        ReleasePressureReservation(destinationIndex, reservation);
+        return;
+    }
     MarkMovement(water, empty, horizontal, 36);
     Grid[sourceIndex] = empty;
     Grid[destinationIndex] = water;
@@ -2905,7 +3144,7 @@ bool CanMoveWater(uint2 coordinate, GridCell cell)
     if (coordinate.y + 1 < Height)
     {
         uint belowMaterial = CellMaterials[FlattenCoordinate(coordinate + uint2(0, 1))];
-        if (WaterCanEnter(cell.MaterialIndex, belowMaterial))
+        if (WaterCanEnter(cell.MaterialIndex, belowMaterial, coordinate+uint2(0,1)))
         {
             return true;
         }
@@ -2921,7 +3160,7 @@ bool CanMoveWater(uint2 coordinate, GridCell cell)
                 uint2 diagonalCoordinate = uint2(x, coordinate.y + 1);
                 if (WaterCanEnter(
                     cell.MaterialIndex,
-                    CellMaterials[FlattenCoordinate(diagonalCoordinate)]))
+                    CellMaterials[FlattenCoordinate(diagonalCoordinate)], diagonalCoordinate))
                 {
                     return true;
                 }
@@ -3205,6 +3444,12 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         coordinate = dispatchThreadId.xy + uint2(DispatchOffsetX, DispatchOffsetY);
     }
     if (coordinate.x >= Width || coordinate.y >= Height)
+    {
+        return;
+    }
+    if (((SimulationPhase>=80 && SimulationPhase<=83) ||
+        (SimulationPhase>=85 && SimulationPhase<=88) || SimulationPhase==90) &&
+        GasActiveTiles[(coordinate.y/64)*((Width+63)/64)+coordinate.x/64]==0)
     {
         return;
     }

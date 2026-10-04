@@ -40,7 +40,10 @@ public static class PhaseTransitionRuntime
 
         MaterialProperties target = materials[(int)targetIndex];
         summary = GetSummaryFlags(source, target);
+        bool energyPair = PhaseEnthalpy.Enabled(source) && PhaseEnthalpy.Enabled(target);
+        float transitionEnergy = energyPair ? PhaseEnthalpy.SpecificEnergy(cell, materials) : 0;
         cell = Normalize(cell, source, target, targetIndex);
+        if (energyPair) PhaseEnthalpy.SetSpecificEnergy(ref cell, transitionEnergy, materials);
         return true;
     }
 

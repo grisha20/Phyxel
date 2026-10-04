@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "core:oil",
+  "name": { "ru": "Парафиновое масло", "en": "Paraffinic Oil" },
+  "kind": "liquid",
+  "flags": ["liquid-convection", "fusion-enthalpy", "phase-enthalpy"],
+  "color": "#B87929",
+  "physics": { "density": 0.8, "friction": 0.08, "flowRate": 0.65,
+    "liquidFlow": { "referenceTemperature": 20, "temperatureSensitivity": 0.015,
+      "minimumMobility": 0.2, "maximumMobility": 2.0 } },
+  "thermal": { "initialTemperature": 20.0, "conductivity": 0.12, "heatCapacity": 2.0,
+    "transitions": {
+      "below": { "temperature": 18.0, "into": "core:frozen_oil" },
+      "above": { "temperature": 287.0, "into": "core:oil_vapour", "latentHeat": 270.0 }
+    } },
+  "combustion": {
+    "ignitionTemperature": 205.0,
+    "contactIgnitionTemperature": 135.0,
+    "burnRate": 0.18,
+    "heatPerMass": 4000.0,
+    "burnedInto": "core:empty",
+    "spreadRate": 4.0,
+    "maximumTemperature": 1100.0,
+    "oxidizerPerMass": 4.0
+  },
+  "emissions": {
+    "smokeInto": "core:smoke",
+    "smokeRate": 0.06,
+    "gasInto": "core:co2",
+    "gasRate": 0.05,
+    "flameInto": "core:fire",
+    "flameRate": 30.0
+  },
+  "ui": { "order": 25, "hidden": false }
+}

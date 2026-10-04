@@ -27,7 +27,9 @@ public sealed class UiPropertiesPanel
         SimulationSettings.DefaultScale * 100,
         "%",
         "0");
-    private readonly UiToggleSwitch solidGravityToggle = new("Гравитация");
+    private readonly UiToggleSwitch solidGravityToggle = new("Гравитация построек");
+    private readonly UiSimulationModeSelector modeSelector = new();
+    private int modeHintY;
     private readonly UiToggleSwitch hydraulicsToggle = new("Гидравлика сосудов");
     private readonly UiToggleSwitch withoutEffectsToggle = new("Без эффектов");
 
@@ -56,6 +58,9 @@ public sealed class UiPropertiesPanel
 
     public bool GravityToggled { get; private set; }
     public bool HydraulicsToggled { get; private set; }
+    public bool ModeChanged { get; private set; }
+    internal Rectangle SandboxModeBounds => modeSelector.SandboxBounds;
+    internal Rectangle SimulationModeBounds => modeSelector.SimulationBounds;
     public bool ResetRequested { get; private set; }
     public bool ResetViewRequested { get; private set; }
     public bool ClearRequested { get; private set; }
@@ -93,6 +98,7 @@ public sealed class UiPropertiesPanel
 
         GravityToggled = false;
         HydraulicsToggled = false;
+        ModeChanged = false;
         ResetRequested = false;
         ResetViewRequested = false;
         ClearRequested = false;
@@ -104,12 +110,13 @@ public sealed class UiPropertiesPanel
         int innerX = bounds.X + padding;
         int innerWidth = bounds.Width - padding * 2;
         bool showDevice = activeTool == PhyxelToolId.Brush && selectedMaterial.ThermalRegulator is not null;
-        bool compact = bounds.Height < (showDevice ? 1000 : 720);
+        bool compact = bounds.Height < Math.Max(showDevice ? 1100 : 800,
+            font.LineSpacing * (showDevice ? 25 : 23) + 100);
         bool compactDevice = compact && showDevice;
-        int cardHeight = compactDevice ? Math.Clamp(font.LineSpacing + 8, 32, 48) : Math.Clamp(font.LineSpacing + (compact ? 16 : 24), 42, 58);
+        int cardHeight = compact ? Math.Clamp(font.LineSpacing + 3, 32, 48) : Math.Clamp(font.LineSpacing + 24, 42, 58);
         toolCardBounds = new Rectangle(innerX, bounds.Y + font.LineSpacing + (compact ? 18 : 24), innerWidth, cardHeight);
-        if (compactDevice) toolCardBounds = Rectangle.Empty;
-        int cursorY = compactDevice ? bounds.Y + font.LineSpacing + 14 : toolCardBounds.Bottom + (compact ? 6 : 8);
+        if (compact) toolCardBounds = Rectangle.Empty;
+        int cursorY = compact ? bounds.Y + font.LineSpacing + 14 : toolCardBounds.Bottom + 8;
 
         if (activeTool == PhyxelToolId.Pan)
         {
@@ -120,11 +127,18 @@ public sealed class UiPropertiesPanel
             materialCardBounds = new Rectangle(innerX, cursorY, innerWidth, cardHeight);
             cursorY = materialCardBounds.Bottom + (compact ? 8 : 12);
         }
+        if (compactDevice)
+        {
+            // Device controls have an extra slider; show the selected device
+            // in the section title instead of spending another card row.
+            materialCardBounds = Rectangle.Empty;
+            cursorY = bounds.Y + font.LineSpacing + 14;
+        }
 
         toolParametersHeaderY = cursorY;
         cursorY += Math.Max(16, (int)MathF.Round(font.LineSpacing * (compact ? 0.68f : 0.82f))) + (compact ? 4 : 8);
         int sliderHeight = font.LineSpacing + (compact ? 22 : 30);
-        int sliderGap = compactDevice ? 3 : compact ? 6 : 10;
+        int sliderGap = compactDevice ? 2 : compact ? 6 : 10;
 
         if (ShowsBrushControls(activeTool))
         {
@@ -213,35 +227,39 @@ public sealed class UiPropertiesPanel
         }
         cursorY += sliderHeight + sliderGap;
 
-        int toggleHeight = compact && showDevice
+        int toggleHeight = compact
             ? Math.Clamp(font.LineSpacing, 24, 44)
             : Math.Clamp(font.LineSpacing + (compact ? 12 : 18), 36, 52);
+        modeSelector.Bounds = new Rectangle(innerX, cursorY, innerWidth, Math.Clamp(font.LineSpacing + 6, 28, 44));
+        ModeChanged = modeSelector.Update(input, settings);
+        modeHintY = modeSelector.Bounds.Bottom + 3;
+        cursorY = modeHintY + Math.Max(12, (int)(font.LineSpacing * .6f)) + (compactDevice ? 2 : 5);
         solidGravityToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (solidGravityToggle.Update(input))
         {
             settings.SolidGravity = !settings.SolidGravity;
             GravityToggled = true;
         }
-        cursorY += toggleHeight + (compactDevice ? 2 : 4);
+        cursorY += toggleHeight + (compact ? 2 : 4);
         hydraulicsToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (hydraulicsToggle.Update(input))
         {
             settings.HydraulicPressure = !settings.HydraulicPressure;
             HydraulicsToggled = true;
         }
-        cursorY += toggleHeight + (compactDevice ? 2 : 4);
+        cursorY += toggleHeight + (compact ? 2 : 4);
         withoutEffectsToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (withoutEffectsToggle.Update(input))
         {
             settings.RenderWithoutEffects = !settings.RenderWithoutEffects;
         }
-        cursorY += toggleHeight + (compactDevice ? 2 : 4);
+        cursorY += toggleHeight + (compact ? 2 : 4);
         boundariesToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (boundariesToggle.Update(input))
         {
             settings.OpenBoundaries = !settings.OpenBoundaries;
         }
-        cursorY += toggleHeight + (compactDevice ? 2 : 4);
+        cursorY += toggleHeight + (compact ? 2 : 4);
         airFieldToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (airFieldToggle.Update(input))
         {
@@ -287,12 +305,12 @@ public sealed class UiPropertiesPanel
         DrawSectionLabel(spriteBatch, font, "СВОЙСТВА", bounds.X + 14, bounds.Y + 10, 0.78f);
 
         if (toolCardBounds != Rectangle.Empty) DrawToolCard(spriteBatch, font, backdrop, pixel, iconCache, activeTool);
-        if (activeTool != PhyxelToolId.Pan)
+        if (materialCardBounds != Rectangle.Empty)
         {
             DrawMaterialCard(spriteBatch, font, backdrop, pixel, selectedMaterial, previewCache);
         }
 
-        DrawSectionLabel(spriteBatch, font, activeTool == PhyxelToolId.Pan ? "КАМЕРА" : deviceHintY == 0 && selectedMaterial.ThermalRegulator is not null && activeTool == PhyxelToolId.Brush ? "МОЩНОСТЬ 0 — ВЫКЛЮЧЕНО" : "ПАРАМЕТРЫ ИНСТРУМЕНТА",
+        DrawSectionLabel(spriteBatch, font, activeTool == PhyxelToolId.Pan ? "КАМЕРА" : materialCardBounds == Rectangle.Empty && selectedMaterial.ThermalRegulator is not null && activeTool == PhyxelToolId.Brush ? selectedMaterial.Name.ToUpperInvariant() : "ПАРАМЕТРЫ ИНСТРУМЕНТА",
             bounds.X + 14, toolParametersHeaderY, 0.68f);
         if (ShowsBrushControls(activeTool)) brushSlider.Draw(spriteBatch, font, backdrop, pixel);
         if (activeTool == PhyxelToolId.Brush && selectedMaterial.ThermalRegulator is not null)
@@ -320,6 +338,11 @@ public sealed class UiPropertiesPanel
 
         DrawSectionLabel(spriteBatch, font, "СИМУЛЯЦИЯ", bounds.X + 14, simulationHeaderY, 0.68f);
         scaleSlider.Draw(spriteBatch, font, backdrop, pixel);
+        modeSelector.Draw(spriteBatch, font, backdrop, pixel, settings.Mode);
+        spriteBatch.DrawString(font, settings.Mode == SimulationMode.Simulation
+            ? "Кислород расходуется" : "Горение без обязательного поддува",
+            new Vector2(bounds.X + 14, modeHintY), UiTheme.TextMuted,
+            0, Vector2.Zero, .55f, SpriteEffects.None, 0);
         solidGravityToggle.Draw(spriteBatch, font, backdrop, pixel, settings.SolidGravity);
         hydraulicsToggle.Draw(spriteBatch, font, backdrop, pixel, settings.HydraulicPressure);
         withoutEffectsToggle.Draw(spriteBatch, font, backdrop, pixel, settings.RenderWithoutEffects);

@@ -22,7 +22,8 @@ public sealed class UiStatusBar
         SimulationStatistics statistics,
         double displayedFps,
         float currentScale,
-        bool isPaused)
+        bool isPaused,
+        string transientStatus = "")
     {
         backdrop.Draw(spriteBatch, bounds, 0);
 
@@ -57,10 +58,36 @@ public sealed class UiStatusBar
         spriteBatch.Draw(pixel, new Rectangle(statusX, bounds.Center.Y - dotSize / 2, dotSize, dotSize), statusColor);
         spriteBatch.DrawString(font, statusBlock, new Vector2(statusX + 14, textY), UiTheme.TextPrimary);
 
+        if (!string.IsNullOrEmpty(transientStatus))
+        {
+            string message = FitStatus(font, transientStatus, Math.Max(0, statusX - x - 24));
+            spriteBatch.DrawString(font, message, new Vector2(x, textY), UiTheme.TextPrimary);
+            return;
+        }
         x = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, tempProbeText, UiTheme.TextSecondary);
         x = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, $"Масштаб: {currentScale:0.00}x", UiTheme.TextSecondary);
         x = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, $"Частиц: {statistics.ActiveCells:N0}", UiTheme.TextSecondary);
         _ = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, $"{displayedFps:0} FPS", UiTheme.TextMuted);
+    }
+
+    internal static string FitStatus(SpriteFont font, string text, int maximumWidth)
+    {
+        // File paths may use characters outside the bundled font's alphabet.
+        char[] safe = text.ToCharArray();
+        for (int i = 0; i < safe.Length; i++)
+            if (!font.Characters.Contains(safe[i])) safe[i] = '?';
+        string value = new(safe);
+        if (font.MeasureString(value).X <= maximumWidth) return value;
+        const string suffix = "...";
+        if (font.MeasureString(suffix).X > maximumWidth) return string.Empty;
+        int low = 0, high = value.Length;
+        while (low < high)
+        {
+            int mid = (low + high + 1) / 2;
+            if (font.MeasureString(value[..mid] + suffix).X <= maximumWidth) low = mid;
+            else high = mid - 1;
+        }
+        return value[..low] + suffix;
     }
 
     private static int DrawOptionalBlock(
@@ -107,6 +134,16 @@ public sealed class UiStatusBar
             float power = (value.Reserved >> 16) / 10f;
             return string.Create(CultureInfo.GetCultureInfo("ru-RU"),
                 $"{material.Name}: {tempStr} °C · цель {target:0.#} · P {power:0.#}");
+        }
+        if (material.Moisture is not null)
+        {
+            float fraction = BitConverter.UInt32BitsToSingle(value.Reserved);
+            if (float.IsFinite(value.FuelFraction) && value.FuelFraction > 0 && value.FuelFraction <= 1)
+                return string.Create(CultureInfo.GetCultureInfo("ru-RU"),
+                    $"Под курсором: {material.Name} ({tempStr} °C · влага {fraction:P0} · масло {value.FuelFraction:P0})");
+            if (float.IsFinite(fraction) && fraction > 0 && fraction <= 1)
+                return string.Create(CultureInfo.GetCultureInfo("ru-RU"),
+                    $"Под курсором: {material.Name} ({tempStr} °C · влага {fraction:P0})");
         }
         return $"Под курсором: {material.Name} ({tempStr} °C)";
     }

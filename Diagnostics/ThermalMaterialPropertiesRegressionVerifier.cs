@@ -32,15 +32,21 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             1.5f, 0.75f, 0.18f, "#DAB85C", 20f, 0.15f, 0.83f),
         new("core:gunpowder", MaterialSimulationKind.Granular, MaterialFlags.SelfOxidizing,
             1.4f, 0.80f, 0.15f, "#505358", 20f, 0.25f, 0.90f),
-        new(CoreMaterialIds.Water, MaterialSimulationKind.Liquid, MaterialFlags.PhaseEnthalpy,
+        new(CoreMaterialIds.Water, MaterialSimulationKind.Liquid, MaterialFlags.PhaseEnthalpy | MaterialFlags.FusionEnthalpy | MaterialFlags.LiquidConvection,
             1f, 0.025f, 0.92f, "#2B84CF", 20f, 0.60f, 4.18f),
-        new(CoreMaterialIds.Ice, MaterialSimulationKind.Solid, MaterialFlags.None,
+        new(CoreMaterialIds.Oil, MaterialSimulationKind.Liquid, MaterialFlags.LiquidConvection | MaterialFlags.FusionEnthalpy | MaterialFlags.PhaseEnthalpy,
+            0.8f, 0.08f, 0.65f, "#B87929", 20f, 0.12f, 2f),
+        new(CoreMaterialIds.FrozenOil, MaterialSimulationKind.Solid, MaterialFlags.FusionEnthalpy | MaterialFlags.MovableSolid | MaterialFlags.DensityBody,
+            .85f,.15f,0,"#D6BC87",10,.18f,1.7f),
+        new(CoreMaterialIds.OilVapour, MaterialSimulationKind.Gas, MaterialFlags.PhaseEnthalpy,
+            .04f,.005f,1.2f,"#B49E77",300,.03f,1.5f),
+        new(CoreMaterialIds.Ice, MaterialSimulationKind.Solid, MaterialFlags.FusionEnthalpy | MaterialFlags.MovableSolid | MaterialFlags.DensityBody,
             0.92f, 0.10f, 0f, "#A9DDF2", -5f, 0.80f, 2.10f),
         new(CoreMaterialIds.Steam, MaterialSimulationKind.Gas, MaterialFlags.PhaseEnthalpy,
             0.03f, 0.005f, 1.20f, "#A0A0FFFF", 122f, 0.04f, 2.08f),
-        new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
+        new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid | MaterialFlags.FusionEnthalpy,
             7.8f, 0.35f, 0f, "#8E9CA6", 20f, 1f, 0.13f),
-        new("core:molten_metal", MaterialSimulationKind.Liquid, MaterialFlags.None,
+        new("core:molten_metal", MaterialSimulationKind.Liquid, MaterialFlags.FusionEnthalpy,
             7f, 0.55f, 0.34f, "#FF7A1E", 1050f, 0.60f, 0.50f),
         new(CoreMaterialIds.Stone, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
             9.2f, 0.75f, 0f, "#5C6065", 20f, 0.25f, 0.84f),
@@ -86,7 +92,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
     private static async Task RunAsync()
     {
         Require(Marshal.SizeOf<MaterialProperties>() == MaterialPropertiesLayout.ByteSize,
-            "MaterialProperties must be 176 bytes.");
+            "MaterialProperties must be 244 bytes.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.AmbientTemperature)).ToInt32() == 104,
             "AmbientTemperature offset must be 104.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.AmbientCoolingRate)).ToInt32() == 108,
@@ -140,12 +146,46 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             VerifyGpuTable(registry);
             await VerifyRegulatorSchemaAsync(directory);
             await VerifyOxidizerGasSchemaAsync(directory);
+            await VerifyLiquidFlowSchemaAsync(directory);
             await VerifyInvalidCoreStopsLoadingAsync(directory);
         }
         finally
         {
             Directory.Delete(directory, true);
         }
+    }
+
+    private static async Task VerifyLiquidFlowSchemaAsync(string parentDirectory)
+    {
+        string directory = Path.Combine(parentDirectory,"liquid-flow-schema");
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory,"oil.json");
+        string original = await File.ReadAllTextAsync(Path.Combine(MaterialRegistry.ResolveCoreDirectory(),"oil.json"));
+        var accepted = MaterialFileLoader.LoadCore(MaterialRegistry.ResolveCoreDirectory(),MaterialRegistry.MaximumMaterials)
+            .Single(m=>m.Id==CoreMaterialIds.Oil);
+        Require(accepted.LiquidFlow is {ReferenceTemperature:20,TemperatureSensitivity:.015f,MinimumMobility:.2f,MaximumMobility:2},"Oil liquid flow metadata missing.");
+        var registry = new MaterialRegistry();
+        var properties = registry[CoreMaterialIds.Oil].Properties;
+        Require(properties.LiquidFlowReferenceTemperature==20&&properties.LiquidFlowTemperatureSensitivity==.015f&&
+            properties.LiquidFlowMinimumMobility==.2f&&properties.LiquidFlowMaximumMobility==2,"Oil GPU liquid flow metadata missing.");
+        Require(registry[CoreMaterialIds.Water].Properties.LiquidFlowTemperatureSensitivity==0,"Water mobility unexpectedly configured.");
+        foreach(var sample in new[]{("referenceTemperature",-274f),("temperatureSensitivity",0f),("temperatureSensitivity",.11f),
+            ("minimumMobility",0f),("minimumMobility",1.1f),("maximumMobility",.9f),("maximumMobility",11f)})
+        {
+            var json=System.Text.Json.Nodes.JsonNode.Parse(original)!;
+            json["physics"]!["liquidFlow"]![sample.Item1]=sample.Item2;
+            await File.WriteAllTextAsync(path,json.ToJsonString());
+            bool rejected=false;try{MaterialFileLoader.LoadCore(directory,MaterialRegistry.MaximumMaterials);}catch(InvalidDataException){rejected=true;}
+            Require(rejected,"Invalid liquid flow accepted: "+sample);
+        }
+        var legacy=System.Text.Json.Nodes.JsonNode.Parse(original)!;
+        legacy["physics"]!.AsObject().Remove("liquidFlow");
+        await File.WriteAllTextAsync(path,legacy.ToJsonString());
+        Require(MaterialFileLoader.LoadCore(directory,MaterialRegistry.MaximumMaterials)[0].LiquidFlow is null,"Legacy liquid flow changed.");
+        Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.LiquidFlowReferenceTemperature)).ToInt32()==224&&
+            Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.LiquidFlowMaximumMobility)).ToInt32()==236,"Liquid material ABI offsets changed.");
+        Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.ContactIgnitionTemperature)).ToInt32()==240,"Contact threshold ABI offset changed.");
+        Console.WriteLine("PHYXEL_LIQUID_FLOW_SCHEMA accepted=2 rejected=7 layout=244");
     }
 
     private static async Task VerifyRegulatorSchemaAsync(string parentDirectory)
@@ -214,7 +254,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static void VerifyCoreMaterials(MaterialRegistry registry)
     {
-        Require(ExpectedCoreMaterials.Length == 20, "Expected bundled core material count changed.");
+        Require(ExpectedCoreMaterials.Length == 23, "Expected bundled material count changed.");
         foreach (ExpectedMaterial expected in ExpectedCoreMaterials)
         {
             MaterialDefinition actual = registry[expected.Id];
@@ -247,6 +287,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             {
                 Require(properties.ContactLiquidIntoMaterialIndex ==
                     registry[CoreMaterialIds.WetCharcoal].RuntimeIndex &&
+                    properties.ContactLiquidRequiredMaterialIndex == registry[CoreMaterialIds.Water].RuntimeIndex &&
                     Same(properties.ContactLiquidRatePerSecond, 0.35f),
                     "core:coal liquid contact transition is incorrect.");
             }
@@ -307,6 +348,21 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
     {
         switch (id)
         {
+            case CoreMaterialIds.FrozenOil:
+                Require(Same(properties.TransitionAboveTemperature,18.5f)&&Same(properties.TransitionAboveLatentHeat,230)&&
+                    properties.TransitionAboveMaterialIndex==registry[CoreMaterialIds.Oil].RuntimeIndex,"Frozen oil phase metadata");
+                break;
+            case CoreMaterialIds.OilVapour:
+                Require(Same(properties.TransitionBelowTemperature,285)&&
+                    properties.TransitionBelowMaterialIndex==registry[CoreMaterialIds.Oil].RuntimeIndex,"Oil vapour metadata");
+                break;
+            case CoreMaterialIds.Oil:
+                Require(Same(properties.TransitionBelowTemperature,18) &&
+                    properties.TransitionBelowMaterialIndex==registry[CoreMaterialIds.FrozenOil].RuntimeIndex &&
+                    Same(properties.TransitionAboveTemperature,287) &&
+                    properties.TransitionAboveMaterialIndex==registry[CoreMaterialIds.OilVapour].RuntimeIndex &&
+                    Same(properties.TransitionAboveLatentHeat,270),"Oil phase contract changed.");
+                break;
             case CoreMaterialIds.Water:
                 Require(Same(properties.TransitionBelowTemperature, 0f),
                     "core:water freeze threshold changed.");
@@ -320,8 +376,10 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             case CoreMaterialIds.Ice:
                 Require(properties.TransitionBelowMaterialIndex == uint.MaxValue,
                     "core:ice unexpectedly has a below transition.");
-                Require(Same(properties.TransitionAboveTemperature, 2f),
+                Require(Same(properties.TransitionAboveTemperature, 0f),
                     "core:ice melting threshold changed.");
+                Require(Same(properties.TransitionAboveLatentHeat, 333.4f),
+                    "core:ice fusion heat changed.");
                 Require(properties.TransitionAboveMaterialIndex == registry[CoreMaterialIds.Water].RuntimeIndex,
                     "core:ice melting target is not core:water.");
                 break;
@@ -378,6 +436,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
         MaterialProperties contact = registry["test:contact_source"].Properties;
         Require(contact.ContactLiquidIntoMaterialIndex == registry["test:contact_target"].RuntimeIndex &&
+            contact.ContactLiquidRequiredMaterialIndex == uint.MaxValue &&
             Same(contact.ContactLiquidRatePerSecond, 0.75f),
             "Valid external liquid contact transition was not resolved into the GPU table.");
 
@@ -645,6 +704,11 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
         Same(left.Density, right.Density) &&
         Same(left.Friction, right.Friction) &&
         Same(left.FlowRate, right.FlowRate) &&
+        Same(left.LiquidFlowReferenceTemperature, right.LiquidFlowReferenceTemperature) &&
+        Same(left.LiquidFlowTemperatureSensitivity, right.LiquidFlowTemperatureSensitivity) &&
+        Same(left.LiquidFlowMinimumMobility, right.LiquidFlowMinimumMobility) &&
+        Same(left.LiquidFlowMaximumMobility, right.LiquidFlowMaximumMobility) &&
+        Same(left.ContactIgnitionTemperature, right.ContactIgnitionTemperature) &&
         Same(left.ColorR, right.ColorR) &&
         Same(left.ColorG, right.ColorG) &&
         Same(left.ColorB, right.ColorB) &&

@@ -10,8 +10,9 @@
 //   3. both are advected with a 3x3 gaussian kernel and a semi-Lagrangian
 //      backtrace;
 //   4. walls zero the flow across them.
-// A matching face-flux pressure projection then couples the two ends of a
-// sealed channel. Fine-grid metal blocks this field, unlike ordinary TPT metal.
+// A matching face-flux pressure projection then couples a sealed channel.
+// Simulation conserves carrier volume; Sandbox admits a bounded HotAir source
+// so combustion can vent without a lower inlet. Fine-grid metal blocks both.
 // Coefficients are per fixed 60 Hz tick, not per render frame.
 //
 // Every pass reads one buffer and writes the other. Reading and writing the
@@ -28,17 +29,23 @@ cbuffer AirSimulationConstants : register(b0)
     float AirAmbientTemperature;
     float AirHotScale;
     uint AirTickIndex;
-    uint AirReserved0;
+    uint AirSandboxMode;
 };
 
 StructuredBuffer<MaterialProperties> AirMaterials : register(t0);
 StructuredBuffer<GridCell> AirGrid : register(t1);
 StructuredBuffer<GasMotionState> AirGasMotion : register(t2);
+StructuredBuffer<float2> AirThermal : register(t3);
+StructuredBuffer<float4> ReactionPulse : register(t4);
+StructuredBuffer<uint> FineMaterialMap : register(t5);
+RWStructuredBuffer<uint> FineMaterialMapOutput : register(u6);
 RWStructuredBuffer<AirCell> Air : register(u0);
 RWStructuredBuffer<AirCell> AirScratch : register(u1);
 RWStructuredBuffer<GasAirImpulse> AirGasImpulse : register(u2);
 RWStructuredBuffer<uint> AirFlowLinks : register(u3);
 // Low-Mach pressure correction: (potential, divergence), temporary only.
+// CSInject temporarily uses ProjectionB.y for the sandbox expansion source;
+// CSDivergence consumes it before the Jacobi passes overwrite the scratch.
 RWStructuredBuffer<float2> ProjectionA : register(u4);
 RWStructuredBuffer<float2> ProjectionB : register(u5);
 
@@ -47,9 +54,20 @@ RWStructuredBuffer<float2> ProjectionB : register(u5);
 // once per tick; all pressure, smoothing and backtrace paths use them.
 #define FineAirWidth AirGridWidth
 #define FineAirHeight AirGridHeight
-#define FineAirMaterialAt(p) AirGrid[uint((p).y) * AirGridWidth + uint((p).x)].MaterialIndex
+#define FineAirMaterialAt(p) FineMaterialMap[uint((p).y) * AirGridWidth + uint((p).x)]
 #define FineAirMaterials AirMaterials
+#define FineAirBlockGranular (AirSandboxMode == 0)
 #include "FineAirGeometry.hlsli"
+
+// Prepare a compact authoritative snapshot before the air passes. Geometry
+// samples this map repeatedly instead of striding through the full wet cell.
+[numthreads(16, 16, 1)]
+void CSFineMaterials(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= AirGridWidth || id.y >= AirGridHeight) return;
+    uint index = id.y * AirGridWidth + id.x;
+    FineMaterialMapOutput[index] = AirGrid[index].IsActive != 0 ? AirGrid[index].MaterialIndex : 0;
+}
 
 uint AirLinkBit(int2 delta)
 {
@@ -156,6 +174,13 @@ static const float AirMaximumHotness = 4.0;
 // additionally depends on connected geometry, gas drag and sustained fuel heat.
 static const float AirConvectionDivisor = 2000.0;
 static const float AirConvectionMaximum = 0.05;
+// A small gameplay increase for the combustion plume only. Keep the bounded
+// forcing and dissipative wind response; do not accelerate the global clock.
+static const float AirTransientConvectionGain = 1.15;
+// Gameplay expansion per carrier volume, calibrated against the saved furnace
+// with both an open inlet and a sealed inlet; not a finite-air thermodynamic law.
+static const float AirSandboxExpansionGain = 1.5;
+static const float AirSandboxMaximumExpansion = 0.0075;
 
 // Particle drag, from the main particle loop in Simulation.cpp. FIRE and SMKE
 // both use AirLoss 0.97 and AirDrag 0.04.
@@ -254,6 +279,14 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     uint index = AirIndex(coordinate);
     AirCell cell = Air[index];
+    // Remove last tick's compressible overlay before solving ordinary draft.
+    // The pulse is evolved separately and reattached after the projection.
+    float4 pulse=ReactionPulse[index];
+    float leftPulse=coordinate.x>0?ReactionPulse[index-1].y:0;
+    float upPulse=coordinate.y>0?ReactionPulse[index-AirWidth].z:0;
+    cell.Pressure-=pulse.x;
+    cell.VelocityX-=(leftPulse+pulse.y)*.5;
+    cell.VelocityY-=(upPulse+pulse.z)*.5;
     uint links = 0;
     [unroll] for (int dy = -1; dy <= 1; dy++)
     [unroll] for (int dx = -1; dx <= 1; dx++)
@@ -272,6 +305,7 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint top = coordinate.y * AirCellSize;
     uint counted = min(AirCellSize, AirGridWidth - left) * min(AirCellSize, AirGridHeight - top);
     uint gasCount = 0;
+    uint transientCount = 0;
     float airLossProduct = 1.0;
     float airDragSum = 0;
     float2 particleDrag = float2(0, 0);
@@ -304,6 +338,7 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
             if (material.SimulationKind == SimulationKindGas)
             {
                 gasCount++;
+                if ((material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0) transientCount++;
                 airLossProduct *= material.MotionAirLoss;
                 airDragSum += material.MotionAirDrag;
                 GasMotionState motion = AirGasMotion[uint(y) * AirGridWidth + uint(x)];
@@ -312,13 +347,11 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
                 particleDrag += (clamp(float2(motion.VelocityX, motion.VelocityY),
                     -AirGasMaximumSpeed, AirGasMaximumSpeed) -
                     float2(cell.VelocityX, cell.VelocityY)) * material.MotionAirDrag;
-                if (material.HotAir != 0.0 &&
-                    (material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0)
+                if (material.HotAir != 0.0 && (AirSandboxMode != 0 || (material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0))
                 {
-                    // Phase gases retain their calibrated pressure source.
-                    // A flame's continuous expansion source cannot be added
-                    // every tick to the same carrier volume without bound;
-                    // FIRE/SMKE drive buoyancy and slip drag instead.
+                    // Sandbox admits a bounded gameplay volume source below.
+                    // Simulation keeps the ordinary phase-gas pressure source;
+                    // its flame/smoke buoyancy comes from transported air heat.
                     hotAirInjection += 4.0 * material.HotAir;
                 }
             }
@@ -347,13 +380,30 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     // Keep phase-gas pressure separate from temperature-driven buoyancy.
-    cell.Pressure += hotAirInjection;
+    // TPT's continuously replenished HotAir is a gameplay source, rather
+    // than finite air heated once. A zero-divergence projection would erase
+    // its expansion and demand an inlet for every outlet. Sandbox admits a
+    // bounded volume source in that projection instead. Keep the channel's
+    // fine walls so expansion takes an actual opening, not a path through metal.
+    // A 4x4 carrier volume must not expand sixteen times faster merely because
+    // it is drawn densely. Average the per-packet source over that volume.
+    float meanOverheat = heat / max(1.0, float(counted));
+    float expansion = AirSandboxMode != 0 ? min(AirSandboxMaximumExpansion,
+        AirSandboxExpansionGain * max(0.0, hotAirInjection) / max(1.0, float(counted))) : 0;
+    ProjectionB[index].y = expansion;
+    // Balance the pressure equation's loss from the admitted divergence too,
+    // otherwise continuing expansion accumulates a spurious negative pressure.
+    cell.Pressure += expansion * AirStepPressure;
+    if (AirSandboxMode == 0) cell.Pressure += hotAirInjection;
 
     // Bounded temperature-driven convection. These coefficients are calibrated
     // for our sealed fine-grid passages, rather than TPT's air-transparent
     // ordinary metal. The y axis grows downward, so rising air is negative.
-    float meanOverheat = heat / max(1.0, float(counted));
-    float convection = min(AirConvectionMaximum, meanOverheat / AirConvectionDivisor);
+    float2 thermal = AirThermal[index];
+    float carrierOverheat = thermal.y > 1e-8 ? max(0, thermal.x / thermal.y - 273.15 - AirAmbientTemperature) : 0;
+    float convection = min(AirConvectionMaximum,
+        (AirSandboxMode != 0 ? meanOverheat : carrierOverheat) / AirConvectionDivisor);
+    convection *= transientCount>0 ? AirTransientConvectionGain : 1.0;
     cell.VelocityY = clamp(
         cell.VelocityY - max(0.0, convection),
         -AirMaximumVelocity,
@@ -364,13 +414,26 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
     // Air is one carrier volume. Per-particle drag is proportional to loading;
     // the ambient loss acts once on that volume, not once per drawn pixel.
     float retained = gasCount > 0 ? pow(airLossProduct, 1.0 / float(gasCount)) : 1.0;
-    float dragAttenuation = airDragSum > 0.9 ? 0.9 / airDragSum : 1.0;
+    // FIRE/SMKE's additive advection has a steady wind gain of 0.9/(1-.2).
+    // With sixteen packets, summed slip drag feeds that gain back sixteen
+    // times while volume loss acts once: .97 + .64 * .125 > 1. Unlimited
+    // sandbox smoke therefore self-accelerates in a closed-bottom chamber.
+    // Bound total slip drag, without dividing it down to one particle's .04.
+    // That old average made a dense flame drive its carrier too weakly.
+    // For FIRE/SMKE this bound retains .97 + .16*.125 = .99 < 1, so a
+    // full carrier still dissipates the additive-advection feedback.
+    // Finite FIRE/SMKE now relax toward the common carrier (steady gain <=1),
+    // so their slip cannot amplify wind. Sandbox retains its calibrated TPT
+    // additive response and therefore needs the stricter .16 bound.
+    float limit = AirSandboxMode != 0 ? .16 : .9;
+    float dragAttenuation = airDragSum > limit ? limit / airDragSum : 1.0;
+    float2 carrier = float2(cell.VelocityX, cell.VelocityY) * retained + particleDrag * dragAttenuation;
     cell.VelocityX = clamp(
-        cell.VelocityX * retained + particleDrag.x * dragAttenuation,
+        carrier.x,
         -AirMaximumVelocity,
         AirMaximumVelocity);
     cell.VelocityY = clamp(
-        cell.VelocityY * retained + particleDrag.y * dragAttenuation,
+        carrier.y,
         -AirMaximumVelocity,
         AirMaximumVelocity);
 
@@ -593,7 +656,10 @@ void CSAdvect(uint3 dispatchThreadId : SV_DispatchThreadID)
     // the circulation normal to the vorticity gradient; this is what carries
     // SMKE out from both ends instead of letting it collapse back into the
     // centreline.  Keep the wall cells excluded just as vorticityBmap does.
-    if (AirVorticityCoefficient > 0.0 &&
+    // Confinement adds energy to circulation. Unlimited sandbox combustion
+    // in a closed-bottom chamber otherwise amplifies a trapped vortex even
+    // when its expansion source is small. Advection retains natural eddies.
+    if (AirSandboxMode == 0 && AirVorticityCoefficient > 0.0 &&
         coordinate.x > 1 && coordinate.x + 2 < AirWidth &&
         coordinate.y > 1 && coordinate.y + 2 < AirHeight)
     {
@@ -665,7 +731,7 @@ void CSDivergence(uint3 id : SV_DispatchThreadID)
     // Divergence and the pressure gradient act on the SAME face fluxes.
     // Their composition is exactly the Laplacian solved below. A collocated
     // central gradient instead leaves unresolved alternating pressure modes.
-    ProjectionA[i] = float2(ProjectionA[i].x, r - l + d - u);
+    ProjectionA[i] = float2(ProjectionA[i].x, r - l + d - u - ProjectionB[i].y);
 }
 
 float2 Jacobi(int2 p, bool readA)
@@ -682,7 +748,11 @@ float2 Jacobi(int2 p, bool readA)
         sum += readA ? ProjectionA[j].x : ProjectionB[j].x;
         faces += 1;
     }
-    return float2(faces > 0 ? (sum - own.y) / faces : 0, own.y);
+    float potential = faces > 0 ? (sum - own.y) / faces : 0;
+    // A completely closed sandbox box has no outlet for its gameplay source.
+    // Bound its correction instead of accumulating an unsolvable mean forever.
+    potential = clamp(potential, -AirMaximumPressure, AirMaximumPressure);
+    return float2(potential, own.y);
 }
 [numthreads(8, 8, 1)]
 void CSJacobiAB(uint3 id : SV_DispatchThreadID)

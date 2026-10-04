@@ -56,12 +56,137 @@ internal static class WorldCellCodecRegressionVerifier
             VerifyV5Migration();
             await VerifyV5RuntimeRemapAsync(directory);
             await VerifyOxidizerAsync(directory, serializer, materials);
+            await VerifyFusionVersionAsync(directory, serializer, materials);
+            var heat = new System.Numerics.Vector2[] { new(17.3f,.025f) };
+            var thermal = MemoryMarshal.AsBytes(heat.AsSpan()).ToArray();
+            var heatWorld = new SimulationWorldSnapshot(3,1,new byte[3*WorldCellCodec.CurrentCellStride],AirThermal:thermal);
+            string heatPath = Path.Combine(directory,"carrier-heat.json");
+            await serializer.SaveAsync(heatPath,new SimulationSettings(),materials.GetRequiredRuntimeIndex(CoreMaterialIds.Sand),heatWorld,materials);
+            var heatLoaded = await serializer.LoadAsync(heatPath,materials);
+            Require(heatLoaded?.World?.AirThermal is not null && heatLoaded.World.AirThermal.AsSpan().SequenceEqual(thermal),"Carrier heat did not round-trip.");
+            // Explicit old-v9 fixture: strip only v10's four empty extensions.
+            byte[] v9=await File.ReadAllBytesAsync(Path.ChangeExtension(heatPath,".world"));
+            // Pack historical stride before stripping the later extensions.
+            byte[] oldV9=RepackWorldPrefix(v9,3,40);
+            v9=oldV9;
+            BinaryPrimitives.WriteInt32LittleEndian(v9.AsSpan(16,4),40);
+            BinaryPrimitives.WriteInt32LittleEndian(v9.AsSpan(20,4),120);
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(v9.AsSpan(4,4),9);
+            string v9Path=Path.Combine(directory,"legacy-v9.json");
+            var v9Json=System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(heatPath))!.AsObject();v9Json["Version"]=9;
+            await File.WriteAllTextAsync(v9Path,v9Json.ToJsonString());
+            await File.WriteAllBytesAsync(Path.ChangeExtension(v9Path,".world"),v9[..^16]);
+            var v9Loaded=await serializer.LoadAsync(v9Path,materials);
+            Require(v9Loaded?.World?.AirThermal is { } oldHeat && oldHeat.AsSpan().SequenceEqual(thermal) && v9Loaded.World.ReactionPulse is null,
+                "Legacy v9 thermal save did not migrate without a pulse.");
+            foreach(var invalid in new System.Numerics.Vector4[] { new(-1,0,0,0),new(1,float.NaN,1,0),new(1,1,0,0),new(1,1,1,1) })
+            {
+                var bad=new System.Numerics.Vector4[3];bad[0]=invalid;
+                ExpectInvalid(()=>WorldCellCodec.ValidateReactionState(3,1,MemoryMarshal.AsBytes(bad.AsSpan()).ToArray(),null,null,null));
+            }
+            foreach(var invalid in new System.Numerics.Vector4[] { new(float.NaN,0,0,0),new(257,0,0,0),new(1,65,0,0),new(1,0,0,-1) })
+                ExpectInvalid(()=>WorldCellCodec.ValidateReactionState(3,1,null,MemoryMarshal.AsBytes(new[]{invalid}.AsSpan()).ToArray(),null,null));
+            foreach(var invalid in new System.Numerics.Vector2[] { new(float.NaN,1),new(1,-1),new(1,0),new(6000,1),new(float.MaxValue,1e-35f) })
+            {
+                var invalidBytes=MemoryMarshal.AsBytes(new[] { invalid }.AsSpan()).ToArray();
+                ExpectInvalid(()=>WorldCellCodec.ValidateAirThermal(3,1,invalidBytes));
+            }
+            await VerifySimulationModesAsync(directory, serializer, materials);
             await VerifyCorruptWorldsAsync(directory);
         }
         finally
         {
             Directory.Delete(directory, true);
         }
+    }
+
+    internal static byte[] RepackWorldPrefix(byte[] bytes, int count, int stride)
+    {
+        int current=WorldCellCodec.CurrentCellStride;
+        byte[] legacy=new byte[bytes.Length-count*(current-stride)];
+        bytes.AsSpan(0,28).CopyTo(legacy);
+        for(int i=0;i<count;i++) bytes.AsSpan(28+i*current,stride).CopyTo(legacy.AsSpan(28+i*stride));
+        bytes.AsSpan(28+count*current).CopyTo(legacy.AsSpan(28+count*stride));
+        BinaryPrimitives.WriteInt32LittleEndian(legacy.AsSpan(16,4),stride);
+        BinaryPrimitives.WriteInt32LittleEndian(legacy.AsSpan(20,4),count*stride);
+        return legacy;
+    }
+
+    private static async Task VerifyFusionVersionAsync(string directory, SimulationStateSerializer serializer,
+        MaterialRegistry materials)
+    {
+        var cells = new GridCell[3];
+        cells[0] = new GridCell { IsActive=1, MaterialIndex=materials.GetRequiredRuntimeIndex(CoreMaterialIds.Water),
+            Mass=1, Temperature=0, Lifetime=-100 };
+        string path=Path.Combine(directory,"fusion-version.json");
+        await serializer.SaveAsync(path,new SimulationSettings(),(ushort)cells[0].MaterialIndex,
+            new SimulationWorldSnapshot(3,1,MemoryMarshal.AsBytes(cells.AsSpan()).ToArray()),materials);
+        var loaded=await serializer.LoadAsync(path,materials);
+        Require(MemoryMarshal.Cast<byte,GridCell>(loaded!.World!.Grid)[0].Lifetime==-100,"v11 freezing progress lost");
+        byte[] bytes=await File.ReadAllBytesAsync(Path.ChangeExtension(path,".world"));
+        var json=System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(path))!;
+        // Repack the current 48-byte cells into the actual historical 40-byte layout.
+        byte[] legacy=RepackWorldPrefix(bytes,3,40);
+        bytes=legacy;
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16,4),40);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(20,4),120);
+        json["Version"]=10;
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4,4),10);
+        await File.WriteAllTextAsync(path,json.ToJsonString());
+        await File.WriteAllBytesAsync(Path.ChangeExtension(path,".world"),bytes);
+        bool rejected=false;
+        try { await serializer.LoadAsync(path,materials); } catch(InvalidDataException) { rejected=true; }
+        Require(rejected,"Legacy v10 negative lifetime accepted");
+        // v10 has the same payload layout; legitimate positive latent progress remains readable.
+        BinaryPrimitives.WriteSingleLittleEndian(bytes.AsSpan(28+36,4),100);
+        await File.WriteAllBytesAsync(Path.ChangeExtension(path,".world"),bytes);
+        loaded=await serializer.LoadAsync(path,materials);
+        Require(MemoryMarshal.Cast<byte,GridCell>(loaded!.World!.Grid)[0].Lifetime==100,"Legacy v10 phase progress lost");
+        // A forged v11 negative lifetime on smoke is rejected after palette remapping.
+        json["Version"]=11;
+        var palette=json["MaterialPalette"]!.AsArray();
+        for(int i=0;i<palette.Count;i++) if(palette[i]!.GetValue<string>()==CoreMaterialIds.Water) palette[i]=CoreMaterialIds.Smoke;
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4,4),11);
+        BinaryPrimitives.WriteSingleLittleEndian(bytes.AsSpan(28+36,4),-100);
+        await File.WriteAllTextAsync(path,json.ToJsonString());
+        await File.WriteAllBytesAsync(Path.ChangeExtension(path,".world"),bytes);
+        rejected=false;
+        try { await serializer.LoadAsync(path,materials); } catch(InvalidDataException) { rejected=true; }
+        Require(rejected,"Negative lifetime on non-fusion material accepted after remap");
+    }
+
+    private static async Task VerifySimulationModesAsync(string directory, SimulationStateSerializer serializer,
+        MaterialRegistry materials)
+    {
+        Require(new SimulationSettings().Mode == SimulationMode.Sandbox, "New scene must default to Sandbox.");
+        var grid = new byte[320 * 180 * System.Runtime.InteropServices.Marshal.SizeOf<GridCell>()];
+        var oxygen = new float[320 * 180];
+        Array.Fill(oxygen, .37f);
+        var world = new SimulationWorldSnapshot(320, 180, grid,
+            Oxidizer: MemoryMarshal.AsBytes(oxygen.AsSpan()).ToArray());
+        foreach (SimulationMode mode in Enum.GetValues<SimulationMode>())
+        {
+            string path = Path.Combine(directory, $"mode-{mode}.json");
+            await serializer.SaveAsync(path, new SimulationSettings { Mode = mode },
+                materials.GetRequiredRuntimeIndex(CoreMaterialIds.Sand), world, materials);
+            var loaded = await serializer.LoadAsync(path, materials) ?? throw new InvalidDataException("Missing mode scene.");
+            var settings = new SimulationSettings();
+            SimulationStateSerializer.Apply(loaded.State, settings);
+            Require(settings.Mode == mode && loaded.World is not null &&
+                loaded.World.Oxidizer!.AsSpan().SequenceEqual(world.Oxidizer), "Mode/oxidizer roundtrip changed.");
+            var json = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
+            json.Remove("Mode");
+            await File.WriteAllTextAsync(path, json.ToJsonString());
+            var legacy = await serializer.LoadAsync(path, materials);
+            Require(legacy?.State.Mode == SimulationMode.Simulation, "Existing scene changed combustion rules.");
+            json["Mode"] = 999;
+            await File.WriteAllTextAsync(path, json.ToJsonString());
+            bool invalidRejected = false;
+            try { await serializer.LoadAsync(path, materials); }
+            catch (InvalidDataException) { invalidRejected = true; }
+            Require(invalidRejected, "Unknown scene mode was accepted.");
+        }
+        Console.WriteLine("[PASS] Scene modes roundtrip; legacy scenes retain Simulation; oxygen is preserved.");
     }
 
     private static void VerifyLayoutContracts()
@@ -75,7 +200,7 @@ internal static class WorldCellCodecRegressionVerifier
             "LegacyGridCellV5 must remain 36 bytes.");
         Require(
             Marshal.SizeOf<GridCell>() == WorldCellCodec.CurrentCellStride,
-            "GridCell must be 40 bytes.");
+            "GridCell must be 52 bytes.");
         string shaderPath = Path.Combine(AppContext.BaseDirectory, "Content", "Shaders", "PhysicsShared.hlsli");
         string shader = File.ReadAllText(shaderPath);
         int layoutStart = shader.IndexOf("struct GridCell", StringComparison.Ordinal);
@@ -86,7 +211,7 @@ internal static class WorldCellCodecRegressionVerifier
         [
             "uint MaterialIndex;", "float Mass;", "float VelocityX;", "float VelocityY;",
             "float Pressure;", "uint IsActive;", "uint BodyId;", "uint RestFrames;",
-            "float Temperature;", "float Lifetime;"
+            "float Temperature;", "float Lifetime;", "float MoistureMass;", "float MoistureEnergy;", "float FuelMass;"
         ];
         int previous = -1;
         foreach (string field in fields)
@@ -272,10 +397,10 @@ internal static class WorldCellCodecRegressionVerifier
         string worldPath = Path.ChangeExtension(scenePath, ".world");
         RawWorldFile raw = await SimulationStateSerializer.ReadWorldAsync(worldPath, CancellationToken.None) ??
             throw new InvalidOperationException("Saved v5 world file is missing.");
-        Require(raw.Version == 7, "CurrentVersion is not 7.");
-        Require(raw.StoredCellStride == 40, "v6 did not store the explicit 40-byte stride.");
-        Require(new FileInfo(worldPath).Length == CurrentHeaderSize + 4 + raw.CellBytes.Length,
-            "v7 world header is not 28 bytes.");
+        Require(raw.Version == 14, "CurrentVersion is not 14.");
+        Require(raw.StoredCellStride == 52, "Current writer did not store the explicit 52-byte stride.");
+        Require(new FileInfo(worldPath).Length == CurrentHeaderSize + 24 + raw.CellBytes.Length,
+            "v10 world did not preserve its header and empty extensions.");
 
         LoadedSimulationScene loaded = await serializer.LoadAsync(scenePath, materials) ??
             throw new InvalidOperationException("Saved v5 scene did not reload.");
@@ -344,24 +469,34 @@ internal static class WorldCellCodecRegressionVerifier
 
     private static async Task VerifyOxidizerAsync(string directory, SimulationStateSerializer serializer, MaterialRegistry materials)
     {
-        float[] concentrations = [0, .1234567f, 1];
+        float[] concentrations = [0, .1234567f, 2.75f];
         byte[] oxygen = MemoryMarshal.AsBytes(concentrations.AsSpan()).ToArray();
         GridCell cell = new() { MaterialIndex = materials.GetRequiredRuntimeIndex(CoreMaterialIds.Sand),
             IsActive = 1, Mass = 1, Temperature = 20 };
         SimulationWorldSnapshot world = CreateSnapshot(3, 1, cell, default, default) with { Oxidizer = oxygen };
-        string path = Path.Combine(directory, "oxidizer-v7.json");
+        string path = Path.Combine(directory, "oxidizer-v8.json");
         await serializer.SaveAsync(path, new SimulationSettings { OpenBoundaries = false }, (ushort)cell.MaterialIndex, world, materials);
         var scene = await serializer.LoadAsync(path, materials);
-        Require(scene?.State.OpenBoundaries == false, "v7 did not preserve the oxygen boundary condition.");
+        Require(scene?.State.OpenBoundaries == false, "v8 did not preserve the oxygen boundary condition.");
         var loaded = scene?.World;
         Require(loaded?.Oxidizer is not null && loaded.Oxidizer.AsSpan().SequenceEqual(oxygen),
-            "World v7 did not preserve exhausted, fractional and fresh oxidizer byte-for-byte.");
+            "World v8 did not preserve exhausted, fractional and compressed oxidizer byte-for-byte.");
         var raw = await SimulationStateSerializer.ReadWorldAsync(Path.ChangeExtension(path, ".world"), CancellationToken.None);
-        Require(raw?.Version == 7 && raw.StoredCellStride == 40 && raw.Oxidizer is not null,
-            "v7 changed GridCell layout or omitted the oxidizer section.");
-        Require(WorldCellCodec.Decode(new RawWorldFile(6, 1, 1, 40, EncodeCurrentCells(cell))).Oxidizer is null,
+        Require(raw?.Version == 14 && raw.StoredCellStride == 52 && raw.Oxidizer is not null,
+            "v8 changed GridCell layout or omitted the oxidizer section.");
+        byte[] oldOxygen = MemoryMarshal.AsBytes(new float[] { 0, .37f, 1 }.AsSpan()).ToArray();
+        Require(WorldCellCodec.Decode(new RawWorldFile(7, 3, 1, 40, EncodeV6Cells(MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray()), oldOxygen)).Oxidizer!.AsSpan().SequenceEqual(oldOxygen),
+            "v7 inventory was not preserved during migration.");
+        ExpectInvalid(() => WorldCellCodec.Decode(new RawWorldFile(7, 3, 1, 40, EncodeV6Cells(MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray()), oxygen)));
+        var emptyInventory=world with { Grid=[] };
+        string emptyPath=Path.Combine(directory,"empty-inventory-v8.json");
+        await serializer.SaveAsync(emptyPath,new SimulationSettings(),0,emptyInventory,materials);
+        var emptyLoaded=await serializer.LoadAsync(emptyPath,materials);
+        Require(emptyLoaded?.World?.Oxidizer is not null && emptyLoaded.World.Oxidizer.AsSpan().SequenceEqual(oxygen),
+            "An empty cell section discarded its saved inventory.");
+        Require(WorldCellCodec.Decode(new RawWorldFile(6, 1, 1, 40, EncodeV6Cells(cell))).Oxidizer is null,
             "v6 must remain loadable without an oxidizer section.");
-        foreach (float invalid in new[] { float.NaN, float.PositiveInfinity, -.01f, 1.01f })
+        foreach (float invalid in new[] { float.NaN, float.PositiveInfinity, -.01f })
         {
             float[] values = [invalid, 0, 1];
             ExpectInvalid(() => WorldCellCodec.ValidateOxidizer(3, 1, MemoryMarshal.AsBytes(values.AsSpan()).ToArray()));
@@ -379,7 +514,7 @@ internal static class WorldCellCodecRegressionVerifier
         string truncated = Path.Combine(directory, "oxidizer-truncated.world");
         await File.WriteAllBytesAsync(truncated, original[..^1]);
         await ExpectInvalidAsync(() => SimulationStateSerializer.ReadWorldAsync(truncated, CancellationToken.None));
-        Console.WriteLine("PHYXEL_OXIDIZER_CODEC v7RoundTrip=True v6Compatible=True invalidValuesAndLengthsRejected=True");
+        Console.WriteLine("PHYXEL_OXIDIZER_CODEC v8CompressedRoundTrip=True v7Compatible=True v6Compatible=True invalidValuesAndLengthsRejected=True");
     }
 
     private static async Task VerifyCorruptWorldsAsync(string directory)
@@ -410,15 +545,15 @@ internal static class WorldCellCodecRegressionVerifier
 
         GridCell valid = new() { MaterialIndex = 0, Mass = 1, IsActive = 1, Temperature = 20 };
         byte[] currentCell = EncodeCurrentCells(valid);
-        await ExpectInvalidCurrentWorldAsync(directory, "v6-wrong-stride", 39, 40, currentCell);
-        await ExpectInvalidCurrentWorldAsync(directory, "v6-truncated", 40, 40, currentCell[..^1]);
-        await ExpectInvalidCurrentWorldAsync(directory, "v6-trailing", 40, 40, [.. currentCell, 0x7f]);
+        await ExpectInvalidCurrentWorldAsync(directory, "v14-wrong-stride", 51, 52, currentCell);
+        await ExpectInvalidCurrentWorldAsync(directory, "v14-truncated", 52, 52, currentCell[..^1]);
+        await ExpectInvalidCurrentWorldAsync(directory, "v14-trailing", 52, 52, [.. currentCell, 0x7f]);
         await ExpectInvalidTemperatureAsync(directory, "v6-nan", float.NaN);
         await ExpectInvalidTemperatureAsync(directory, "v6-infinity", float.PositiveInfinity);
         await ExpectInvalidTemperatureAsync(directory, "v6-too-cold", -273.16f);
         await ExpectInvalidTemperatureAsync(directory, "v6-too-hot", 5000.01f);
         WorldCellCodec.Decode(new RawWorldFile(
-            6,
+            14,
             2,
             1,
             WorldCellCodec.CurrentCellStride,
@@ -442,7 +577,7 @@ internal static class WorldCellCodecRegressionVerifier
             Temperature = float.NaN
         };
         SimulationWorldSnapshot normalized = WorldCellCodec.Decode(
-            new RawWorldFile(6, 1, 1, 40, EncodeCurrentCells(dirtyInactive)));
+            new RawWorldFile(6, 1, 1, 40, EncodeV6Cells(dirtyInactive)));
         AssertCells(normalized, default(GridCell));
     }
 
@@ -553,9 +688,9 @@ internal static class WorldCellCodecRegressionVerifier
         int declaredLength,
         byte[] actualBytes)
     {
-        byte[] header = new byte[CurrentHeaderSize];
+        byte[] header = new byte[28];
         BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0, 4), WorldFileMagic);
-        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(4, 4), 6);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(4, 4), 14);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(8, 4), width);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(12, 4), height);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(16, 4), stride);
@@ -563,6 +698,7 @@ internal static class WorldCellCodecRegressionVerifier
         await using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None);
         await stream.WriteAsync(header);
         await stream.WriteAsync(actualBytes);
+        await stream.WriteAsync(new byte[20]);
     }
 
     private static byte[] EncodeLegacyCells(params LegacyGridCellV3V4[] cells)
@@ -581,6 +717,13 @@ internal static class WorldCellCodecRegressionVerifier
             BinaryPrimitives.WriteUInt32LittleEndian(destination[24..28], cell.BodyId);
             BinaryPrimitives.WriteUInt32LittleEndian(destination[28..32], cell.RestFrames);
         }
+        return bytes;
+    }
+
+    private static byte[] EncodeV6Cells(params GridCell[] cells)
+    {
+        byte[] bytes=new byte[cells.Length*40];
+        for(int i=0;i<cells.Length;i++) MemoryMarshal.AsBytes(cells.AsSpan(i,1))[..40].CopyTo(bytes.AsSpan(i*40));
         return bytes;
     }
 

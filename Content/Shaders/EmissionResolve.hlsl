@@ -55,12 +55,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     destination.Pressure = 0;
     destination.IsActive = destination.Mass > 0 ? 1 : 0;
     destination.BodyId = (product.Flags & MaterialFlagFlame) != 0
-        ? request.SourceIndex & SelfOxidizingFlameMarker : 0;
+        ? request.SourceIndex & (SelfOxidizingFlameMarker | ReactedFuelFlameMarker) : 0;
     destination.RestFrames = 0;
     destination.Temperature = request.Temperature;
     destination.Lifetime = InitialMaterialLifetime(
         product,
-        request.SourceIndex ^ destinationIndex ^ request.MaterialIndex);
+        (request.SourceIndex & ~ReactedFuelFlameMarker) ^ destinationIndex ^ request.MaterialIndex) *
+        ((product.Flags & MaterialFlagFlame) != 0 && request.FlameLifetimeMultiplier > 0 ? request.FlameLifetimeMultiplier : 1);
     Grid[destinationIndex] = destination;
     InterlockedOr(CombustionSummary[0], CombustionOccurred | TargetCellular | TargetGas);
 }

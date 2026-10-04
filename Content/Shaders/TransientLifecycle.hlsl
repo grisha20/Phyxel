@@ -8,7 +8,7 @@ cbuffer TransientConstants : register(b0)
     uint TransientHeight;
     uint TransientMaterialCount;
     uint TransientTickIndex;
-    uint TransientReserved0;
+    uint FiniteOxidizer;
     uint TransientReserved1;
     uint TransientReserved2;
 };
@@ -26,6 +26,23 @@ float2 OxidizerAt(uint index)
 {
     GridCell cell = Grid[index];
     return float2(Oxidizer[index], OxidizerSpace(cell, Materials[cell.MaterialIndex]));
+}
+
+// Sandbox keeps CO2's direct flame-quenching interaction, like TPT,
+// without requiring an invisible ambient oxygen inventory for combustion.
+bool TouchesCarbonDioxide(uint2 p)
+{
+    for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++)
+    {
+        if (dx == 0 && dy == 0) continue;
+        int2 q = int2(p) + int2(dx, dy);
+        if (q.x < 0 || q.y < 0 || q.x >= int(TransientWidth) || q.y >= int(TransientHeight)) continue;
+        GridCell c = Grid[uint(q.y) * TransientWidth + uint(q.x)];
+        if (c.IsActive != 0 && c.MaterialIndex < TransientMaterialCount &&
+            (Materials[c.MaterialIndex].Flags & MaterialFlagThermalCarbonDioxide) != 0 &&
+            c.Mass >= .5 * Materials[c.MaterialIndex].Density) return true;
+    }
+    return false;
 }
 
 [numthreads(16, 16, 1)]
@@ -56,8 +73,14 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (coordinate.x + 1 < TransientWidth) supply += OxidizerAt(index + 1);
     if (coordinate.y > 0) supply += OxidizerAt(index - TransientWidth);
     if (coordinate.y + 1 < TransientHeight) supply += OxidizerAt(index + TransientWidth);
-    bool extinguished = flame && cell.BodyId != SelfOxidizingFlameMarker &&
-        supply.x <= max(supply.y, 1) * OxidizerExtinctionThreshold;
+    // Self-oxidizing flames are independent of ambient O2, but must still
+    // stop when cooled. Combustion applies the same temperature gate before
+    // this pass, so a cold marker cannot ignite another grain for one tick.
+    bool thermallyExtinguished = flame && cell.Temperature <= material.FlameExtinctionTemperature;
+    bool extinguished = thermallyExtinguished || (flame && cell.BodyId != SelfOxidizingFlameMarker &&
+        (FiniteOxidizer != 0
+            ? cell.BodyId != ReactedFuelFlameMarker && supply.x <= max(supply.y, 1) * OxidizerExtinctionThreshold
+            : TouchesCarbonDioxide(coordinate)));
     cell.Lifetime = extinguished ? 0 : max(0, cell.Lifetime - TransientDeltaTime);
     if (cell.Lifetime > 0)
     {

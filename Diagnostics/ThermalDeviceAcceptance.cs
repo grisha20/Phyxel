@@ -110,7 +110,15 @@ internal static class ThermalDeviceAcceptance
                 if (c.IsActive != 0) e += c.Mass * (double)PhaseEnthalpy.SpecificEnergy(c, table);
             return e;
         }
-        double before = Energy(initial.Grid), after = Energy(snapshot.Grid), heat = 0, ambient = 0, heating = 0, cooling = 0;
+        double AirHeat(SimulationWorldSnapshot world)
+        {
+            if (world.AirThermal is null) return 0;
+            double excess=0;
+            foreach(var cell in MemoryMarshal.Cast<byte,System.Numerics.Vector2>(world.AirThermal))
+                excess += cell.X - 293.15 * cell.Y;
+            return excess;
+        }
+        double before = Energy(initial.Grid)+AirHeat(initial), after = Energy(snapshot.Grid)+AirHeat(snapshot), heat = 0, ambient = 0, heating = 0, cooling = 0;
         foreach (var l in ledger) { heat += l.DeviceHeat; ambient += l.AmbientHeat; heating += Math.Max(0, l.DeviceHeat); cooling += Math.Min(0, l.DeviceHeat); }
         // Creation of one test block at room temperature is an
         // explicitly accounted input of matter, not device-generated heat.

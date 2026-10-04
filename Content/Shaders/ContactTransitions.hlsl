@@ -11,13 +11,19 @@ cbuffer ContactConstants : register(b0)
 StructuredBuffer<MaterialProperties> Materials : register(t0);
 RWStructuredBuffer<GridCell> Grid : register(u0);
 RWStructuredBuffer<uint> CellMaterials : register(u1);
+RWStructuredBuffer<GasMotionState> GasMotion : register(u2);
+RWStructuredBuffer<uint> ContactSummary : register(u3);
 
-bool IsLiquidContact(uint2 coordinate)
+#include "PhaseEnthalpy.hlsli"
+
+bool IsLiquidContact(uint2 coordinate, MaterialProperties source)
 {
     uint index = coordinate.y * ContactWidth + coordinate.x;
     GridCell neighbour = Grid[index];
     return neighbour.IsActive != 0 &&
-        Materials[neighbour.MaterialIndex].SimulationKind == SimulationKindLiquid;
+        Materials[neighbour.MaterialIndex].SimulationKind == SimulationKindLiquid &&
+        (source.ThermalDeviceMaximumPower == 0 ||
+            neighbour.MaterialIndex + 1 == (uint)source.ThermalDeviceMaximumPower);
 }
 
 [numthreads(16, 16, 1)]
@@ -37,6 +43,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     MaterialProperties source = Materials[cell.MaterialIndex];
+    if (source.MoistureCapacity > 0) return; // Conserved path below owns these materials.
     if (source.SimulationKind != SimulationKindGranular ||
         source.ContactLiquidIntoMaterialIndex == 0xffffffffu ||
         source.ContactLiquidRatePerSecond <= 0)
@@ -45,10 +52,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     bool touchingLiquid =
-        (coordinate.x > 0 && IsLiquidContact(coordinate - uint2(1, 0))) ||
-        (coordinate.x + 1 < ContactWidth && IsLiquidContact(coordinate + uint2(1, 0))) ||
-        (coordinate.y > 0 && IsLiquidContact(coordinate - uint2(0, 1))) ||
-        (coordinate.y + 1 < ContactHeight && IsLiquidContact(coordinate + uint2(0, 1)));
+        (coordinate.x > 0 && IsLiquidContact(coordinate - uint2(1, 0), source)) ||
+        (coordinate.x + 1 < ContactWidth && IsLiquidContact(coordinate + uint2(1, 0), source)) ||
+        (coordinate.y > 0 && IsLiquidContact(coordinate - uint2(0, 1), source)) ||
+        (coordinate.y + 1 < ContactHeight && IsLiquidContact(coordinate + uint2(0, 1), source));
     if (!touchingLiquid)
     {
         return;
@@ -68,4 +75,230 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     cell.RestFrames = 0;
     Grid[index] = cell;
     CellMaterials[index] = cell.MaterialIndex;
+}
+
+float FuelPoreFraction(GridCell c, MaterialProperties m)
+{
+    return m.FuelCapacity>0 && c.Mass>0 ? saturate(c.FuelMass/(c.Mass*m.FuelCapacity)) : 0;
+}
+float WaterPoreFraction(GridCell c, MaterialProperties m)
+{
+    return m.MoistureCapacity>0 && c.Mass>0 ? saturate(c.MoistureMass/(c.Mass*m.MoistureCapacity)) : 0;
+}
+bool TransferAbsorbedFuel(inout GridCell first, inout GridCell second)
+{
+    MaterialProperties ma=Materials[first.MaterialIndex], mb=Materials[second.MaterialIndex];
+    bool fa=first.IsActive!=0 && ma.FuelCapacity>0 && first.Mass>0;
+    bool fb=second.IsActive!=0 && mb.FuelCapacity>0 && second.Mass>0;
+    if(!fa && !fb) return false;
+    bool fromFirst;
+    float amount;
+    MaterialProperties carrier;
+    if(fa && fb)
+    {
+        if(ma.FuelLiquidMaterialIndex!=mb.FuelLiquidMaterialIndex) return false;
+        float ca=first.Mass*ma.FuelCapacity, cb=second.Mass*mb.FuelCapacity;
+        float difference=first.FuelMass/ca-second.FuelMass/cb;
+        fromFirst=difference>0;
+        amount=abs(difference)*ca*cb/(ca+cb);
+        amount=min(amount,min(ma.FuelAbsorptionRate,mb.FuelAbsorptionRate)*min(first.Mass,second.Mass)*ContactDeltaTime*4);
+        carrier=Materials[ma.FuelLiquidMaterialIndex];
+    }
+    else
+    {
+        fromFirst=fb;
+        GridCell receiver=first, donor=second;
+        MaterialProperties mr=ma;
+        if(fb) { receiver=second; donor=first; mr=mb; }
+        if(donor.IsActive==0 || donor.MaterialIndex!=mr.FuelLiquidMaterialIndex || donor.Mass<=0) return false;
+        amount=mr.FuelAbsorptionRate*receiver.Mass*ContactDeltaTime*4;
+        carrier=Materials[mr.FuelLiquidMaterialIndex];
+    }
+    GridCell donor=first, receiver=second;
+    MaterialProperties md=ma, mr=mb;
+    bool donorAbsorbent=fa;
+    if(!fromFirst) { donor=second; receiver=first; md=mb; mr=ma; donorAbsorbent=fb; }
+    amount=min(amount,min(donorAbsorbent ? donor.FuelMass : donor.Mass,
+        max(0,receiver.Mass*mr.FuelCapacity*(1-WaterPoreFraction(receiver,mr))-receiver.FuelMass)));
+    if(amount<=0) return false;
+    float ed=donor.Mass*CellSpecificEnthalpy(donor), er=receiver.Mass*CellSpecificEnthalpy(receiver);
+    float carried=amount*carrier.HeatCapacity*donor.Temperature;
+    if(donorAbsorbent) donor.FuelMass-=amount; else donor.Mass-=amount;
+    receiver.FuelMass+=amount;
+    receiver=SetCellSpecificEnthalpy(receiver,(er+carried)/receiver.Mass);
+    receiver.RestFrames=0;
+    if(donorAbsorbent || donor.Mass>0)
+    {
+        donor=SetCellSpecificEnthalpy(donor,(ed-carried)/donor.Mass);
+        donor.RestFrames=0;
+    }
+    else donor=CreateEmptyCell();
+    first=donor; second=receiver;
+    if(!fromFirst) { first=receiver; second=donor; }
+    return true;
+}
+
+// Disjoint adjacent pairs: horizontal-even, vertical-even, horizontal-odd,
+// vertical-odd. No cell is written by two invocations, so shared water cannot
+// be spent twice. Each face is visited every four fixed thermal ticks.
+[numthreads(16, 16, 1)]
+void CSMoisture(uint3 id : SV_DispatchThreadID)
+{
+    uint2 p=id.xy;
+    if(p.x>=ContactWidth || p.y>=ContactHeight || ContactDeltaTime<=0) return;
+    bool capillary=(ContactTickIndex&0x80000000u)!=0;
+    uint phase=ContactTickIndex&3, axis=capillary?1:phase&1;
+    uint stride=capillary?8:1, parity=capillary?(ContactTickIndex&1):phase>>1;
+    if((((axis==0?p.x:p.y)/stride)&1)!=parity) return;
+    uint2 q=p+(axis==0 ? uint2(stride,0) : uint2(0,stride));
+    if(q.x>=ContactWidth || q.y>=ContactHeight) return;
+    uint a=p.y*ContactWidth+p.x, b=q.y*ContactWidth+q.x;
+    GridCell first=Grid[a], second=Grid[b];
+    if(capillary)
+    {
+        // Fast longitudinal redistribution only inside a continuous porous
+        // solid. Every intermediate cell must be a compatible capillary path.
+        uint liquid=Materials[first.MaterialIndex].MoistureLiquidMaterialIndex;
+        [loop] for(uint offset=0;offset<=stride;offset++)
+        {
+            GridCell path=Grid[(p.y+offset)*ContactWidth+p.x];
+            MaterialProperties mp=Materials[path.MaterialIndex];
+            if(path.IsActive==0 || mp.SimulationKind!=SimulationKindSolid ||
+                mp.MoistureReserved0<=0 || mp.MoistureLiquidMaterialIndex!=liquid) return;
+        }
+    }
+    else if(TransferAbsorbedFuel(first,second))
+    {
+        Grid[a]=first; Grid[b]=second;
+        CellMaterials[a]=first.IsActive!=0?first.MaterialIndex:0;
+        CellMaterials[b]=second.IsActive!=0?second.MaterialIndex:0;
+        return;
+    }
+    bool firstFuel=first.IsActive!=0 && Materials[first.MaterialIndex].MoistureCapacity>0;
+    bool secondFuel=second.IsActive!=0 && Materials[second.MaterialIndex].MoistureCapacity>0;
+    if(firstFuel && secondFuel)
+    {
+        MaterialProperties ma=Materials[first.MaterialIndex], mb=Materials[second.MaterialIndex];
+        if(first.Mass<=0 || second.Mass<=0 ||
+            ma.MoistureLiquidMaterialIndex!=mb.MoistureLiquidMaterialIndex) return;
+        float ca=first.Mass*ma.MoistureCapacity, cb=second.Mass*mb.MoistureCapacity;
+        float difference=first.MoistureMass/ca-second.MoistureMass/cb;
+        bool fromFirst=difference>0;
+        // Never pump the top wetter than its source. Adjacent transport still
+        // redistributes in both directions; this longer path speeds the rise.
+        if(capillary && fromFirst) return;
+        GridCell donor=first, receiver=second;
+        MaterialProperties donorMaterial=ma, receiverMaterial=mb;
+        if(!fromFirst) { donor=second; receiver=first; donorMaterial=mb; receiverMaterial=ma; }
+        float amount=min(abs(difference)*ca*cb/(ca+cb),min(donor.MoistureMass,
+            max(0,receiver.Mass*receiverMaterial.MoistureCapacity*(1-FuelPoreFraction(receiver,receiverMaterial))-receiver.MoistureMass)));
+        float rate=capillary?min(ma.MoistureReserved0,mb.MoistureReserved0):
+            min(ma.MoistureAbsorptionRate,mb.MoistureAbsorptionRate);
+        amount=min(amount,rate*min(first.Mass,second.Mass)*ContactDeltaTime*(capillary?2:4));
+        // Keep sub-resolution water at its source; never discard it.
+        if(amount<.0001*min(first.Mass,second.Mass) || amount<=0) return;
+        MaterialProperties carrier=Materials[ma.MoistureLiquidMaterialIndex];
+        float donorEnergy=donor.Mass*CellSpecificEnthalpy(donor);
+        float receiverEnergy=receiver.Mass*CellSpecificEnthalpy(receiver);
+        // Water carries sensible heat and its paid vaporization share. Excess
+        // heat retained in a sealed grain stays with that grain.
+        float carriedEnergy=amount*(carrier.HeatCapacity*donor.Temperature+
+            min(donor.MoistureEnergy,donor.MoistureMass*carrier.TransitionAboveLatentHeat)/donor.MoistureMass);
+        donor.MoistureMass-=amount;
+        receiver.MoistureMass+=amount;
+        receiver.MaterialIndex=receiverMaterial.MoistureWetMaterialIndex;
+        receiver.Lifetime=0; receiver.Pressure=0; receiver.RestFrames=0;
+        donor.RestFrames=0;
+        if(donor.MoistureMass<=0)
+        {
+            donor.MoistureMass=0; donor.MoistureEnergy=0;
+            donor.MaterialIndex=donorMaterial.MoistureDryMaterialIndex;
+        }
+        donor=SetCellSpecificEnthalpy(donor,(donorEnergy-carriedEnergy)/donor.Mass);
+        receiver=SetCellSpecificEnthalpy(receiver,(receiverEnergy+carriedEnergy)/receiver.Mass);
+        first=donor; second=receiver;
+        if(!fromFirst) { first=receiver; second=donor; }
+        Grid[a]=first; Grid[b]=second;
+        CellMaterials[a]=first.MaterialIndex; CellMaterials[b]=second.MaterialIndex;
+        return;
+    }
+    if(firstFuel==secondFuel) return;
+    uint fuelIndex=firstFuel?a:b, otherIndex=firstFuel?b:a;
+    GridCell fuel=first, other=second;
+    if(!firstFuel) { fuel=second; other=first; }
+    MaterialProperties m=Materials[fuel.MaterialIndex];
+    MaterialProperties liquid=Materials[m.MoistureLiquidMaterialIndex];
+    float energy=fuel.Mass*CellSpecificEnthalpy(fuel);
+    // Normalize old hot-wet worlds even if every outlet is occupied.
+    bool changed=fuel.MoistureMass>0 && fuel.Temperature>liquid.TransitionAboveTemperature;
+    if(changed) fuel=SetCellSpecificEnthalpy(fuel,energy/fuel.Mass);
+    if(other.IsActive!=0 && other.MaterialIndex==m.MoistureLiquidMaterialIndex && other.Mass>0)
+    {
+        float amount=min(other.Mass,min(max(0,m.MoistureCapacity*fuel.Mass*(1-FuelPoreFraction(fuel,m))-fuel.MoistureMass),
+            m.MoistureAbsorptionRate*fuel.Mass*ContactDeltaTime*4));
+        if(amount>0)
+        {
+            energy+=amount*CellSpecificEnthalpy(other);
+            fuel.MoistureMass+=amount;
+            other.Mass-=amount;
+            if(other.Mass<=0) other=CreateEmptyCell();
+            fuel.MaterialIndex=m.MoistureWetMaterialIndex;
+            fuel.Lifetime=0; fuel.Pressure=0; fuel.RestFrames=0;
+            fuel=SetCellSpecificEnthalpy(fuel,energy/fuel.Mass);
+            changed=true;
+        }
+    }
+    else if((other.IsActive==0 || other.MaterialIndex==liquid.TransitionAboveMaterialIndex) &&
+        fuel.MoistureMass>0 && fuel.Temperature>=liquid.TransitionAboveTemperature-.001)
+    {
+        // Only paid heat can leave as vapour. Existing vapour accepts more;
+        // another species or a sealed solid pore keeps the full energy ledger.
+        float amount=min(fuel.MoistureMass,min(fuel.MoistureEnergy/liquid.TransitionAboveLatentHeat,
+            m.MoistureDryingRate*fuel.Mass*ContactDeltaTime*4));
+        // Final single-precision cancellation can leave a microscopic wet
+        // tail at exactly boiling. Pay that tail from sensible heat, allowing
+        // at most 0.0001 C cooling; never discard water or change the energy ledger.
+        if(fuel.MoistureMass <= m.MoistureDryingRate*fuel.Mass*ContactDeltaTime*4 &&
+            fuel.MoistureMass*liquid.TransitionAboveLatentHeat-fuel.MoistureEnergy <= CellEffectiveCapacity(fuel)*.0001)
+            amount=fuel.MoistureMass;
+        if(amount>0)
+        {
+            uint vapourIndex=liquid.TransitionAboveMaterialIndex;
+            GridCell emitted=CreateEmptyCell(); emitted.IsActive=1; emitted.MaterialIndex=vapourIndex; emitted.Mass=amount;
+            emitted.Temperature=liquid.TransitionAboveTemperature;
+            float releasedSpecific=CellSpecificEnthalpy(emitted);
+            if(other.IsActive!=0)
+            {
+                float combinedEnergy=other.Mass*CellSpecificEnthalpy(other)+amount*releasedSpecific;
+                other.Mass+=amount;
+                other=SetCellSpecificEnthalpy(other,combinedEnergy/other.Mass);
+                other.RestFrames=0;
+            }
+            else other=emitted;
+            InterlockedOr(ContactSummary[0], PhaseSummaryPhaseOccurred | PhaseSummaryTargetGas | PhaseSummaryTargetCellular);
+            energy-=amount*releasedSpecific;
+            fuel.MoistureMass-=amount;
+            if(fuel.MoistureMass<=0)
+            {
+                fuel.MoistureMass=0; fuel.MoistureEnergy=0;
+                fuel.MaterialIndex=m.MoistureDryMaterialIndex;
+            }
+            fuel=SetCellSpecificEnthalpy(fuel,energy/fuel.Mass);
+            fuel.RestFrames=0;
+            changed=true;
+        }
+    }
+    if(fuel.MoistureMass==0 && fuel.MaterialIndex!=m.MoistureDryMaterialIndex)
+    {
+        fuel.MaterialIndex=m.MoistureDryMaterialIndex;
+        fuel.Lifetime=0; fuel.RestFrames=0; changed=true;
+    }
+    if(changed)
+    {
+        Grid[fuelIndex]=fuel; Grid[otherIndex]=other;
+        CellMaterials[fuelIndex]=fuel.MaterialIndex;
+        CellMaterials[otherIndex]=other.IsActive!=0?other.MaterialIndex:0;
+        if(other.IsActive!=0 && (firstFuel ? second.IsActive : first.IsActive)==0)
+            GasMotion[otherIndex]=(GasMotionState)0;
+    }
 }

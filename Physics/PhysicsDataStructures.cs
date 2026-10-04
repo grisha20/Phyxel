@@ -15,12 +15,35 @@ public struct GridCell
     public uint RestFrames;
     public float Temperature;
     public float Lifetime;
+    // Mass is dry material; water and its boiling/excess heat reservoir travel
+    // with the cell. The reservoir is released when drying has an outlet.
+    public float MoistureMass;
+    public float MoistureEnergy;
+    public float FuelMass; // Absorbed combustible liquid; distinct from water.
 
-    // Tagged by MaterialFlags.PhaseEnthalpy; no additional serialized field.
+    // Tagged by PhaseEnthalpy/FusionEnthalpy; liquid freezing is negative.
+    // World v11 preserves this progress without increasing the cell stride.
     public float PhaseProgress { readonly get => Lifetime; set => Lifetime = value; }
     // Fixed thermal devices tag unused solid pressure/lifetime slots.
     public float DeviceTargetTemperature { readonly get => Pressure; set => Pressure = value; }
     public float DeviceMaximumPower { readonly get => Lifetime; set => Lifetime = value; }
+}
+
+// Per-body GPU scratch; reconstructed from world cells, never serialized.
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct BodyBalanceData
+{
+    public uint WeightLo, WeightHi, XLo, XHi, YLo, YHi;
+    public uint LiftLo, LiftHi, LiftXLo, LiftXHi;
+    public uint LeftSupport, RightSupport, SupportY, Contacts;
+    public uint FirstCell;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct BodyRotationPlan
+{
+    public int OldAngle, NewAngle, OldX, OldY, NewX, NewY, Direction;
+    public uint Padding;
 }
 
 /// <summary>
@@ -41,7 +64,7 @@ public struct AirCell
 /// <summary>
 /// Per-particle motion state for the deterministic FIRE/SMKE carrier.
 /// This deliberately lives outside <see cref="GridCell"/>: saved worlds retain
-/// their 40-byte cell format and water/solid velocity fields remain unchanged.
+/// water/solid velocity fields remain unchanged; motion lives separately.
 /// </summary>
 public struct GasMotionState
 {
@@ -306,7 +329,7 @@ public struct AirSimulationConstants
     public float AirAmbientTemperature;
     public float AirHotScale;
     public uint AirTickIndex;
-    public uint AirReserved0;
+    public uint AirSandboxMode;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -353,22 +376,51 @@ public struct MaterialProperties
     public float MotionLoss;
     public float MotionCollision;
     public float MotionReserved0;
+    // Uses an existing slot in the material prefix.
+    public float ReactionPressurePerMass { readonly get => MotionReserved0; set => MotionReserved0 = value; }
     public float MotionReserved1;
+    public float ReactionFlameLifetimeMultiplier { readonly get => MotionReserved1; set => MotionReserved1 = value; }
     public float MotionReserved2;
+    public float FlameExtinctionTemperature { readonly get => MotionReserved2; set => MotionReserved2 = value; }
     // Render-only density of the soft halo around a gas. It deliberately
     // occupies the first former tail-padding scalar so the GPU table remains
-    // 176 bytes; no physics pass reads it.
+    // a stable prefix slot; no physics pass reads it.
     public float GasHazeStrength;
     public float ThermalDeviceTargetTemperature; // Fixed regulator target; gas oxidizer displacement.
     public float GasOxidizerDisplacement { readonly get => ThermalDeviceTargetTemperature; set => ThermalDeviceTargetTemperature = value; }
     public float ThermalDeviceMaximumPower;
+    public uint MoistureLiquidMaterialIndex;
+    public uint MoistureDryMaterialIndex;
+    public uint MoistureWetMaterialIndex;
+    public float MoistureCapacity;
+    public float MoistureAbsorptionRate;
+    public float MoistureDryingRate;
+    public float MoistureReserved0;
+    public float MoistureCapillaryRate { readonly get => MoistureReserved0; set => MoistureReserved0 = value; }
+    public float MoistureReserved1;
+    public uint FuelLiquidMaterialIndex;
+    public float FuelCapacity;
+    public float FuelAbsorptionRate;
+    public float FuelSaturatedDensity;
+    public float LiquidFlowReferenceTemperature;
+    public float LiquidFlowTemperatureSensitivity;
+    public float LiquidFlowMinimumMobility;
+    public float LiquidFlowMaximumMobility;
+    public float ContactIgnitionTemperature;
+    // Granular contact sources cannot be regulators. Reuse their unused
+    // power slot as an exact index+1; zero retains legacy ANY-liquid rules.
+    public uint ContactLiquidRequiredMaterialIndex
+    {
+        readonly get => ThermalDeviceMaximumPower == 0 ? uint.MaxValue : (uint)ThermalDeviceMaximumPower - 1;
+        set => ThermalDeviceMaximumPower = value == uint.MaxValue ? 0 : value + 1;
+    }
 }
 
 public static class MaterialPropertiesLayout
 {
-    // All forty-four scalars are semantic; byte layout stays unchanged.
-    public const int FieldCount = 44;
-    public const int ByteSize = 176;
+    // Contact ignition is separate from automatic ignition; GridCell is unchanged.
+    public const int FieldCount = 61;
+    public const int ByteSize = 244;
 }
 
 public enum BrushCommandMode : uint
@@ -446,6 +498,8 @@ public struct SimulationFrameConstants
     public uint GasSubStep;
     // Ordinary-gas physical tick. Reuses reserved space without changing layout.
     public uint DebugReserved2;
+    // Tagged alias used only by the gas-motion kernels; no cbuffer expansion.
+    public uint GasFiniteAirGeometry { readonly get => SolidPass; set => SolidPass = value; }
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -497,6 +551,10 @@ public struct OxidizerConstants
     public uint Height;
     public uint OpenEdges;
     public float DeltaTime;
+    public uint UseAir;
+    public uint Reserved0;
+    public uint Reserved1;
+    public uint Reserved2;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -507,7 +565,7 @@ public struct CombustionConstants
     public uint Height;
     public uint MaterialCount;
     public uint TickIndex;
-    public uint Reserved0;
+    public uint FiniteOxidizer;
     public uint Reserved1;
     public uint Reserved2;
 }
@@ -521,7 +579,8 @@ public struct MaterialEmissionProperties
     public float GasRate;
     public uint FlameIntoMaterialIndex;
     public float FlameRate;
-    public uint Reserved0;
+    // Former padding; runtime reaction budget, not SI stoichiometry.
+    public float OxidizerPerMass;
     public uint Reserved1;
 }
 
@@ -533,6 +592,7 @@ public struct EmissionRequest
     public float Mass;
     public float Temperature;
     public uint SourceIndex; // High bit marks flame emitted by self-oxidizing fuel.
+    public float FlameLifetimeMultiplier;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -560,6 +620,7 @@ public struct TemperatureProbeResult
     public uint MaterialIndex;
     public float Temperature;
     public uint Reserved;
+    public float FuelFraction;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -577,6 +638,7 @@ public struct SimulationStatistics
     public uint MovingSolidCells;
     public uint FarColumnMoves;
     public uint PressurePlans;
+    public uint FreeBodyCells;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -584,4 +646,12 @@ public struct WaterPressureRouteData
 {
     public uint Route;
     public uint SourceIndex;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct AirThermalConstants
+{
+    public uint Width, Height, GridWidth, GridHeight;
+    public float Ambient, Capacity, Exchange;
+    public uint OpenBoundaries;
 }

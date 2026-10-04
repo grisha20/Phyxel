@@ -24,7 +24,7 @@ internal static class CoalFireAcceptance
     internal static SimulationWorldSnapshot? Create(AcceptanceScenarioMode mode, int width, int height, MaterialRegistry materials)
     {
         if (mode != AcceptanceScenarioMode.CoalFire) return null;
-        byte[] grid = new byte[width * height * 40];
+        byte[] grid = new byte[width * height * System.Runtime.InteropServices.Marshal.SizeOf<GridCell>()];
         float[] oxygen = new float[width * height];
         Array.Fill(oxygen, 1);
         void Put(int x, int y, string id, float temperature = 20)

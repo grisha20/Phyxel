@@ -30,7 +30,7 @@ internal static class CorePhaseAcceptanceScenario
             case AcceptanceScenarioMode.WaterIceSteamPause:
                 Set(cells, width, 220, 135, materials, CoreMaterialIds.Water, 20, 1.25f,
                     2.5f, -1.5f, 7, 1, 9001, 17);
-                Cage(cells, width, 220, 135, materials, -10);
+                Cage(cells, width, 220, 135, materials, -100);
                 Set(cells, width, 260, 135, materials, CoreMaterialIds.Water, 20, 1.75f,
                     -3.5f, 4.5f, 9, 1, 9002, 23);
                 Cage(cells, width, 260, 135, materials, 650);
@@ -73,7 +73,7 @@ internal static class CorePhaseAcceptanceScenario
                 Radius = 1,
                 MaterialIndex = materials.Water,
                 Mode = BrushCommandMode.SetTemperature,
-                TargetTemperature = -10
+                TargetTemperature = -100
             },
             new BrushDrawCommand
             {
@@ -94,7 +94,7 @@ internal static class CorePhaseAcceptanceScenario
         // checks that contract without forcing a transition.
         Set(cells, width, 180, 130, materials, CoreMaterialIds.Water, 20, 1);
         Set(cells, width, 200, 130, materials, CoreMaterialIds.Water, 0, 1.125f);
-        Set(cells, width, 220, 130, materials, CoreMaterialIds.Ice, 2, 1.25f, restFrames: 2);
+        Set(cells, width, 220, 130, materials, CoreMaterialIds.Ice, 0, 1.25f, restFrames: 2);
         // Steam at the exact condensation threshold now cools below it before
         // the phase pass. Keep this cell above the threshold so the chain still
         // covers a stable steam state; generic phase acceptance owns exact
@@ -110,14 +110,14 @@ internal static class CorePhaseAcceptanceScenario
             9, -10, 11, 1, 73, 21);
         Set(cells, width, 240, 160, materials, CoreMaterialIds.Steam, 80, 2,
             12, -13, 14, 1, 74, 22);
-        Set(cells, width, 260, 160, materials, CoreMaterialIds.Ice, 650, 2.125f,
+        Set(cells, width, 260, 160, materials, CoreMaterialIds.Ice, 1500, 2.125f,
             15, -16, 17, 1, 75, 2);
 
         foreach ((int X, int Y, float Temperature) in new[]
         {
-            (180, 130, 20f), (200, 130, 0f), (220, 130, 2f), (240, 130, 122f),
+            (180, 130, 20f), (200, 130, 0f), (220, 130, 0f), (240, 130, 122f),
             (260, 130, 100f), (180, 160, -10f), (200, 160, 10f),
-            (220, 160, 650f), (240, 160, 80f), (260, 160, 650f)
+            (220, 160, 650f), (240, 160, 80f), (260, 160, 1500f)
         })
         {
             Cage(cells, width, X, Y, materials, Temperature);
@@ -128,10 +128,12 @@ internal static class CorePhaseAcceptanceScenario
     {
         Fill(cells, width, 70, 160, 85, 163, materials, CoreMaterialIds.Ice, -5, 1, 2);
         Fill(cells, width, 150, 80, 157, 87, materials, CoreMaterialIds.Ice, 10, 1, 2);
-        Fill(cells, width, 230, 180, 237, 187, materials, CoreMaterialIds.Water, 100, 1, 0);
+        // A small paid excess avoids an exact-threshold test accidentally
+        // becoming a partial boil when neighbouring gas gives heat to air.
+        Fill(cells, width, 230, 180, 237, 187, materials, CoreMaterialIds.Water, 100.1f, 1, 0);
         for (int y = 180; y <= 187; y++) for (int x = 230; x <= 237; x++)
             cells[y * width + x].PhaseProgress = materials[CoreMaterialIds.Water].Properties.TransitionAboveLatentHeat;
-        Fill(cells, width, 238, 180, 245, 187, materials, CoreMaterialIds.Co2, 100, 1, 0);
+        Fill(cells, width, 238, 180, 245, 187, materials, CoreMaterialIds.Co2, 100.1f, 1, 0);
         Fill(cells, width, 310, 80, 317, 87, materials, CoreMaterialIds.Steam, 80, 1, 0);
     }
 
@@ -145,11 +147,11 @@ internal static class CorePhaseAcceptanceScenario
             7, -8, 9, 1, 103, 13);
         Set(cells, width, 260, 135, materials, CoreMaterialIds.Steam, 80, 2,
             10, -11, 12, 1, 104, 14);
-        Set(cells, width, 280, 135, materials, CoreMaterialIds.Ice, 650, 2.25f,
+        Set(cells, width, 280, 135, materials, CoreMaterialIds.Ice, 1500, 2.25f,
             13, -14, 15, 1, 105, 2);
         foreach ((int X, float Temperature) in new[]
         {
-            (200, -10f), (220, 10f), (240, 650f), (260, 80f), (280, 650f)
+            (200, -10f), (220, 10f), (240, 650f), (260, 80f), (280, 1500f)
         })
         {
             Cage(cells, width, X, 135, materials, Temperature);
@@ -228,6 +230,13 @@ internal static class CorePhaseAcceptanceScenario
             RestFrames = restFrames,
             Temperature = temperature
         };
+        // Normalization/motion fixtures prepay fusion energy. Partial fusion
+        // is measured independently by IceFusionRegressionVerifier; these
+        // cases still test full conversion and subsequent movement.
+        if (id == CoreMaterialIds.Ice && temperature > 0)
+            cells[y * width + x].PhaseProgress = materials[CoreMaterialIds.Ice].Properties.TransitionAboveLatentHeat;
+        if (id == CoreMaterialIds.Water && temperature < 0)
+            cells[y * width + x].PhaseProgress = -materials[CoreMaterialIds.Ice].Properties.TransitionAboveLatentHeat;
         // These normalization/motion fixtures start with fully withdrawn
         // condensation heat. Partial cooling is covered by steam_energy.
         if (id == CoreMaterialIds.Steam && temperature < 98)

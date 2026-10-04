@@ -8,10 +8,11 @@
   "thermal": { "initialTemperature": 20.0, "conductivity": 0.65, "heatCapacity": 1.0 },
   "combustion": {
     "ignitionTemperature": 300.0,
-    "burnRate": 0.05,
-    "heatPerMass": 800.0,
+    "burnRate": 0.10,
+    "heatPerMass": 3200.0,
     "burnedInto": "core:coal",
-    "spreadRate": 3.0,
+    "oxidizerPerMass": 4.0,
+    "spreadRate": 12.0,
     "maximumTemperature": 900.0
   },
   "emissions": {
@@ -22,5 +23,20 @@
     "flameInto": "core:fire",
     "flameRate": 30.0
   },
-  "ui": { "order": 80, "hidden": false }
+  "ui": { "order": 80, "hidden": false },
+  "moisture": {
+    "liquid": "core:water",
+    "dry": "core:wood",
+    "wet": "core:wood",
+    "capacity": 0.30,
+    "absorptionRate": 0.25,
+    "dryingRate": 0.08,
+    "capillaryRate": 1.0
+  },
+  "fuelAbsorption": {
+    "liquid": "core:oil",
+    "capacity": 0.25,
+    "absorptionRate": 0.04,
+    "saturatedDensity": 1.0
+  }
 }

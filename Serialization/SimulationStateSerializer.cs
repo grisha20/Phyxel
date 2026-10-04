@@ -27,17 +27,26 @@ public sealed record SimulationSceneState(
     ushort SelectedMaterial,
     DateTimeOffset SavedAt,
     bool HydraulicPressure = false,
-    bool OpenBoundaries = true);
+    bool OpenBoundaries = true,
+    SimulationMode Mode = SimulationMode.Simulation);
 
-// Air and GasMotion are diagnostic readbacks. Oxidizer is persisted independently
-// of the unchanged 40-byte GridCell in world v7; v3-v6 load fresh ambient air.
+// World v11 extends v10 auxiliary validation for negative fusion progress.
+// v10 persists pending reaction packets, pressure waves and their finite
+// volume stock, plus Air/GasMotion. v9 carrier heat and v8 oxidizer stay intact.
+// World v14 appends absorbed fuel to the v12/v13 prefix (52-byte cells).
+// Wet boiling storage may retain
+// excess heat while vapour awaits an outlet. v12 remains readable.
+// v3..v11 migrate their historic strides; missing moisture starts at zero.
 public sealed record SimulationWorldSnapshot(
     int Width,
     int Height,
     byte[] Grid,
     byte[]? Air = null,
     byte[]? GasMotion = null,
-    byte[]? Oxidizer = null);
+    byte[]? Oxidizer = null,
+    byte[]? AirThermal = null,
+    byte[]? ReactionPending = null,
+    byte[]? ReactionPulse = null);
 
 public sealed record LoadedSimulationScene(
     SimulationSceneState State,
@@ -58,13 +67,15 @@ public sealed class SimulationStateSerializer
         public DateTimeOffset SavedAt { get; set; }
         public bool HydraulicPressure { get; set; }
         public bool OpenBoundaries { get; set; } = true;
+        // Existing scenes used finite oxidizer before modes were introduced.
+        public SimulationMode Mode { get; set; } = SimulationMode.Simulation;
         public string[] MaterialPalette { get; set; } = [];
     }
 
     private const uint WorldFileMagic = 0x5058594C;
     private const int LegacyWorldHeaderSize = 20;
     private const int CurrentWorldHeaderSize = 28;
-    private const int CurrentVersion = 7;
+    private const int CurrentVersion = 14;
     private const string RemovedGoldSandId = "core:gold_sand";
     private const string RenamedConcreteId = "core:concrete";
     private const string RenamedGasId = "core:gas";
@@ -93,6 +104,9 @@ public sealed class SimulationStateSerializer
         resources.Context.CopyResource(resources.Air.Buffer, resources.AirStaging);
         resources.Context.CopyResource(resources.GasMotion.Buffer, resources.GasMotionStaging);
         resources.Context.CopyResource(resources.Oxidizer.ReadBuffer, resources.OxidizerStaging);
+        resources.Context.CopyResource(resources.AirThermal.Buffer, resources.AirThermalStaging);
+        resources.Context.CopyResource(resources.ReactionPending.Buffer,resources.ReactionPendingStaging);
+        resources.Context.CopyResource(resources.ReactionPulse.ReadBuffer,resources.ReactionPulseStaging);
         resources.Context.End(resources.SceneTransferQuery);
         resources.Context.Flush();
         capturePending = true;
@@ -128,7 +142,10 @@ public sealed class SimulationStateSerializer
             ReadBuffer(resources.Context, resources.GridStaging),
             ReadBuffer(resources.Context, resources.AirStaging),
             ReadBuffer(resources.Context, resources.GasMotionStaging),
-            ReadBuffer(resources.Context, resources.OxidizerStaging));
+            ReadBuffer(resources.Context, resources.OxidizerStaging),
+            ReadBuffer(resources.Context, resources.AirThermalStaging),
+            ReadBuffer(resources.Context,resources.ReactionPendingStaging),
+            ReadBuffer(resources.Context,resources.ReactionPulseStaging));
         capturePending = false;
         return true;
     }
@@ -145,6 +162,7 @@ public sealed class SimulationStateSerializer
         {
             throw new InvalidDataException($"Выбранный runtime-индекс материала {selectedMaterial} отсутствует в реестре.");
         }
+        if (!Enum.IsDefined(settings.Mode)) throw new InvalidDataException("Неизвестный режим симуляции.");
 
         (SimulationWorldSnapshot encodedWorld, string[] palette) = EncodeSceneSnapshot(world, materialRegistry);
         SceneFileV4 state = new()
@@ -159,6 +177,7 @@ public sealed class SimulationStateSerializer
             SavedAt = DateTimeOffset.UtcNow,
             HydraulicPressure = settings.HydraulicPressure,
             OpenBoundaries = settings.OpenBoundaries,
+            Mode = settings.Mode,
             MaterialPalette = palette
         };
         string directory = Path.GetDirectoryName(path) ?? AppContext.BaseDirectory;
@@ -212,7 +231,7 @@ public sealed class SimulationStateSerializer
                 warnings,
                 options),
             4 => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, true),
-            5 or 6 or CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
+            5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
             _ => null
         };
     }
@@ -223,12 +242,24 @@ public sealed class SimulationStateSerializer
         {
             throw new InvalidDataException("Размер снимка мира не совпадает с размером GPU-ресурсов.");
         }
-        if (world.Grid.Length == 0)
-        {
-            return;
-        }
         ValidateSnapshotSize(world);
-        UploadBuffer(resources.Context, resources.GridStaging, world.Grid, resources.Grid.Buffers);
+        if(world.ReactionPending is { Length: > 0 } pending)
+            UploadBuffer(resources.Context,resources.ReactionPendingStaging,pending,[resources.ReactionPending.Buffer]);
+        else resources.Context.ClearUnorderedAccessView(resources.ReactionPending.UnorderedView,new RawInt4());
+        if(world.ReactionPulse is { Length: > 0 } pulse)
+            UploadBuffer(resources.Context,resources.ReactionPulseStaging,pulse,resources.ReactionPulse.Buffers);
+        else foreach(var view in resources.ReactionPulse.UnorderedAccessViews) resources.Context.ClearUnorderedAccessView(view,new RawInt4());
+        if(world.Air is { Length: > 0 } air)
+            UploadBuffer(resources.Context,resources.AirStaging,air,[resources.Air.Buffer]);
+        else resources.Context.ClearUnorderedAccessView(resources.Air.UnorderedView,new RawInt4());
+        if(world.GasMotion is { Length: > 0 } motion)
+            UploadBuffer(resources.Context,resources.GasMotionStaging,motion,[resources.GasMotion.Buffer]);
+        else resources.Context.ClearUnorderedAccessView(resources.GasMotion.UnorderedView,new RawInt4());
+        if (world.Grid.Length == 0)
+            foreach (var view in resources.Grid.UnorderedAccessViews)
+                resources.Context.ClearUnorderedAccessView(view, new RawInt4());
+        else
+            UploadBuffer(resources.Context, resources.GridStaging, world.Grid, resources.Grid.Buffers);
         if (world.Oxidizer is { Length: > 0 } oxygen)
             UploadBuffer(resources.Context, resources.OxidizerStaging, oxygen, resources.Oxidizer.Buffers);
         else
@@ -236,6 +267,14 @@ public sealed class SimulationStateSerializer
             float[] freshAir = new float[resources.Oxidizer.Count];
             Array.Fill(freshAir, 1f);
             foreach (Buffer buffer in resources.Oxidizer.Buffers) resources.Context.UpdateSubresource(freshAir, buffer);
+        }
+        if (world.AirThermal is { Length: > 0 } thermal)
+            UploadBuffer(resources.Context, resources.AirThermalStaging, thermal, [resources.AirThermal.Buffer]);
+        else
+        {
+            var ambient = new System.Numerics.Vector2[resources.AirWidth * resources.AirHeight];
+            Array.Fill(ambient, new System.Numerics.Vector2(293.15f*.016f,.016f));
+            resources.Context.UpdateSubresource(ambient,resources.AirThermal.Buffer);
         }
     }
 
@@ -248,6 +287,8 @@ public sealed class SimulationStateSerializer
         settings.SolidGravity = state.SolidGravity;
         settings.HydraulicPressure = state.HydraulicPressure;
         settings.OpenBoundaries = state.OpenBoundaries;
+        if (!Enum.IsDefined(state.Mode)) throw new InvalidDataException("Неизвестный режим симуляции.");
+        settings.Mode = state.Mode;
     }
 
     public static bool ContainsMatter(SimulationWorldSnapshot world)
@@ -271,7 +312,7 @@ public sealed class SimulationStateSerializer
         foreach (GridCell cell in grid)
         {
             if (cell.IsActive != 0 && cell.MaterialIndex < materialRegistry.Count &&
-                materialRegistry[cell.MaterialIndex].LiquidContactTransition is not null)
+                (materialRegistry[cell.MaterialIndex].LiquidContactTransition is not null || materialRegistry[cell.MaterialIndex].Moisture is not null))
             {
                 return true;
             }
@@ -288,6 +329,7 @@ public sealed class SimulationStateSerializer
     {
         SceneFileV4 state = JsonSerializer.Deserialize<SceneFileV4>(sceneJson, options) ??
             throw new InvalidDataException("Сцена v4 не содержит состояния.");
+        if (!Enum.IsDefined(state.Mode)) throw new InvalidDataException("Неизвестный режим симуляции.");
         if (state.MaterialPalette.Length is 0 or > MaterialRegistry.MaximumMaterials)
         {
             throw new InvalidDataException("Палитра сцены v4 пуста или превышает допустимый размер.");
@@ -332,7 +374,8 @@ public sealed class SimulationStateSerializer
                 selectedMaterial,
                 state.SavedAt,
                 state.HydraulicPressure,
-                state.OpenBoundaries),
+                state.OpenBoundaries,
+                state.Mode),
             world,
             warnings);
     }
@@ -358,6 +401,7 @@ public sealed class SimulationStateSerializer
                     $"Снимок содержит неизвестный runtime-индекс материала {cell.MaterialIndex}.");
             }
             usedRuntimeIndices[cell.MaterialIndex] = true;
+            ValidatePhaseAuxiliary(cell, materialRegistry[cell.MaterialIndex].Properties);
         }
 
         ushort[] runtimeToScene = new ushort[materialRegistry.Count];
@@ -385,7 +429,8 @@ public sealed class SimulationStateSerializer
             uint runtimeIndex = encodedCells[index].MaterialIndex;
             encodedCells[index].MaterialIndex = runtimeToScene[runtimeIndex];
         }
-        return (new SimulationWorldSnapshot(world.Width, world.Height, encodedGrid, Oxidizer: world.Oxidizer), palette.ToArray());
+        return (new SimulationWorldSnapshot(world.Width, world.Height, encodedGrid, world.Air,world.GasMotion,
+            world.Oxidizer,world.AirThermal,world.ReactionPending,world.ReactionPulse), palette.ToArray());
     }
 
     private static void RemapSnapshotToRuntime(
@@ -424,6 +469,7 @@ public sealed class SimulationStateSerializer
             }
         }
 
+        var moistureTable=materialRegistry.CreateGpuTable();
         Span<GridCell> cells = MemoryMarshal.Cast<byte, GridCell>(world.Grid.AsSpan());
         for (int index = 0; index < cells.Length; index++)
         {
@@ -440,6 +486,27 @@ public sealed class SimulationStateSerializer
             }
             uint runtimeIndex = sceneToRuntime[sceneIndex];
             cells[index].MaterialIndex = runtimeIndex;
+            MaterialProperties moistureMaterial=materialRegistry[runtimeIndex].Properties;
+            ValidateAbsorbedFuel(cells[index], moistureMaterial);
+            if (cells[index].MoistureMass > 0 &&
+                (moistureMaterial.MoistureCapacity <= 0 || !float.IsFinite(cells[index].Mass) || cells[index].Mass <= 0 ||
+                 cells[index].MoistureMass > cells[index].Mass * moistureMaterial.MoistureCapacity + .00001f))
+                throw new InvalidDataException($"Invalid moisture capacity/energy in cell {index}.");
+            if (cells[index].MoistureMass > 0 && cells[index].Temperature >
+                materialRegistry[moistureMaterial.MoistureLiquidMaterialIndex].Properties.TransitionAboveTemperature)
+            {
+                // v12 previously allowed hot wet cells after filling latent
+                // storage. Canonicalize the same total energy without loss.
+                float moistureEnergy=PhaseEnthalpy.SpecificEnergy(cells[index],moistureTable);
+                PhaseEnthalpy.SetSpecificEnergy(ref cells[index],moistureEnergy,moistureTable);
+            }
+            if (moistureMaterial.MoistureCapacity > 0 && cells[index].MoistureMass == 0 &&
+                runtimeIndex == moistureMaterial.MoistureWetMaterialIndex && runtimeIndex != moistureMaterial.MoistureDryMaterialIndex)
+            {
+                cells[index].MaterialIndex = moistureMaterial.MoistureDryMaterialIndex;
+                AddWarning(warnings, "Мокрый материал без сохранённой воды восстановлен как сухой; вода не создавалась.");
+            }
+            ValidatePhaseAuxiliary(cells[index], materialRegistry[runtimeIndex].Properties);
             if (ThermalRegulator.Enabled(materialRegistry[runtimeIndex].Properties) &&
                 !ThermalRegulator.ValidCellSettings(cells[index]))
                 throw new InvalidDataException($"Invalid thermal device settings in world cell {index}.");
@@ -487,9 +554,30 @@ public sealed class SimulationStateSerializer
         Console.Error.WriteLine($"PHYXEL_SCENE_WARNING {message}");
     }
 
+    private static void ValidateAbsorbedFuel(GridCell cell, MaterialProperties material)
+    {
+        if (!float.IsFinite(cell.FuelMass) || cell.FuelMass < 0)
+            throw new InvalidDataException("Invalid absorbed fuel mass.");
+        if (cell.FuelMass == 0) return;
+        if (material.FuelCapacity <= 0 || !float.IsFinite(cell.Mass) || cell.Mass <= 0 ||
+            cell.FuelMass / (cell.Mass * material.FuelCapacity) +
+            (material.MoistureCapacity > 0 ? cell.MoistureMass / (cell.Mass * material.MoistureCapacity) : 0) > 1.0001f)
+            throw new InvalidDataException("Absorbed fuel is unsupported or exceeds shared pore capacity.");
+    }
+
+    private static void ValidatePhaseAuxiliary(GridCell cell, MaterialProperties material)
+    {
+        ValidateAbsorbedFuel(cell, material);
+        if (cell.Lifetime < 0 &&
+            (!PhaseEnthalpy.FusionEnabled(material) || material.SimulationKind != (uint)MaterialSimulationKind.Liquid))
+            throw new InvalidDataException("Negative phase progress requires a fusion-enthalpy liquid.");
+    }
+
     internal static void ValidateSnapshotSize(SimulationWorldSnapshot world)
     {
         WorldCellCodec.ValidateOxidizer(world.Width, world.Height, world.Oxidizer);
+        WorldCellCodec.ValidateAirThermal(world.Width,world.Height,world.AirThermal);
+        WorldCellCodec.ValidateReactionState(world.Width,world.Height,world.ReactionPending,world.ReactionPulse,world.Air,world.GasMotion);
         int expected = checked(world.Width * world.Height * Marshal.SizeOf<GridCell>());
         if (world.Grid.Length != 0 && world.Grid.Length != expected)
         {
@@ -545,6 +633,16 @@ public sealed class SimulationStateSerializer
         await stream.WriteAsync(header, cancellationToken);
         await stream.WriteAsync(world.Grid, cancellationToken);
         if (world.Oxidizer is { Length: > 0 }) await stream.WriteAsync(world.Oxidizer, cancellationToken);
+        byte[] heatLength=new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(heatLength,world.AirThermal?.Length ?? 0);
+        await stream.WriteAsync(heatLength,cancellationToken);
+        if (world.AirThermal is { Length: > 0 }) await stream.WriteAsync(world.AirThermal,cancellationToken);
+        foreach(byte[]? section in new[]{world.ReactionPending,world.ReactionPulse,world.Air,world.GasMotion})
+        {
+            byte[] size=new byte[4];BinaryPrimitives.WriteInt32LittleEndian(size,section?.Length??0);
+            await stream.WriteAsync(size,cancellationToken);
+            if(section is { Length: > 0 }) await stream.WriteAsync(section,cancellationToken);
+        }
     }
 
     internal static async Task<RawWorldFile?> ReadWorldAsync(
@@ -568,13 +666,13 @@ public sealed class SimulationStateSerializer
 
         uint magic = BinaryPrimitives.ReadUInt32LittleEndian(prefix.AsSpan(0, 4));
         int version = BinaryPrimitives.ReadInt32LittleEndian(prefix.AsSpan(4, 4));
-        if (magic != WorldFileMagic || version is not (3 or 4 or 5 or 6 or CurrentVersion))
+        if (magic != WorldFileMagic || version is not (3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or CurrentVersion))
         {
             throw new InvalidDataException("Формат снимка мира не поддерживается.");
         }
 
         bool extendedHeader = version >= 5;
-        int headerSize = version == 7 ? CurrentWorldHeaderSize : extendedHeader ? 24 : LegacyWorldHeaderSize;
+        int headerSize = version >= 7 ? CurrentWorldHeaderSize : extendedHeader ? 24 : LegacyWorldHeaderSize;
         byte[] remainder = new byte[headerSize - prefix.Length];
         try
         {
@@ -594,7 +692,7 @@ public sealed class SimulationStateSerializer
             remainder.AsSpan(extendedHeader ? 12 : 8, 4));
         WorldCellCodec.ValidateStoredWorld(version, width, height, storedCellStride, length);
 
-        int oxygenLength = version == 7 ? BinaryPrimitives.ReadInt32LittleEndian(remainder.AsSpan(16, 4)) : 0;
+        int oxygenLength = version >= 7 ? BinaryPrimitives.ReadInt32LittleEndian(remainder.AsSpan(16, 4)) : 0;
         long expectedOxygenLength = (long)width * height * sizeof(float);
         if (oxygenLength < 0 || (oxygenLength != 0 && oxygenLength != expectedOxygenLength))
             throw new InvalidDataException("Invalid oxidizer section length.");
@@ -603,7 +701,7 @@ public sealed class SimulationStateSerializer
         {
             throw new InvalidDataException("Секция клеток файла мира обрезана.");
         }
-        if (stream.Length > expectedFileLength)
+        if (version < 9 && stream.Length > expectedFileLength)
         {
             throw new InvalidDataException("После секции клеток файла мира обнаружены лишние байты.");
         }
@@ -619,7 +717,41 @@ public sealed class SimulationStateSerializer
         }
         byte[]? oxygen = oxygenLength == 0 ? null : new byte[oxygenLength];
         if (oxygen is not null) await stream.ReadExactlyAsync(oxygen, cancellationToken);
-        WorldCellCodec.ValidateOxidizer(width, height, oxygen);
-        return new RawWorldFile(version, width, height, storedCellStride, grid, oxygen);
+        WorldCellCodec.ValidateOxidizer(width, height, oxygen, version >= 8);
+        byte[]? thermal=null;
+        if (version >= 9)
+        {
+            byte[] size=new byte[4];
+            try { await stream.ReadExactlyAsync(size,cancellationToken); }
+            catch (EndOfStreamException e) { throw new InvalidDataException("Air heat section header is truncated.",e); }
+            int heatLength=BinaryPrimitives.ReadInt32LittleEndian(size);
+            long expectedHeatLength=(long)((width+3)/4)*((height+3)/4)*8;
+            if (heatLength < 0 || (heatLength != 0 && heatLength != expectedHeatLength) ||
+                (version==9 && stream.Length != expectedFileLength+4+heatLength) || stream.Length<expectedFileLength+4+heatLength)
+                throw new InvalidDataException("Invalid air heat section length.");
+            thermal=heatLength==0?null:new byte[heatLength];
+            if (thermal is not null) await stream.ReadExactlyAsync(thermal,cancellationToken);
+            WorldCellCodec.ValidateAirThermal(width,height,thermal);
+        }
+        byte[]? pending=null,pulse=null,air=null,motion=null;
+        if(version>=10)
+        {
+            async Task<byte[]?> Section(long expected)
+            {
+                byte[] size=new byte[4];
+                try { await stream.ReadExactlyAsync(size,cancellationToken); }
+                catch(EndOfStreamException e) { throw new InvalidDataException("Reaction section header is truncated.",e); }
+                int n=BinaryPrimitives.ReadInt32LittleEndian(size);
+                if(n<0 || (n!=0 && n!=expected) || stream.Length-stream.Position<n)
+                    throw new InvalidDataException("Invalid reaction section length.");
+                if(n==0) return null;
+                byte[] bytes=new byte[n];await stream.ReadExactlyAsync(bytes,cancellationToken);return bytes;
+            }
+            long fine=(long)width*height*16,coarse=(long)((width+3)/4)*((height+3)/4)*16;
+            pending=await Section(fine);pulse=await Section(coarse);air=await Section(coarse);motion=await Section(fine);
+            if(stream.Position!=stream.Length) throw new InvalidDataException("Trailing world data.");
+            WorldCellCodec.ValidateReactionState(width,height,pending,pulse,air,motion);
+        }
+        return new RawWorldFile(version, width, height, storedCellStride, grid, oxygen, thermal,pending,pulse,air,motion);
     }
 }

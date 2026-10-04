@@ -14,7 +14,8 @@ public enum CombustionSummaryFlags : uint
     TargetGas = 1u << 4,
     TouchesLiquid = 1u << 5,
     TouchesSolid = 1u << 6,
-    TargetMovableSolid = 1u << 7
+    TargetMovableSolid = 1u << 7,
+    PressurePowderPresent = 1u << 8
 }
 
 public static class CombustionRuntime
@@ -23,19 +24,27 @@ public static class CombustionRuntime
     public const float MassEpsilon = 0.0001f;
     public const float MinimumTemperature = -273.15f;
     public const float MaximumTemperature = 5000f;
+    public const uint FuelBurningMarker = 0x20000000u;
+
+    private static bool RetainsFuelIgnition(MaterialProperties source) =>
+        source.ContactIgnitionTemperature > MinimumTemperature &&
+        (source.SimulationKind == (uint)MaterialSimulationKind.Liquid ||
+         source.SimulationKind == (uint)MaterialSimulationKind.Gas);
 
     public static bool IsBurning(
         GridCell cell,
         ReadOnlySpan<MaterialProperties> materials)
     {
-        if (cell.IsActive == 0 || cell.MaterialIndex >= materials.Length)
+        if (cell.IsActive == 0 || cell.MaterialIndex >= materials.Length || cell.MoistureMass > 0)
         {
             return false;
         }
 
         MaterialProperties source = materials[(int)cell.MaterialIndex];
         if ((source.SimulationKind != (uint)MaterialSimulationKind.Solid &&
-             source.SimulationKind != (uint)MaterialSimulationKind.Granular) ||
+             source.SimulationKind != (uint)MaterialSimulationKind.Granular &&
+             source.SimulationKind != (uint)MaterialSimulationKind.Liquid &&
+             source.SimulationKind != (uint)MaterialSimulationKind.Gas) ||
             source.BurnedIntoMaterialIndex == MissingMaterialIndex ||
             source.BurnedIntoMaterialIndex >= materials.Length)
         {
@@ -48,6 +57,8 @@ public static class CombustionRuntime
             : target.Density;
         return cell.Mass > residueMass + MassEpsilon &&
             (cell.Temperature > source.IgnitionTemperature ||
+             (RetainsFuelIgnition(source) && (cell.BodyId & FuelBurningMarker) != 0 &&
+              cell.Temperature >= source.ContactIgnitionTemperature) ||
              ((source.Flags & (uint)MaterialFlags.PersistentCoalIgnition) != 0 && cell.Lifetime > 0));
     }
 
@@ -60,6 +71,9 @@ public static class CombustionRuntime
     {
         summary = CombustionSummaryFlags.None;
         burnedMass = 0;
+        if (cell.MaterialIndex < materials.Length && RetainsFuelIgnition(materials[(int)cell.MaterialIndex]) &&
+            cell.Temperature < materials[(int)cell.MaterialIndex].ContactIgnitionTemperature)
+            cell.BodyId &= ~FuelBurningMarker;
         if (!IsBurning(cell, materials) || !float.IsFinite(elapsedSeconds) || elapsedSeconds <= 0)
         {
             return false;
@@ -68,6 +82,7 @@ public static class CombustionRuntime
         MaterialProperties source = materials[(int)cell.MaterialIndex];
         MaterialProperties target = materials[(int)source.BurnedIntoMaterialIndex];
         if ((source.Flags & (uint)MaterialFlags.PersistentCoalIgnition) != 0) cell.Lifetime = 1;
+        if (RetainsFuelIgnition(source)) cell.BodyId |= FuelBurningMarker;
         float residueMass = target.SimulationKind == (uint)MaterialSimulationKind.None
             ? 0
             : Math.Max(0, target.Density);
@@ -160,7 +175,8 @@ public static class TransientMaterialRuntime
 {
     public static bool IsFlame(GridCell cell, ReadOnlySpan<MaterialProperties> materials) =>
         cell.IsActive != 0 && cell.MaterialIndex < materials.Length && cell.Lifetime > 0 &&
-        (((MaterialFlags)materials[(int)cell.MaterialIndex].Flags & MaterialFlags.Flame) != 0);
+        (((MaterialFlags)materials[(int)cell.MaterialIndex].Flags & MaterialFlags.Flame) != 0) &&
+        cell.Temperature > materials[(int)cell.MaterialIndex].FlameExtinctionTemperature;
 
     public static bool ShouldIgnite(
         MaterialProperties combustible,
@@ -186,7 +202,7 @@ public static class TransientMaterialRuntime
             return false;
         }
         bool flame = ((MaterialFlags)source.Flags & MaterialFlags.Flame) != 0;
-        cell.Lifetime = flame && cell.Temperature < source.InitialTemperature * 0.15f
+        cell.Lifetime = flame && cell.Temperature <= source.FlameExtinctionTemperature
             ? 0
             : Math.Max(0, cell.Lifetime - elapsedSeconds);
         if (cell.Lifetime > 0)

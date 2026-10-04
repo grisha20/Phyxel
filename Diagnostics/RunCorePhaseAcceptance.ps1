@@ -38,8 +38,12 @@ function Invoke-CorePhaseCase {
     }
 
     Write-Host "PHYXEL_CORE_PHASE_CASE_BEGIN $Label"
-    $output = @(& $executable 2>&1 | ForEach-Object { "$_" })
-    $exitCode = $LASTEXITCODE
+    $process = Start-Process -FilePath $executable -WorkingDirectory $repository -WindowStyle Hidden -Wait -PassThru `
+        -RedirectStandardOutput (Join-Path $caseDirectory 'run.log') `
+        -RedirectStandardError (Join-Path $caseDirectory 'error.log')
+    $output = @(Get-Content -LiteralPath (Join-Path $caseDirectory 'run.log')) +
+        @(Get-Content -LiteralPath (Join-Path $caseDirectory 'error.log'))
+    $exitCode = $process.ExitCode
     $output | ForEach-Object { Write-Host $_ }
     $output | Set-Content -LiteralPath (Join-Path $caseDirectory 'console.log') -Encoding UTF8
     $resultLine = $output | Where-Object { $_ -like 'PHASE_ACCEPTANCE_RESULT*' } | Select-Object -Last 1
@@ -78,8 +82,8 @@ try {
     Invoke-CorePhaseCase -Label 'water_ice_steam_v5_roundtrip' `
         -Mode 'water_ice_steam_v5_roundtrip' -ScenePath $roundTripScene
     $scene = Get-Content -LiteralPath $roundTripScene -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($scene.Version -ne 7) {
-        throw "Actual-core round-trip wrote scene version $($scene.Version), expected 7."
+    if ($scene.Version -ne 14) {
+        throw "Actual-core round-trip wrote scene version $($scene.Version), expected 14."
     }
     foreach ($id in 'core:water', 'core:ice', 'core:steam') {
         if ($scene.MaterialPalette -notcontains $id) {

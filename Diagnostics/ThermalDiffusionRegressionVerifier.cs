@@ -42,8 +42,8 @@ internal static class ThermalDiffusionRegressionVerifier
             "ThermalSimulationConstants must be 32 bytes.");
         Require(Marshal.SizeOf<TemperatureProbeConstants>() == 16,
             "TemperatureProbeConstants must be 16 bytes.");
-        Require(Marshal.SizeOf<TemperatureProbeResult>() == 16,
-            "TemperatureProbeResult must be 16 bytes.");
+        Require(Marshal.SizeOf<TemperatureProbeResult>() == 20,
+            "TemperatureProbeResult must be 20 bytes.");
         Require(Marshal.SizeOf<BrushDrawCommand>() == 48,
             "BrushDrawCommand must be 48 bytes.");
         Require(Enum.GetUnderlyingType(typeof(BrushCommandMode)) == typeof(uint) &&
@@ -108,8 +108,9 @@ internal static class ThermalDiffusionRegressionVerifier
             thermal.Contains("immediateEmptyNeighbors", StringComparison.Ordinal) &&
             thermal.Contains("localEmptyNeighbors", StringComparison.Ordinal),
             "Thermal shader is missing same-gas equalization or surface-aware ambient cooling.");
-        Require(thermal.Contains("DestinationGrid[index] = (GridCell)0", StringComparison.Ordinal),
-            "Thermal shader does not normalize inactive cells.");
+        // Inactive cells are normalized by the coordinator's bulk destination
+        // clear. FuelMoistureRegressionVerifier checks stale destination data
+        // on the GPU; a particular shader assignment cannot prove that contract.
         // Gas motion, conservation and render independence are exercised on
         // the GPU by RunGasReview.ps1. Function spelling and diagnostic atomics
         // cannot establish their numerical correctness.
@@ -227,6 +228,14 @@ internal static class ThermalDiffusionRegressionVerifier
         ulong ticks100 = RunScheduler(100, 3);
         Require(ticks30 == 60 && ticks60 == 60 && ticks100 == 60,
             $"Fixed-step ticks differ by FPS: {ticks30}/{ticks60}/{ticks100}.");
+        foreach(int fps in new[]{30,60,100})
+        {
+            FixedStepThermalScheduler actual=new();
+            for(int frame=0;frame<fps*8;frame++)actual.Advance(1f/fps,false,true);
+            Require(actual.TotalTicks==160,$"Float production clock missed a boundary at {fps} FPS.");
+        }
+        FixedStepThermalScheduler early=new();
+        Require(early.Advance(.049998,false,true)==0,"Thermal tolerance triggered a materially early tick.");
 
         FixedStepThermalScheduler scheduler = new();
         for (int frame = 0; frame < 60; frame++) scheduler.Advance(1d / 60, false, true);

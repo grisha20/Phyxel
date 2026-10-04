@@ -15,6 +15,8 @@ namespace Phyxel.Diagnostics;
 internal static class OxidizerAcceptance
 {
     private static SimulationWorldSnapshot? initial;
+    internal static bool SwitchModes => Environment.GetEnvironmentVariable("PHYXEL_OXIDIZER_SWITCH_MODES") == "1";
+    private static bool Sandbox => SwitchModes || Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_SIMULATION_MODE") == "sandbox";
     internal static bool EmptyLoad => Environment.GetEnvironmentVariable("PHYXEL_OXIDIZER_EMPTY_LOAD") == "1";
     private static bool EmptyOpen => Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_OPEN_BOUNDARIES") == "1";
     internal static bool Restarting => EmptyLoad || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PHYXEL_OXIDIZER_RESTART"));
@@ -29,7 +31,7 @@ internal static class OxidizerAcceptance
         {
             float[] exhaustedAir = new float[width * height];
             Array.Fill(exhaustedAir, .37f);
-            initial = new(width, height, new byte[width * height * 40],
+            initial = new(width, height, new byte[width * height * System.Runtime.InteropServices.Marshal.SizeOf<GridCell>()],
                 Oxidizer: MemoryMarshal.AsBytes(exhaustedAir.AsSpan()).ToArray());
             Task.Run(() => new SimulationStateSerializer().SaveAsync(
                 Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SCENE_PATH")!,
@@ -42,7 +44,7 @@ internal static class OxidizerAcceptance
             return initial = Task.Run(async () => (await new SimulationStateSerializer().LoadAsync(
                 Environment.GetEnvironmentVariable("PHYXEL_OXIDIZER_RESTART")!, materials))?.World
                 ?? throw new InvalidDataException("Missing oxidizer restart world.")).GetAwaiter().GetResult();
-        byte[] bytes = new byte[width * height * 40];
+        byte[] bytes = new byte[width * height * System.Runtime.InteropServices.Marshal.SizeOf<GridCell>()];
         float[] oxygen = new float[width * height];
         Array.Fill(oxygen, 1);
         void Put(int x, int y, string id, float temperature)
@@ -72,6 +74,7 @@ internal static class OxidizerAcceptance
                 for (int yy = y + 1; yy < y + 8; yy++) for (int xx = x + 1; xx < x + 12; xx++)
                     oxygen[yy * width + xx] = .37f;
         }
+        if (SwitchModes) Array.Clear(oxygen);
         initial = new(width, height, bytes, Oxidizer: MemoryMarshal.AsBytes(oxygen.AsSpan()).ToArray());
         return initial;
     }
@@ -140,15 +143,45 @@ internal static class OxidizerAcceptance
         var vent = Measure(final, materials, 2); var co2 = Measure(final, materials, 3);
         var steam = Measure(final, materials, 4); var self = Measure(final, materials, 5);
         var powderFinal = Measure(final, materials, 6); var uniform = Measure(final, materials, 7);
+        SimulationMode mode = Sandbox ? SimulationMode.Sandbox : SimulationMode.Simulation;
         bool saved = Task.Run(async () => {
             var serializer = new SimulationStateSerializer();
             string path = Path.Combine(directory, "final.scene.json");
-            await serializer.SaveAsync(path, new SimulationSettings { OpenBoundaries = false },
+            await serializer.SaveAsync(path, new SimulationSettings { OpenBoundaries = false, Mode = mode },
                 (ushort)materials.GetRequiredRuntimeIndex(CoreMaterialIds.Co2), final, materials);
-            var loaded = (await serializer.LoadAsync(path, materials))?.World;
-            return loaded is not null && loaded.Grid.AsSpan().SequenceEqual(final.Grid) &&
+            var scene = await serializer.LoadAsync(path, materials);
+            var loaded = scene?.World;
+            return scene?.State.Mode == mode && loaded is not null && loaded.Grid.AsSpan().SequenceEqual(final.Grid) &&
                 loaded.Oxidizer is not null && loaded.Oxidizer.AsSpan().SequenceEqual(final.Oxidizer);
         }).GetAwaiter().GetResult();
+        if (Sandbox)
+        {
+            bool passSandbox = saved && powderFinal.Powder == 0;
+            double pausedLoss = 0, resumedBurn = 0;
+            if (SwitchModes)
+            {
+                var at10 = checkpoints.Last(c => c.Frame <= Frame(10)).Snapshot;
+                var at20 = checkpoints.Last(c => c.Frame <= Frame(20)).Snapshot;
+                var at30 = checkpoints.Last(c => c.Frame <= Frame(30)).Snapshot;
+                pausedLoss = Math.Abs(Measure(at10, materials, 0).Fuel - Measure(at20, materials, 0).Fuel);
+                resumedBurn = Measure(at20, materials, 0).Fuel - Measure(at30, materials, 0).Fuel;
+                passSandbox &= closed.Fuel < 13 && closed.Fuel > 12 && pausedLoss < .01 && resumedBurn > 2;
+            }
+            else
+            {
+                passSandbox &= Math.Abs(closed.Fuel - 10) < .04 && Math.Abs(open.Fuel - 10) < .04 &&
+                    Math.Abs(co2.Fuel - 10) < .04 && Math.Abs(steam.Fuel - 10) < .04;
+                var sandboxEarly = checkpoints[0].Snapshot;
+                passSandbox &= Measure(sandboxEarly, materials, 3).Flames == 0 && Measure(sandboxEarly, materials, 4).Flames > 0;
+            }
+            // No transport/consumption in Sandbox; in switch case zero inventory
+            // stays zero through the exhausted Simulation interval as well.
+            bool inventoryPreserved = final.Oxidizer!.AsSpan().SequenceEqual(initial.Oxidizer);
+            passSandbox &= inventoryPreserved;
+            report = FormattableString.Invariant($"PHYXEL_COMBUSTION_MODES sandbox=True switch={SwitchModes} closedFuel={closed.Fuel:F6} co2Fuel={co2.Fuel:F6} steamFuel={steam.Fuel:F6} pausedLoss={pausedLoss:F6} resumedBurn={resumedBurn:F6} inventoryPreserved={inventoryPreserved} saved={saved}");
+            File.WriteAllText(Path.Combine(directory, "report.txt"), report);
+            return passSandbox;
+        }
         bool pass = saved && co2.Fuel >= 24.999 && steam.Fuel >= 24.999 && co2.Flames == 0 && steam.Flames == 0 &&
             powderFinal.Powder == 0 && Math.Abs(uniform.Oxygen - .37 * 77) < .0001;
         var early = checkpoints[0].Snapshot;

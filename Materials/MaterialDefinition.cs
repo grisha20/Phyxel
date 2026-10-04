@@ -50,7 +50,12 @@ public enum MaterialFlags : uint
     // Runtime tag for the CO2/ambient-air density ratio; no layout expansion.
     ThermalCarbonDioxide = 1u << 8,
     // Coal retains ignition like TPT's burning life counter.
-    PersistentCoalIgnition = 1u << 9
+    PersistentCoalIgnition = 1u << 9,
+    // Reversible solid/liquid enthalpy; liquid may also have liquid/vapour enthalpy.
+    FusionEnthalpy = 1u << 10,
+    LiquidConvection = 1u << 11,
+    // Compact rigid pieces use material/fluid density, without hull thinning.
+    DensityBody = 1u << 12
 }
 
 public static class CoreMaterialIds
@@ -58,6 +63,9 @@ public static class CoreMaterialIds
     public const string Empty = "core:empty";
     public const string Sand = "core:sand";
     public const string Water = "core:water";
+    public const string Oil = "core:oil";
+    public const string FrozenOil = "core:frozen_oil";
+    public const string OilVapour = "core:oil_vapour";
     public const string Ice = "core:ice";
     public const string Steam = "core:steam";
     public const string Metal = "core:metal";
@@ -99,6 +107,10 @@ public static class CoreMaterialIds
 
 public sealed record MaterialTransitionRule(float Temperature, string IntoId, float LatentHeat = 0);
 
+// Mobility is a dimensionless gameplay proxy, not viscosity in Pa.s.
+public sealed record MaterialLiquidFlowDefinition(float ReferenceTemperature,
+    float TemperatureSensitivity, float MinimumMobility, float MaximumMobility);
+
 public sealed record MaterialTransitionDefinitions(
     MaterialTransitionRule? Below,
     MaterialTransitionRule? Above);
@@ -109,7 +121,11 @@ public sealed record MaterialCombustionDefinition(
     float HeatPerMass,
     string BurnedIntoId,
     float FlameSpreadRate,
-    float MaximumTemperature);
+    float MaximumTemperature,
+    float PressurePerMass = 0,
+    float FlameLifetimeMultiplier = 1,
+    float OxidizerPerMass = 20,
+    float ContactIgnitionTemperature = -273.15f);
 
 public sealed record MaterialEmissionDefinition(
     string SmokeIntoId,
@@ -122,11 +138,13 @@ public sealed record MaterialEmissionDefinition(
 public sealed record MaterialLifecycleDefinition(
     float MinimumLifetime,
     float MaximumLifetime,
-    string DecayIntoId);
+    string DecayIntoId,
+    float? ExtinctionTemperature = null);
 
 public sealed record MaterialLiquidContactTransitionDefinition(
     string IntoId,
-    float RatePerSecond);
+    float RatePerSecond,
+    string? WithId = null);
 
 public sealed record MaterialGasDefinition(
     float Diffusion,
@@ -135,12 +153,19 @@ public sealed record MaterialGasDefinition(
     float HazeStrength,
     float OxidizerDisplacement = 1);
 
+public sealed record MaterialMoistureDefinition(
+    string LiquidId, string DryId, string WetId,
+    float Capacity, float AbsorptionRate, float DryingRate, float CapillaryRate = 0);
+
 public sealed record MaterialMotionDefinition(
     float Advection,
     float AirDrag,
     float AirLoss,
     float Loss,
     float Collision);
+
+public sealed record MaterialFuelAbsorptionDefinition(
+    string LiquidId, float Capacity, float AbsorptionRate, float SaturatedDensity);
 
 public sealed record MaterialThermalRegulatorDefinition(bool Heating, float TargetTemperature, float MaximumPower);
 
@@ -159,8 +184,11 @@ public sealed record MaterialDefinition(
     public MaterialEmissionDefinition? Emissions { get; init; }
     public MaterialLifecycleDefinition? Lifecycle { get; init; }
     public MaterialLiquidContactTransitionDefinition? LiquidContactTransition { get; init; }
+    public MaterialMoistureDefinition? Moisture { get; init; }
+    public MaterialFuelAbsorptionDefinition? FuelAbsorption { get; init; }
     public MaterialGasDefinition? Gas { get; init; }
     public MaterialThermalRegulatorDefinition? ThermalRegulator { get; init; }
+    public MaterialLiquidFlowDefinition? LiquidFlow { get; init; }
     public MaterialMotionDefinition Motion { get; init; } = new(
         MaterialRegistry.DefaultMotionAdvection,
         MaterialRegistry.DefaultMotionAirDrag,

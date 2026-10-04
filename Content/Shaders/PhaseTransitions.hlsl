@@ -13,6 +13,7 @@ cbuffer PhaseConstants : register(b0)
 };
 
 StructuredBuffer<MaterialProperties> Materials : register(t0);
+StructuredBuffer<uint> ContactSummary : register(t1);
 RWStructuredBuffer<GridCell> Grid : register(u0);
 RWStructuredBuffer<uint> PhaseSummary : register(u1);
 RWStructuredBuffer<uint> PhaseEventCounters : register(u2);
@@ -118,6 +119,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     uint index = coordinate.y * PhaseWidth + coordinate.x;
+    // Drying creates vapour without changing the grain's temperature phase.
+    // Fold its event into the existing asynchronous activity readback.
+    if (index == 0) InterlockedOr(PhaseSummary[0], ContactSummary[0]);
     GridCell cell = Grid[index];
     if (cell.IsActive == 0 || cell.MaterialIndex >= MaterialCount)
     {
@@ -169,8 +173,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     bool sourceCellular = IsCellularMaterial(source.SimulationKind);
     bool targetCellular = IsCellularMaterial(target.SimulationKind);
-    if (phaseEnthalpy && HasPhaseEnthalpy(target))
-        cell.Temperature = EnthalpyTransitionTemperature(cell, source, target);
+    float transitionEnergy = phaseEnthalpy ? CellSpecificEnthalpy(cell) : 0;
     cell.MaterialIndex = targetIndex;
     cell.IsActive = 1;
     cell.BodyId = 0;
@@ -187,6 +190,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         ? 2u
         : 0u;
     cell.Lifetime = InitialMaterialLifetime(target, index);
+    if (phaseEnthalpy && HasPhaseEnthalpy(target))
+        cell = SetCellSpecificEnthalpy(cell, transitionEnergy);
     Grid[index] = cell;
     if (PhaseReserved0 != 0)
     {

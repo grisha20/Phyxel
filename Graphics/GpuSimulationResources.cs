@@ -9,6 +9,11 @@ namespace Phyxel.Graphics;
 
 public sealed class GpuSimulationResources : IDisposable
 {
+    internal GpuStageTimer? AirTimer { get; init; }
+    internal GpuStageTimer? AirHeatTimer { get; init; }
+    internal GpuStageTimer? GasMotionTimer { get; init; }
+    public required GpuStructuredBuffer<uint> GasActiveTiles { get; init; }
+    public ComputeShader? GasActiveTilesShader { get; init; }
     public required Device Device { get; init; }
     public required DeviceContext Context { get; init; }
     public required int Width { get; init; }
@@ -19,6 +24,11 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuStructuredBuffer<uint> BodyFlags { get; init; }
     public required GpuStructuredBuffer<uint> SolidBodyGeometry { get; init; }
     public required GpuStructuredBuffer<uint> SolidBodyMass { get; init; }
+    public required GpuStructuredBuffer<BodyBalanceData> SolidBalance { get; init; }
+    public required GpuStructuredBuffer<uint> SolidRotationTargets { get; init; }
+    public required GpuStructuredBuffer<uint> SolidRotationBlocked { get; init; }
+    public required GpuBufferPair<uint> SolidOrigins { get; init; }
+    public required GpuStructuredBuffer<BodyRotationPlan> SolidRotationPlans { get; init; }
     public required GpuStructuredBuffer<uint> PathBlockerMasks { get; init; }
     public required GpuStructuredBuffer<uint> CellMaterials { get; init; }
     public required GpuStructuredBuffer<WaterPressureRouteData> WaterPressureRoutes { get; init; }
@@ -31,14 +41,34 @@ public sealed class GpuSimulationResources : IDisposable
     public required Buffer ThermalConstants { get; init; }
     public required GpuBufferPair<float> Oxidizer { get; init; }
     public required GpuStructuredBuffer<float> OxidizerDemand { get; init; }
+    public required GpuStructuredBuffer<float> OxidizerAvailable { get; init; }
+    public required GpuStructuredBuffer<System.Numerics.Vector2> OxidizerFlux { get; init; }
     public required Buffer OxidizerConstants { get; init; }
     public required Buffer OxidizerStaging { get; init; }
     public ComputeShader? OxidizerTransportShader { get; init; }
+    public ComputeShader? OxidizerFluxShader { get; init; }
     public ComputeShader? OxidizerConsumeShader { get; init; }
     public required int AirWidth { get; init; }
     public required int AirHeight { get; init; }
     public required Buffer AirConstants { get; init; }
+    public required Buffer AirThermalConstants { get; init; }
+    public required GpuStructuredBuffer<System.Numerics.Vector2> AirThermal { get; init; }
+    public required GpuStructuredBuffer<System.Numerics.Vector4> AirThermalFlux { get; init; }
+    public required Buffer AirThermalStaging { get; init; }
+    public ComputeShader? AirHeatExchangeShader { get; init; }
+    public ComputeShader? AirHeatFluxShader { get; init; }
+    public ComputeShader? AirHeatTransportShader { get; init; }
+
     public required GpuStructuredBuffer<AirCell> Air { get; init; }
+    public required GpuStructuredBuffer<System.Numerics.Vector4> ReactionPending { get; init; }
+    public required GpuBufferPair<System.Numerics.Vector4> ReactionPulse { get; init; }
+    public required GpuStructuredBuffer<System.Numerics.Vector4> ReactionPulseScratch { get; init; }
+    public required Buffer ReactionPendingStaging { get; init; }
+    public required Buffer ReactionPulseStaging { get; init; }
+    public ComputeShader? ReactionGatherShader { get; init; }
+    public ComputeShader? ReactionClearMappedShader { get; init; }
+    public ComputeShader? ReactionFacesShader { get; init; }
+    public ComputeShader? ReactionCommitShader { get; init; }
     public required GpuStructuredBuffer<AirCell> AirScratch { get; init; }
     // Derived from the current fine grid each air tick, never persisted.
     public required GpuStructuredBuffer<uint> AirFlowLinks { get; init; }
@@ -87,6 +117,7 @@ public sealed class GpuSimulationResources : IDisposable
     public required Buffer ContactTransitionConstants { get; init; }
     public required Buffer PhaseConstants { get; init; }
     public required GpuStructuredBuffer<uint> PhaseSummary { get; init; }
+    public required GpuStructuredBuffer<uint> ContactSummary { get; init; }
     public GpuStructuredBuffer<uint>? PhaseEventCounters { get; init; }
     public Buffer? PhaseEventStaging { get; init; }
     public GpuStructuredBuffer<ThermalEnergyLedgerCell>? ThermalEnergyLedger { get; init; }
@@ -148,6 +179,11 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? ComponentCompressShader { get; init; }
     public ComputeShader? ComponentFinalizeShader { get; init; }
     public ComputeShader? SolidGeometryAnalyzeShader { get; init; }
+    public ComputeShader? SolidBalanceShader { get; init; }
+    public ComputeShader? SolidRotationPlanShader { get; init; }
+    public ComputeShader? SolidRotationApplyShader { get; init; }
+    public ComputeShader? SolidOriginsInitializeShader { get; init; }
+    public ComputeShader? SolidRotationBuildShader { get; init; }
     public ComputeShader? SolidAnalyzeShader { get; init; }
     public ComputeShader? SolidDisplacementPlanShader { get; init; }
     public ComputeShader? SolidMoveShader { get; init; }
@@ -156,6 +192,7 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? ThermalDiffusionShader { get; init; }
     public ComputeShader? WaterConvectionShader { get; init; }
     public ComputeShader? AirInjectShader { get; init; }
+    public ComputeShader? AirFineMaterialsShader { get; init; }
     public ComputeShader? AirPressureShader { get; init; }
     public ComputeShader? AirVelocityShader { get; init; }
     public ComputeShader? AirAdvectShader { get; init; }
@@ -174,6 +211,7 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? GasVisualDiffuseShader { get; init; }
     public ComputeShader? GasVisualCommitShader { get; init; }
     public ComputeShader? ContactTransitionShader { get; init; }
+    public ComputeShader? MoistureShader { get; init; }
     public ComputeShader? PhaseTransitionShader { get; init; }
     public ComputeShader? CombustionShader { get; init; }
     public ComputeShader? EmissionResolveShader { get; init; }
@@ -194,6 +232,7 @@ public sealed class GpuSimulationResources : IDisposable
         ThermalDiffusionShader?.Dispose();
         WaterConvectionShader?.Dispose();
         AirInjectShader?.Dispose();
+        AirFineMaterialsShader?.Dispose();
         AirPressureShader?.Dispose();
         AirVelocityShader?.Dispose();
         AirAdvectShader?.Dispose();
@@ -212,11 +251,17 @@ public sealed class GpuSimulationResources : IDisposable
         GasVisualDiffuseShader?.Dispose();
         GasVisualCommitShader?.Dispose();
         ContactTransitionShader?.Dispose();
+        MoistureShader?.Dispose();
         SolidDisplacementApplyShader?.Dispose();
         SolidMoveShader?.Dispose();
         SolidDisplacementPlanShader?.Dispose();
         SolidAnalyzeShader?.Dispose();
         SolidGeometryAnalyzeShader?.Dispose();
+        SolidBalanceShader?.Dispose();
+        SolidRotationPlanShader?.Dispose();
+        SolidRotationApplyShader?.Dispose();
+        SolidOriginsInitializeShader?.Dispose();
+        SolidRotationBuildShader?.Dispose();
         ComponentFinalizeShader?.Dispose();
         ComponentCompressShader?.Dispose();
         ComponentUnionShader?.Dispose();
@@ -267,9 +312,12 @@ public sealed class GpuSimulationResources : IDisposable
         TemperatureProbeConstants.Dispose();
         ThermalConstants.Dispose();
         OxidizerTransportShader?.Dispose();
+        OxidizerFluxShader?.Dispose();
         OxidizerConsumeShader?.Dispose();
         Oxidizer.Dispose();
         OxidizerDemand.Dispose();
+        OxidizerAvailable.Dispose();
+        OxidizerFlux.Dispose();
         OxidizerConstants.Dispose();
         OxidizerStaging.Dispose();
         FireGlowScratch.Dispose();
@@ -278,6 +326,10 @@ public sealed class GpuSimulationResources : IDisposable
         FireGlow.Dispose();
         FireGlowConstants.Dispose();
         AirScratch.Dispose();
+        ReactionPending.Dispose();ReactionPulse.Dispose();ReactionPulseScratch.Dispose();
+        ReactionPendingStaging.Dispose();ReactionPulseStaging.Dispose();
+        ReactionGatherShader?.Dispose();ReactionClearMappedShader?.Dispose();
+        ReactionFacesShader?.Dispose();ReactionCommitShader?.Dispose();
         AirFlowLinks.Dispose();
         AirProjectionA.Dispose();
         AirProjectionB.Dispose();
@@ -316,12 +368,17 @@ public sealed class GpuSimulationResources : IDisposable
         SteamJetAirCoupling?.Dispose();
         SteamJetAirCouplingStaging?.Dispose();
         AirConstants.Dispose();
+        AirTimer?.Dispose(); AirHeatTimer?.Dispose(); GasMotionTimer?.Dispose();
+        GasActiveTiles.Dispose(); GasActiveTilesShader?.Dispose();
+        AirThermalConstants.Dispose(); AirThermal.Dispose(); AirThermalFlux.Dispose(); AirThermalStaging.Dispose();
+        AirHeatExchangeShader?.Dispose(); AirHeatFluxShader?.Dispose(); AirHeatTransportShader?.Dispose();
         ContactTransitionConstants.Dispose();
         foreach (GpuPhaseSummaryReadbackSlot slot in PhaseSummaryReadbackSlots)
         {
             slot.Dispose();
         }
         PhaseSummary.Dispose();
+        ContactSummary.Dispose();
         PhaseEventCounters?.Dispose();
         PhaseEventStaging?.Dispose();
         ThermalEnergyLedger?.Dispose();
@@ -346,6 +403,11 @@ public sealed class GpuSimulationResources : IDisposable
         PathBlockerMasks.Dispose();
         BodyFlags.Dispose();
         SolidBodyMass.Dispose();
+        SolidBalance.Dispose();
+        SolidRotationTargets.Dispose();
+        SolidRotationBlocked.Dispose();
+        SolidOrigins.Dispose();
+        SolidRotationPlans.Dispose();
         SolidBodyGeometry.Dispose();
         ComponentParents.Dispose();
         Grid.Dispose();

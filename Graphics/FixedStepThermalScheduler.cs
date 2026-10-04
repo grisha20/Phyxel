@@ -23,7 +23,10 @@ public sealed class FixedStepThermalScheduler
             accumulator + Math.Clamp(elapsedSeconds, 0, maximumAccumulation),
             maximumAccumulation);
         int ticks = 0;
-        while (accumulator + 1e-9 >= FixedStepSeconds &&
+        // DispatchFrame supplies float elapsed time. Its accumulated rounding
+        // error can defer a boundary tick at 100 FPS; use the same one-
+        // microsecond tolerance as the gas clock, far below the 50 ms step.
+        while (accumulator + 1e-6 >= FixedStepSeconds &&
             ticks < SimulationDispatchCoordinator.MaximumThermalTicksPerFrame)
         {
             accumulator -= FixedStepSeconds;

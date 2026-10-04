@@ -34,6 +34,7 @@ public enum AcceptanceScenarioMode
     Co2Thermal,
     TransientHeat,
     GasCoFlow,
+    SmokeRender,
     WaterStress,
     FlatSurface,
     WaterDrain,
@@ -295,14 +296,18 @@ public static class AcceptanceRegressionScenario
 
     private static IReadOnlyList<BrushDrawCommand> CreateFireOpen(uint frame, uint scenarioSeed)
     {
-        if (frame >= 360)
+        if (frame >= 360 && Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE") != "1")
         {
             return [];
         }
 
         // Intentionally identical source to fire_obstacle, without any plate
         // or other solid.  This isolates the source/air feedback loop.
-        BrushDrawCommand flame = Create(FireObstacleSourceX, 170, FireBrushRadius, materials.Fire, 0, 0);
+        bool benchmark = Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE") == "1";
+        int radius = benchmark && int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE_RADIUS"), out int requestedRadius)
+            ? Math.Clamp(requestedRadius,1,60) : FireBrushRadius;
+        BrushDrawCommand flame = Create(benchmark ? 960 : FireObstacleSourceX,
+            benchmark ? 810 : 170, radius, materials.Fire, 0, 0);
         flame.Density = 0.82f;
         flame.Seed ^= scenarioSeed;
         return [flame];

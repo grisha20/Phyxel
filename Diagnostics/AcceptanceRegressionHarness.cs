@@ -54,6 +54,7 @@ public sealed class AcceptanceRegressionHarness
             Environment.GetEnvironmentVariable("PHYXEL_SPEC_SCENARIO");
         Mode = requested?.Trim().ToLowerInvariant() switch
         {
+            "smoke_render" => AcceptanceScenarioMode.SmokeRender,
             "bowl" or "acceptance_bowl" => AcceptanceScenarioMode.Bowl,
             "solid_gravity" or "acceptance_solid_gravity" => AcceptanceScenarioMode.SolidGravity,
             "sand" or "acceptance_sand" => AcceptanceScenarioMode.Sand,
@@ -258,6 +259,7 @@ public sealed class AcceptanceRegressionHarness
                 AcceptanceScenarioMode.Oxidizer => OxidizerAcceptance.Restarting ? OxidizerAcceptance.Frame(10) : OxidizerAcceptance.Frame(60),
                 AcceptanceScenarioMode.CoalFire => CoalFireAcceptance.Frame(CoalFireAcceptance.FinalSecond),
                 AcceptanceScenarioMode.SavedFurnace => SavedFurnaceAcceptance.FinalFrame,
+                AcceptanceScenarioMode.SmokeRender => 3,
                 AcceptanceScenarioMode.AirWall => 180,
                 AcceptanceScenarioMode.Co2Thermal => 60,
                 AcceptanceScenarioMode.TransientHeat => 3,
@@ -284,8 +286,20 @@ public sealed class AcceptanceRegressionHarness
         return AcceptanceRegressionScenario.CreateCommands(Mode, frame, materialRegistry, scenarioSeed);
     }
 
-    public void InitializeDiagnosticFields(GpuSimulationResources resources) =>
+    public void InitializeDiagnosticFields(GpuSimulationResources resources)
+    {
         GasFlowAcceptance.InitializeFields(Mode, resources);
+        if (materialRegistry is not null && CorePhaseAcceptanceScenario.IsCorePhaseMode(Mode))
+        {
+            // These fixtures measure phase normalization, not heat transfer.
+            // Latent conversion now changes temperature, so a surrounding hot
+            // cage would inject extra Q between checkpoints. Insulate only
+            // the diagnostic cage; production contact is verified separately.
+            var table = materialRegistry.CreateGpuTable();
+            table[materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Fixture)].ThermalConductivity = 0;
+            resources.Materials.Upload(resources.Context, table);
+        }
+    }
 
     public SimulationWorldSnapshot? CreateInitialWorld(int width, int height) =>
         materialRegistry is null
@@ -684,6 +698,9 @@ public sealed class AcceptanceRegressionHarness
     }
 
     public float AdjustElapsedSeconds(float elapsedSeconds) =>
+        // Performance checks can exercise the ordinary variable-step clock,
+        // rather than advancing a nominal diagnostic second per frame count.
+        Active && Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_REALTIME_CLOCK") == "1" ? elapsedSeconds :
         // Cycle frame numbers denote fixed 60 Hz simulation steps. Keeping
         // that clock explicit also permits faster rendering during diagnostics.
         Mode is AcceptanceScenarioMode.SteamCycle or AcceptanceScenarioMode.SteamApparatus ? 1f / 60 :
@@ -734,7 +751,12 @@ public sealed class AcceptanceRegressionHarness
         {
             return;
         }
-
+        // Existing physics acceptance scenes retain their original rules.
+        settings.Mode = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_SIMULATION_MODE") == "sandbox"
+            ? SimulationMode.Sandbox : SimulationMode.Simulation;
+        if (Mode == AcceptanceScenarioMode.Oxidizer && OxidizerAcceptance.SwitchModes)
+            settings.Mode = frame >= OxidizerAcceptance.Frame(10) && frame < OxidizerAcceptance.Frame(20)
+                ? SimulationMode.Simulation : SimulationMode.Sandbox;
         bool scenarioHydraulics = Mode is
             AcceptanceScenarioMode.Hydro or
             AcceptanceScenarioMode.HydraulicSurface or
@@ -782,7 +804,7 @@ public sealed class AcceptanceRegressionHarness
         {
             settings.Paused = frame < ThermalDeviceAcceptance.FramesAt60(30);
         }
-        else if (Mode == AcceptanceScenarioMode.WaterConvectionPause)
+        else if (Mode is AcceptanceScenarioMode.WaterConvectionPause or AcceptanceScenarioMode.SmokeRender)
         {
             settings.Paused = true;
         }
@@ -824,6 +846,7 @@ public sealed class AcceptanceRegressionHarness
         }
         string? label = Mode switch
         {
+            AcceptanceScenarioMode.SmokeRender when frame == 1 => "smoke-render",
             AcceptanceScenarioMode.SavedFurnace when frame > 0 && frame % (uint)SavedFurnaceAcceptance.Fps == 0 => $"saved-furnace-{frame / SavedFurnaceAcceptance.Fps:D2}s",
             AcceptanceScenarioMode.Co2Layer when frame % 600 == 599 => $"co2_layer_{frame + 1}",
             AcceptanceScenarioMode.SteamCycle when frame % 600 == 599 => $"steam_cycle_{frame + 1}",

@@ -53,8 +53,8 @@ internal static class CorePhaseAcceptanceVerifier
             water.Properties.TransitionAboveTemperature == 100,
             "core:water boil rule is not 100 -> core:steam", errors);
         Require(ice.Properties.TransitionAboveMaterialIndex == water.RuntimeIndex &&
-            ice.Properties.TransitionAboveTemperature == 2,
-            "core:ice melt rule is not 2 -> core:water", errors);
+            ice.Properties.TransitionAboveTemperature == 0 && ice.Properties.TransitionAboveLatentHeat == 333.4f,
+            "core:ice melt rule is not funded 0 -> core:water", errors);
         Require(steam.Properties.TransitionBelowMaterialIndex == water.RuntimeIndex &&
             steam.Properties.TransitionBelowTemperature == 98,
             "core:steam condensation rule is not 98 -> core:water", errors);
@@ -113,7 +113,7 @@ internal static class CorePhaseAcceptanceVerifier
         GridCell oneTransition = Cell(checkpoints[0].Snapshot, 260, 160);
         GridCell twoTransitions = Cell(checkpoints[1].Snapshot, 260, 160);
         Require(oneTransition.MaterialIndex == materials.GetRequiredRuntimeIndex(CoreMaterialIds.Water),
-            "ice at 650 C skipped water in the first dispatch", errors);
+            "fully heated ice skipped water in the first dispatch", errors);
         ValidateNormalized(oneTransition, twoTransitions, materials, CoreMaterialIds.Steam,
             "second dispatch water -> steam", errors);
 
@@ -218,7 +218,7 @@ internal static class CorePhaseAcceptanceVerifier
         SimulationWorldSnapshot initial = Initial(AcceptanceScenarioMode.WaterIceSteamPause,
             checkpoints[0].Snapshot, materials);
         GridCell coldBefore = Cell(initial, 220, 135);
-        coldBefore.Temperature = -10;
+        coldBefore.Temperature = -100;
         GridCell hotBefore = Cell(initial, 260, 135);
         hotBefore.Temperature = 650;
         Require(CellEquals(coldBefore, Cell(checkpoints[0].Snapshot, 220, 135)) &&
@@ -330,8 +330,12 @@ internal static class CorePhaseAcceptanceVerifier
         {
             for (int x = left; x <= right; x++)
             {
-                Require(CellEquals(Cell(source, x, y), Cell(target, x, y)),
-                    $"{label} at {x},{y}", errors);
+                GridCell before = Cell(source, x, y), after = Cell(target, x, y);
+                // Solid canonicalization rounds temperature by float precision;
+                // CO2 exchanges a small amount of Q with the enabled air field.
+                // Identity, mass and all other fields still must match exactly.
+                Require(CellEqualsExceptTemperature(before, after) && Math.Abs(before.Temperature-after.Temperature)<.1f,
+                    $"{label} at {x},{y} before={Describe(Cell(source,x,y))} after={Describe(Cell(target,x,y))}", errors);
             }
         }
     }
@@ -355,11 +359,9 @@ internal static class CorePhaseAcceptanceVerifier
             sourceAtPhasePass.Temperature +=
                 (sourceProperties.AmbientTemperature - sourceAtPhasePass.Temperature) * factor;
         }
-        GridCell expected = PhaseTransitionRuntime.Normalize(
-            sourceAtPhasePass,
-            sourceProperties,
-            materials[target].Properties,
-            target);
+        GridCell expected = sourceAtPhasePass;
+        Require(PhaseTransitionRuntime.TryApply(ref expected, materials.CreateGpuTable(), out _) &&
+            expected.MaterialIndex == target, $"{label} source has insufficient phase energy", errors);
         // GPU ambient cooling can be reduced by local material shelter. The
         // phase contract still requires every non-temperature field and the
         // locally cooled temperature to be preserved by normalization.
@@ -376,8 +378,7 @@ internal static class CorePhaseAcceptanceVerifier
             materials[target].Properties.SimulationKind == (uint)MaterialSimulationKind.Gas;
         Require(SameBits(source.Mass, actual.Mass) &&
             (energyPair
-                ? Math.Abs(PhaseEnthalpy.TransitionTemperature(sourceAtPhasePass, sourceProperties,
-                    materials[target].Properties) - actual.Temperature) <= ambientTemperatureTolerance
+                ? Math.Abs(expected.Temperature - actual.Temperature) <= ambientTemperatureTolerance
                 : latentBoil
                 ? SameBits(actual.Temperature,
                     sourceProperties.TransitionAboveTemperature)

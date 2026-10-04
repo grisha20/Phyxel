@@ -66,6 +66,10 @@ public sealed class MaterialRegistry
         ValidateCoreEmissions(coreDefinitions);
         ValidateCoreLifecycles(coreDefinitions);
         ValidateCoreContactTransitions(coreDefinitions);
+        var moistureCore = coreDefinitions.ToDictionary(m => m.Id, StringComparer.Ordinal);
+        foreach (var m in coreDefinitions)
+            if ((FindMoistureError(m, moistureCore, true) ?? FindFuelAbsorptionError(m, moistureCore, true)) is { } error)
+                throw new InvalidDataException($"Invalid moisture in '{m.Id}': {error}");
 
         HashSet<string> reservedIds = coreDefinitions
             .Select(material => material.Id)
@@ -113,7 +117,10 @@ public sealed class MaterialRegistry
         RegistryHasPhaseTransitions = definitions.Any(material => material.PhaseTransitions is not null);
         RegistryHasCombustibleMaterials = definitions.Any(material => material.Combustion is not null);
         RegistryHasTransientMaterials = definitions.Any(material => material.Lifecycle is not null);
-        RegistryHasContactTransitions = definitions.Any(material => material.LiquidContactTransition is not null);
+        RegistryHasPressurePowders = definitions.Any(material =>
+            material.Properties.SimulationKind == (uint)MaterialSimulationKind.Granular &&
+            material.Properties.ReactionPressurePerMass > 0);
+        RegistryHasContactTransitions = definitions.Any(material => material.LiquidContactTransition is not null || material.Moisture is not null);
         PhaseTransitionGraphFlags = definitions
             .Where(material => material.PhaseTransitions is not null)
             .Aggregate(
@@ -131,6 +138,7 @@ public sealed class MaterialRegistry
     public bool RegistryHasPhaseTransitions { get; }
     public bool RegistryHasCombustibleMaterials { get; }
     public bool RegistryHasTransientMaterials { get; }
+    public bool RegistryHasPressurePowders { get; }
     public bool RegistryHasContactTransitions { get; }
     public PhaseTransitionSummaryFlags PhaseTransitionGraphFlags { get; }
 
@@ -325,7 +333,8 @@ public sealed class MaterialRegistry
                         FindCombustionReferenceError(source, available, requireBundledTarget: false) ??
                         FindEmissionReferenceError(source, available, requireBundledTarget: false) ??
                         FindLifecycleReferenceError(source, available, requireBundledTarget: false) ??
-                        FindContactTransitionReferenceError(source, available, requireBundledTarget: false)))
+                        FindContactTransitionReferenceError(source, available, requireBundledTarget: false) ??
+                        FindMoistureError(source, available, false) ?? FindFuelAbsorptionError(source, available, false)))
                 .Where(result => result.Error is not null)
                 .Select(result => (result.Source, result.Error!))
                 .ToList();
@@ -409,12 +418,12 @@ public sealed class MaterialRegistry
     private static string? FindPhaseEnthalpyError(
         MaterialDefinition source, IReadOnlyDictionary<string, MaterialDefinition> available)
     {
-        if (PhaseEnthalpy.Enabled(source.Properties))
+        if ((source.Properties.Flags & (uint)MaterialFlags.PhaseEnthalpy) != 0)
         {
             bool liquidSource = source.Properties.SimulationKind == (uint)MaterialSimulationKind.Liquid;
             MaterialTransitionRule? rule = liquidSource ? source.PhaseTransitions?.Above : source.PhaseTransitions?.Below;
             if (rule is null || !available.TryGetValue(rule.IntoId, out MaterialDefinition? partner) ||
-                !PhaseEnthalpy.Enabled(partner.Properties) || partner.Lifecycle is not null)
+                (partner.Properties.Flags & (uint)MaterialFlags.PhaseEnthalpy) == 0 || partner.Lifecycle is not null)
                 return "phase-enthalpy requires an infinite-lived, flagged reversible liquid/gas pair.";
             MaterialDefinition liquid = liquidSource ? source : partner;
             MaterialDefinition vapour = liquidSource ? partner : source;
@@ -432,6 +441,33 @@ public sealed class MaterialRegistry
                 (boiling.Temperature - condensing.Temperature);
             if (boiling.LatentHeat > MaximumLifetime || condensingRange <= 0 || condensingRange > MaximumLifetime)
                 return "phase-enthalpy progress must fit the serialized auxiliary range (0..3600).";
+        }
+        if (PhaseEnthalpy.FusionEnabled(source.Properties))
+        {
+            bool solidSource = source.Properties.SimulationKind == (uint)MaterialSimulationKind.Solid;
+            MaterialTransitionRule? rule = solidSource ? source.PhaseTransitions?.Above : source.PhaseTransitions?.Below;
+            if (rule is null || !available.TryGetValue(rule.IntoId, out MaterialDefinition? partner) ||
+                !PhaseEnthalpy.FusionEnabled(partner.Properties) || partner.Lifecycle is not null)
+                return "fusion-enthalpy requires a flagged reversible solid/liquid pair.";
+            MaterialDefinition solid = solidSource ? source : partner;
+            MaterialDefinition liquid = solidSource ? partner : source;
+            MaterialTransitionRule? melting = solid.PhaseTransitions?.Above;
+            MaterialTransitionRule? freezing = liquid.PhaseTransitions?.Below;
+            if (solid.Properties.SimulationKind != (uint)MaterialSimulationKind.Solid ||
+                liquid.Properties.SimulationKind != (uint)MaterialSimulationKind.Liquid ||
+                solid.PhaseTransitions?.Below is not null ||
+                melting is null || freezing is null || melting.IntoId != liquid.Id ||
+                freezing.IntoId != solid.Id || melting.LatentHeat <= 0 ||
+                freezing.Temperature > melting.Temperature)
+                return "fusion-enthalpy requires positive latent heat and reversible ordered thresholds.";
+            float freezingRange = melting.LatentHeat -
+                (liquid.Properties.HeatCapacity - solid.Properties.HeatCapacity) *
+                (melting.Temperature - freezing.Temperature);
+            if (melting.LatentHeat > MaximumLifetime || freezingRange <= 0 || freezingRange > MaximumLifetime)
+                return "fusion-enthalpy progress must fit the serialized auxiliary range (-3600..3600).";
+            if (liquid.PhaseTransitions?.Above is { } above &&
+                above.Temperature <= melting.Temperature)
+                return "fusion-enthalpy melting must finish below the liquid upper transition.";
         }
         return null;
     }
@@ -538,6 +574,8 @@ public sealed class MaterialRegistry
         {
             return null;
         }
+        if (lifecycle.ExtinctionTemperature.HasValue && (source.Properties.Flags & (uint)MaterialFlags.Flame) == 0)
+            return "lifecycle.extinctionTemperature currently requires flag 'flame'.";
         if (!available.TryGetValue(lifecycle.DecayIntoId, out MaterialDefinition? target))
         {
             return $"lifecycle.decayInto target '{lifecycle.DecayIntoId}' does not exist in the valid material set.";
@@ -580,6 +618,15 @@ public sealed class MaterialRegistry
         {
             return "liquid contact source and target must both have kind 'granular'.";
         }
+        if (transition.WithId is { } withId)
+        {
+            if (!available.TryGetValue(withId, out MaterialDefinition? liquid))
+                return $"liquid.with material '{withId}' does not exist in the valid material set.";
+            if (requireBundledTarget && !liquid.IsBundled)
+                return $"liquid.with material '{withId}' is not a bundled core material.";
+            if ((MaterialSimulationKind)liquid.Properties.SimulationKind != MaterialSimulationKind.Liquid)
+                return $"liquid.with material '{withId}' must have kind 'liquid'.";
+        }
         return null;
     }
 
@@ -606,11 +653,54 @@ public sealed class MaterialRegistry
         }
     }
 
+    private static string? FindMoistureError(MaterialDefinition source,
+        IReadOnlyDictionary<string, MaterialDefinition> available, bool core)
+    {
+        if (source.Moisture is not { } m) return null;
+        if (!available.TryGetValue(m.LiquidId, out var water) ||
+            !available.TryGetValue(m.DryId, out var dry) || !available.TryGetValue(m.WetId, out var wet))
+            return "Missing liquid/dry/wet material.";
+        if (core && (!water.IsBundled || !dry.IsBundled || !wet.IsBundled)) return "Non-core moisture reference.";
+        if (water.Properties.SimulationKind != (uint)MaterialSimulationKind.Liquid ||
+            (water.Properties.Flags & (uint)MaterialFlags.PhaseEnthalpy) == 0 || water.PhaseTransitions?.Above is not { } boiling ||
+            !available.TryGetValue(boiling.IntoId, out var vapour) || vapour.Properties.SimulationKind != (uint)MaterialSimulationKind.Gas)
+            return "Moisture liquid needs a reversible latent-heat vapour pair.";
+        if ((dry.Properties.SimulationKind != (uint)MaterialSimulationKind.Granular &&
+             dry.Properties.SimulationKind != (uint)MaterialSimulationKind.Solid) ||
+            wet.Properties.SimulationKind != dry.Properties.SimulationKind || dry.Combustion is null ||
+            dry.Moisture != m || wet.Moisture != m || (source.Id != dry.Id && source.Id != wet.Id) ||
+            dry.Properties.HeatCapacity != wet.Properties.HeatCapacity)
+            return "Dry/wet solid or granular partners must share kind, moisture settings and dry heat capacity; dry partner must be combustible.";
+        return null;
+    }
+
+    private static string? FindFuelAbsorptionError(MaterialDefinition source,
+        IReadOnlyDictionary<string, MaterialDefinition> available, bool core)
+    {
+        if (source.FuelAbsorption is not { } f) return null;
+        if (source.Moisture is not { } m || !available.TryGetValue(f.LiquidId, out var liquid) ||
+            !available.TryGetValue(m.DryId, out var dry) || !available.TryGetValue(m.WetId, out var wet))
+            return "Absorbed fuel requires shared dry/wet pore partners and a liquid.";
+        if (core && !liquid.IsBundled) return "Non-core absorbed fuel reference.";
+        if (liquid.Properties.SimulationKind != (uint)MaterialSimulationKind.Liquid ||
+            liquid.Combustion is not { BurnedIntoId: CoreMaterialIds.Empty } ||
+            liquid.Lifecycle is not null || f.LiquidId == m.LiquidId || dry.FuelAbsorption != f || wet.FuelAbsorption != f)
+            return "Absorbed fuel must be a liquid fuel without residue; both pore partners must share its definition. Free-liquid phases do not act inside pores.";
+        return null;
+    }
+
     private static MaterialProperties ResolveProperties(
         MaterialDefinition source,
         IReadOnlyDictionary<string, MaterialDefinition> indexedById)
     {
         MaterialProperties properties = source.Properties;
+        if (source.LiquidFlow is { } liquidFlow)
+        {
+            properties.LiquidFlowReferenceTemperature = liquidFlow.ReferenceTemperature;
+            properties.LiquidFlowTemperatureSensitivity = liquidFlow.TemperatureSensitivity;
+            properties.LiquidFlowMinimumMobility = liquidFlow.MinimumMobility;
+            properties.LiquidFlowMaximumMobility = liquidFlow.MaximumMobility;
+        }
         if (source.Id == CoreMaterialIds.Co2)
             properties.Flags |= (uint)MaterialFlags.ThermalCarbonDioxide;
         if (source.Id is CoreMaterialIds.Coal or CoreMaterialIds.StoneCoal)
@@ -624,14 +714,18 @@ public sealed class MaterialRegistry
             ? indexedById[above.IntoId].RuntimeIndex
             : uint.MaxValue;
         properties.IgnitionTemperature = source.Combustion?.IgnitionTemperature ?? 0;
+        properties.ContactIgnitionTemperature = source.Combustion?.ContactIgnitionTemperature ?? -273.15f;
         properties.BurnRate = source.Combustion?.BurnRate ?? 0;
         properties.HeatPerMass = source.Combustion?.HeatPerMass ?? 0;
+        properties.ReactionPressurePerMass = source.Combustion?.PressurePerMass ?? 0;
+        properties.ReactionFlameLifetimeMultiplier = source.Combustion?.FlameLifetimeMultiplier ?? 1;
         properties.BurnedIntoMaterialIndex = source.Combustion is { } combustion
             ? indexedById[combustion.BurnedIntoId].RuntimeIndex
             : uint.MaxValue;
         properties.FlameSpreadRate = source.Combustion?.FlameSpreadRate ?? 0;
         properties.MinimumLifetime = source.Lifecycle?.MinimumLifetime ?? 0;
         properties.MaximumLifetime = source.Lifecycle?.MaximumLifetime ?? 0;
+        properties.FlameExtinctionTemperature = source.Lifecycle?.ExtinctionTemperature ?? MinimumInitialTemperature;
         properties.DecayIntoMaterialIndex = source.Lifecycle is { } lifecycle
             ? indexedById[lifecycle.DecayIntoId].RuntimeIndex
             : uint.MaxValue;
@@ -641,6 +735,26 @@ public sealed class MaterialRegistry
             ? indexedById[contact.IntoId].RuntimeIndex
             : uint.MaxValue;
         properties.ContactLiquidRatePerSecond = source.LiquidContactTransition?.RatePerSecond ?? 0;
+        if (source.LiquidContactTransition is { } liquidContact)
+            properties.ContactLiquidRequiredMaterialIndex = liquidContact.WithId is { } withId
+                ? indexedById[withId].RuntimeIndex : uint.MaxValue;
+        if (source.Moisture is { } moisture)
+        {
+            properties.MoistureLiquidMaterialIndex = indexedById[moisture.LiquidId].RuntimeIndex;
+            properties.MoistureDryMaterialIndex = indexedById[moisture.DryId].RuntimeIndex;
+            properties.MoistureWetMaterialIndex = indexedById[moisture.WetId].RuntimeIndex;
+            properties.MoistureCapacity = moisture.Capacity;
+            properties.MoistureAbsorptionRate = moisture.AbsorptionRate;
+            properties.MoistureDryingRate = moisture.DryingRate;
+            properties.MoistureCapillaryRate = moisture.CapillaryRate;
+        }
+        if (source.FuelAbsorption is { } fuel)
+        {
+            properties.FuelLiquidMaterialIndex = indexedById[fuel.LiquidId].RuntimeIndex;
+            properties.FuelCapacity = fuel.Capacity;
+            properties.FuelAbsorptionRate = fuel.AbsorptionRate;
+            properties.FuelSaturatedDensity = fuel.SaturatedDensity;
+        }
         return properties;
     }
 
@@ -654,7 +768,8 @@ public sealed class MaterialRegistry
             {
                 SmokeIntoMaterialIndex = uint.MaxValue,
                 GasIntoMaterialIndex = uint.MaxValue,
-                FlameIntoMaterialIndex = uint.MaxValue
+                FlameIntoMaterialIndex = uint.MaxValue,
+                OxidizerPerMass = source.Combustion?.OxidizerPerMass ?? 20
             };
         }
         return new MaterialEmissionProperties
@@ -666,7 +781,8 @@ public sealed class MaterialRegistry
             FlameIntoMaterialIndex = emissions.FlameIntoId is { } flameId
                 ? indexedById[flameId].RuntimeIndex
                 : uint.MaxValue,
-            FlameRate = emissions.FlameRate
+            FlameRate = emissions.FlameRate,
+            OxidizerPerMass = source.Combustion?.OxidizerPerMass ?? 20
         };
     }
 

@@ -28,11 +28,15 @@ static const float GasSurfaceConductivityFloor = 0.16;
 // the pair symmetric and bounded by the solid; dry gases retain their floor.
 static const float PhaseVapourSurfaceConductivityFloor = 0.20;
 static const float DiagonalGasContactWeight = 0.5;
+// A diagonal wet contact has a smaller effective area than a shared face.
+// Four faces plus four quarter contacts have total weight five: with the
+// existing .80/4 exchange bound, a condensed cell cannot overshoot its neighbours.
+static const float DiagonalWetContactWeight = 0.25;
 static const float InteriorAmbientExposure = 0.04;
 
 float EffectiveCapacity(GridCell cell)
 {
-    return Materials[cell.MaterialIndex].HeatCapacity * max(cell.Mass, MinimumThermalMass);
+    return CellEffectiveCapacity(cell);
 }
 
 bool IsSameGas(GridCell cell, GridCell neighbor)
@@ -55,9 +59,32 @@ bool IsOrdinaryGasSurface(GridCell cell, GridCell neighbor)
         (gasB && a.SimulationKind == SimulationKindSolid);
 }
 
+bool IsWetSurface(GridCell cell, GridCell neighbor)
+{
+    uint a = Materials[cell.MaterialIndex].SimulationKind;
+    uint b = Materials[neighbor.MaterialIndex].SimulationKind;
+    return (a == SimulationKindLiquid && b == SimulationKindSolid) ||
+        (b == SimulationKindLiquid && a == SimulationKindSolid);
+}
+
+bool HasWetCornerPath(uint index, uint neighborIndex, GridCell cell, GridCell neighbor)
+{
+    uint2 p = uint2(index % ThermalWidth, index / ThermalWidth);
+    uint2 q = uint2(neighborIndex % ThermalWidth, neighborIndex / ThermalWidth);
+    GridCell first = SourceGrid[p.y * ThermalWidth + q.x];
+    GridCell second = SourceGrid[q.y * ThermalWidth + p.x];
+    // Do not bridge an air gap or the corner of a different insulating wall.
+    bool firstPath = first.IsActive != 0 &&
+        (first.MaterialIndex == cell.MaterialIndex || first.MaterialIndex == neighbor.MaterialIndex);
+    bool secondPath = second.IsActive != 0 &&
+        (second.MaterialIndex == cell.MaterialIndex || second.MaterialIndex == neighbor.MaterialIndex);
+    return firstPath || secondPath;
+}
+
 float ContactHeatFlow(
     GridCell cell,
     float capacity,
+    uint index,
     uint neighborIndex,
     float contactWeight,
     bool diagonalContact)
@@ -70,9 +97,15 @@ float ContactHeatFlow(
 
     bool sameGas = IsSameGas(cell, neighbor);
     bool gasSurface = IsOrdinaryGasSurface(cell, neighbor);
-    if (diagonalContact && !sameGas && !gasSurface)
+    bool wetSurface = IsWetSurface(cell, neighbor);
+    if (diagonalContact && !sameGas && !gasSurface && !wetSurface)
     {
         return 0;
+    }
+    if (diagonalContact && wetSurface)
+    {
+        if (!HasWetCornerPath(index, neighborIndex, cell, neighbor)) return 0;
+        contactWeight = DiagonalWetContactWeight;
     }
 
     float conductivityA = Materials[cell.MaterialIndex].ThermalConductivity;
@@ -168,7 +201,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     GridCell cell = SourceGrid[index];
     if (cell.IsActive == 0)
     {
-        DestinationGrid[index] = (GridCell)0;
+        // The coordinator clears the destination in one bulk GPU operation.
+        // Sparse scenes need no per-thread 48-byte stores for empty cells.
         return;
     }
 
@@ -176,43 +210,43 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float heatFlow = 0;
     if (coordinate.x > 0)
     {
-        heatFlow += ContactHeatFlow(cell, capacity, index - 1, 1.0, false);
+        heatFlow += ContactHeatFlow(cell, capacity, index, index - 1, 1.0, false);
     }
     if (coordinate.x + 1 < ThermalWidth)
     {
-        heatFlow += ContactHeatFlow(cell, capacity, index + 1, 1.0, false);
+        heatFlow += ContactHeatFlow(cell, capacity, index, index + 1, 1.0, false);
     }
     if (coordinate.y > 0)
     {
-        heatFlow += ContactHeatFlow(cell, capacity, index - ThermalWidth, 1.0, false);
+        heatFlow += ContactHeatFlow(cell, capacity, index, index - ThermalWidth, 1.0, false);
     }
     if (coordinate.y + 1 < ThermalHeight)
     {
-        heatFlow += ContactHeatFlow(cell, capacity, index + ThermalWidth, 1.0, false);
+        heatFlow += ContactHeatFlow(cell, capacity, index, index + ThermalWidth, 1.0, false);
     }
 
 
     // Include diagonal gas/surface contacts on both endpoints. The symmetric
     // coefficient conserves exchanged energy; division by six bounds the
-    // four cardinal plus four half-weight diagonal contacts. Solid/liquid
-    // and combustion contacts retain their existing stencil and coefficients.
+    // four cardinal plus four half-weight gas contacts. Wet corners use
+    // quarter weights; dry condensed and combustion contacts keep four faces.
     if (coordinate.x > 0 && coordinate.y > 0)
-        heatFlow += ContactHeatFlow(cell, capacity, index - ThermalWidth - 1,
+        heatFlow += ContactHeatFlow(cell, capacity, index, index - ThermalWidth - 1,
             DiagonalGasContactWeight, true);
     if (coordinate.x + 1 < ThermalWidth && coordinate.y > 0)
-        heatFlow += ContactHeatFlow(cell, capacity, index - ThermalWidth + 1,
+        heatFlow += ContactHeatFlow(cell, capacity, index, index - ThermalWidth + 1,
             DiagonalGasContactWeight, true);
     if (coordinate.x > 0 && coordinate.y + 1 < ThermalHeight)
-        heatFlow += ContactHeatFlow(cell, capacity, index + ThermalWidth - 1,
+        heatFlow += ContactHeatFlow(cell, capacity, index, index + ThermalWidth - 1,
             DiagonalGasContactWeight, true);
     if (coordinate.x + 1 < ThermalWidth && coordinate.y + 1 < ThermalHeight)
-        heatFlow += ContactHeatFlow(cell, capacity, index + ThermalWidth + 1,
+        heatFlow += ContactHeatFlow(cell, capacity, index, index + ThermalWidth + 1,
             DiagonalGasContactWeight, true);
 
     MaterialProperties material = Materials[cell.MaterialIndex];
     float ambientHeat = 0;
     float deviceHeat = 0;
-    if (HasPhaseEnthalpy(material))
+    if (HasPhaseEnthalpy(material) || cell.MoistureMass > 0)
         cell = SetCellSpecificEnthalpy(cell,
             CellSpecificEnthalpy(cell) + heatFlow / max(cell.Mass, MinimumThermalMass));
     else
@@ -224,9 +258,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         float temperatureChange =
             (material.AmbientTemperature - cell.Temperature) * saturate(ambientFactor);
         ambientHeat = capacity * temperatureChange;
-        if (HasPhaseEnthalpy(material))
+        if (HasPhaseEnthalpy(material) || cell.MoistureMass > 0)
             cell = SetCellSpecificEnthalpy(cell,
-                CellSpecificEnthalpy(cell) + material.HeatCapacity * temperatureChange);
+                CellSpecificEnthalpy(cell) + ambientHeat / max(cell.Mass, MinimumThermalMass));
         else
             cell.Temperature += temperatureChange;
     }

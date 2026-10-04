@@ -8,7 +8,8 @@
 // light. What the eye sees is fire_r/g/b, a coarse buffer that every particle
 // adds into, which is then blurred into its neighbours, faded a little, and
 // splatted over a 12x12 pixel area with a gaussian kernel. Overlapping flames
-// sum, so a dense core saturates to white while the edges trail off into red.
+// sum; TPT clips a dense core to white while the edges trail off into red.
+// The bright core is deliberate: the user prefers TPT's additive fire display.
 //
 // Drawing each flame cell as its own coloured pixel, and combining the glow with
 // max() as we did before, can never produce that: max() cannot accumulate, so
@@ -153,7 +154,7 @@ void CSDeposit(uint3 dispatchThreadId : SV_DispatchThreadID)
                 // and made a blocked, dense band turn white.
                 uint lifeIndex = min(199u, (uint)max(0.0, floor(source.Lifetime * 60.0)));
                 // Every flame adds its own light. Summing rather than taking a
-                // maximum is what lets a dense core burn out to white.
+                // maximum preserves the contribution of neighbouring sources.
                 deposited += FireAddContribution(FlameGradient(lifeIndex));
                 continue;
             }
@@ -189,13 +190,8 @@ void CSDeposit(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
     }
 
-    // Clamped after every deposit, exactly as Renderer.cpp does with its
-    // 0..255 channels. Without this the field is an unbounded float: a dense
-    // core accumulated five to eight units, everything above one looked equally
-    // white on screen, and the hidden surplus was then spread outward by the
-    // blur frame after frame. The visible flame grew to roughly 37 cells across
-    // even with no lateral movement whatsoever, so every width measurement
-    // taken from the screen was measuring this overflow rather than the fire.
+    // TPT's bounded additive RGB: a dense source can reach a white core.
+    // Clip stored channels, so invisible excess cannot widen the halo later.
     cell.Red = saturate(cell.Red + deposited.r);
     cell.Green = saturate(cell.Green + deposited.g);
     cell.Blue = saturate(cell.Blue + deposited.b);

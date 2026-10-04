@@ -154,6 +154,7 @@ public sealed class SimulationDispatchCoordinator
     private bool worldHasMatter;
     private bool retainOxidizerField;
     private bool cellularMatter;
+    private bool pressurePowderPotential;
     private bool fluidMatter;
     private bool liquidMatter;
     private bool gasMatter;
@@ -164,11 +165,15 @@ public sealed class SimulationDispatchCoordinator
     private double gasTimingMinimumMilliseconds = double.PositiveInfinity;
     private double gasTimingMaximumMilliseconds;
     private bool solidMatter;
+    private double densityBodyAccumulator;
     private bool cellularSleeping;
     private bool solidSleeping;
+    private bool freeBodyMatter;
+    private readonly bool bodyBalanceBaseline = Environment.GetEnvironmentVariable("PHYXEL_BODY_BALANCE_BASELINE") == "1";
     private bool topologyDirty;
     private bool previousSolidGravity;
     private bool previousHydraulicPressure;
+    private SimulationMode previousAirMode = SimulationMode.Simulation;
     private bool presentationDirty = true;
     private bool gasVisualNeedsRebuild = true;
     private bool finalizeCellularRest;
@@ -181,7 +186,6 @@ public sealed class SimulationDispatchCoordinator
     private ulong gasMotionTickIndex;
     private readonly GasBrushQueue gasBrushQueue = new();
     private readonly BrushDrawCommand[] immediateBrushCommands = new BrushDrawCommand[SimulationSettings.MaximumBrushCommands];
-    private double combustionAccumulator;
     // Renderer::render_fire in TPT advances together with its 60 Hz particle
     // simulation.  Keeping this accumulator separate from presentation avoids
     // fading FIRE/SMKE 100 times per second on a 100 FPS Phyxel window.
@@ -290,6 +294,11 @@ public sealed class SimulationDispatchCoordinator
     public bool ThermalActive => thermalActive;
     public ulong ThermalTicks => thermalScheduler.TotalTicks;
     public ulong GasTicks => gasScheduler.TotalTicks;
+    public ulong AirTicks => airTickIndex;
+    public ulong GasMotionTicks => gasMotionTickIndex;
+    internal ThermalGpuTimingStatistics AirGpuTiming => boundResources?.AirTimer?.Statistics ?? default;
+    internal ThermalGpuTimingStatistics AirHeatGpuTiming => boundResources?.AirHeatTimer?.Statistics ?? default;
+    internal ThermalGpuTimingStatistics GasMotionGpuTiming => boundResources?.GasMotionTimer?.Statistics ?? default;
     public ThermalGpuTimingStatistics ThermalGpuTiming => new(
         thermalTimingSamples,
         thermalTimingSamples == 0 ? 0 : thermalTimingTotalMilliseconds / thermalTimingSamples,
@@ -363,7 +372,11 @@ public sealed class SimulationDispatchCoordinator
             presentationDirty = true;
             return;
         }
-        solidSleeping = true;
+        // Free density bodies remain physical when construction gravity is off.
+        solidSleeping = false;
+        topologyDirty = worldHasMatter;
+        cellularSleeping = false;
+        settledObservations = 0;
     }
 
     private void ApplyHydraulicMode(GpuSimulationResources resources, bool enabled)
@@ -430,6 +443,15 @@ public sealed class SimulationDispatchCoordinator
             previousHydraulicPressure = settings.HydraulicPressure;
         }
 
+        if (previousAirMode != settings.Mode)
+        {
+            // Geometry is identical in both modes. Preserve physical pressure
+            // and momentum, so switching a lit furnace does not stop its draft.
+            // Only the correction guess belongs to the old divergence policy.
+            resources.Context.ClearUnorderedAccessView(resources.AirProjectionA.UnorderedView, new RawInt4());
+            resources.Context.ClearUnorderedAccessView(resources.AirProjectionB.UnorderedView, new RawInt4());
+            previousAirMode = settings.Mode;
+        }
         SimulationFrameConstants constants = CreateConstants(settings, commands);
         if (commands.Length > 0 && resources.IsSimulationAllocated)
         {
@@ -486,7 +508,7 @@ public sealed class SimulationDispatchCoordinator
             presentationDirty = true;
         }
 
-        if (!settings.Paused && settings.SolidGravity && solidMatter && !solidSleeping)
+        if (!settings.Paused && solidMatter && (settings.SolidGravity || (!bodyBalanceBaseline && freeBodyMatter)) && !solidSleeping)
         {
             // If active solids are moving, we must simulate the entire world to catch all cellular updates safely
             activeMinX = 0;
@@ -504,7 +526,11 @@ public sealed class SimulationDispatchCoordinator
             // Once the liquid is asleep, resting bodies cannot lose support.
             // Re-evaluate only the still-moving bodies instead of rescanning a
             // large stationary hull because a few detached pixels are falling.
-            DispatchSolidPass(resources, ref constants, cellularSleeping ? 0u : 1u);
+            densityBodyAccumulator += Math.Min(Math.Max(elapsedSeconds, 0), 1f / 15);
+            bool densityBodyStep = densityBodyAccumulator + 1e-8 >= 1.0 / 15;
+            if (densityBodyStep) densityBodyAccumulator = Math.Max(0, densityBodyAccumulator - 1.0 / 15);
+            DispatchSolidPass(resources, ref constants, (cellularSleeping ? 0u : 1u) | (densityBodyStep ? 2u : 0u));
+            if (!bodyBalanceBaseline) DispatchSolidBalance(resources, ref constants, densityBodyStep);
             cellMaterialsDirty = true;
             if (solidMotionNeedsCellular)
             {
@@ -557,6 +583,10 @@ public sealed class SimulationDispatchCoordinator
             bool runSecondaryStep = fluidMatter && !useOptimizedSchedule &&
                 (settings.HydraulicPressure || gasMatter || boostOrdinaryWater);
             bool runLongRangeFluid = fluidMatter;
+            // Only the optional viscous-liquid gates read dt in this solver.
+            // Existing water/granular movement keeps its established schedule.
+            float cellularPreviousDelta = constants.DeltaTime;
+            constants.DeltaTime = Math.Clamp(elapsedSeconds, 0, .1f);
             DispatchCellularAutomata(
                 resources,
                 ref constants,
@@ -579,6 +609,7 @@ public sealed class SimulationDispatchCoordinator
                     updateRestState: true,
                     useOptimizedSchedule: false);
             }
+            constants.DeltaTime = cellularPreviousDelta;
             hydraulicWarmupFrames = settings.HydraulicPressure
                 ? Math.Max(0, hydraulicWarmupFrames - 1)
                 : 0;
@@ -621,10 +652,15 @@ public sealed class SimulationDispatchCoordinator
         }
         airFieldPopulated = settings.AirSimulation && resources.IsSimulationAllocated;
 
+        bool combustionActive = (materialRegistry.RegistryHasCombustibleMaterials ||
+            materialRegistry.RegistryHasTransientMaterials) &&
+            resources.IsSimulationAllocated && (thermalActive || retainOxidizerField) && !settings.Paused;
+
         // Fixed 60 Hz deterministic gas carrier.  This deliberately follows
         // air: FIRE and SMKE are tracers of the just-solved field, as in TPT's
         // BeforeSim -> UpdateParticles order.
-        if (resources.IsSimulationAllocated && !settings.Paused && (gasMatter || settings.AirSimulation))
+        if (resources.IsSimulationAllocated && !settings.Paused &&
+            (gasMatter || settings.AirSimulation || combustionActive))
         {
             gasMotionAccumulator = Math.Min(
                 gasMotionAccumulator + Math.Clamp(elapsedSeconds, 0, FixedAirStep * MaximumAirTicksPerFrame),
@@ -649,19 +685,45 @@ public sealed class SimulationDispatchCoordinator
                     worldHasMatter = true;
                 }
                 gasBrushQueue.Consumed();
+                if (pressurePowderPotential && cellularMatter && !cellularSleeping)
+                {
+                    uint previousFrame = constants.FrameIndex;
+                    constants.FrameIndex = unchecked((uint)gasMotionTickIndex);
+                    DispatchCellularAutomata(resources, ref constants, rebuildCellMaterials: true,
+                        primaryStep: true, runPressureRoutes: false, runLongRangeFluid: false,
+                        updateRestState: false, useOptimizedSchedule: false, pressurePowderOnly: true);
+                    if (settings.Scale < 0.5f && fluidMatter)
+                        DispatchCellularAutomata(resources, ref constants, rebuildCellMaterials: false,
+                            primaryStep: false, runPressureRoutes: false, runLongRangeFluid: false,
+                            updateRestState: false, useOptimizedSchedule: false, pressurePowderOnly: true);
+                    constants.FrameIndex = previousFrame;
+                    cellMaterialsDirty = true;
+                }
                 // Interleave each air tick and its particle tick. Batched air
                 // updates at 30 FPS would otherwise consume stale gas impulses.
                 if (settings.AirSimulation)
                 {
                     airTickIndex++;
-                    DispatchAirSimulation(resources, unchecked((uint)airTickIndex));
+                    DispatchAirSimulation(resources, unchecked((uint)airTickIndex), settings.Mode == SimulationMode.Sandbox, settings.OpenBoundaries);
                 }
                 constants.DebugReserved2 = unchecked((uint)gasMotionTickIndex);
-                if (gasMatter) DispatchGasMotion(resources, ref constants, settings.AirSimulation);
+                if (gasMatter) DispatchGasMotion(resources, ref constants, settings.AirSimulation,
+                    settings.Mode == SimulationMode.Simulation);
+                // Each reaction tick belongs to one air/particle tick. Batching
+                // two reactions after two air steps at 30 FPS changed when the
+                // finite source reached the wave and excited different modes.
+                // Keep this clock alive for hot fuel even with air switched off.
+                if (combustionActive)
+                {
+                    bool measure = combustionDispatches >= 40 && !combustionTimingPending;
+                    DispatchCombustion(resources, (float)FixedAirStep, measure, settings.OpenBoundaries,
+                        settings.Mode == SimulationMode.Simulation, settings.AirSimulation);
+                    combustionDispatches++;
+                }
             }
             if (gasMotionTicks > 0)
             {
-                cellMaterialsDirty = false;
+                cellMaterialsDirty = combustionActive;
                 presentationDirty = true;
             }
         }
@@ -695,38 +757,6 @@ public sealed class SimulationDispatchCoordinator
                 finalizeCellularRest = false;
                 presentationDirty = true;
             }
-        }
-
-        // Горение идёт на 60 Гц, в одном темпе с движением газа, а не на 20 Гц
-        // вместе с теплопроводностью.
-        //
-        // Воспламенение соседа проверяется по наличию живого пламени в
-        // окрестности 5x5. Пока горение шло раз в 0.05 с, а пламя за это время
-        // успевало пролететь до двадцати клеток, к моменту проверки рядом уже
-        // никого не было: порох горел, только пока по нему водили кистью, и
-        // гас сразу после. В The Powder Toy воспламенение и движение происходят
-        // в одном и том же проходе по частицам, поэтому огонь всегда успевает
-        // поджечь то, мимо чего пролетает.
-        bool combustionActive = (materialRegistry.RegistryHasCombustibleMaterials ||
-            materialRegistry.RegistryHasTransientMaterials) &&
-            resources.IsSimulationAllocated && (thermalActive || retainOxidizerField) && !settings.Paused;
-        if (combustionActive)
-        {
-            combustionAccumulator = Math.Min(
-                combustionAccumulator + Math.Clamp(elapsedSeconds, 0, FixedAirStep * MaximumAirTicksPerFrame),
-                FixedAirStep * MaximumAirTicksPerFrame);
-            while (combustionAccumulator + 1e-6 >= FixedAirStep)
-            {
-                combustionAccumulator -= FixedAirStep;
-                bool measure = combustionDispatches >= 40 && !combustionTimingPending;
-                DispatchCombustion(resources, (float)FixedAirStep, measure, settings.OpenBoundaries);
-                combustionDispatches++;
-                presentationDirty = true;
-            }
-        }
-        else
-        {
-            combustionAccumulator = 0;
         }
 
         int phaseDispatchCount = PhaseTransitionDispatchPolicy.GetDispatchCount(
@@ -784,6 +814,11 @@ public sealed class SimulationDispatchCoordinator
                 resources.Context.ClearUnorderedAccessView(resources.GasVisual.UnorderedView, zero);
                 resources.Context.ClearUnorderedAccessView(resources.GasVisualScratch.UnorderedView, zero);
                 DispatchGasVisual(resources, decay: false);
+                // Smoke/flame also use a derived field. Rebuild it once after
+                // paused edits/load so smoke stays visible without raw pixels,
+                // and erased sources do not leave a frozen glow behind.
+                DispatchFireGlowClear(resources);
+                DispatchFireGlowDeposit(resources);
                 gasVisualNeedsRebuild = false;
             }
             DispatchComposition(resources, ref constants, fireGlowTicks);
@@ -800,6 +835,8 @@ public sealed class SimulationDispatchCoordinator
         GpuSimulationResources resources = lifecycleManager.CreateOrResize(settings, false);
         Clear(resources);
         boundResources = resources;
+        foreach(var view in resources.SolidOrigins.UnorderedAccessViews)
+            resources.Context.ClearUnorderedAccessView(view,new RawInt4(0,0,0,0));
         ResetActivity(resources.IsSimulationAllocated);
     }
 
@@ -834,6 +871,9 @@ public sealed class SimulationDispatchCoordinator
             new RawInt4(0, 0, 0, 0));
         boundResources = resources;
         worldHasMatter = containsMatter;
+        foreach(var view in resources.SolidOrigins.UnorderedAccessViews)
+            resources.Context.ClearUnorderedAccessView(view,new RawInt4(0,0,0,0));
+        resources.Context.ClearUnorderedAccessView(resources.ContactSummary.UnorderedView, new RawInt4());
         // The pressure correction is a solver guess for the old geometry,
         // not saved physical state. Never reuse it after loading/resetting a
         // world in an allocation with the same dimensions.
@@ -850,10 +890,13 @@ public sealed class SimulationDispatchCoordinator
         ResetPhaseRuntime();
         ResetCombustionRuntime();
         cellularMatter = containsMatter;
+        pressurePowderPotential = containsMatter && materialRegistry.RegistryHasPressurePowders;
         fluidMatter = containsMatter;
         liquidMatter = containsMatter;
         gasMatter = containsMatter;
         solidMatter = containsMatter;
+        freeBodyMatter = containsMatter; // Conservative until first GPU statistics.
+        densityBodyAccumulator = 0;
         cellularSleeping = false;
         solidSleeping = false;
         topologyDirty = true;
@@ -892,6 +935,7 @@ public sealed class SimulationDispatchCoordinator
         fluidMatter = statistics.LiquidCells > 0 || statistics.GasCells > 0;
         liquidMatter = statistics.LiquidCells > 0;
         gasMatter = statistics.GasCells > 0;
+        freeBodyMatter = statistics.FreeBodyCells > 0;
         uint movingCellularCells = statistics.MovingCells > statistics.MovingSolidCells
             ? statistics.MovingCells - statistics.MovingSolidCells
             : 0;
@@ -929,7 +973,7 @@ public sealed class SimulationDispatchCoordinator
         {
             finalizeCellularRest = cellularMatter && !cellularSleeping;
             cellularSleeping = true;
-            solidSleeping = !previousSolidGravity || statistics.MovingSolidCells == 0;
+            solidSleeping = statistics.MovingSolidCells == 0;
             ResetActiveRegion();
         }
         if (statistics.ActiveCells == 0 && (worldHasMatter || !retainOxidizerField))
@@ -1039,9 +1083,9 @@ public sealed class SimulationDispatchCoordinator
             null,
             resources.ComponentParents.View,
             resources.Materials.View);
-        context.ComputeShader.SetUnorderedAccessViews(0, null, resources.Grid.ReadUnorderedView);
+        context.ComputeShader.SetUnorderedAccessViews(0, null, resources.Grid.ReadUnorderedView, resources.SolidOrigins.ReadUnorderedView);
         context.Dispatch(DivideRoundUp(cells, 256), 1, 1);
-        Unbind(context, 3, 2);
+        Unbind(context, 3, 3);
     }
 
     private static void DispatchSolidGeometry(
@@ -1055,6 +1099,7 @@ public sealed class SimulationDispatchCoordinator
         context.ClearUnorderedAccessView(
             resources.SolidBodyMass.UnorderedView,
             new RawInt4(0, 0, 0, 0));
+        context.ClearUnorderedAccessView(resources.SolidRotationBlocked.UnorderedView,new RawInt4(0,0,0,0));
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.SolidGeometryAnalyzeShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
@@ -1080,6 +1125,13 @@ public sealed class SimulationDispatchCoordinator
             DivideRoundUp(resources.Height, 16),
             1);
         Unbind(context, 7, 6);
+        context.ComputeShader.Set(resources.SolidOriginsInitializeShader);
+        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView,resources.Materials.View,
+            null,null,null,null,resources.SolidOrigins.ReadView);
+        context.ComputeShader.SetUnorderedAccessViews(0,null,null,null,null,resources.SolidOrigins.WriteUnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width*resources.Height,256),1,1);
+        Unbind(context,9,7);
+        resources.SolidOrigins.Swap();
     }
 
     private void DispatchSolidPass(
@@ -1138,6 +1190,7 @@ public sealed class SimulationDispatchCoordinator
         Unbind(context, 7, 4);
 
         context.ComputeShader.Set(resources.SolidMoveShader);
+        context.CopyResource(resources.GasMotion.Buffer,resources.SteamGasStepPreviousMotion.Buffer);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
         context.ComputeShader.SetShaderResources(
             0,
@@ -1147,10 +1200,12 @@ public sealed class SimulationDispatchCoordinator
             resources.ComponentParents.View,
             resources.SolidBodyGeometry.View,
             resources.Materials.View,
-            resources.SolidBodyMass.View);
-        context.ComputeShader.SetUnorderedAccessViews(0, null, resources.Grid.WriteUnorderedView);
+            resources.SolidBodyMass.View,
+            resources.SolidOrigins.ReadView,resources.SteamGasStepPreviousMotion.View);
+        context.ComputeShader.SetUnorderedAccessViews(0, null, resources.Grid.WriteUnorderedView,
+            null,null,null,null,resources.SolidOrigins.WriteUnorderedView,resources.GasMotion.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 7, 2);
+        Unbind(context, 9, 8);
 
         context.ComputeShader.Set(resources.SolidDisplacementApplyShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
@@ -1163,11 +1218,70 @@ public sealed class SimulationDispatchCoordinator
             resources.SolidBodyGeometry.View,
             resources.Materials.View,
             resources.SolidBodyMass.View);
-        context.ComputeShader.SetUnorderedAccessViews(0, null, resources.Grid.WriteUnorderedView);
+        context.ComputeShader.SetUnorderedAccessViews(0, null, resources.Grid.WriteUnorderedView,
+            null,null,null,null,null,resources.GasMotion.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 7, 2);
+        Unbind(context, 9, 8);
         resources.Grid.Swap();
+        resources.SolidOrigins.Swap();
         waterPressureRoutesDirty = true;
+    }
+
+    internal void DispatchBodyOnlyAcceptanceStep(GpuSimulationResources resources,bool constructionGravity,bool initialize)
+    {
+        var constants=new SimulationFrameConstants{Width=(uint)resources.Width,Height=(uint)resources.Height,
+            DeltaTime=1f/15,Gravity=980,
+            SolidGravity=constructionGravity?1u:0u,FrameIndex=1,SolidPass=3};
+        if(initialize){DispatchComponentLabeling(resources,ref constants);DispatchSolidGeometry(resources,ref constants);}
+        DispatchSolidPass(resources,ref constants,3);
+        if(!bodyBalanceBaseline)DispatchSolidBalance(resources,ref constants,true);
+    }
+
+    private static void DispatchSolidBalance(GpuSimulationResources resources, ref SimulationFrameConstants constants, bool step)
+    {
+        DeviceContext context = resources.Context;
+        context.ClearUnorderedAccessView(resources.SolidBalance.UnorderedView, new RawInt4(0, 0, 0, 0));
+        if(step)
+        {
+            context.ClearUnorderedAccessView(resources.SolidRotationTargets.UnorderedView, new RawInt4(0,0,0,0));
+            context.ClearUnorderedAccessView(resources.SolidRotationBlocked.UnorderedView, new RawInt4(0,0,0,0));
+        }
+        UpdateConstants(context, resources, ref constants);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.Set(resources.SolidBalanceShader);
+        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.Materials.View,
+            null,null,null,resources.SolidBodyGeometry.View);
+        context.ComputeShader.SetUnorderedAccessViews(0, resources.SolidBalance.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        Unbind(context, 9, 7);
+        if(step)
+        {
+        context.ComputeShader.Set(resources.SolidRotationBuildShader);
+        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView,resources.Materials.View,
+            resources.SolidBalance.View,null,null,resources.SolidBodyGeometry.View,resources.SolidOrigins.ReadView);
+        context.ComputeShader.SetUnorderedAccessViews(0,null,null,null,null,null,null,resources.SolidRotationPlans.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width*resources.Height,256),1,1);
+        Unbind(context,9,7);
+        context.ComputeShader.Set(resources.SolidRotationPlanShader);
+        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.Materials.View,
+            resources.SolidBalance.View, null, null, resources.SolidBodyGeometry.View,
+            resources.SolidOrigins.ReadView,null,resources.SolidRotationPlans.View);
+        context.ComputeShader.SetUnorderedAccessViews(0, null, resources.SolidRotationTargets.UnorderedView,
+            resources.SolidRotationBlocked.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        Unbind(context, 9, 7);
+        }
+        context.ComputeShader.Set(resources.SolidRotationApplyShader);
+        context.CopyResource(resources.GasMotion.Buffer,resources.SteamGasStepPreviousMotion.Buffer);
+        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.Materials.View,
+            resources.SolidBalance.View, resources.SolidRotationTargets.View, resources.SolidRotationBlocked.View,
+            resources.SolidBodyGeometry.View,resources.SolidOrigins.ReadView,resources.SteamGasStepPreviousMotion.View,resources.SolidRotationPlans.View);
+        context.ComputeShader.SetUnorderedAccessViews(0, null, null, null, resources.Grid.WriteUnorderedView,resources.SolidOrigins.WriteUnorderedView,
+            resources.GasMotion.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        Unbind(context, 9, 8);
+        resources.Grid.Swap();
+        resources.SolidOrigins.Swap();
     }
 
     private void DispatchCellularAutomata(
@@ -1178,13 +1292,18 @@ public sealed class SimulationDispatchCoordinator
         bool runPressureRoutes,
         bool runLongRangeFluid,
         bool updateRestState,
-        bool useOptimizedSchedule)
+        bool useOptimizedSchedule,
+        bool pressurePowderOnly = false)
     {
         DeviceContext context = resources.Context;
         // Resolve gravity and ordinary lateral flow before consulting the
         // hydraulic caches. Phase 13 balances adjacent columns only; phase 29
         // applies that local plan before the pressure-only passes run.
-        ReadOnlySpan<uint> phases = useOptimizedSchedule
+        ReadOnlySpan<uint> phases = pressurePowderOnly
+            ? primaryStep
+                ? (constants.FrameIndex & 1) == 0 ? PrimaryEvenPhases : PrimaryOddPhases
+                : (constants.FrameIndex & 1) == 0 ? SecondaryEvenPhases : SecondaryOddPhases
+            : useOptimizedSchedule
             ? (frameIndex & 1) == 0 ? OptimizedEvenPhases : OptimizedOddPhases
             : primaryStep
                 ? (frameIndex & 1) == 0 ? PrimaryEvenPhases : PrimaryOddPhases
@@ -1210,6 +1329,8 @@ public sealed class SimulationDispatchCoordinator
 
         foreach (uint phase in phases)
         {
+            if (pressurePowderOnly && phase != 32 && phase > 3 && (phase < 5 || phase > 12))
+                continue;
             if (phase == 32 && !rebuildCellMaterials)
             {
                 continue;
@@ -1238,6 +1359,7 @@ public sealed class SimulationDispatchCoordinator
             }
 
             constants.SimulationPhase = phase;
+            constants.GasSubStep = pressurePowderOnly ? 0x80000000u : 0u;
 
             bool buildPathBlockers = phase == 31;
             bool buildCellMaterials = phase == 32;
@@ -1307,6 +1429,7 @@ public sealed class SimulationDispatchCoordinator
         // Unbind once at the end
         Unbind(context, 2, 7);
         constants.SimulationPhase = 0;
+        constants.GasSubStep = 0;
     }
 
     private void DispatchCellularRest(
@@ -1412,6 +1535,7 @@ public sealed class SimulationDispatchCoordinator
     private static void Clear(GpuSimulationResources resources)
     {
         RawInt4 zero = new(0, 0, 0, 0);
+        resources.Context.ClearUnorderedAccessView(resources.ContactSummary.UnorderedView, zero);
         foreach (UnorderedAccessView view in resources.Grid.UnorderedAccessViews)
         {
             resources.Context.ClearUnorderedAccessView(view, zero);
@@ -1423,6 +1547,8 @@ public sealed class SimulationDispatchCoordinator
         resources.Context.ClearUnorderedAccessView(resources.PathBlockerMasks.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.CellMaterials.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.GasMotion.UnorderedView, zero);
+        resources.Context.ClearUnorderedAccessView(resources.ReactionPending.UnorderedView,zero);
+        foreach(var view in resources.ReactionPulse.UnorderedAccessViews) resources.Context.ClearUnorderedAccessView(view,zero);
         resources.Context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.SteamGasStepStatistics.UnorderedView, zero);
         resources.Context.ClearUnorderedAccessView(resources.SteamJetInjectionStatistics.UnorderedView, zero);
@@ -1536,13 +1662,24 @@ public sealed class SimulationDispatchCoordinator
                 continue;
             }
             thermalActive = true;
+            if (materialRegistry[command.MaterialIndex].Properties.ReactionPressurePerMass > 0 &&
+                materialRegistry[command.MaterialIndex].Properties.SimulationKind ==
+                    (uint)MaterialSimulationKind.Granular)
+            {
+                pressurePowderPotential = true;
+                // An older empty-world readback must not put newly painted
+                // powder to sleep. Future summaries use this generation.
+                combustionReadbackGeneration++;
+            }
             MaterialSimulationKind kind = (MaterialSimulationKind)materialRegistry[command.MaterialIndex]
                 .Properties.SimulationKind;
             contactTransitionPotential |=
-                materialRegistry[command.MaterialIndex].LiquidContactTransition is not null;
+                materialRegistry[command.MaterialIndex].LiquidContactTransition is not null ||
+                materialRegistry[command.MaterialIndex].Moisture is not null;
             if (kind == MaterialSimulationKind.Solid)
             {
                 solidMatter = true;
+                freeBodyMatter |= (materialRegistry[command.MaterialIndex].Properties.Flags & (uint)MaterialFlags.DensityBody) != 0;
                 topologyDirty = true;
                 solidSleeping = false;
                 solidMotionNeedsCellular = true;
@@ -1565,6 +1702,7 @@ public sealed class SimulationDispatchCoordinator
         worldHasMatter = false;
         retainOxidizerField = false;
         cellularMatter = false;
+        pressurePowderPotential = false;
         fluidMatter = false;
         liquidMatter = false;
         gasMatter = false;
@@ -1573,10 +1711,11 @@ public sealed class SimulationDispatchCoordinator
         gasMotionAccumulator = 0;
         gasMotionTickIndex = 0;
         gasBrushQueue.Reset();
-        combustionAccumulator = 0;
         fireGlowAccumulator = 0;
         airFieldPopulated = false;
         solidMatter = false;
+        freeBodyMatter = false;
+        densityBodyAccumulator = 0;
         cellularSleeping = false;
         solidSleeping = false;
         topologyDirty = false;
@@ -1602,7 +1741,7 @@ public sealed class SimulationDispatchCoordinator
         ResetActiveRegion();
     }
 
-    private void DispatchThermalDiffusion(GpuSimulationResources resources, bool measure,
+    internal void DispatchThermalDiffusion(GpuSimulationResources resources, bool measure,
         uint tickIndex, bool convectWater)
     {
         ThermalSimulationConstants constants = new()
@@ -1620,8 +1759,9 @@ public sealed class SimulationDispatchCoordinator
             context.End(resources.ThermalTimestampStartQuery);
         }
         // Independent of cellular sleep, hydraulic mode and render FPS.
-        // Same-water rotations preserve occupancy, so material/path maps stay valid.
+        // Same-material liquid rotations preserve occupancy and path maps.
         if (convectWater) DispatchWaterConvection(resources, tickIndex);
+        context.ClearUnorderedAccessView(resources.Grid.WriteUnorderedView, new RawInt4());
         context.UpdateSubresource(ref constants, resources.ThermalConstants);
         context.ComputeShader.Set(resources.ThermalDiffusionShader);
         context.ComputeShader.SetConstantBuffer(0, resources.ThermalConstants);
@@ -1652,11 +1792,11 @@ public sealed class SimulationDispatchCoordinator
         SimulationFrameConstants constants = new()
         {
             Width = (uint)resources.Width, Height = (uint)resources.Height,
-            FrameIndex = tickIndex,
-            CommandCount = materialRegistry.GetRequiredRuntimeIndex(CoreMaterialIds.Water)
+            FrameIndex = tickIndex
         };
         context.ComputeShader.Set(resources.WaterConvectionShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResource(0, resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.ReadUnorderedView);
         for (uint pass = 0; pass < 4; pass++)
         {
@@ -1668,7 +1808,22 @@ public sealed class SimulationDispatchCoordinator
             context.Dispatch(DivideRoundUp((resources.Width + 1) / 2, 16),
                 DivideRoundUp((resources.Height + 1) / 2, 16), 1);
         }
-        Unbind(context, 0, 1);
+        // One local same-height exchange per tick spreads bottom heat laterally
+        // after it rises, without globally averaging the vessel or overturning
+        // a stable warm upper layer.
+        for (uint mixPass = 0; mixPass < 2; mixPass++)
+        {
+            uint side = mixPass == 0 ? 4u : 8u;
+            constants.GasSubStep = side;
+            constants.SimulationPhase = 4 + mixPass;
+            uint span = side * 2;
+            constants.DispatchOffsetX = (tickIndex / 2 + mixPass * 3) % span;
+            constants.DispatchOffsetY = 0;
+            context.UpdateSubresource(ref constants, resources.FrameConstants);
+            context.Dispatch(DivideRoundUp((resources.Width + (int)span - 1) / (int)span, 16),
+                DivideRoundUp(resources.Height, 16),1);
+        }
+        Unbind(context, 1, 1);
     }
 
     /// <summary>
@@ -1677,9 +1832,10 @@ public sealed class SimulationDispatchCoordinator
     /// на GPU соседняя клетка может быть уже обновлена, а может и нет.
     /// Порядок повторяет Air::update_air из The Powder Toy.
     /// </summary>
-    private void DispatchAirSimulation(
+    internal void DispatchAirSimulation(
         GpuSimulationResources resources,
-        uint tickIndex)
+        uint tickIndex,
+        bool sandbox, bool openBoundaries)
     {
         AirSimulationConstants constants = new()
         {
@@ -1690,7 +1846,7 @@ public sealed class SimulationDispatchCoordinator
             AirAmbientTemperature = AirAmbientTemperature,
             AirHotScale = AirHotScale,
             AirTickIndex = tickIndex,
-            AirReserved0 = 0
+            AirSandboxMode = sandbox ? 1u : 0u
         };
         DeviceContext context = resources.Context;
         // This is deliberately before CSInject: the observer sees the same
@@ -1702,11 +1858,19 @@ public sealed class SimulationDispatchCoordinator
         }
         context.UpdateSubresource(ref constants, resources.AirConstants);
         context.ComputeShader.SetConstantBuffer(0, resources.AirConstants);
+        resources.AirTimer?.Begin(context);
+        context.ComputeShader.Set(resources.AirFineMaterialsShader);
+        context.ComputeShader.SetShaderResource(1, resources.Grid.ReadView);
+        context.ComputeShader.SetUnorderedAccessView(6, resources.CellMaterials.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        context.ComputeShader.SetUnorderedAccessView(6, null);
+        cellMaterialsDirty = false;
         context.ComputeShader.SetShaderResources(
             0,
             resources.Materials.View,
             resources.Grid.ReadView,
-            resources.GasMotion.View);
+            resources.GasMotion.View, resources.AirThermal.View,resources.ReactionPulse.ReadView,
+            resources.CellMaterials.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Air.UnorderedView,
@@ -1720,10 +1884,21 @@ public sealed class SimulationDispatchCoordinator
         int groupsY = DivideRoundUp(resources.AirHeight, 8);
 
         RunAirPass(context, resources.AirInjectShader, groupsX, groupsY);
+        // Fine links are now baked. Reaction volume must enter BEFORE the
+        // projection, while its compressible wave is attached afterwards.
+        Unbind(context,6,6);
+        DispatchReactionGather(resources);
+        context.ComputeShader.SetShaderResources(0,resources.Materials.View,resources.Grid.ReadView,
+            resources.GasMotion.View,resources.AirThermal.View,resources.ReactionPulse.ReadView,
+            resources.CellMaterials.View);
+        context.ComputeShader.SetUnorderedAccessViews(0,resources.Air.UnorderedView,resources.AirScratch.UnorderedView,
+            resources.GasAirImpulse.UnorderedView,resources.AirFlowLinks.UnorderedView,resources.AirProjectionA.UnorderedView,resources.AirProjectionB.UnorderedView);
         RunAirPass(context, resources.AirPressureShader, groupsX, groupsY);
         RunAirPass(context, resources.AirVelocityShader, groupsX, groupsY);
         RunAirPass(context, resources.AirAdvectShader, groupsX, groupsY);
         RunAirPass(context, resources.AirCommitShader, groupsX, groupsY);
+        // Simulation closes the air circuit. Sandbox admits a bounded HotAir
+        // volume source, allowing outlet flow without a required lower inlet.
         RunAirPass(context, resources.AirFacesShader, groupsX, groupsY);
         RunAirPass(context, resources.AirDivergenceShader, groupsX, groupsY);
         for (int iteration = 0; iteration < 64; iteration++)
@@ -1732,8 +1907,56 @@ public sealed class SimulationDispatchCoordinator
             RunAirPass(context, resources.AirJacobiBAShader, groupsX, groupsY);
         }
         RunAirPass(context, resources.AirProjectShader, groupsX, groupsY);
+        resources.AirTimer?.End(context);
 
-        Unbind(context, 3, 6);
+        Unbind(context, 6, 6);
+        DispatchReactionPulse(resources);
+        DispatchAirHeat(resources, openBoundaries, tickIndex);
+    }
+
+    // Consumes every issued reaction packet once; keeps pressure waves outside
+    // the ordinary incompressible draft projection. No extra simulation tick.
+    internal static void DispatchReactionPulse(GpuSimulationResources r)
+    {
+        var c=r.Context;
+        c.ComputeShader.SetShaderResources(0,r.Materials.View,r.Grid.ReadView,r.ReactionPulse.ReadView,r.AirFlowLinks.View);
+        c.ComputeShader.SetUnorderedAccessViews(0,r.ReactionPending.UnorderedView,r.ReactionPulse.WriteUnorderedView,
+            r.ReactionPulseScratch.UnorderedView,r.Air.UnorderedView,r.AirThermal.UnorderedView);
+        int x=DivideRoundUp(r.AirWidth,8),y=DivideRoundUp(r.AirHeight,8);
+        RunAirPass(c,r.ReactionFacesShader,x,y);
+        RunAirPass(c,r.ReactionCommitShader,x,y);
+        Unbind(c,4,5);r.ReactionPulse.Swap();
+    }
+
+    private static void DispatchReactionGather(GpuSimulationResources r)
+    {
+        var c=r.Context;
+        c.ComputeShader.SetShaderResources(0,r.Materials.View,r.Grid.ReadView,r.ReactionPulse.ReadView,r.AirFlowLinks.View);
+        c.ComputeShader.SetUnorderedAccessViews(0,r.ReactionPending.UnorderedView,r.ReactionPulse.WriteUnorderedView,
+            r.ReactionPulseScratch.UnorderedView,r.Air.UnorderedView,r.AirThermal.UnorderedView,r.AirProjectionB.UnorderedView);
+        RunAirPass(c,r.ReactionGatherShader,DivideRoundUp(r.AirWidth,8),DivideRoundUp(r.AirHeight,8));
+        c.ComputeShader.Set(r.ReactionClearMappedShader);
+        c.Dispatch(DivideRoundUp(r.Width,16),DivideRoundUp(r.Height,16),1);
+        Unbind(c,4,6);
+    }
+
+    internal static void DispatchAirHeat(GpuSimulationResources resources, bool openBoundaries, uint surfacePhase = 0)
+    {
+        var context=resources.Context;
+        resources.AirHeatTimer?.Begin(context);
+        var constants=new AirThermalConstants { Width=(uint)resources.AirWidth, Height=(uint)resources.AirHeight,
+            GridWidth=(uint)resources.Width,GridHeight=(uint)resources.Height, Ambient=20,Capacity=.016f,
+            Exchange=.12f,OpenBoundaries=(openBoundaries?1u:0u)|((surfacePhase&3u)<<1) };
+        context.UpdateSubresource(ref constants,resources.AirThermalConstants);
+        context.ComputeShader.SetConstantBuffer(0,resources.AirThermalConstants);
+        context.ComputeShader.SetShaderResources(0,resources.Air.View,resources.AirFlowLinks.View,resources.Materials.View);
+        context.ComputeShader.SetUnorderedAccessViews(0,resources.AirThermal.UnorderedView,resources.Grid.ReadUnorderedView,resources.AirThermalFlux.UnorderedView);
+        int x=DivideRoundUp(resources.AirWidth,8), y=DivideRoundUp(resources.AirHeight,8);
+        RunAirPass(context,resources.AirHeatExchangeShader,x,y);
+        RunAirPass(context,resources.AirHeatFluxShader,x,y);
+        RunAirPass(context,resources.AirHeatTransportShader,x,y);
+        resources.AirHeatTimer?.End(context);
+        Unbind(context,3,3);
     }
 
     private static void RunAirPass(
@@ -1920,12 +2143,30 @@ public sealed class SimulationDispatchCoordinator
         constants.SimulationPhase = previousPhase;
     }
 
-    private void DispatchGasMotion(
+    internal void DispatchGasMotion(
         GpuSimulationResources resources,
         ref SimulationFrameConstants constants,
-        bool airSimulationEnabled)
+        bool airSimulationEnabled,
+        bool finiteAirGeometry,
+        bool fullScanForVerification = false)
     {
+        uint previousSolidPass = constants.SolidPass;
+        constants.GasFiniteAirGeometry = finiteAirGeometry ? 1u : 0u;
         DeviceContext context = resources.Context;
+        resources.GasMotionTimer?.Begin(context);
+        // Classify once, on the current grid. Empty far-away tiles can skip
+        // repeated pair/bypass passes without a CPU readback or a reduced clock.
+        Unbind(context, 3, 12);
+        context.ClearUnorderedAccessView(resources.GasActiveTiles.UnorderedView,
+            fullScanForVerification ? new RawInt4(1,1,1,1) : new RawInt4());
+        context.ComputeShader.Set(resources.GasActiveTilesShader);
+        context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+        context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.Materials.View);
+        context.ComputeShader.SetUnorderedAccessView(0, resources.GasActiveTiles.UnorderedView);
+        UpdateConstants(context, resources, ref constants);
+        if (!fullScanForVerification)
+            context.Dispatch(DivideRoundUp(resources.Width,16), DivideRoundUp(resources.Height,16),1);
+        Unbind(context, 3, 1);
         bool steamGasStepTrace = Environment.GetEnvironmentVariable("PHYXEL_STEAM_GAS_STEP_TRACE") == "1";
         bool steamJetBlockingTrace = Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_BLOCKING_TRACE") == "1";
         bool steamJetDiagonalTrace = Environment.GetEnvironmentVariable("PHYXEL_STEAM_JET_DIAGONAL_TRACE") == "1";
@@ -2096,14 +2337,16 @@ public sealed class SimulationDispatchCoordinator
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
         constants.SimulationPhase = previousPhase;
         constants.GasSubStep = 0;
-        Unbind(context, 2, 12);
+        constants.SolidPass = previousSolidPass;
+        Unbind(context, 3, 12);
+        resources.GasMotionTimer?.End(context);
     }
 
     private static void BindGasMotionSolver(DeviceContext context, GpuSimulationResources resources)
     {
         context.ComputeShader.Set(resources.CellularAutomataShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
-        context.ComputeShader.SetShaderResources(0, resources.Materials.View, resources.Air.View);
+        context.ComputeShader.SetShaderResources(0, resources.Materials.View, resources.Air.View, resources.GasActiveTiles.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Grid.ReadUnorderedView,
@@ -2311,7 +2554,7 @@ public sealed class SimulationDispatchCoordinator
             AirAmbientTemperature = AirAmbientTemperature,
             AirHotScale = AirHotScale,
             AirTickIndex = 0,
-            AirReserved0 = 0
+            AirSandboxMode = 0
         };
         DeviceContext context = resources.Context;
         context.UpdateSubresource(ref constants, resources.AirConstants);
@@ -2321,6 +2564,11 @@ public sealed class SimulationDispatchCoordinator
             0,
             resources.Air.UnorderedView,
             resources.AirScratch.UnorderedView);
+        var freshHeat = new System.Numerics.Vector2[resources.AirWidth * resources.AirHeight];
+        Array.Fill(freshHeat,new System.Numerics.Vector2(293.15f*.016f,.016f));
+        context.UpdateSubresource(freshHeat,resources.AirThermal.Buffer);
+        context.ClearUnorderedAccessView(resources.ReactionPending.UnorderedView,new RawInt4());
+        foreach(var view in resources.ReactionPulse.UnorderedAccessViews) context.ClearUnorderedAccessView(view,new RawInt4());
         context.ClearUnorderedAccessView(resources.GasAirImpulse.UnorderedView, new RawInt4(0, 0, 0, 0));
         context.ClearUnorderedAccessView(resources.AirProjectionA.UnorderedView, new RawInt4(0, 0, 0, 0));
         context.ClearUnorderedAccessView(resources.AirProjectionB.UnorderedView, new RawInt4(0, 0, 0, 0));
@@ -2385,7 +2633,7 @@ public sealed class SimulationDispatchCoordinator
             DeltaTime = FixedThermalStep,
             Width = (uint)resources.Width,
             Height = (uint)resources.Height,
-            TickIndex = tickIndex
+            TickIndex = tickIndex & 0x7fffffffu
         };
         DeviceContext context = resources.Context;
         if (measure)
@@ -2402,17 +2650,24 @@ public sealed class SimulationDispatchCoordinator
             resources.Grid.ReadUnorderedView,
             resources.CellMaterials.UnorderedView,
             resources.GasMotion.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessView(3, resources.ContactSummary.UnorderedView);
         context.Dispatch(
             DivideRoundUp(resources.Width, 16),
             DivideRoundUp(resources.Height, 16),
             1);
+        context.ComputeShader.Set(resources.MoistureShader);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        // A disjoint longer path accelerates water inside connected porous solids.
+        constants.TickIndex=(tickIndex&0x7fffffffu)|0x80000000u;
+        context.UpdateSubresource(ref constants,resources.ContactTransitionConstants);
+        context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
         if (measure)
         {
             context.End(resources.ContactTimestampEndQuery);
             context.End(resources.ContactTimestampDisjointQuery);
             contactTimingPending = true;
         }
-        Unbind(context, 1, 3);
+        Unbind(context, 1, 4);
     }
 
     private void PollContactTiming(GpuSimulationResources resources)
@@ -2459,24 +2714,36 @@ public sealed class SimulationDispatchCoordinator
         contactTimingMaximumMilliseconds = 0;
     }
 
-    private static void DispatchOxidizer(GpuSimulationResources resources, float dt, bool openEdges, bool consume)
+    internal static void DispatchOxidizer(GpuSimulationResources resources, float dt, bool openEdges, bool consume, bool useAir = false)
     {
         OxidizerConstants constants = new()
         {
             Width = (uint)resources.Width,
             Height = (uint)resources.Height,
             DeltaTime = dt,
-            OpenEdges = openEdges ? 1u : 0u
+            OpenEdges = openEdges ? 1u : 0u,
+            UseAir = useAir ? 1u : 0u
         };
         DeviceContext context = resources.Context;
         context.UpdateSubresource(ref constants, resources.OxidizerConstants);
         context.ComputeShader.Set(consume ? resources.OxidizerConsumeShader : resources.OxidizerTransportShader);
         context.ComputeShader.SetConstantBuffer(0, resources.OxidizerConstants);
         context.ComputeShader.SetShaderResources(0, resources.Grid.ReadView, resources.Materials.View,
-            resources.Oxidizer.ReadView, resources.OxidizerDemand.View);
-        context.ComputeShader.SetUnorderedAccessView(0, resources.Oxidizer.WriteUnorderedView);
+            resources.Oxidizer.ReadView, resources.OxidizerDemand.View, resources.Air.View,
+            resources.GasMotion.View, resources.OxidizerAvailable.View);
+        context.ComputeShader.SetUnorderedAccessViews(0, resources.Oxidizer.WriteUnorderedView,
+            resources.OxidizerFlux.UnorderedView);
+        if (!consume)
+        {
+            context.ComputeShader.Set(resources.OxidizerFluxShader);
+            context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+            // The availability output is distinct from its SRV while writing.
+            context.ComputeShader.SetShaderResource(6, null);
+            context.ComputeShader.SetUnorderedAccessView(2, resources.OxidizerAvailable.UnorderedView);
+            context.ComputeShader.Set(resources.OxidizerTransportShader);
+        }
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 4, 1);
+        Unbind(context, 7, 3);
         resources.Oxidizer.Swap();
     }
 
@@ -2484,7 +2751,9 @@ public sealed class SimulationDispatchCoordinator
         GpuSimulationResources resources,
         float elapsedSeconds,
         bool measure,
-        bool openEdges)
+        bool openEdges,
+        bool finiteOxidizer,
+        bool useAir)
     {
         CombustionConstants constants = new()
         {
@@ -2492,7 +2761,9 @@ public sealed class SimulationDispatchCoordinator
             Width = (uint)resources.Width,
             Height = (uint)resources.Height,
             MaterialCount = (uint)materialRegistry.Count,
-            TickIndex = unchecked((uint)thermalScheduler.TotalTicks)
+            TickIndex = unchecked((uint)thermalScheduler.TotalTicks),
+            FiniteOxidizer = finiteOxidizer ? 1u : 0u,
+            Reserved1 = useAir ? 1u : 0u
         };
         DeviceContext context = resources.Context;
         context.ClearUnorderedAccessView(resources.CombustionSummary.UnorderedView, new RawInt4(0, 0, 0, 0));
@@ -2503,27 +2774,29 @@ public sealed class SimulationDispatchCoordinator
             context.Begin(resources.CombustionTimestampDisjointQuery);
             context.End(resources.CombustionTimestampStartQuery);
         }
-        DispatchOxidizer(resources, elapsedSeconds, openEdges, consume: false);
+        // Sandbox freezes the existing inventory rather than inventing oxygen
+        // when switching back to Simulation or loading an exhausted scene.
+        if (finiteOxidizer) DispatchOxidizer(resources, elapsedSeconds, openEdges, consume: false, useAir);
         context.UpdateSubresource(ref constants, resources.CombustionConstants);
         context.ComputeShader.Set(resources.CombustionShader);
         context.ComputeShader.SetConstantBuffer(0, resources.CombustionConstants);
-        context.ComputeShader.SetShaderResources(0, resources.Materials.View, resources.Emissions.View, resources.Oxidizer.ReadView);
+        context.ComputeShader.SetShaderResources(0, resources.Materials.View, resources.Emissions.View, resources.OxidizerAvailable.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Grid.ReadUnorderedView,
             resources.CombustionSummary.UnorderedView,
             resources.EmissionClaims.UnorderedView,
             resources.EmissionRequests.UnorderedView,
-            resources.OxidizerDemand.UnorderedView);
+            resources.OxidizerDemand.UnorderedView,resources.ReactionPending.UnorderedView);
         context.Dispatch(
             DivideRoundUp(resources.Width, 16),
             DivideRoundUp(resources.Height, 16),
             1);
-        Unbind(context, 3, 5);
+        Unbind(context, 3, 6);
 
         DispatchEmissionResolve(resources);
         DispatchTransientLifecycle(resources, constants);
-        DispatchOxidizer(resources, elapsedSeconds, openEdges, consume: true);
+        if (finiteOxidizer) DispatchOxidizer(resources, elapsedSeconds, openEdges, consume: true);
 
         if (measure)
         {
@@ -2679,7 +2952,7 @@ public sealed class SimulationDispatchCoordinator
         Unbind(context, 3, 2);
     }
 
-    private static void DispatchTransientLifecycle(
+    internal static void DispatchTransientLifecycle(
         GpuSimulationResources resources,
         CombustionConstants constants)
     {
@@ -2687,7 +2960,7 @@ public sealed class SimulationDispatchCoordinator
         context.UpdateSubresource(ref constants, resources.CombustionConstants);
         context.ComputeShader.Set(resources.TransientLifecycleShader);
         context.ComputeShader.SetConstantBuffer(0, resources.CombustionConstants);
-        context.ComputeShader.SetShaderResources(0, resources.Materials.View, resources.Oxidizer.ReadView);
+        context.ComputeShader.SetShaderResources(0, resources.Materials.View, resources.OxidizerAvailable.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Grid.ReadUnorderedView,
@@ -2720,6 +2993,8 @@ public sealed class SimulationDispatchCoordinator
             }
             combustionSummaryReadbacks++;
             lastCombustionSummary = (CombustionSummaryFlags)rawFlags;
+            pressurePowderPotential =
+                (lastCombustionSummary & CombustionSummaryFlags.PressurePowderPresent) != 0;
             if ((lastCombustionSummary & CombustionSummaryFlags.CombustionOccurred) != 0)
             {
                 presentationDirty = true;
@@ -2822,7 +3097,7 @@ public sealed class SimulationDispatchCoordinator
         context.UpdateSubresource(ref constants, resources.PhaseConstants);
         context.ComputeShader.Set(resources.PhaseTransitionShader);
         context.ComputeShader.SetConstantBuffer(0, resources.PhaseConstants);
-        context.ComputeShader.SetShaderResource(0, resources.Materials.View);
+        context.ComputeShader.SetShaderResources(0, resources.Materials.View, resources.ContactSummary.View);
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Grid.ReadUnorderedView,
@@ -2838,7 +3113,8 @@ public sealed class SimulationDispatchCoordinator
             context.End(resources.PhaseTimestampDisjointQuery);
             phaseTimingPending = true;
         }
-        Unbind(context, 1, 3);
+        Unbind(context, 2, 3);
+        context.ClearUnorderedAccessView(resources.ContactSummary.UnorderedView, new RawInt4());
 
         Span<bool> pendingSlots = stackalloc bool[resources.PhaseSummaryReadbackSlots.Length];
         for (int index = 0; index < pendingSlots.Length; index++)
@@ -2976,6 +3252,7 @@ public sealed class SimulationDispatchCoordinator
         if ((flags & PhaseTransitionSummaryFlags.TouchesSolid) != 0)
         {
             solidMatter = true;
+            freeBodyMatter = true; // A freeze target may be a free body.
             solidSleeping = false;
             topologyDirty = true;
             solidMotionNeedsCellular = true;

@@ -17,7 +17,9 @@ public readonly record struct UiFrameActions(
     bool LoadRequested,
     bool ScaleChanged,
     bool GravityChanged,
-    bool HydraulicsChanged);
+    bool HydraulicsChanged,
+    bool ModeChanged,
+    bool SaveAsRequested = false);
 
 public sealed class SandboxUiCoordinator : IDisposable
 {
@@ -198,7 +200,9 @@ public sealed class SandboxUiCoordinator : IDisposable
             loadRequested,
             propertiesPanel.ScaleChanged,
             propertiesPanel.GravityToggled,
-            propertiesPanel.HydraulicsToggled);
+            propertiesPanel.HydraulicsToggled,
+            propertiesPanel.ModeChanged,
+            topBar.SaveRequested || (input.SavePressed && input.ShiftDown));
     }
 
     public void Draw(
@@ -274,7 +278,8 @@ public sealed class SandboxUiCoordinator : IDisposable
             statistics,
             framesPerSecond,
             settings.Scale,
-            settings.Paused);
+            settings.Paused,
+            transientStatus);
     }
 
     public void DrawBrushIndicator(

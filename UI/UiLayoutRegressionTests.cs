@@ -1,12 +1,17 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Core;
+using Phyxel.Graphics;
+using Phyxel.Diagnostics;
 using Phyxel.Input;
 using Phyxel.Materials;
 using Phyxel.Physics;
+using Phyxel.Serialization;
+using System.Runtime.InteropServices;
 
 namespace Phyxel.UI;
 
@@ -31,6 +36,8 @@ public static class UiLayoutRegressionTests
 
         TestLayoutResolutionAndDpiMatrix();
         TestTopBarButtons(fonts);
+        TestSceneStatusText(fonts.Regular);
+        TestSceneSaveActions(coordinator);
         TestPanelControlBounds(registry, fonts);
         TestDeviceControlBounds(registry, fonts);
         TestPropertiesActions(registry, fonts);
@@ -38,6 +45,7 @@ public static class UiLayoutRegressionTests
         TestCategoryFiltering(registry, coordinator);
         TestBrushToolModesAndInputBreaks(registry);
         TestCameraPanZoomAndInputIsolation();
+        TestCanvasWorldExpansion();
         TestButtonVisualStates();
         TestMaterialCards(fonts.Regular);
         TestMaterialCategorization(registry);
@@ -47,6 +55,32 @@ public static class UiLayoutRegressionTests
         TestPauseContinueLogic();
 
         Console.WriteLine("=== All UI Layout & Input Regression Tests Passed Successfully ===");
+    }
+
+    private static void TestSceneSaveActions(SandboxUiCoordinator coordinator)
+    {
+        var settings = new SimulationSettings();
+        var view = new Viewport(0, 0, 1920, 1080);
+        var input = Input(new Point(-1, -1)) with { SavePressed = true };
+        var quick = coordinator.Update(input, view, 1, settings);
+        Require(quick.SaveRequested && !quick.SaveAsRequested, "Ctrl+S must request quick save.");
+        var saveAs = coordinator.Update(input with { ShiftDown = true }, view, 1, settings);
+        Require(saveAs.SaveRequested && saveAs.SaveAsRequested, "Ctrl+Shift+S must request Save As.");
+        var load = coordinator.Update(input with { SavePressed = false, LoadPressed = true }, view, 1, settings);
+        Require(load.LoadRequested && !load.SaveRequested, "Load shortcut requested save.");
+        Console.WriteLine("[PASS] Quick save / Save As / load actions.");
+    }
+
+    private static void TestSceneStatusText(SpriteFont font)
+    {
+        foreach (int width in new[] { 0, 8, 120, 350, 900 })
+        {
+            string text = UiStatusBar.FitStatus(font, "Сохранено: F:\\Сцены\\🔥长文件名\\Очень длинное название сцены.json", width);
+            Require(font.MeasureString(text).X <= width, "Scene status escaped its width.");
+            foreach (char c in text) Require(font.Characters.Contains(c), "Unsupported filename glyph.");
+        }
+        Require(UiStatusBar.FitStatus(font, "Сохранено", 900) == "Сохранено", "Short status truncated.");
+        Console.WriteLine("[PASS] Scene status width and unsupported filename glyphs.");
     }
 
     private static void TestLayoutResolutionAndDpiMatrix()
@@ -154,7 +188,8 @@ public static class UiLayoutRegressionTests
                 PhyxelToolId.Brush, registry[CoreMaterialIds.Heater], out _);
             Require(panel.DeviceTargetTemperature == 240 && panel.DeviceMaximumPower == 600, "Wrong heater brush defaults.");
             Rectangle[] controls = [panel.BrushSliderBounds, panel.DeviceTemperatureBounds, panel.DevicePowerBounds,
-                panel.ScaleSliderBounds, panel.GravityToggleBounds, panel.HydraulicsToggleBounds,
+                panel.ScaleSliderBounds, panel.SandboxModeBounds, panel.SimulationModeBounds,
+                panel.GravityToggleBounds, panel.HydraulicsToggleBounds,
                 panel.WithoutEffectsToggleBounds, panel.BoundariesToggleBounds, panel.AirFieldToggleBounds,
                 panel.ResetButtonBounds, panel.ClearButtonBounds];
             for (int i = 0; i < controls.Length; i++)
@@ -191,9 +226,13 @@ public static class UiLayoutRegressionTests
                     panel.BrushSliderBounds,
                     panel.DensitySliderBounds,
                     panel.ScaleSliderBounds,
+                    panel.SandboxModeBounds,
+                    panel.SimulationModeBounds,
                     panel.GravityToggleBounds,
                     panel.HydraulicsToggleBounds,
                     panel.WithoutEffectsToggleBounds,
+                    panel.BoundariesToggleBounds,
+                    panel.AirFieldToggleBounds,
                     panel.ResetButtonBounds,
                     panel.ClearButtonBounds
                 ];
@@ -202,6 +241,8 @@ public static class UiLayoutRegressionTests
                     Require(IsInside(control, layout.RightPanel),
                         $"Property control {control} escaped at {width}x{height}, DPI {dpi}.");
                 }
+                for (int i = 0; i < controls.Length; i++) for (int j = i + 1; j < controls.Length; j++)
+                    Require(!controls[i].Intersects(controls[j]), $"Mode/property controls {i}/{j} overlap at {width}x{height} DPI {dpi}: {controls[i]} / {controls[j]}.");
                 Require(!panel.GravityToggleBounds.Intersects(panel.HydraulicsToggleBounds) &&
                         !panel.GravityToggleBounds.Intersects(panel.WithoutEffectsToggleBounds) &&
                         !panel.HydraulicsToggleBounds.Intersects(panel.WithoutEffectsToggleBounds),
@@ -306,6 +347,40 @@ public static class UiLayoutRegressionTests
             layout.RightPanel, font, settings, PhyxelToolId.Brush, sand, out _);
         Require(settings.HydraulicPressure && panel.HydraulicsToggled,
             "Hydraulics switch did not change the setting.");
+        Require(settings.Mode == SimulationMode.Sandbox, "New scenes must default to Sandbox.");
+        panel.Update(Input(panel.SimulationModeBounds.Center, leftDown: true, leftPressed: true),
+            layout.RightPanel, font, settings, PhyxelToolId.Brush, sand, out _);
+        Require(settings.Mode == SimulationMode.Simulation && panel.ModeChanged, "Simulation mode click failed.");
+        panel.Update(Input(new Point(-1, -1)), layout.RightPanel, font, settings, PhyxelToolId.Brush, sand, out _);
+        Require(!panel.ModeChanged, "Mode action did not reset.");
+        panel.Update(Input(panel.SandboxModeBounds.Center, leftDown: true, leftPressed: true),
+            layout.RightPanel, font, settings, PhyxelToolId.Brush, sand, out _);
+        Require(settings.Mode == SimulationMode.Sandbox && panel.ModeChanged, "Sandbox mode click failed.");
+        // Reproduce the real Update order: UI first, then the harness hook.
+        // The inactive diagnostics must not overwrite a user's selection.
+        string? previousAcceptance = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_MODE");
+        string? previousSpec = Environment.GetEnvironmentVariable("PHYXEL_SPEC_SCENARIO");
+        try
+        {
+            Environment.SetEnvironmentVariable("PHYXEL_ACCEPTANCE_MODE", null);
+            Environment.SetEnvironmentVariable("PHYXEL_SPEC_SCENARIO", null);
+            AcceptanceRegressionHarness inactive = new();
+            Require(!inactive.Active, "Expected ordinary game without an acceptance scenario.");
+            foreach (SimulationMode choice in Enum.GetValues<SimulationMode>())
+            {
+                settings.Mode = choice;
+                settings.Paused = true;
+                settings.RenderWithoutEffects = false;
+                for (uint frame = 0; frame < 120; frame++) inactive.ConfigureSettings(frame, settings);
+                Require(settings.Mode == choice && settings.Paused && !settings.RenderWithoutEffects,
+                    "Inactive diagnostics overwrote user mode/render/pause settings.");
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PHYXEL_ACCEPTANCE_MODE", previousAcceptance);
+            Environment.SetEnvironmentVariable("PHYXEL_SPEC_SCENARIO", previousSpec);
+        }
         panel.Update(
             Input(panel.WithoutEffectsToggleBounds.Center, leftDown: true, leftPressed: true),
             layout.RightPanel, font, settings, PhyxelToolId.Brush, sand, out _);
@@ -403,7 +478,7 @@ public static class UiLayoutRegressionTests
             // затем, чтобы обойти ограничение горения, и висел в воздухе.
             [MaterialCategoryType.Powders] =
                 [CoreMaterialIds.Sand, CoreMaterialIds.Gunpowder, CoreMaterialIds.Coal, CoreMaterialIds.StoneCoal],
-            [MaterialCategoryType.Liquids] = [CoreMaterialIds.Water],
+            [MaterialCategoryType.Liquids] = [CoreMaterialIds.Water, CoreMaterialIds.Oil],
             [MaterialCategoryType.Gases] = [CoreMaterialIds.Steam, CoreMaterialIds.Co2],
             [MaterialCategoryType.Solids] =
                 [CoreMaterialIds.Ice, CoreMaterialIds.Metal, CoreMaterialIds.Stone, CoreMaterialIds.Fixture, CoreMaterialIds.Wood],
@@ -618,6 +693,40 @@ public static class UiLayoutRegressionTests
                 true).Count == 0,
             "Camera-owned drag leaked into brush commands.");
         Console.WriteLine("[PASS] Camera pan, zoom, re-entry safety, resize, reset, and brush isolation.");
+    }
+
+    private static void TestCanvasWorldExpansion()
+    {
+        foreach(var resolution in Resolutions)foreach(float dpi in DpiScales)
+        {
+            Rectangle canvas=UiLayoutCalculator.Calculate(new Viewport(0,0,resolution.Width,resolution.Height),dpi).SimulationCanvas;
+            Point size=CanvasWorldExpansion.RequiredSize(480,270,canvas);
+            Require(CanvasWorldExpansion.RequiredSize(size.X,size.Y,canvas)==size,"Canvas alignment keeps growing every frame.");
+            Rectangle view=CanvasWorldExpansion.CoverBounds(canvas,size.X,size.Y);
+            Require(view.Contains(canvas.Location)&&view.Contains(new Point(canvas.Right-1,canvas.Bottom-1)),"Canvas contains non-interactive bands.");
+            foreach(Point point in new[]{canvas.Location,canvas.Center,new Point(canvas.Right-1,canvas.Bottom-1)})
+                Require(GpuTemperatureProbe.MapPointerToCell(point,view,size.X,size.Y)!=null,"New canvas area has no cell mapping.");
+        }
+        const int width=12,height=10;int count=width*height;
+        var cells=new GridCell[count];for(int i=0;i<count;i++)cells[i]=new(){MaterialIndex=(uint)i,IsActive=1,Mass=i+.5f,Temperature=i-20,MoistureMass=.1f,FuelMass=.3f};
+        byte[] Packet(int n,int stride){var bytes=new byte[n*stride];for(int i=0;i<bytes.Length;i++)bytes[i]=(byte)(i%251);return bytes;}
+        var original=new SimulationWorldSnapshot(width,height,MemoryMarshal.AsBytes(cells.AsSpan()).ToArray(),
+            Packet(9,16),Packet(count,16),Packet(count,4),Packet(9,8),Packet(count,16),Packet(9,16));
+        var expanded=CanvasWorldExpansion.Expand(original,new Point(16,14));
+        Require(expanded.Width==16&&expanded.Height==14,"Expanded dimensions wrong.");
+        var expandedCells=MemoryMarshal.Cast<byte,GridCell>(expanded.Grid);
+        for(int y=0;y<height;y++)for(int x=0;x<width;x++)
+            Require(MemoryMarshal.AsBytes(cells.AsSpan(y*width+x,1)).SequenceEqual(expanded.Grid.AsSpan(((y+4)*16+x)*52,52)),"Canvas resize changed a world packet.");
+        Require(expandedCells[..(16*4)].ToArray().All(c=>c.IsActive==0),"Added sky is occupied.");
+        foreach(var pair in new[]{(original.Air!,expanded.Air!,16),
+            (original.AirThermal!,expanded.AirThermal!,8),(original.ReactionPulse!,expanded.ReactionPulse!,16)})
+            for(int y=0;y<3;y++)Require(pair.Item1.AsSpan(y*3*pair.Item3,3*pair.Item3).SequenceEqual(pair.Item2.AsSpan((y+1)*4*pair.Item3,3*pair.Item3)),"Canvas resize changed coarse state.");
+        foreach(var pair in new[]{(original.GasMotion!,expanded.GasMotion!),(original.ReactionPending!,expanded.ReactionPending!)})
+            for(int y=0;y<height;y++)Require(pair.Item1.AsSpan(y*width*16,width*16).SequenceEqual(pair.Item2.AsSpan((y+4)*16*16,width*16)),"Canvas resize changed fine state.");
+        for(int y=0;y<height;y++)Require(original.Oxidizer!.AsSpan(y*width*4,width*4).SequenceEqual(expanded.Oxidizer!.AsSpan((y+4)*16*4,width*4)),"Canvas resize changed fine oxygen.");
+        Require(BitConverter.ToSingle(expanded.Oxidizer!,0)==1f,"Added air lacks ambient oxygen.");
+        Require(Math.Abs(BitConverter.ToSingle(expanded.AirThermal!,0)-293.15f*.016f)<1e-6,"Added air heat wrong.");
+        Console.WriteLine("[PASS] Canvas fill, stable dimensions, pointer mapping and byte-exact world/air/heat/fuel/pulse expansion.");
     }
 
     private static void TestButtonVisualStates()

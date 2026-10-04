@@ -12,6 +12,14 @@
 
 Проект использует `net8.0-windows`, KNI WinForms DX11 и runtime-компиляцию HLSL через SharpDX D3DCompiler. Реальные GPU acceptance нельзя заменить только CPU-проверками.
 
+## Добавление и изменение веществ
+
+Сначала составьте или обновите [паспорт вещества](materials/README.md),
+изучив исходники TPT и текущие обработчики Phyxel. Затем реализуйте
+согласованное поведение и проверьте сценарии паспорта.
+Обязательный порядок и правила статусов: [WORKFLOW.md](materials/WORKFLOW.md).
+Правило также закреплено в корневом [AGENTS.md](../AGENTS.md).
+
 ## Сборка
 
 Из корня репозитория:
@@ -44,6 +52,13 @@ dotnet run --project Phyxel.csproj -c Debug
 ```
 
 При запуске проверьте, что core JSON скопированы в `bin/Debug/net8.0-windows/Materials/core`, окно создаёт GPU-ресурсы и в меню присутствует один обычный песок, вода, металл, камень, газ, опора и ластик.
+
+## Проверка сохранений через интерфейс
+
+После сборки `./Diagnostics/RunSceneFiles.ps1` запускает отдельный процесс
+с `PHYXEL_VERIFY_SCENE_FILES=1`: реальные GPU save/load, ответы выбора
+файла подменены, тестовые файлы только в каталоге artifacts. Не запускайте
+с другими verify-флагами одновременно. [Критерии/результаты](SCENE_FILES_RESULTS.md).
 
 ## Холодная компиляция shaders
 
@@ -366,3 +381,15 @@ git status --short
 ```
 
 Если менялись shaders или GPU layouts, между `git diff --check` и сборкой/acceptance очистите shader cache и прогоните нужный cold GPU-набор. Итоговый статус должен содержать только ожидаемые исходные/документационные файлы, а после коммита — быть чистым.
+
+## Проверка масляной пропитки
+
+После сборки `./Diagnostics/RunOilAbsorption.ps1` включает только
+`PHYXEL_VERIFY_OIL_ABSORPTION=1`: настоящий GPU-контакт/горение/движение/
+probe и serializer14/legacy12/13. Не смешивать с другими verify-флагами.
+Контрольный старый ContactTransitions.hlsl из
+`artifacts/oil-absorption-20261003/baseline/` проверяется при наличии;
+без него явно NOT_RUN, не PASS сравнения до/после. [Результаты](OIL_ABSORPTION_RESULTS.md).
+Повторенные группы: Oil, FuelMoisture, LiquidFeed, SubmergedHeaps,
+WettingContact, WaterContact, IceFusion, MetalFusion, CorePhase, Gunpowder,
+SceneFiles и CPU/layout/UI. Структуры C#/HLSL должны быть52/224/probe20.

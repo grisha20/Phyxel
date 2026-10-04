@@ -1,13 +1,14 @@
 param([string]$ArtifactRoot='artifacts/convection-20261001/trial',[switch]$Baseline,[switch]$Single,
     [int]$Seconds=60,[switch]$Isolate,[string]$RestartPath,
-    [int]$TargetFps=60,[int]$Air=0,[int]$Hydraulics=0)
+    [int]$TargetFps=60,[int]$Air=0,[int]$Hydraulics=0,[string]$Executable,[string]$CoreSourceDirectory)
 $ErrorActionPreference='Stop'
 $taskRepo=Split-Path -Parent $PSScriptRoot
 $taskRoot=[IO.Path]::GetFullPath((Join-Path $taskRepo $ArtifactRoot))
 New-Item -ItemType Directory -Force -Path $taskRoot | Out-Null
 $taskCore=Join-Path $taskRoot 'core'
 New-Item -ItemType Directory -Force -Path $taskCore | Out-Null
-Copy-Item -Path (Join-Path $taskRepo 'Materials/core/*.json') -Destination $taskCore -Force
+if(-not $CoreSourceDirectory){$CoreSourceDirectory=Join-Path $taskRepo 'Materials/core'}
+Copy-Item -Path (Join-Path $CoreSourceDirectory '*.json') -Destination $taskCore -Force
 $taskFixture=Join-Path $taskCore 'fixture.json'
 $taskJson=Get-Content -Raw -LiteralPath $taskFixture | ConvertFrom-Json
 $taskJson.thermal.conductivity=0
@@ -19,6 +20,7 @@ if($Isolate) {
     $taskJson | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $taskWater -Encoding utf8
 }
 $taskExe=Join-Path $taskRepo 'bin/Debug/net8.0-windows/Phyxel.exe'
+if($Executable){$taskExe=[IO.Path]::GetFullPath((Join-Path $taskRepo $Executable))}
 if($Baseline) {
     $taskRuntime=Join-Path $taskRoot 'baseline-runtime'
     New-Item -ItemType Directory -Force -Path $taskRuntime | Out-Null

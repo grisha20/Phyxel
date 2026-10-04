@@ -33,15 +33,21 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             1.5f, 0.75f, 0.18f, "#DAB85C", 20, 0.15f, 0.83f),
         new("core:gunpowder", MaterialSimulationKind.Granular, MaterialFlags.SelfOxidizing,
             1.4f, 0.80f, 0.15f, "#505358", 20f, 0.25f, 0.90f),
-        new(CoreMaterialIds.Water, MaterialSimulationKind.Liquid, MaterialFlags.PhaseEnthalpy,
+        new(CoreMaterialIds.Water, MaterialSimulationKind.Liquid, MaterialFlags.PhaseEnthalpy | MaterialFlags.FusionEnthalpy | MaterialFlags.LiquidConvection,
             1, 0.025f, 0.92f, "#2B84CF", 20, 0.60f, 4.18f),
-        new(CoreMaterialIds.Ice, MaterialSimulationKind.Solid, MaterialFlags.None,
+        new(CoreMaterialIds.Oil, MaterialSimulationKind.Liquid, MaterialFlags.LiquidConvection | MaterialFlags.FusionEnthalpy | MaterialFlags.PhaseEnthalpy,
+            0.8f, 0.08f, 0.65f, "#B87929", 20f, 0.12f, 2f),
+        new(CoreMaterialIds.FrozenOil, MaterialSimulationKind.Solid, MaterialFlags.FusionEnthalpy | MaterialFlags.MovableSolid | MaterialFlags.DensityBody,
+            .85f,.15f,0,"#D6BC87",10,.18f,1.7f),
+        new(CoreMaterialIds.OilVapour, MaterialSimulationKind.Gas, MaterialFlags.PhaseEnthalpy,
+            .04f,.005f,1.2f,"#B49E77",300,.03f,1.5f),
+        new(CoreMaterialIds.Ice, MaterialSimulationKind.Solid, MaterialFlags.FusionEnthalpy | MaterialFlags.MovableSolid | MaterialFlags.DensityBody,
             0.92f, 0.10f, 0, "#A9DDF2", -5, 0.80f, 2.10f),
         new(CoreMaterialIds.Steam, MaterialSimulationKind.Gas, MaterialFlags.PhaseEnthalpy,
             0.03f, 0.005f, 1.20f, "#A0A0FFFF", 122, 0.04f, 2.08f),
-        new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
+        new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid | MaterialFlags.FusionEnthalpy,
             7.8f, 0.35f, 0, "#8E9CA6", 20, 1, 0.13f),
-        new("core:molten_metal", MaterialSimulationKind.Liquid, MaterialFlags.None,
+        new("core:molten_metal", MaterialSimulationKind.Liquid, MaterialFlags.FusionEnthalpy,
             7f, 0.55f, 0.34f, "#FF7A1E", 1050f, 0.60f, 0.50f),
         new(CoreMaterialIds.Stone, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
             9.2f, 0.75f, 0, "#5C6065", 20, 0.25f, 0.84f),
@@ -120,7 +126,21 @@ internal static class PhaseTransitionMaterialRegressionVerifier
                 node["thermal"]!["transitions"]!["above"]!["latentHeat"] = 10000),
             ("enthalpy-extra-phase", "steam.json", "phase-enthalpy", node =>
                 node["thermal"]!["transitions"]!["above"] = new JsonObject {
-                    ["temperature"] = 500, ["into"] = CoreMaterialIds.Co2 })
+                    ["temperature"] = 500, ["into"] = CoreMaterialIds.Co2 }),
+            ("fusion-unflagged", "ice.json", "flagged reversible", node =>
+                node["flags"] = new JsonArray()),
+            ("fusion-zero", "ice.json", "latentHeat", node =>
+                node["thermal"]!["transitions"]!["above"]!["latentHeat"] = 0),
+            ("fusion-overflow", "ice.json", "serialized auxiliary range", node =>
+                node["thermal"]!["transitions"]!["above"]!["latentHeat"] = 4000),
+            ("fusion-order", "ice.json", "instantaneous", node =>
+                node["thermal"]!["transitions"]!["above"]!["temperature"] = -1),
+            ("fusion-kind", "ice.json", "solid or liquid", node =>
+                { node["kind"] = "gas"; node["flags"] = new JsonArray("fusion-enthalpy"); }),
+            ("density-needs-movable", "ice.json", "density-body", node =>
+                node["flags"] = new JsonArray("fusion-enthalpy", "density-body")),
+            ("density-not-liquid", "water.json", "density-body", node =>
+                node["flags"] = new JsonArray("fusion-enthalpy", "phase-enthalpy", "density-body"))
         ];
         foreach (var test in cases)
         {
@@ -145,7 +165,7 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             "TransitionAboveTemperature offset must be 56.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.TransitionAboveMaterialIndex)).ToInt32() == 60,
             "TransitionAboveMaterialIndex offset must be 60.");
-        Require(Marshal.SizeOf<GridCell>() == 40, "GridCell must be 40 bytes.");
+        Require(Marshal.SizeOf<GridCell>() == 52, "GridCell must be 52 bytes.");
 
         string shaderPath = Path.Combine(
             AppContext.BaseDirectory,
@@ -506,13 +526,22 @@ internal static class PhaseTransitionMaterialRegressionVerifier
     {
         switch (material.Id)
         {
+            case CoreMaterialIds.FrozenOil:
+                VerifyRule(registry,material.Id,false,0,null,true,18.5f,CoreMaterialIds.Oil);
+                break;
+            case CoreMaterialIds.OilVapour:
+                VerifyRule(registry,material.Id,true,285,CoreMaterialIds.Oil,false,0,null);
+                break;
+            case CoreMaterialIds.Oil:
+                VerifyRule(registry,material.Id,true,18,CoreMaterialIds.FrozenOil,true,287,CoreMaterialIds.OilVapour);
+                break;
             case CoreMaterialIds.Water:
                 VerifyRule(registry, material.Id, true, 0, CoreMaterialIds.Ice,
                     true, 100, CoreMaterialIds.Steam);
                 break;
             case CoreMaterialIds.Ice:
                 VerifyRule(registry, material.Id, false, 0, null,
-                    true, 2, CoreMaterialIds.Water);
+                    true, 0, CoreMaterialIds.Water);
                 break;
             case CoreMaterialIds.Steam:
                 VerifyRule(registry, material.Id, true, 98, CoreMaterialIds.Water,

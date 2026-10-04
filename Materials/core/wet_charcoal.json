@@ -1,10 +1,38 @@
 {
   "schema": 1,
   "id": "core:wet_charcoal",
-  "name": { "ru": "Мокрый древесный уголь", "en": "Wet Charcoal" },
+  "name": {
+    "ru": "Мокрый древесный уголь",
+    "en": "Wet Charcoal"
+  },
   "kind": "granular",
   "color": "#202020",
-  "physics": { "density": 1.15, "friction": 0.62, "flowRate": 0.32 },
-  "thermal": { "initialTemperature": 20.0, "conductivity": 0.22, "heatCapacity": 1.0 },
-  "ui": { "order": 90, "hidden": true }
+  "physics": {
+    "density": 1.15,
+    "friction": 0.62,
+    "flowRate": 0.32
+  },
+  "thermal": {
+    "initialTemperature": 20.0,
+    "conductivity": 0.22,
+    "heatCapacity": 1.0
+  },
+  "ui": {
+    "order": 90,
+    "hidden": true
+  },
+  "fuelAbsorption": {
+    "liquid": "core:oil",
+    "capacity": 0.25,
+    "absorptionRate": 0.025,
+    "saturatedDensity": 0.9
+  },
+  "moisture": {
+    "liquid": "core:water",
+    "dry": "core:coal",
+    "wet": "core:wet_charcoal",
+    "capacity": 0.35,
+    "absorptionRate": 0.35,
+    "dryingRate": 0.1
+  }
 }

@@ -10,7 +10,14 @@ struct GridCell
     uint RestFrames;
     float Temperature;
     float Lifetime; // PhaseEnthalpy: latent progress; thermal regulator: power; otherwise lifetime.
+    float MoistureMass;
+    float MoistureEnergy;
+    float FuelMass;
 };
+
+// Free liquid/gas fuel only; distinct from rigid-body IDs and FIRE markers.
+// Phase progress stays entirely in Lifetime. Clear this bit on phase changes.
+static const uint FuelBurningMarker = 0x20000000u;
 
 // One cell of the coarse air field. Blocked is a float rather than a bool or a
 // uint so the struct stays 16 bytes with natural alignment in both HLSL and C#.
@@ -24,7 +31,7 @@ struct AirCell
 
 // Mirrors Physics.GasMotionState.  This is intentionally a separate GPU
 // buffer, not an addition to GridCell: worlds are serialized with a fixed
-// 40-byte GridCell layout and the water solvers own GridCell.VelocityX/Y.
+// Water solvers own GridCell.VelocityX/Y; gas motion lives separately.
 struct GasMotionState
 {
     float VelocityX;
@@ -154,18 +161,42 @@ struct MaterialProperties
     float MotionAirLoss;
     float MotionLoss;
     float MotionCollision;
-    float MotionReserved0;
-    float MotionReserved1;
-    float MotionReserved2;
+    float ReactionPressurePerMass;
+    float ReactionFlameLifetimeMultiplier;
+    float FlameExtinctionTemperature;
     float GasHazeStrength;
     float ThermalDeviceTargetTemperature;
-    float ThermalDeviceMaximumPower;
+    float ThermalDeviceMaximumPower; // Granular contact: allowed liquid index+1; 0 means any liquid.
+    uint MoistureLiquidMaterialIndex;
+    uint MoistureDryMaterialIndex;
+    uint MoistureWetMaterialIndex;
+    float MoistureCapacity;
+    float MoistureAbsorptionRate;
+    float MoistureDryingRate;
+    float MoistureReserved0;
+    float MoistureReserved1;
+    uint FuelLiquidMaterialIndex;
+    float FuelCapacity;
+    float FuelAbsorptionRate;
+    float FuelSaturatedDensity;
+    float LiquidFlowReferenceTemperature;
+    float LiquidFlowTemperatureSensitivity;
+    float LiquidFlowMinimumMobility;
+    float LiquidFlowMaximumMobility;
+    float ContactIgnitionTemperature;
 };
 
-// Mirrors Physics.MaterialPropertiesLayout.ByteSize. Forty-four semantic
-// material fields produce a 176-byte
-// structured-buffer stride (a multiple of sixteen).
-static const uint MaterialPropertiesByteSize = 176;
+// Mirrors Physics.MaterialPropertiesLayout.ByteSize: sixty-one scalars.
+static const uint MaterialPropertiesByteSize = 244;
+
+float LiquidMobility(MaterialProperties material, float temperature)
+{
+    if (material.LiquidFlowTemperatureSensitivity <= 0) return 1.0;
+    float exponent = clamp(material.LiquidFlowTemperatureSensitivity *
+        (temperature - material.LiquidFlowReferenceTemperature), -20.0, 20.0);
+    return clamp(exp(exponent), material.LiquidFlowMinimumMobility,
+        material.LiquidFlowMaximumMobility);
+}
 
 struct MaterialEmissionProperties
 {
@@ -175,7 +206,7 @@ struct MaterialEmissionProperties
     float GasRate;
     uint FlameIntoMaterialIndex;
     float FlameRate;
-    uint Reserved0;
+    float OxidizerPerMass;
     uint Reserved1;
 };
 
@@ -186,6 +217,7 @@ struct EmissionRequest
     float Mass;
     float Temperature;
     uint SourceIndex;
+    float FlameLifetimeMultiplier;
 };
 
 static const uint SimulationKindNone = 0;
@@ -208,6 +240,9 @@ static const uint MaterialFlagPhaseEnthalpy = 1u << 5;
 static const uint MaterialFlagThermalHeater = 1u << 6;
 static const uint MaterialFlagThermalCooler = 1u << 7;
 static const uint MaterialFlagThermalCarbonDioxide = 1u << 8;
+static const uint MaterialFlagFusionEnthalpy = 1u << 10;
+static const uint MaterialFlagLiquidConvection = 1u << 11;
+static const uint MaterialFlagDensityBody = 1u << 12;
 static const uint MaterialFlagPersistentCoalIgnition = 1u << 9;
 static const uint PhaseSummaryPhaseOccurred = 1u << 0;
 static const uint PhaseSummaryTargetCellular = 1u << 1;
@@ -258,6 +293,7 @@ struct SimulationStatistics
     uint MovingSolidCells;
     uint FarColumnMoves;
     uint PressurePlans;
+    uint FreeBodyCells;
 };
 
 cbuffer SimulationFrameConstants : register(b0)

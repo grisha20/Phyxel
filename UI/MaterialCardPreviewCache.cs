@@ -13,6 +13,7 @@ public sealed class MaterialCardPreviewCache : IDisposable
         {
             ["core:sand"] = "sand.png",
             ["core:water"] = "water.png",
+            ["core:oil"] = "oil.png",
             ["core:steam"] = "steam.png",
             ["core:co2"] = "co2.png",
             ["core:ice"] = "ice.png",

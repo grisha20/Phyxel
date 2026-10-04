@@ -9,6 +9,12 @@ public sealed class RawInputSampler
     private MouseState previousMouse;
     private KeyboardState previousKeyboard;
 
+    public void ResetAfterDialog()
+    {
+        previousMouse = Mouse.GetState();
+        previousKeyboard = Keyboard.GetState();
+    }
+
     public RawInputSnapshot Sample(GameTime gameTime)
     {
         MouseState mouse = Mouse.GetState();

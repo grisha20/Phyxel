@@ -28,6 +28,8 @@ acceptance-report.txt
 *.tmp
 *.temp
 *.cache
+__pycache__/
+*.py[cod]
 *.bak
 *~
 Thumbs.db

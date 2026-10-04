@@ -102,7 +102,7 @@ GridCell CreateGasCell(
     result.VelocityY = velocityY;
     result.Pressure = 0;
     result.IsActive = 1;
-    result.BodyId = 0;
+    result.BodyId &= FuelBurningMarker;
     result.RestFrames = 0;
     return result;
 }

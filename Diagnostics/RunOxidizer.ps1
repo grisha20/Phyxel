@@ -1,4 +1,4 @@
-param([string]$ArtifactRoot='artifacts/oxidizer-20261001/final',[switch]$Single,[switch]$Baseline,[switch]$RestartOnly,[switch]$EmptyOnly)
+param([string]$ArtifactRoot='artifacts/oxidizer-20261001/final',[switch]$Single,[switch]$Baseline,[switch]$RestartOnly,[switch]$EmptyOnly,[ValidateSet(0,1)][int]$SingleAir=0,[ValidateSet(30,60,100)][int[]]$SingleFps=@(60))
 $ErrorActionPreference='Stop'
 $taskRepo=Split-Path -Parent $PSScriptRoot
 $taskRoot=[IO.Path]::GetFullPath((Join-Path $taskRepo $ArtifactRoot))
@@ -23,7 +23,8 @@ $taskResults=[Collections.Generic.List[object]]::new()
 try {
  $env:PHYXEL_ACCEPTANCE_MODE='oxidizer'; $env:PHYXEL_ACCEPTANCE_SCALE='0.25'
  $env:PHYXEL_CORE_MATERIALS_PATH=$taskCore; $env:PHYXEL_MATERIALS_PATH=$taskExternal
- $taskCases=@(@{Label='fps-60';Fps=60;Seconds=60;Air=0;Effects=0})
+ $taskCases=@(@{Label='fps-60';Fps=60;Seconds=60;Air=$SingleAir;Effects=0})
+ if($Single) {$taskCases=@(foreach($taskFps in $SingleFps){@{Label="fps-$taskFps";Fps=$taskFps;Seconds=60;Air=$SingleAir;Effects=0}})}
  if(-not $Single -and -not $Baseline) {$taskCases+=@(@{Label='fps-30';Fps=30;Seconds=60;Air=0;Effects=0},@{Label='fps-100';Fps=100;Seconds=60;Air=0;Effects=1},@{Label='air-1';Fps=60;Seconds=60;Air=1;Effects=0},@{Label='restart';Fps=60;Seconds=10;Air=0;Effects=0;Restart=(Join-Path $taskRoot 'fps-60/final.scene.json')})}
  if($RestartOnly) {
   if($Single -or $Baseline) {throw 'RestartOnly cannot be combined with Single or Baseline'}
@@ -59,7 +60,7 @@ try {
   $env:PHYXEL_ACCEPTANCE_CAPTURE_FRAME="$($taskCase.Seconds*$taskCase.Fps)"
   $env:PHYXEL_ACCEPTANCE_AIR="$($taskCase.Air)"; $env:PHYXEL_ACCEPTANCE_RENDER_EFFECTS="$($taskCase.Effects)"; $env:PHYXEL_ARTIFACT_DIR=$taskDir
   $taskProcess=Start-Process -FilePath $taskExe -WorkingDirectory $taskRepo -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput (Join-Path $taskDir 'run.log') -RedirectStandardError (Join-Path $taskDir 'error.log')
-  Get-Content (Join-Path $taskDir 'run.log') | Where-Object {$_ -match '^PHYXEL_(OXIDIZER|ACCEPTANCE_SUCCESS)'} | Write-Output
+  Get-Content (Join-Path $taskDir 'run.log') | Where-Object {$_ -match '^PHYXEL_(OXIDIZER|COMBUSTION_MODES|ACCEPTANCE_SUCCESS)'} | Write-Output
   $taskPassed=$taskProcess.ExitCode -eq 0
   $taskResults.Add([pscustomobject]@{case=$taskCase.Label;passed=$taskPassed;exit=$taskProcess.ExitCode})
   $taskSummary=if($RestartOnly) {'restart-summary.csv'} elseif($EmptyOnly) {'empty-summary.csv'} else {'summary.csv'}

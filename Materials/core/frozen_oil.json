@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "core:frozen_oil",
+  "name": { "ru": "Застывшее масло", "en": "Solidified Oil" },
+  "kind": "solid",
+  "flags": ["fusion-enthalpy", "movable-solid", "density-body"],
+  "color": "#D6BC87",
+  "physics": { "density": 0.85, "friction": 0.15, "flowRate": 0.0 },
+  "thermal": { "initialTemperature": 10.0, "conductivity": 0.18, "heatCapacity": 1.7,
+    "transitions": { "above": { "temperature": 18.5, "into": "core:oil", "latentHeat": 230.0 } } },
+  "ui": { "order": 26, "hidden": true }
+}

@@ -29,7 +29,15 @@ public sealed class PhyxelGame : Game
     private readonly GpuDebugProbe debugProbe = new();
     private readonly GpuTemperatureProbe temperatureProbe = new();
     private readonly AcceptanceRegressionHarness acceptance = new();
-    private readonly string scenePath;
+    private readonly SimulationClockTrace simulationClockTrace = new();
+    private string scenePath;
+    private bool hasChosenScenePath;
+    private bool sceneDialogOpen;
+    private string? pendingSavePath;
+    private string? pendingLoadPath;
+    private SimulationSettings? pendingSaveSettings;
+    private Func<string, bool, IntPtr, string?> scenePathPicker =
+        (path, save, owner) => SceneFileDialog.Select(path, save, owner);
     private readonly string? uiScreenshotPath;
     private readonly float? uiDpiOverride;
     private SpriteBatch? spriteBatch;
@@ -42,6 +50,9 @@ public sealed class PhyxelGame : Game
     private Task? pendingSave;
     private Task<LoadedSimulationScene?>? pendingLoad;
     private bool pendingWorldCapture;
+    private readonly SimulationStateSerializer canvasCaptureSerializer = new();
+    private bool canvasExpansionPending;
+    private Point canvasExpansionSize;
     private bool pendingAcceptanceCheckpoint;
     private uint pendingAcceptanceCheckpointFrame;
     private ulong pendingAcceptanceCheckpointTick;
@@ -141,6 +152,211 @@ public sealed class PhyxelGame : Game
         resourceManager.PrepareSimulation(settings);
         dispatchCoordinator = new SimulationDispatchCoordinator(resourceManager, materialRegistry);
         userInterface = new SandboxUiCoordinator(materialRegistry, fonts, resourceManager);
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_BODY_SUITE") == "1")
+        {
+            string diagnosticsRoot=Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")??"artifacts/body-suite";
+            try
+            {
+                Environment.SetEnvironmentVariable("PHYXEL_ARTIFACT_DIR",Path.Combine(diagnosticsRoot,"body"));
+                BodyBalanceRegressionVerifier.Run(dispatchCoordinator,materialRegistry);
+                Environment.SetEnvironmentVariable("PHYXEL_ARTIFACT_DIR",Path.Combine(diagnosticsRoot,"frozen"));
+                FrozenBodyRegressionVerifier.Run(dispatchCoordinator,materialRegistry);
+                UiLayoutRegressionTests.RunAllTests(materialRegistry,fonts,userInterface);
+                Environment.SetEnvironmentVariable("PHYXEL_ARTIFACT_DIR",Path.Combine(diagnosticsRoot,"scenes"));
+                SceneFileRegressionVerifier.Run(this,dispatchCoordinator,materialRegistry);
+                Console.WriteLine("PHYXEL_BODY_SUITE_SUCCESS");
+            }
+            catch(Exception e){Console.WriteLine($"PHYXEL_BODY_SUITE_FAILED {e}");Environment.ExitCode=1;}
+            finally{Environment.SetEnvironmentVariable("PHYXEL_ARTIFACT_DIR",diagnosticsRoot);}
+            Exit();return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_BODY_BALANCE") == "1")
+        {
+            try { BodyBalanceRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch(Exception e) { Console.WriteLine($"PHYXEL_BODY_BALANCE_FAILED {e}");Environment.ExitCode=1; }
+            Exit();return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FROZEN_BODIES") == "1")
+        {
+            try { FrozenBodyRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception e) { Console.WriteLine($"PHYXEL_FROZEN_BODY_FAILED {e}"); Environment.ExitCode = 1; }
+            Exit(); return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_OIL_PHASES") == "1")
+        {
+            try { OilPhaseRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception e) { Console.WriteLine($"PHYXEL_OIL_PHASES_FAILED {e}"); Environment.ExitCode = 1; }
+            Exit(); return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_TEMPERATURE") == "1")
+        {
+            try { LiquidTemperatureRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception e) { Console.WriteLine($"PHYXEL_LIQUID_TEMPERATURE_FAILED {e}"); Environment.ExitCode = 1; }
+            Exit(); return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_FEED") == "1")
+        {
+            try { LiquidFeedRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception exception) { Console.WriteLine($"PHYXEL_LIQUID_FEED_FAILED {exception}"); Environment.ExitCode = 1; }
+            Exit();return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_OIL_ABSORPTION") == "1")
+        {
+            try { OilAbsorptionRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
+            catch (Exception e) { Console.WriteLine($"PHYXEL_OIL_ABSORPTION_FAILED {e}"); Environment.ExitCode=1; }
+            Exit(); return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_OIL") == "1")
+        {
+            try { OilRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
+            catch (Exception exception) { Console.WriteLine($"PHYXEL_OIL_FAILED {exception}"); Environment.ExitCode=1; }
+            Exit();
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SUBMERGED_HEAPS") == "1")
+        {
+            try { SubmergedHeapRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
+            catch (Exception exception) { Console.WriteLine($"PHYXEL_SUBMERGED_FAILED {exception}"); Environment.ExitCode=1; }
+            Exit();
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_WOOD") == "1")
+        {
+            try { WoodCycleRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
+            catch (Exception exception) { Console.WriteLine($"PHYXEL_WOOD_FAILED {exception}"); Environment.ExitCode=1; }
+            Exit();
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FUEL_MOISTURE") == "1")
+        {
+            try { FuelMoistureRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
+            catch (Exception exception) { Console.WriteLine($"PHYXEL_FUEL_MOISTURE_FAILED {exception}"); Environment.ExitCode=1; }
+            Exit();
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_WETTING_CONTACT") == "1")
+        {
+            try { WettingContactRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
+            catch (Exception exception) { Console.WriteLine($"PHYXEL_WETTING_FAILED {exception}"); Environment.ExitCode=1; }
+            Exit();
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_METAL_FUSION") == "1")
+        {
+            try { MetalFusionRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
+            catch (Exception exception) { Console.WriteLine($"PHYXEL_METAL_FUSION_FAILED {exception}"); Environment.ExitCode=1; }
+            Exit();
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_ICE_FUSION") == "1")
+        {
+            try { IceFusionRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
+            catch(Exception exception) { Console.WriteLine($"PHYXEL_ICE_FUSION_FAILED {exception}");Environment.ExitCode=1; }
+            Exit();return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_WATER_CONTACT") == "1")
+        {
+            try { WaterContactRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"PHYXEL_WATER_CONTACT_FAILED {exception}");
+                Environment.ExitCode = 1;
+            }
+            Exit();
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_REACTION_PULSE") == "1")
+        {
+            try { ReactionPulseRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
+            catch(Exception exception) { Console.WriteLine($"PHYXEL_REACTION_PULSE_FAILED {exception}");Environment.ExitCode=1; }
+            Exit();return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_GUNPOWDER") == "1")
+        {
+            try { GunpowderRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
+            catch(Exception exception) { Console.WriteLine($"PHYXEL_GUNPOWDER_FAILED {exception}");Environment.ExitCode=1; }
+            Exit();return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_TRANSIENT_PACE") == "1")
+        {
+            try { TransientPaceRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"PHYXEL_TRANSIENT_PACE_FAILED {exception}");
+                Environment.ExitCode = 1;
+            }
+            Exit(); return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_GAS_TILES") == "1")
+        {
+            try { GasTileRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"PHYXEL_GAS_TILES_FAILED {exception}");
+                Environment.ExitCode = 1;
+            }
+            Exit(); return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_CHIMNEY_TRANSPORT") == "1")
+        {
+            try { ChimneyTransportRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"PHYXEL_CHIMNEY_TRANSPORT_FAILED {exception}");
+                Environment.ExitCode = 1;
+            }
+            Exit(); return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_MATERIAL_ENVIRONMENT") == "1")
+        {
+            try { MaterialEnvironmentRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception exception) { Console.WriteLine($"PHYXEL_ENVIRONMENT_FAILED {exception}"); Environment.ExitCode=1; }
+            Exit(); return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_AIR_HEAT") == "1")
+        {
+            try { AirThermalRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"PHYXEL_AIR_HEAT_FAILED {exception}");
+                Environment.ExitCode = 1;
+            }
+            Exit();
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FURNACE_COMBUSTION") == "1")
+        {
+            try { FurnaceCombustionRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"PHYXEL_FURNACE_COMBUSTION_FAILED {exception}");
+                Environment.ExitCode = 1;
+            }
+            Exit();
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_AIR_INVENTORY") == "1")
+        {
+            try { AirInventoryRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"PHYXEL_AIR_INVENTORY_FAILED {exception}");
+                Environment.ExitCode = 1;
+            }
+            Exit();
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_AIR_MODE_SWITCH") == "1")
+        {
+            try { AirModeSwitchRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"PHYXEL_AIR_MODE_SWITCH_FAILED {exception.Message}");
+                Environment.ExitCode = 1;
+            }
+            Exit();
+            return;
+        }
         if (!string.IsNullOrEmpty(uiScreenshotPath) &&
             Environment.GetEnvironmentVariable("PHYXEL_UI_PREVIEW_MATERIAL") is { } previewId)
         {
@@ -157,6 +373,13 @@ public sealed class PhyxelGame : Game
             UiLayoutRegressionTests.RunAllTests(materialRegistry, fonts, userInterface);
             Console.WriteLine("PHYXEL_UI_REGRESSION_SUCCESS");
             Exit();
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SCENE_FILES") == "1")
+        {
+            try { SceneFileRegressionVerifier.Run(this, dispatchCoordinator, materialRegistry); }
+            catch (Exception e) { Console.WriteLine($"PHYXEL_SCENE_FILES_FAILED {e}"); Environment.ExitCode = 1; Exit(); return; }
+            if (string.IsNullOrEmpty(uiScreenshotPath)) Exit();
             return;
         }
         SimulationWorldSnapshot? initialAcceptanceWorld = acceptance.CreateInitialWorld(
@@ -190,7 +413,13 @@ public sealed class PhyxelGame : Game
             base.Update(gameTime);
             return;
         }
+        if (canvasExpansionPending)
+        {
+            CompleteCanvasExpansion();
+            return;
+        }
         RawInputSnapshot input = inputSampler.Sample(gameTime);
+        if (sceneDialogOpen) return;
         latestInput = input;
         if (input.EscapePressed)
         {
@@ -205,13 +434,14 @@ public sealed class PhyxelGame : Game
             uiDpiOverride ?? UiDisplayScale.GetDpiScale(Window.Handle),
             settings);
         ProcessUiActions(actions);
+        if (!acceptance.Active && EnsureCanvasWorldFits(userInterface.CanvasBounds)) return;
         acceptance.ConfigureSettings(frameIndex, settings);
         acceptance.ApplyRuntimeControls(
             frameIndex,
             settings,
             dispatchCoordinator,
             temperatureProbe);
-        Rectangle fittedWorldBounds = FitWorldToCanvas(
+        Rectangle fittedWorldBounds = WorldCanvasBounds(
             userInterface.CanvasBounds,
             settings.Width,
             settings.Height);
@@ -241,10 +471,13 @@ public sealed class PhyxelGame : Game
         try
         {
             uint acceptanceFrame = frameIndex;
+            float physicalElapsedSeconds = acceptance.AdjustElapsedSeconds(input.DeltaSeconds);
             currentResources = dispatchCoordinator.DispatchFrame(
                 settings,
                 commandEncoder.Encode(commands),
-                acceptance.AdjustElapsedSeconds(input.DeltaSeconds));
+                physicalElapsedSeconds);
+            simulationClockTrace.Observe(physicalElapsedSeconds, settings, dispatchCoordinator);
+            if (simulationClockTrace.ExitRequested) Exit();
             acceptance.RecordAirPressureTrace(acceptanceFrame, currentResources);
             acceptance.RecordGasObstacleBypassTrace(acceptanceFrame, currentResources);
             acceptance.RecordGasLateralTransferTrace(acceptanceFrame, currentResources);
@@ -338,7 +571,7 @@ public sealed class PhyxelGame : Game
             base.Draw(gameTime);
             return;
         }
-        Rectangle fittedWorldBounds = FitWorldToCanvas(
+        Rectangle fittedWorldBounds = WorldCanvasBounds(
             userInterface.CanvasBounds,
             currentResources.Width,
             currentResources.Height);
@@ -380,6 +613,7 @@ public sealed class PhyxelGame : Game
 
     protected override void UnloadContent()
     {
+        simulationClockTrace.Dispose();
         userInterface?.Dispose();
         resourceManager?.Dispose();
         canvasRasterizerState?.Dispose();
@@ -414,7 +648,7 @@ public sealed class PhyxelGame : Game
         if (actions.GravityChanged)
         {
             dispatchCoordinator.SetSolidGravityEnabled(settings.SolidGravity);
-            SetStatus(settings.SolidGravity ? "Гравитация включена" : "Гравитация выключена");
+            SetStatus(settings.SolidGravity ? "Гравитация построек включена" : "Постройки закреплены; свободные куски подвижны");
         }
         if (actions.ScaleChanged)
         {
@@ -426,20 +660,76 @@ public sealed class PhyxelGame : Game
                 ? "Гидравлика сосудов включена (медленнее)"
                 : "Быстрая вода включена");
         }
-        if (actions.SaveRequested && pendingSave is null && !pendingWorldCapture && currentResources is not null)
+        if (actions.ModeChanged)
         {
+            SetStatus(settings.Mode == SimulationMode.Simulation
+                ? "Симуляция: горению нужен кислород"
+                : "Песочница: горение без обязательного поддува");
+        }
+        if ((actions.SaveRequested || actions.LoadRequested) &&
+            (pendingSave is not null || pendingWorldCapture || pendingLoad is not null))
+        {
+            SetStatus("Дождитесь завершения сохранения или загрузки");
+            return;
+        }
+        if (actions.SaveRequested && currentResources is not null)
+        {
+            string? path = actions.SaveAsRequested || !hasChosenScenePath
+                ? SelectScenePath(true) : scenePath;
+            if (path is null) return;
+            pendingSavePath = path;
+            pendingSaveSettings = SnapshotSaveSettings(settings);
             stateSerializer.BeginWorldCapture(currentResources);
             pendingWorldCapture = true;
             capturedMaterial = userInterface.SelectedMaterial;
             SetStatus("Копирование мира с GPU…");
+            return;
         }
-        if (actions.LoadRequested && pendingLoad is null)
+        if (actions.LoadRequested)
         {
+            string? path = SelectScenePath(false);
+            if (path is null) return;
+            pendingLoadPath = path;
             temperatureProbe.Reset();
-            pendingLoad = stateSerializer.LoadAsync(scenePath, materialRegistry);
+            pendingLoad = stateSerializer.LoadAsync(path, materialRegistry);
             SetStatus("Загрузка…");
         }
     }
+
+    private string? SelectScenePath(bool save)
+    {
+        bool wasPaused = settings.Paused;
+        sceneDialogOpen = true;
+        settings.Paused = true;
+        try
+        {
+            string? path = scenePathPicker(scenePath, save, Window.Handle);
+            if (path is null) SetStatus(save ? "Сохранение отменено" : "Загрузка отменена");
+            return path;
+        }
+        catch (Exception e) when (e is IOException or ArgumentException or System.ComponentModel.Win32Exception)
+        {
+            SetStatus(e is InvalidDataException ? e.Message : "Не удалось открыть выбор файла");
+            return null;
+        }
+        finally
+        {
+            settings.Paused = wasPaused;
+            sceneDialogOpen = false;
+            inputSampler.ResetAfterDialog();
+            ResetElapsedTime();
+        }
+    }
+
+    private static SimulationSettings SnapshotSaveSettings(SimulationSettings source) => new()
+    {
+        Width = source.Width, Height = source.Height, Scale = source.Scale,
+        Gravity = source.Gravity, BrushRadius = source.BrushRadius, SpawnDensity = source.SpawnDensity,
+        Paused = source.Paused, SolidGravity = source.SolidGravity, HydraulicPressure = source.HydraulicPressure,
+        OpenBoundaries = source.OpenBoundaries, Mode = source.Mode,
+        AirSimulation = source.AirSimulation, ShowAirField = source.ShowAirField,
+        RenderWithoutEffects = source.RenderWithoutEffects
+    };
 
     private void CaptureUiScreenshotIfRequested()
     {
@@ -542,7 +832,8 @@ public sealed class PhyxelGame : Game
                 Exit();
                 return;
             }
-            pendingSave = stateSerializer.SaveAsync(scenePath, settings, capturedMaterial, snapshot, materialRegistry);
+            pendingSave = stateSerializer.SaveAsync(pendingSavePath ?? scenePath,
+                pendingSaveSettings ?? settings, capturedMaterial, snapshot, materialRegistry);
             SetStatus("Сохранение сцены…");
         }
         if (pendingSave is { IsCompleted: true })
@@ -564,7 +855,18 @@ public sealed class PhyxelGame : Game
                 pendingSave = null;
                 return;
             }
-            SetStatus(pendingSave.IsCompletedSuccessfully ? "Сцена сохранена" : "Ошибка сохранения");
+            if (pendingSave.IsCompletedSuccessfully)
+            {
+                if (pendingSavePath is not null)
+                {
+                    scenePath = pendingSavePath;
+                    hasChosenScenePath = true;
+                }
+                SetStatus($"Сохранено: {scenePath}", 12);
+            }
+            else SetStatus($"Ошибка сохранения: {Path.GetFileName(pendingSavePath ?? scenePath)}", 8);
+            pendingSavePath = null;
+            pendingSaveSettings = null;
             pendingSave = null;
         }
         if (pendingLoad is not { IsCompleted: true } || userInterface is null)
@@ -578,8 +880,10 @@ public sealed class PhyxelGame : Game
             userInterface.SelectedMaterial = loaded.State.SelectedMaterial;
             if (loaded.World is not null && resourceManager is not null && materialRegistry is not null)
             {
+                settings.Width=loaded.World.Width;
+                settings.Height=loaded.World.Height;
                 bool containsMatter = SimulationStateSerializer.ContainsMatter(loaded.World);
-                bool preserveOxidizer = loaded.World.Oxidizer is { Length: > 0 };
+                bool preserveOxidizer = loaded.World.Oxidizer is { Length: > 0 } || loaded.World.AirThermal is { Length: > 0 };
                 currentResources = resourceManager.CreateOrResize(settings, containsMatter || preserveOxidizer);
                 stateSerializer.ApplyWorldSnapshot(currentResources, loaded.World);
                 dispatchCoordinator?.RestoreWorldActivity(
@@ -595,14 +899,21 @@ public sealed class PhyxelGame : Game
                     acceptance.MarkPhaseRoundTripLoaded(frameIndex);
                 }
                 SetStatus(loaded.Warnings.Count == 0
-                    ? "Сцена загружена"
-                    : $"Сцена загружена с предупреждениями: {loaded.Warnings[0]}");
+                    ? $"Загружено: {pendingLoadPath ?? scenePath}"
+                    : $"Сцена загружена с предупреждениями: {loaded.Warnings[0]}", 8);
+                if (pendingLoadPath is not null)
+                {
+                    scenePath = pendingLoadPath;
+                    hasChosenScenePath = true;
+                }
             }
+            else SetStatus("Загружены только настройки; в файле нет мира", 8);
         }
         else
         {
-            SetStatus(File.Exists(scenePath) ? "Ошибка загрузки" : "Сохранённая сцена не найдена");
+            SetStatus(File.Exists(pendingLoadPath ?? scenePath) ? "Ошибка загрузки" : "Сохранённая сцена не найдена");
         }
+        pendingLoadPath = null;
         pendingLoad = null;
     }
 
@@ -648,10 +959,10 @@ public sealed class PhyxelGame : Game
         Console.WriteLine($"PHYXEL_THERMAL_CHECKPOINT_CAPTURE ticks={checkpointTick}");
     }
 
-    private void SetStatus(string message)
+    private void SetStatus(string message, float seconds = 3)
     {
         transientStatus = message;
-        transientStatusRemaining = 3;
+        transientStatusRemaining = seconds;
     }
 
     private void UpdateFrameRate(GameTime gameTime)
@@ -665,6 +976,46 @@ public sealed class PhyxelGame : Game
         displayedFrameRate = accumulatedFrames / frameRateAccumulator;
         frameRateAccumulator = 0;
         accumulatedFrames = 0;
+    }
+
+    private Rectangle WorldCanvasBounds(Rectangle canvas,int width,int height) => acceptance.Active
+        ? FitWorldToCanvas(canvas,width,height) : CanvasWorldExpansion.CoverBounds(canvas,width,height);
+
+    private bool EnsureCanvasWorldFits(Rectangle canvas)
+    {
+        if (pendingSave is not null || pendingWorldCapture || pendingLoad is not null || pendingAcceptanceCheckpoint)
+            return false;
+        Point size=CanvasWorldExpansion.RequiredSize(settings.Width,settings.Height,canvas);
+        if(size.X==settings.Width&&size.Y==settings.Height)return false;
+        // Guard pathological repeated resizes; camera still covers the panel.
+        if(size.X>4096||size.Y>4096|| (long)size.X*size.Y>8388608)return false;
+        if(currentResources is not {IsSimulationAllocated:true} ||
+            currentResources.Width!=settings.Width || currentResources.Height!=settings.Height)
+        {
+            settings.Width=size.X;settings.Height=size.Y;
+            cameraController.Reset();return false;
+        }
+        canvasExpansionSize=size;
+        canvasCaptureSerializer.BeginWorldCapture(currentResources);
+        canvasExpansionPending=true;
+        return true;
+    }
+
+    private void CompleteCanvasExpansion()
+    {
+        if(currentResources is null||resourceManager is null||dispatchCoordinator is null||materialRegistry is null)return;
+        if(!canvasCaptureSerializer.TryCompleteWorldCapture(currentResources,out SimulationWorldSnapshot? captured)||captured is null)return;
+        SimulationWorldSnapshot expanded=CanvasWorldExpansion.Expand(captured,canvasExpansionSize);
+        settings.Width=expanded.Width;settings.Height=expanded.Height;
+        bool matter=SimulationStateSerializer.ContainsMatter(expanded);
+        bool fields=expanded.Oxidizer is {Length:>0}||expanded.AirThermal is {Length:>0};
+        currentResources=resourceManager.CreateOrResize(settings,matter||fields);
+        stateSerializer.ApplyWorldSnapshot(currentResources,expanded);
+        dispatchCoordinator.RestoreWorldActivity(currentResources,matter,
+            SimulationStateSerializer.ContainsContactTransitionSource(expanded,materialRegistry),settings.HydraulicPressure,fields);
+        canvasExpansionPending=false;
+        cameraController.Reset();temperatureProbe.Reset();
+        inputSampler.ResetAfterDialog();ResetElapsedTime();
     }
 
     internal static Rectangle FitWorldToCanvas(Rectangle canvas, int worldWidth, int worldHeight)

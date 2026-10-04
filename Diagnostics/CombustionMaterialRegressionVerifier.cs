@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using System.Text.Json.Nodes;
 using Phyxel.Materials;
 using Phyxel.Physics;
 
@@ -37,6 +38,9 @@ internal static class CombustionMaterialRegressionVerifier
             await VerifyValidDefinitionsAsync(root, coreDirectory);
             await VerifyRuntimeReorderAsync(root, coreDirectory);
             await VerifyInvalidDefinitionsAsync(root, coreDirectory);
+            await VerifyFlameExtinctionDefinitionsAsync(root, coreDirectory);
+            await VerifyOxidizerBudgetDefinitionsAsync(root, coreDirectory);
+            await VerifySolidMoistureDefinitionsAsync(root, coreDirectory);
         }
         finally
         {
@@ -147,6 +151,7 @@ internal static class CombustionMaterialRegressionVerifier
             FlameSpreadRate = 3f,
             MinimumLifetime = 2f,
             MaximumLifetime = 2.8f,
+            FlameExtinctionTemperature = 100,
             DecayIntoMaterialIndex = 2
         };
         MaterialProperties smoke = new()
@@ -180,6 +185,8 @@ internal static class CombustionMaterialRegressionVerifier
 
         GridCell cooledFlame = liveFlame;
         cooledFlame.Temperature = 50f;
+        Require(!TransientMaterialRuntime.IsFlame(cooledFlame, transientMaterials),
+            "Cooled flame is still an ignition source.");
         Require(TransientMaterialRuntime.TryAdvance(ref cooledFlame, transientMaterials, 0.05f) &&
             cooledFlame.MaterialIndex == 2 && cooledFlame.IsActive != 0 &&
             Same(cooledFlame.Lifetime, 4f) && Same(cooledFlame.Mass, liveFlame.Mass) &&
@@ -202,6 +209,90 @@ internal static class CombustionMaterialRegressionVerifier
         Require(TransientMaterialRuntime.TryAdvance(ref expiredSmoke, transientMaterials, 0.05f) &&
             expiredSmoke.IsActive == 0,
             "Expired smoke did not decay into empty.");
+    }
+
+    private static async Task VerifyFlameExtinctionDefinitionsAsync(string root, string coreDirectory)
+    {
+        string template=File.ReadAllText(Path.Combine(coreDirectory,"fire.json"));
+        foreach(bool configured in new[]{false,true})
+        {
+            var node=JsonNode.Parse(template)!;string id=configured?"test:configured_flame":"test:legacy_flame";
+            node["id"]=id;var lifecycle=node["lifecycle"]!.AsObject();
+            if(configured) lifecycle["extinctionTemperature"]=100;else lifecycle.Remove("extinctionTemperature");
+            string directory=CreateDirectory(root,id.Replace(':','-'));
+            await WriteMaterialAsync(directory,"flame.json",node.ToJsonString());
+            var registry=new MaterialRegistry(coreDirectory,directory);
+            Require(registry.TryGet(id,out var material) && Same(material!.Properties.FlameExtinctionTemperature,
+                configured?100:MaterialRegistry.MinimumInitialTemperature),"Flame extinction data/default did not reach the GPU table.");
+        }
+        foreach(string bad in new[]{"null","\"cold\"","-274","5001"})
+        {
+            var node=JsonNode.Parse(template)!;node["id"]="test:bad_extinction";
+            node["lifecycle"]!["extinctionTemperature"]=JsonNode.Parse(bad);
+            await ExpectRejectedAsync(root,coreDirectory,"extinction-"+bad.GetHashCode(),"test:bad_extinction",node.ToJsonString());
+        }
+        var nonFlame=JsonNode.Parse(template)!;nonFlame["id"]="test:nonflame_extinction";nonFlame["flags"]=new JsonArray();
+        await ExpectRejectedAsync(root,coreDirectory,"nonflame-extinction","test:nonflame_extinction",nonFlame.ToJsonString());
+    }
+
+    private static async Task VerifyOxidizerBudgetDefinitionsAsync(string root, string coreDirectory)
+    {
+        string template = File.ReadAllText(Path.Combine(coreDirectory, "coal.json"));
+        foreach (bool configured in new[] { false, true })
+        {
+            var node = JsonNode.Parse(template)!;
+            string id = configured ? "test:configured_budget" : "test:default_budget";
+            node["id"] = id;
+            node.AsObject().Remove("moisture");
+            node.AsObject().Remove("fuelAbsorption");
+            if (configured) node["combustion"]!["oxidizerPerMass"] = 4;
+            else node["combustion"]!.AsObject().Remove("oxidizerPerMass");
+            string directory = CreateDirectory(root, id.Replace(':', '-'));
+            await WriteMaterialAsync(directory, "fuel.json", node.ToJsonString());
+            var registry = new MaterialRegistry(coreDirectory, directory);
+            Require(registry.TryGet(id, out var material) &&
+                Same(registry.CreateEmissionGpuTable()[material!.RuntimeIndex].OxidizerPerMass,
+                    configured ? 4 : 20), "Reaction oxidizer budget/default lost from GPU table.");
+        }
+        foreach (string bad in new[] { "null", "\"4\"", "0", "-1", "101" })
+        {
+            var node = JsonNode.Parse(template)!;
+            node["id"] = "test:bad_budget";
+            node["combustion"]!["oxidizerPerMass"] = JsonNode.Parse(bad);
+            await ExpectRejectedAsync(root, coreDirectory, "budget-" + bad.GetHashCode(),
+                "test:bad_budget", node.ToJsonString());
+        }
+    }
+
+    private static async Task VerifySolidMoistureDefinitionsAsync(string root,string coreDirectory)
+    {
+        string template=File.ReadAllText(Path.Combine(coreDirectory,"wood.json"));
+        foreach(string kind in new[]{"solid","granular"})
+        {
+            var node=JsonNode.Parse(template)!;string id="test:moist_"+kind;
+            node["id"]=id;node["kind"]=kind;node["moisture"]!["dry"]=id;node["moisture"]!["wet"]=id;
+            if(kind=="granular") node["moisture"]!["capillaryRate"]=0;
+            string directory=CreateDirectory(root,"moist-"+kind);
+            await WriteMaterialAsync(directory,"fuel.json",node.ToJsonString());
+            var registry=new MaterialRegistry(coreDirectory,directory);
+            Require(registry.TryGet(id,out var material)&&material!.Moisture is not null && material.FuelAbsorption is not null,
+                "Solid/granular moisture extension rejected: "+kind);
+        }
+        foreach(string kind in new[]{"liquid","gas"})
+        {
+            var node=JsonNode.Parse(template)!;string id="test:bad_moist_"+kind;
+            node["id"]=id;node["kind"]=kind;node["moisture"]!["dry"]=id;node["moisture"]!["wet"]=id;
+            await ExpectRejectedAsync(root,coreDirectory,"bad-moist-"+kind,id,node.ToJsonString());
+        }
+        var mismatch=JsonNode.Parse(template)!;mismatch["id"]="test:bad_pores";
+        await ExpectRejectedAsync(root,coreDirectory,"bad-pore-partners","test:bad_pores",mismatch.ToJsonString());
+        foreach(float rate in new[]{-1f,11f})
+        {
+            var node=JsonNode.Parse(template)!;string id="test:bad_capillary_"+Math.Abs(rate);
+            node["id"]=id;node["moisture"]!["dry"]=id;node["moisture"]!["wet"]=id;
+            node["moisture"]!["capillaryRate"]=rate;
+            await ExpectRejectedAsync(root,coreDirectory,"bad-capillary-"+rate,id,node.ToJsonString());
+        }
     }
 
     private static void VerifyLayout()
@@ -228,7 +319,13 @@ internal static class CombustionMaterialRegressionVerifier
             "MaximumCombustionTemperature offset must be 96.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.TransitionAboveLatentHeat)).ToInt32() == 100,
             "TransitionAboveLatentHeat offset must be 100.");
-        Require(Marshal.SizeOf<GridCell>() == 40, "GridCell must be 40 bytes.");
+        Require(Marshal.SizeOf<GridCell>() == 52, "GridCell must be 52 bytes.");
+        Require(Marshal.SizeOf<MaterialEmissionProperties>() == 32 &&
+            Marshal.OffsetOf<MaterialEmissionProperties>(nameof(MaterialEmissionProperties.OxidizerPerMass)).ToInt32() == 24,
+            "Reaction budget must reuse emission padding without changing the 32-byte ABI.");
+        Require(Marshal.SizeOf<OxidizerConstants>() == 32 &&
+            Marshal.OffsetOf<OxidizerConstants>(nameof(OxidizerConstants.UseAir)).ToInt32() == 16,
+            "OxidizerConstants must match the 32-byte transport cbuffer.");
 
         string shaderPath = Path.Combine(
             AppContext.BaseDirectory,
@@ -337,8 +434,21 @@ internal static class CombustionMaterialRegressionVerifier
             0.80f,
             CombustionJson(300f, 0.1f, 1000f, CoreMaterialIds.Empty),
             flags: "movable-solid"));
+        await WriteMaterialAsync(directory, "liquid-fuel.json", MaterialJson(
+            "test:liquid_fuel", "liquid", 0.8f,
+            CombustionJson(260f, 0.18f, 4000f, CoreMaterialIds.Empty)));
 
         MaterialRegistry registry = new(coreDirectory, directory);
+        MaterialDefinition liquidFuel = registry["test:liquid_fuel"];
+        Require(liquidFuel.Combustion is not null &&
+            liquidFuel.Properties.SimulationKind == (uint)MaterialSimulationKind.Liquid &&
+            liquidFuel.Properties.BurnedIntoMaterialIndex == registry[CoreMaterialIds.Empty].RuntimeIndex,
+            "Data-defined liquid fuel did not load as a liquid with its burn target.");
+        GridCell liquidCell = new() { IsActive = 1, MaterialIndex = liquidFuel.RuntimeIndex, Mass = 1, Temperature = 300 };
+        Require(CombustionRuntime.TryApply(ref liquidCell, registry.CreateGpuTable(), .05f, out var liquidSummary, out float liquidBurn) &&
+            Math.Abs(liquidBurn - .009f) < 1e-7f && Math.Abs(liquidCell.Mass - .991f) < 1e-7f &&
+            (liquidSummary & CombustionSummaryFlags.TouchesLiquid) != 0,
+            "Liquid reaction kernel did not consume the declared rate or wake liquid motion.");
 
         MaterialDefinition granularFuel = registry["test:granular_fuel"];
         Require(granularFuel.Combustion is not null,
@@ -395,9 +505,6 @@ internal static class CombustionMaterialRegressionVerifier
         await ExpectRejectedAsync(root, coreDirectory, "zero-rate", "test:zero_rate",
             MaterialJson("test:zero_rate", "solid", 0.8f,
                 CombustionJson(300f, 0f, 1000f, "core:empty")));
-        await ExpectRejectedAsync(root, coreDirectory, "liquid-source", "test:liquid_source",
-            MaterialJson("test:liquid_source", "liquid", 0.8f,
-                CombustionJson(300f, 0.1f, 1000f, "core:empty")));
         await ExpectRejectedAsync(root, coreDirectory, "gas-source", "test:gas_source",
             MaterialJson("test:gas_source", "gas", 0.05f,
                 CombustionJson(300f, 0.1f, 1000f, "core:empty")));
