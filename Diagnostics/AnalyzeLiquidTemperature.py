@@ -17,14 +17,17 @@ for fps in (30, 60, 100):
     check(f"water LT02 {fps}", b["upper"] >= a["upper"] - .01 and b["contrast"] <= a["contrast"] * .75)
     check(f"oil LT02 {fps}", after[f"core:oil-{fps}"]["upper"] >= 20.25 and after[f"core:oil-{fps}"]["contrast"] <= 1)
 drains = json.loads((root / "final/drains.json").read_text())
+drain_temperatures = tuple(sorted({x["temperature"] for x in drains}))
+if drain_temperatures not in ((-20,20,100), (19,50,100)):
+    raise ValueError(f"Unexpected LT temperature set: {drain_temperatures}")
 def drain(mode, fps, t):
     return next(x["outMass"] for x in drains if (x["mode"],x["fps"],x["temperature"]) == (mode,fps,t))
 for mode in ("Sandbox", "Simulation"):
     for fps in (30,60,100):
-        cold, reference, hot = [drain(mode,fps,t) for t in (-20,20,100)]
+        cold, reference, hot = [drain(mode,fps,t) for t in drain_temperatures]
         check(f"oil LT01 {mode} {fps}", cold < reference < hot and hot/cold > 1.3)
     for fps in (30,100):
-        for t in (-20,20,100):
+        for t in drain_temperatures:
             check(f"oil FPS {mode} {fps} {t}", abs(drain(mode,fps,t)/drain(mode,60,t)-1) <= .25)
 log = (root / "final/run.log").read_text()
 check("GPU stable, walls, mass, latent energy, pause, reload, fixed ticks", "PHYXEL_LIQUID_TEMPERATURE_SUCCESS" in log and "PHYXEL_LT_FAIL" not in log)

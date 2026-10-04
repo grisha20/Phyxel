@@ -307,6 +307,12 @@ public sealed class PhyxelGame : Game
             }
             Exit(); return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_WATER_LEVEL") == "1")
+        {
+            try { WaterLevelRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception exception) { Console.WriteLine($"PHYXEL_WATER_LEVEL_FAILED {exception}"); Environment.ExitCode=1; }
+            Exit(); return;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_MATERIAL_ENVIRONMENT") == "1")
         {
             try { MaterialEnvironmentRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }

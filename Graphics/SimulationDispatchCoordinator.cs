@@ -109,7 +109,7 @@ public sealed class SimulationDispatchCoordinator
         0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
         2, 3, 2, 3, 2, 3, 2, 3,
         40, 41, 42, 43, 44, 45, 46, 47,
-        33, 13, 29,
+        33, 56, 57, 13, 29,
         4
     ];
 
@@ -118,7 +118,7 @@ public sealed class SimulationDispatchCoordinator
         1, 0, 1, 0, 1, 0, 1, 0, 6, 5, 8, 7, 10, 9, 12, 11,
         3, 2, 3, 2, 3, 2, 3, 2,
         47, 46, 45, 44, 43, 42, 41, 40,
-        33, 13, 29,
+        33, 56, 57, 13, 29,
         4
     ];
 
@@ -166,6 +166,7 @@ public sealed class SimulationDispatchCoordinator
     private double gasTimingMaximumMilliseconds;
     private bool solidMatter;
     private double densityBodyAccumulator;
+    private double airborneBodyAccumulator;
     private bool cellularSleeping;
     private bool solidSleeping;
     private bool freeBodyMatter;
@@ -529,8 +530,21 @@ public sealed class SimulationDispatchCoordinator
             densityBodyAccumulator += Math.Min(Math.Max(elapsedSeconds, 0), 1f / 15);
             bool densityBodyStep = densityBodyAccumulator + 1e-8 >= 1.0 / 15;
             if (densityBodyStep) densityBodyAccumulator = Math.Max(0, densityBodyAccumulator - 1.0 / 15);
-            DispatchSolidPass(resources, ref constants, (cellularSleeping ? 0u : 1u) | (densityBodyStep ? 2u : 0u));
-            if (!bodyBalanceBaseline) DispatchSolidBalance(resources, ref constants, densityBodyStep);
+            airborneBodyAccumulator += Math.Min(Math.Max(elapsedSeconds, 0), 1f / 15);
+            int airborneSteps = freeBodyMatter ? Math.Min(4, (int)((airborneBodyAccumulator + 1e-8) * 60)) : 0;
+            airborneBodyAccumulator = freeBodyMatter ? Math.Max(0, airborneBodyAccumulator - airborneSteps / 60.0) : 0;
+            DispatchSolidPass(resources, ref constants, (cellularSleeping ? 0u : 1u) |
+                (densityBodyStep ? 2u : 0u) | (airborneSteps > 0 ? 4u : 0u));
+            for (int step = 1; step < airborneSteps; step++)
+                DispatchSolidPass(resources, ref constants, 4u | 8u);
+            if (!bodyBalanceBaseline)
+            {
+                // Extra air passes leave their own flags in the constants.
+                // Rotation still follows the liquid/body clock, including at
+                // 30 FPS when two air passes occur before the balance pass.
+                constants.SolidPass = densityBodyStep ? 2u : 0u;
+                DispatchSolidBalance(resources, ref constants, densityBodyStep);
+            }
             cellMaterialsDirty = true;
             if (solidMotionNeedsCellular)
             {
@@ -897,6 +911,7 @@ public sealed class SimulationDispatchCoordinator
         solidMatter = containsMatter;
         freeBodyMatter = containsMatter; // Conservative until first GPU statistics.
         densityBodyAccumulator = 0;
+        airborneBodyAccumulator = 0;
         cellularSleeping = false;
         solidSleeping = false;
         topologyDirty = true;
@@ -1231,9 +1246,9 @@ public sealed class SimulationDispatchCoordinator
     {
         var constants=new SimulationFrameConstants{Width=(uint)resources.Width,Height=(uint)resources.Height,
             DeltaTime=1f/15,Gravity=980,
-            SolidGravity=constructionGravity?1u:0u,FrameIndex=1,SolidPass=3};
+            SolidGravity=constructionGravity?1u:0u,FrameIndex=1,SolidPass=7};
         if(initialize){DispatchComponentLabeling(resources,ref constants);DispatchSolidGeometry(resources,ref constants);}
-        DispatchSolidPass(resources,ref constants,3);
+        DispatchSolidPass(resources,ref constants,7);
         if(!bodyBalanceBaseline)DispatchSolidBalance(resources,ref constants,true);
     }
 
@@ -1347,7 +1362,7 @@ public sealed class SimulationDispatchCoordinator
             {
                 continue;
             }
-            bool ordinaryFlowPhase = phase is >= 48 and <= 57;
+            bool ordinaryFlowPhase = phase is >= 48 and <= 55;
             if (ordinaryFlowPhase && runPressureRoutes)
             {
                 continue;
@@ -1717,6 +1732,7 @@ public sealed class SimulationDispatchCoordinator
         freeBodyMatter = false;
         densityBodyAccumulator = 0;
         cellularSleeping = false;
+        airborneBodyAccumulator = 0;
         solidSleeping = false;
         topologyDirty = false;
         settledObservations = 0;

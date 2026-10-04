@@ -855,6 +855,7 @@ bool WaterCanFlowSide(
     uint targetMaterial)
 {
     uint stride = abs(int(destination.x) - int(source.x));
+    if (stride > 8 && Materials[waterMaterial].LiquidFlowTemperatureSensitivity > 0) return false;
     uint requiredDepth = stride >= 128 ? 7 : stride >= 32 ? 3 : stride >= 2 ? 1 : 0;
     if (requiredDepth > 0)
     {
@@ -897,6 +898,7 @@ bool WaterCanFlowSideOpt(
     bool hasWaterRight)
 {
     uint stride = abs(int(destination.x) - int(source.x));
+    if (stride > 8 && Materials[waterMaterial].LiquidFlowTemperatureSensitivity > 0) return false;
     uint requiredDepth = stride >= 128 ? 7 : stride >= 32 ? 3 : stride >= 2 ? 1 : 0;
     if (requiredDepth > 0)
     {
@@ -1118,22 +1120,45 @@ void BuildPathBlockerMask(uint2 tileCoordinate)
 
 int WaterBaseY(uint x)
 {
-    for (int y = int(Height) - 1; y >= 0; y--)
+    int fallback = -1;
+    int bulk = -1;
+    // A lower puddle underneath a bowl must not hide the bowl's surface.
+    // Choose the highest exposed bulk layer, not the lowest liquid in the
+    // whole screen column. Covered columns beneath ice are not free surfaces.
+    uint layerMaterial = 0;
+    uint layerTop = 0;
+    bool exposed = false;
+    [loop]
+    for (uint y = 0; y <= Height; y++)
     {
-        if (CellKindAt(uint2(x, y)) == 4)
+        uint material = y < Height ? CellMaterials[FlattenCoordinate(uint2(x, y))] : 0;
+        if (material != layerMaterial)
         {
-            return y;
+            if (layerMaterial != 0 && exposed)
+            {
+                uint bottom = y - 1;
+                if (bulk < 0 && bottom >= layerTop + 2) bulk = int(bottom);
+                if (fallback < 0) fallback = int(bottom);
+            }
+            layerMaterial = CellKindFromMaterial(material) == SimulationKindLiquid ? material : 0;
+            layerTop = y;
+            uint aboveKind = y > 0 ? CellKindAt(uint2(x, y - 1)) : 0;
+            exposed = aboveKind == 0 || aboveKind == SimulationKindGas;
         }
     }
-    return -1;
+    return bulk >= 0 ? bulk : fallback;
 }
 
 uint WaterSurfaceY(uint2 coordinate)
 {
-    uint top = coordinate.y;
+    // A ternary caller may speculatively evaluate this with base=-1 cast to
+    // uint. Bound the loop even when this column contains no liquid.
+    uint top = min(coordinate.y, Height - 1);
+    uint material = CellMaterials[FlattenCoordinate(uint2(coordinate.x, top))];
+    if (CellKindFromMaterial(material) != SimulationKindLiquid) return top;
     while (top > 0)
     {
-        if (CellKindAt(uint2(coordinate.x, top - 1)) != 4)
+        if (CellMaterials[FlattenCoordinate(uint2(coordinate.x, top - 1))] != material)
         {
             break;
         }
@@ -1276,6 +1301,16 @@ void PlanWaterColumnMove(
     {
         return;
     }
+    uint material = CellMaterials[sourceIndex];
+    uint ignoredTop; uint sourceBase;
+    if (!UnpackWaterColumn(WaterColumnState[sourceX], ignoredTop, sourceBase)) return;
+    // Adjacent bulk plans must use the same donor rules as wide leveling.
+    // Otherwise they lift the perched film off ice after leveling and create
+    // a fresh surface mound; viscosity must not be bypassed here either.
+    bool perchedOnBody = sourceBase + 1 < Height &&
+        (Materials[CellMaterials[FlattenCoordinate(uint2(sourceX, sourceBase + 1))]].Flags & MaterialFlagDensityBody) != 0;
+    if (perchedOnBody || Materials[material].LiquidFlowTemperatureSensitivity > 0 ||
+        CellMaterials[FlattenCoordinate(uint2(destinationX, destinationTop))] != material) return;
     WaterColumnState[Width + sourceX] = sourceIndex + 1;
     WaterColumnState[Width * 2 + sourceX] = destinationIndex + 1;
 }
@@ -2121,6 +2156,35 @@ void ResolveWaterColumnSpan(uint2 leftCoordinate, uint stride)
         rightTop);
 }
 
+bool SameLiquidColumnsConnected(uint firstX, uint secondX, uint top, uint base, uint material)
+{
+    // Follow overlapping vertical liquid runs. A curved bowl may deepen
+    // between its shallow flanks and the underside of floating ice, so a
+    // single horizontal row cannot prove its actual connection.
+    int direction = secondX > firstX ? 1 : -1;
+    uint runTop = top;
+    uint runBase = base;
+    [loop]
+    for (int column = int(firstX) + direction; column != int(secondX) + direction; column += direction)
+    {
+        int overlap = -1;
+        [loop]
+        for (int y = int(runBase); y >= int(runTop); y--)
+            if (CellMaterials[FlattenCoordinate(uint2(column, y))] == material)
+            { overlap = y; break; }
+        if (overlap < 0) return false;
+        runTop = uint(overlap);
+        runBase = uint(overlap);
+        [loop]
+        while (runTop > top && CellMaterials[FlattenCoordinate(uint2(column, runTop - 1))] == material)
+            runTop--;
+        [loop]
+        while (runBase + 1 < Height && CellMaterials[FlattenCoordinate(uint2(column, runBase + 1))] == material)
+            runBase++;
+    }
+    return true;
+}
+
 bool FindOrdinarySurfaceDestination(
     uint sourceX,
     uint sourceTop,
@@ -2129,6 +2193,9 @@ bool FindOrdinarySurfaceDestination(
     out uint destinationX,
     out uint destinationTop)
 {
+    uint sourceMaterial = CellMaterials[FlattenCoordinate(uint2(sourceX, sourceTop))];
+    uint sourceBaseLimit; uint sourceTopIgnored;
+    if (!UnpackWaterColumn(WaterColumnState[sourceX], sourceTopIgnored, sourceBaseLimit)) return false;
     uint reachableLeft = sourceX;
     while (reachableLeft > blockLeft)
     {
@@ -2137,7 +2204,9 @@ bool FindOrdinarySurfaceDestination(
         // made a wide pool level one adjacent swap at a time and left a broad
         // ripple behind. Solids and granular matter still stop the transfer, so
         // this cannot jump through a vessel wall or a sand bank.
-        if (kind != 0 && kind != 4 && kind != 5)
+        uint material = CellMaterials[FlattenCoordinate(uint2(reachableLeft - 1, sourceTop))];
+        bool floatingBody = kind == 2 && (Materials[material].Flags & MaterialFlagDensityBody) != 0;
+        if (kind != 0 && kind != 4 && kind != 5 && !floatingBody)
         {
             break;
         }
@@ -2147,7 +2216,9 @@ bool FindOrdinarySurfaceDestination(
     while (reachableRight < blockRight)
     {
         uint kind = CellKindAt(uint2(reachableRight + 1, sourceTop));
-        if (kind != 0 && kind != 4 && kind != 5)
+        uint material = CellMaterials[FlattenCoordinate(uint2(reachableRight + 1, sourceTop))];
+        bool floatingBody = kind == 2 && (Materials[material].Flags & MaterialFlagDensityBody) != 0;
+        if (kind != 0 && kind != 4 && kind != 5 && !floatingBody)
         {
             break;
         }
@@ -2155,6 +2226,7 @@ bool FindOrdinarySurfaceDestination(
     }
 
     uint rejected[4] = { Width, Width, Width, Width };
+    [loop]
     for (uint attempt = 0; attempt < 4; attempt++)
     {
         destinationX = Width;
@@ -2171,7 +2243,8 @@ bool FindOrdinarySurfaceDestination(
             uint ignoredBase;
             if (wasRejected ||
                 !UnpackWaterColumn(WaterColumnState[column], top, ignoredBase) ||
-                top <= sourceTop + 1)
+                top <= sourceTop + 1 || top > min(sourceBaseLimit, ignoredBase) ||
+                CellMaterials[FlattenCoordinate(uint2(column, top))] != sourceMaterial)
             {
                 continue;
             }
@@ -2207,7 +2280,8 @@ bool FindOrdinarySurfaceDestination(
                 break;
             }
         }
-        if (verticalPathClear)
+        if (verticalPathClear && SameLiquidColumnsConnected(
+            sourceX, destinationX, sourceTop, sourceBaseLimit, sourceMaterial))
         {
             return true;
         }
@@ -2235,7 +2309,18 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight)
         // when the column is already a stable pool. Vertical velocity is the
         // reliable distinction here: a falling stream is fast, a resting
         // surface is not.
-        bool sourceReady = abs(surface.VelocityY) <= 8;
+        // A column beneath a body is not a free surface. Nor is a one-cell
+        // film perched on top of it: choosing that film as the highest donor
+        // starved every genuine surface in this block, in perpetuity.
+        uint aboveKind = top > 0 ? CellKindAt(uint2(column, top - 1)) : 2;
+        bool perchedOnBody = base + 1 < Height &&
+            (Materials[CellMaterials[FlattenCoordinate(uint2(column, base + 1))]].Flags & MaterialFlagDensityBody) != 0;
+        bool sourceReady = abs(surface.VelocityY) <= 8 &&
+            // Viscous liquids use local, clocked flow; a bulk water shortcut
+            // would bypass viscosity and visibly teleport a freshly fed oil.
+            Materials[surface.MaterialIndex].LiquidFlowTemperatureSensitivity <= 0 &&
+            !perchedOnBody && (aboveKind == 0 || aboveKind == 5) &&
+            top < base && CellMaterials[FlattenCoordinate(uint2(column, top + 1))] == surface.MaterialIndex;
         if (sourceReady && (sourceLeft == Width || top < sourceTop))
         {
             sourceLeft = column;
@@ -2257,6 +2342,7 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight)
     uint destinationX = Width;
     uint destinationTop = 0;
     uint bestDistance = Width + 1;
+    [loop]
     for (uint sourceCandidate = 0; sourceCandidate < 2; sourceCandidate++)
     {
         uint candidateSourceX = sourceCandidates[sourceCandidate];
@@ -2319,10 +2405,6 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight)
 
 void ResolveOrdinarySurfaceBlock(uint x)
 {
-    if (HydraulicPressure != 0)
-    {
-        return;
-    }
     int blockStart;
     if ((FrameIndex & 1) == 0)
     {
@@ -2357,7 +2439,8 @@ void ResolveOrdinarySurfaceBlock(uint x)
     }
     // Keep this serial pass short. Repeating a small budget over several frames
     // produces the same surface without a long single-frame GPU stall.
-    uint transferBudget = 2;
+    uint transferBudget = 8;
+    [loop]
     for (uint transfer = 0; transfer < transferBudget; transfer++)
     {
         if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight))
@@ -2369,10 +2452,6 @@ void ResolveOrdinarySurfaceBlock(uint x)
 
 void ResolveOrdinaryLocalSurfaceBlock(uint x)
 {
-    if (HydraulicPressure != 0)
-    {
-        return;
-    }
     int blockStart;
     if ((FrameIndex & 1) == 0)
     {
@@ -2406,7 +2485,8 @@ void ResolveOrdinaryLocalSurfaceBlock(uint x)
     {
         return;
     }
-    uint transferBudget = 1;
+    uint transferBudget = 4;
+    [loop]
     for (uint transfer = 0; transfer < transferBudget; transfer++)
     {
         if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight))
@@ -3393,7 +3473,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     if (SimulationPhase == 33)
     {
-        BuildWaterColumnInfo(dispatchThreadId.x);
+        // One writer per column; the other 15 lanes need not rescan it.
+        if (dispatchThreadId.y == 0) BuildWaterColumnInfo(dispatchThreadId.x);
         return;
     }
     if (dispatchThreadId.x >= DispatchExtentX || dispatchThreadId.y >= DispatchExtentY)

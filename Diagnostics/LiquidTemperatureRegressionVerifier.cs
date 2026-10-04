@@ -97,9 +97,13 @@ internal static class LiquidTemperatureRegressionVerifier
         r.Materials.Upload(r.Context,physicalTable);
         var drains = new List<object>();
         var drainByCase = new Dictionary<(SimulationMode,int,float),double>();
+        // The oil phase model now pins an initially -20 C liquid to its
+        // 18 C fusion plateau. Compare established liquid states instead;
+        // the temperature ordering, 1.3 ratio and FPS tolerances stay intact.
+        float[] drainTemperatures = [19f, 50f, 100f];
         foreach (var mode in new[] { SimulationMode.Sandbox, SimulationMode.Simulation }) foreach(int fps in new[]{30,60,100}) {
             var efflux = new List<double>();
-            foreach (float temperature in new[]{-20f,20f,100f}) {
+            foreach (float temperature in drainTemperatures) {
                 uint oil = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Oil);
                 var before = new GridCell[n];
                 for(int y=85;y<=150;y++) foreach(int x in new[]{120,180}) before[y*w+x]=Cell(fixture);
@@ -120,7 +124,7 @@ internal static class LiquidTemperatureRegressionVerifier
             if(!baseline)Check(efflux[2]>efflux[0]*1.3&&efflux[1]>efflux[0]&&efflux[2]>efflux[1],$"temperature response {mode} {fps}");
         }
         if(!baseline)foreach(var mode in new[]{SimulationMode.Sandbox,SimulationMode.Simulation})
-            foreach(float temperature in new[]{-20f,20f,100f})foreach(int fps in new[]{30,100})
+            foreach(float temperature in drainTemperatures)foreach(int fps in new[]{30,100})
                 Check(Math.Abs(drainByCase[(mode,fps,temperature)]/drainByCase[(mode,60,temperature)]-1)<=.25,$"LT01 FPS {mode} {fps} {temperature}");
         File.WriteAllText(Path.Combine(dir,"drains.json"),JsonSerializer.Serialize(drains,new JsonSerializerOptions{WriteIndented=true}));
         settings.Paused=true; var pauseBefore=Read();coordinator.DispatchFrame(settings,[],1);var pauseAfter=Read();

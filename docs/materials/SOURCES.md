@@ -1,5 +1,12 @@
 # Зафиксированные источники паспортов
 
+WL2026-10-05: локальные WATR/ICEI/OIL.cpp и Simulation.cpp3120+
+(Falldown/боковой поиск/вертикальный выход), flood_water695–760 прочитаны.
+ICEI неподвижен; OIL не имеет нашей замёрзшей фазы. Плавающие связанные
+тела и раздельные часы — модель Phyxel, числа движения неСИ.
+[Хеши](../../artifacts/water-level-20261004/source-hashes.json),
+[контракт](WATER_LEVEL_CONTRACT.md), [результаты](../WATER_LEVEL_RESULTS.md).
+
 ME2026-10-04: прочитаны WOOD/COAL/BCOL/METL/WATR/OIL.cpp,
 Simulation.cpp2449–2461 (aheat/hv/heat capacity) и Air.cpp79–252
 (ambient boundaries, diffusion/advection). Поровых oil-цветов/капиллярного

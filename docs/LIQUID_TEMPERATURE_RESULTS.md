@@ -1,5 +1,11 @@
 # Температура масла и перемешивание жидкости —2026-10-04
 
+Уточнение WL2026-10-05: после OP начальная oil−20°C выходит на плато18°C;
+прежние числа−20/20/100 ниже относятся к опыту до добавления фаз.
+Текущий verifier сравнивает жидкие19/50/100°C при прежних критериях
+отношения>1.3, упорядоченности и FPS≤25%. [Текущие измерения и
+сохранённый старый FAIL](WATER_LEVEL_RESULTS.md).
+
 Выбранный этап LT01–LT04. [Контракт до физики](materials/LIQUID_TEMPERATURE_CONTRACT.md),
 [GPU verifier](../Diagnostics/LiquidTemperatureRegressionVerifier.cs),
 [runner](../Diagnostics/RunLiquidTemperature.ps1),

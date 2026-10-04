@@ -78,7 +78,13 @@ int DensityBodyForceDirection(GridCell cell)
 
 int DensityBodyDirection(GridCell cell)
 {
-    return (SolidPass & 2) != 0 ? DensityBodyForceDirection(cell) : 0;
+    if (!IsMovableSolid(cell)) return 0;
+    // Airborne bodies have a separate fixed clock. Contact with a liquid
+    // returns them to the slower displacement clock, without accelerating
+    // buoyancy or the construction solver.
+    bool inLiquid = SourceBodyBuoyancy[cell.BodyId - 1] > 0;
+    bool enabled = inLiquid ? (SolidPass & 2) != 0 : (SolidPass & 4) != 0;
+    return enabled ? DensityBodyForceDirection(cell) : 0;
 }
 
 bool BodyMoves(GridCell cell)
@@ -91,7 +97,7 @@ bool BodyMoves(GridCell cell)
     uint geometry = SourceBodyGeometry[cell.BodyId - 1];
     if ((geometry & GeometryDensityBody) != 0)
         return DensityBodyDirection(cell) == 1;
-    if (SolidGravity == 0) return false;
+    if (SolidGravity == 0 || (SolidPass & 8) != 0) return false;
     if ((flags & (BodyBlocked | BodyActive)) != BodyActive)
     {
         return false;
@@ -794,7 +800,9 @@ void MoveSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
             DestinationOrigins[index] = 0;
             return;
         }
-        if (IsMovableSolid(current))
+        if (IsMovableSolid(current) && ((SolidPass & 8) == 0 ||
+            ((SourceBodyGeometry[current.BodyId - 1] & GeometryDensityBody) != 0 &&
+                SourceBodyBuoyancy[current.BodyId - 1] == 0)))
         {
             current.RestFrames = DensityBodyForceDirection(current) != 0
                 ? 0 : min(current.RestFrames + 1, 2);
