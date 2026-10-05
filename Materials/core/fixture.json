@@ -6,6 +6,6 @@
   "flags": ["blocks-air"],
   "color": "#525B63",
   "physics": { "density": 100.0, "friction": 0.9, "flowRate": 0.0 },
-  "thermal": { "initialTemperature": 20.0, "conductivity": 0.25, "heatCapacity": 0.84 },
+  "thermal": { "initialTemperature": 30.0, "conductivity": 0.25, "heatCapacity": 0.84 },
   "ui": { "order": 70, "hidden": false }
 }

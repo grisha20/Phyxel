@@ -10,11 +10,11 @@ if($Baseline){
   Copy-Item -Path (Join-Path $repo 'bin/Debug/net8.0-windows/*') -Destination $runtime -Recurse -Force
   $source=@(& git -C $repo show 'ac762df:Content/Shaders/CellularAutomataSolver.hlsl') -join "`n"
   if($LASTEXITCODE -ne 0){throw 'Cannot read pre-WL liquid shader'}
-  # The current coordinator includes phase58; it must be a no-op in this
+  # The current coordinator includes phases58/59; it must be a no-op in this
   # historical shader, whose unknown phases otherwise fall through to diagonals.
   $entry='(void CSMain\(uint3 dispatchThreadId : SV_DispatchThreadID\)\s*\{)'
   if([regex]::Matches($source,$entry).Count -ne 1){throw 'Unexpected legacy cellular entry point'}
-  $source=[regex]::Replace($source,$entry,'$1'+"`n    if (SimulationPhase == 58) return;")
+  $source=[regex]::Replace($source,$entry,'$1'+"`n    if (SimulationPhase == 58 || SimulationPhase == 59) return;")
   [IO.File]::WriteAllText((Join-Path $runtime 'Content/Shaders/CellularAutomataSolver.hlsl'),$source,[Text.UTF8Encoding]::new($false))
   $exe=Join-Path $runtime 'Phyxel.exe'
 }

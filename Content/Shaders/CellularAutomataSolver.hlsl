@@ -2361,7 +2361,7 @@ bool FindOrdinarySurfaceDestination(
     return false;
 }
 
-bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight, bool viscousOnly)
+bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight, bool viscousOnly, bool scanAllSources)
 {
     uint sourceLeft = Width;
     uint sourceRight = Width;
@@ -2421,15 +2421,28 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight, bool viscou
     uint destinationX = Width;
     uint destinationTop = 0;
     uint bestDistance = Width + 1;
+    uint bestHead = 0;
+    uint chosenSourceTop = sourceTop;
     [loop]
-    for (uint sourceCandidate = 0; sourceCandidate < 2; sourceCandidate++)
+    for (uint sourceCandidate = 0; sourceCandidate < (scanAllSources ? blockRight-blockLeft+1 : 2); sourceCandidate++)
     {
-        uint candidateSourceX = sourceCandidates[sourceCandidate];
+        uint candidateSourceX = scanAllSources ? ((FrameIndex & 1)==0 ? blockLeft+sourceCandidate : blockRight-sourceCandidate) : sourceCandidates[sourceCandidate];
+        uint candidateTop = sourceTop;
+        if(scanAllSources)
+        {
+            uint candidateBase;
+            if(!UnpackWaterColumn(WaterColumnState[candidateSourceX],candidateTop,candidateBase) || candidateTop>=candidateBase)continue;
+            GridCell candidateCell=Grid[FlattenCoordinate(uint2(candidateSourceX,candidateTop))];
+            uint above=candidateTop>0?CellKindAt(uint2(candidateSourceX,candidateTop-1)):SimulationKindSolid;
+            bool perched=candidateBase+1<Height && (Materials[CellMaterials[FlattenCoordinate(uint2(candidateSourceX,candidateBase+1))]].Flags & MaterialFlagDensityBody)!=0;
+            if(abs(candidateCell.VelocityY)>8 || perched || (above!=SimulationKindNone && above!=SimulationKindGas) ||
+                Materials[candidateCell.MaterialIndex].LiquidFlowTemperatureSensitivity<=0)continue;
+        }
         uint candidateDestinationX;
         uint candidateDestinationTop;
         if (!FindOrdinarySurfaceDestination(
             candidateSourceX,
-            sourceTop,
+            candidateTop,
             blockLeft,
             blockRight,
             candidateDestinationX,
@@ -2439,10 +2452,14 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight, bool viscou
         }
         uint distance = max(candidateSourceX, candidateDestinationX) -
             min(candidateSourceX, candidateDestinationX);
-        if (sourceX == Width || candidateDestinationTop > destinationTop ||
+        uint head=candidateDestinationTop-candidateTop;
+        if (sourceX == Width || (scanAllSources && head>bestHead) ||
+            ((!scanAllSources || head==bestHead) && (candidateDestinationTop > destinationTop ||
             (candidateDestinationTop == destinationTop && (viscousSource ? distance > bestDistance : distance < bestDistance)))
+            ))
         {
             sourceX = candidateSourceX;
+            chosenSourceTop=candidateTop;bestHead=head;
             destinationX = candidateDestinationX;
             destinationTop = candidateDestinationTop;
             bestDistance = distance;
@@ -2452,6 +2469,7 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight, bool viscou
     {
         return false;
     }
+    sourceTop=chosenSourceTop;
     uint ignoredTop;
     uint sourceBase;
     uint destinationBase;
@@ -2522,7 +2540,7 @@ void ResolveOrdinarySurfaceBlock(uint x)
     [loop]
     for (uint transfer = 0; transfer < transferBudget; transfer++)
     {
-        if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight, false))
+        if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight, false, false))
         {
             break;
         }
@@ -2568,7 +2586,7 @@ void ResolveOrdinaryLocalSurfaceBlock(uint x)
     [loop]
     for (uint transfer = 0; transfer < transferBudget; transfer++)
     {
-        if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight, false))
+        if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight, false, false))
         {
             break;
         }
@@ -2588,7 +2606,7 @@ void ResolveViscousSurfaceBlock(uint x)
     // A hydrostatic surface patch needs a supported basin. A falling drain
     // or a deep neighbouring outlet keeps its existing viscosity/gravity path;
     // feeding it with this extra pool-head pass would accelerate cold efflux.
-    uint minimumBase=Height, maximumBase=0;
+    uint previousBase=Height, previousColumn=Width,minimumBase=Height,maximumBase=0;
     [loop] for(uint column=left;column<=right;column++)
     {
         uint top, base;
@@ -2599,11 +2617,106 @@ void ResolveViscousSurfaceBlock(uint x)
             uint below=CellKindAt(uint2(column,base+1));
             if(below==SimulationKindNone||below==SimulationKindGas)return;
         }
+        // A curved bed is supported too. Reject an abrupt drain shaft,
+        // rather than rejecting the accumulated slope across the whole patch.
+        if(previousColumn+1==column && abs(int(base)-int(previousBase))>3)return;
+        previousBase=base;previousColumn=column;
         minimumBase=min(minimumBase,base);maximumBase=max(maximumBase,base);
     }
-    if(minimumBase<Height && maximumBase-minimumBase>1)return;
+    // On a sloping bed examine every donor and alternate its scan direction.
+    // One transfer per patch avoids repeatedly exchanging the same one-cell
+    // head within a tick, which pins a staircase instead of diffusing it.
+    // Flat puddles/drains retain their accepted viscosity budget.
+    bool slopingBed=minimumBase<Height && maximumBase-minimumBase>1;
+    uint transferBudget=slopingBed?1u:4u;
+    [loop] for(uint transfer=0;transfer<transferBudget;transfer++)
+        if(!ResolveOrdinarySurfaceTransfer(left,right,true,slopingBed))break;
+}
+
+bool ReadLiquidLayer(uint x, out uint surface, out uint boundary,
+    out uint upperMaterial, out uint lowerMaterial)
+{
+    uint base;
+    surface=0;boundary=0;upperMaterial=0;lowerMaterial=0;
+    if(!UnpackWaterColumn(WaterColumnState[x],surface,base) || base+1>=Height)return false;
+    upperMaterial=CellMaterials[FlattenCoordinate(uint2(x,surface))];
+    lowerMaterial=CellMaterials[FlattenCoordinate(uint2(x,base+1))];
+    if(CellKindFromMaterial(upperMaterial)!=SimulationKindLiquid ||
+        CellKindFromMaterial(lowerMaterial)!=SimulationKindLiquid ||
+        Materials[lowerMaterial].Density<=Materials[upperMaterial].Density)return false;
+    uint above=surface>0?CellKindAt(uint2(x,surface-1)):SimulationKindSolid;
+    if(above!=SimulationKindNone && above!=SimulationKindGas)return false;
+    boundary=base+1;
+    return abs(Grid[FlattenCoordinate(uint2(x,surface))].VelocityY)<=8 &&
+        abs(Grid[FlattenCoordinate(uint2(x,boundary))].VelocityY)<=8;
+}
+
+void ResolveLiquidLayerBlock(uint x)
+{
+    // Only adjacent patches own these cells. Complete parcels are exchanged
+    // through a connected lower layer; neither liquid is created or removed.
+    uint patchWidth=16,offset=(FrameIndex & 1)*8;
+    int start;
+    if(x==0)start=-int(offset);
+    else if(x>=offset && (x-offset)%patchWidth==0)start=int(x);
+    else return;
+    uint left=uint(max(0,start)),right=uint(min(int(Width)-1,start+15));
     [loop] for(uint transfer=0;transfer<4;transfer++)
-        if(!ResolveOrdinarySurfaceTransfer(left,right,true))break;
+    {
+        uint bestSource=Width,bestTarget=Width,sourceBoundary=0,targetBoundary=0;
+        uint sourceTop=0,upper=0,lower=0;
+        uint bestDistance=0;
+        float bestDrive=0;
+        [loop] for(uint sourceCursor=left;sourceCursor<=right;sourceCursor++)
+        {
+            uint source=(FrameIndex & 1)==0?sourceCursor:right-(sourceCursor-left);
+            uint top,interfaceY,upperId,lowerId;
+            if(!ReadLiquidLayer(source,top,interfaceY,upperId,lowerId))continue;
+            float upperDensity=Materials[upperId].Density;
+            float densityDifference=Materials[lowerId].Density-upperDensity;
+            [loop] for(uint target=left;target<=right;target++)
+            {
+                uint distance=max(source,target)-min(source,target);
+                if(distance==0 || distance>8)continue;
+                uint otherTop,otherInterface,otherUpper,otherLower;
+                if(!ReadLiquidLayer(target,otherTop,otherInterface,otherUpper,otherLower) ||
+                    upperId!=otherUpper || lowerId!=otherLower || interfaceY>=otherInterface)continue;
+                // Compare pressure heads at a common depth: the upper liquid
+                // contributes its own weight. This is a bounded game closure,
+                // not SI pressure or a general multilayer fluid solver.
+                float drive=densityDifference*(float(otherInterface)-float(interfaceY))+
+                    upperDensity*(float(otherTop)-float(top));
+                // A one-cell head must also relax. A tolerance of a whole
+                // cell per short patch accumulated into a broad curved ridge.
+                if(drive<=.5*densityDifference || drive<bestDrive ||
+                    (drive==bestDrive && distance<=bestDistance))continue;
+                uint lowerBase=interfaceY;
+                [loop] while(lowerBase+1<Height &&
+                    CellMaterials[FlattenCoordinate(uint2(source,lowerBase+1))]==lowerId)lowerBase++;
+                if(!SameLiquidColumnsConnected(source,target,interfaceY,lowerBase,lowerId))continue;
+                bestDrive=drive;bestDistance=distance;bestSource=source;bestTarget=target;
+                sourceBoundary=interfaceY;targetBoundary=otherInterface;
+                sourceTop=top;upper=upperId;lower=lowerId;
+            }
+        }
+        if(bestSource==Width)break;
+        uint sourceIndex=FlattenCoordinate(uint2(bestSource,sourceBoundary));
+        uint targetIndex=FlattenCoordinate(uint2(bestTarget,targetBoundary-1));
+        float load=float(min(16u,sourceBoundary-sourceTop));
+        if(!LiquidStepAllowedLoaded(sourceIndex,targetIndex,load) ||
+            !LiquidStepAllowedLoaded(targetIndex,sourceIndex,load))break;
+        // Avoid calling the ordinary swap gate a second time: viscosity was
+        // already paid above. Transfer every saved field including Q/pore data.
+        GridCell first=Grid[sourceIndex],second=Grid[targetIndex];
+        MarkMovement(first,second,bestTarget>bestSource?58:-58,0);
+        Grid[sourceIndex]=second;Grid[targetIndex]=first;
+        CellMaterials[sourceIndex]=upper;CellMaterials[targetIndex]=lower;
+        uint ignoredTop,base;
+        UnpackWaterColumn(WaterColumnState[bestSource],ignoredTop,base);
+        WaterColumnState[bestSource]=PackWaterColumn(ignoredTop,base+1);
+        UnpackWaterColumn(WaterColumnState[bestTarget],ignoredTop,base);
+        WaterColumnState[bestTarget]=base==ignoredTop?0:PackWaterColumn(ignoredTop,base-1);
+    }
 }
 
 void ApplyWaterColumnMove(uint x)
@@ -3718,6 +3831,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (SimulationPhase == 58)
     {
         ResolveViscousSurfaceBlock(coordinate.x);
+        return;
+    }
+    if (SimulationPhase == 59)
+    {
+        ResolveLiquidLayerBlock(coordinate.x);
         return;
     }
     if (SimulationPhase == 30)

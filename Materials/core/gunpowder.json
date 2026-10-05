@@ -16,7 +16,7 @@
     "flowRate": 0.15
   },
   "thermal": {
-    "initialTemperature": 20.0,
+    "initialTemperature": 30.0,
     "conductivity": 0.25,
     "heatCapacity": 0.9
   },

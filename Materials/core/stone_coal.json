@@ -5,7 +5,7 @@
   "kind": "granular",
   "color": "#171717",
   "physics": { "density": 1.4, "friction": 0.65, "flowRate": 0.3 },
-  "thermal": { "initialTemperature": 20.0, "conductivity": 0.11, "heatCapacity": 0.75 },
+  "thermal": { "initialTemperature": 30.0, "conductivity": 0.11, "heatCapacity": 0.75 },
   "combustion": {
     "ignitionTemperature": 500.0,
     "burnRate": 0.030,

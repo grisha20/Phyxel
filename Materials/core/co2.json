@@ -7,6 +7,6 @@
   "physics": { "density": 0.12, "friction": 0.0, "flowRate": 0.8 },
   "gas": { "diffusion": 1.00, "buoyancy": 0.1, "hazeStrength": 1.0 },
   "motion": { "advection": 2.0, "airDrag": 0.00, "airLoss": 0.99, "loss": 0.30, "collision": -0.1 },
-  "thermal": { "initialTemperature": 20.0, "conductivity": 0.06, "heatCapacity": 0.85 },
+  "thermal": { "initialTemperature": 30.0, "conductivity": 0.06, "heatCapacity": 0.85 },
   "ui": { "order": 60, "hidden": false }
 }

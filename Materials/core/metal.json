@@ -7,7 +7,7 @@
   "color": "#8E9CA6",
   "physics": { "density": 7.8, "friction": 0.35, "flowRate": 0.0 },
   "thermal": {
-    "initialTemperature": 20.0,
+    "initialTemperature": 30.0,
     "conductivity": 1.0,
     "heatCapacity": 0.13,
     "transitions": {

@@ -8,7 +8,7 @@
   "physics": { "density": 0.8, "friction": 0.08, "flowRate": 0.65,
     "liquidFlow": { "referenceTemperature": 20, "temperatureSensitivity": 0.015,
       "minimumMobility": 0.2, "maximumMobility": 2.0 } },
-  "thermal": { "initialTemperature": 20.0, "conductivity": 0.12, "heatCapacity": 2.0,
+  "thermal": { "initialTemperature": 30.0, "conductivity": 0.12, "heatCapacity": 2.0,
     "transitions": {
       "below": { "temperature": 18.0, "into": "core:frozen_oil" },
       "above": { "temperature": 287.0, "into": "core:oil_vapour", "latentHeat": 270.0 }

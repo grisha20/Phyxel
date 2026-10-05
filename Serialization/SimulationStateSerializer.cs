@@ -512,7 +512,7 @@ public sealed class SimulationStateSerializer
                 throw new InvalidDataException($"Invalid thermal device settings in world cell {index}.");
             if (initializeLegacyTemperature)
             {
-                cells[index].Temperature = materialRegistry[runtimeIndex].Properties.InitialTemperature;
+                cells[index].Temperature = LegacySceneV3Loader.InitialTemperature(materialRegistry[runtimeIndex]);
             }
         }
     }

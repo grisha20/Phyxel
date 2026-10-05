@@ -325,6 +325,11 @@ public sealed class PhyxelGame : Game
             oilSmokeVerification = OilSmokeFlowRegressionVerifier.Run(dispatchCoordinator, materialRegistry,
                 settings, status => SetStatus("Автотест: " + status)).GetEnumerator();
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_LAYERS") == "1")
+        {
+            oilSmokeVerification = LiquidLayersRegressionVerifier.Run(dispatchCoordinator, materialRegistry,
+                settings, status => SetStatus("Автотест: " + status)).GetEnumerator();
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_MATERIAL_ENVIRONMENT") == "1")
         {
             try { MaterialEnvironmentRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
@@ -466,7 +471,8 @@ public sealed class PhyxelGame : Game
             }
             catch (Exception exception)
             {
-                Console.WriteLine($"PHYXEL_OS_FAILED {exception}");
+                string test = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_LAYERS") == "1" ? "LL" : "OS";
+                Console.WriteLine($"PHYXEL_{test}_FAILED {exception}");
                 Environment.ExitCode = 1;
                 Exit();
             }

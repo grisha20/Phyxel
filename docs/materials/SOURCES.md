@@ -1,5 +1,16 @@
 # Зафиксированные источники паспортов
 
+LL2026-10-05: прочитаны OIL/WATR.cpp и Simulation.cpp3095–3220
+(обычное жидкостное движение/плотностный обмен),2335–2375 (воздух).
+Element.cpp54 задаёт температуру TPT; игровое значение не переносится
+в Phyxel. Начальные30°C — отдельный выбор пользователя, а местное
+выравнивание двух слоёв — численная модель Phyxel.
+SHA256 WATR: `9D34127B059230756CF31E584071F72073B57F6BEAF1569EB976101056794630`;
+Element: `F68B1F58B4F0DFAA4FFDF22DE32E6C3A0E7EF7172EDBE0704A5F1C4BA0C6B371`.
+OIL: `6BE34A5EADCE7B9C6F6261DF91D1A7C82C76B1D60A6590E95B7C8627F5BA064E`;
+Simulation: `5088E75A66263CB1C195EB41A323244916F64FF9D8914DD2C2CE660338D36359`.
+[Область LL и критерии](LIQUID_LAYERS_CONTRACT.md).
+
 OC/OL2026-10-05: прочитаны TPT FIRE/SMKE/OIL.cpp, общий перенос
 Simulation.cpp2341–2367,2448–2462 и жидкостное движение3095+;
 Air.cpp73–189. FIRE/SMKE: Advection.9/Loss.2/Gravity−.1/HotAir.001;

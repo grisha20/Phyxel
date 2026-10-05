@@ -12,7 +12,7 @@ public sealed class MaterialRegistry
 {
     public const int MaximumMaterials = 256;
     public const float MaximumDensity = 100f;
-    public const float DefaultInitialTemperature = 20f;
+    public const float DefaultInitialTemperature = 30f;
     public const float DefaultThermalConductivity = 0.15f;
     public const float DefaultHeatCapacity = 1f;
     public const float MinimumInitialTemperature = -273.15f;

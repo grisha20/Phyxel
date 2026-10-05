@@ -99,9 +99,19 @@ internal static class LegacySceneV3Loader
             }
             uint runtimeIndex = legacyToRuntime[legacyIndex];
             cells[index].MaterialIndex = runtimeIndex;
-            cells[index].Temperature = materialRegistry[runtimeIndex].Properties.InitialTemperature;
+            cells[index].Temperature = InitialTemperature(materialRegistry[runtimeIndex]);
         }
     }
+
+    // v3/v4 had no saved temperature. Keep their historical core defaults;
+    // the new room-temperature brush default must not warm old worlds.
+    internal static float InitialTemperature(MaterialDefinition material) => material.Id switch
+    {
+        CoreMaterialIds.Co2 or CoreMaterialIds.Coal or CoreMaterialIds.Fixture or CoreMaterialIds.Gunpowder or
+        CoreMaterialIds.Metal or CoreMaterialIds.Oil or CoreMaterialIds.Sand or CoreMaterialIds.StoneCoal or
+        CoreMaterialIds.Stone or CoreMaterialIds.Water or CoreMaterialIds.WetCharcoal or CoreMaterialIds.Wood => 20f,
+        _ => material.Properties.InitialTemperature
+    };
 
     private static ushort ResolveLegacyIndex(uint legacyIndex, MaterialRegistry materialRegistry) =>
         legacyIndex < LegacyPalette.Length

@@ -86,7 +86,7 @@ public sealed class SimulationDispatchCoordinator
         2, 3, 2, 3, 2, 3, 2, 3,
         40, 41, 42, 43, 44, 45, 46, 47,
         48, 50, 52, 54,
-        33, 56, 57, 58, 13, 29,
+        33, 56, 57, 58, 59, 13, 29,
         34, 35, 34, 35, 34, 35, 34, 35,
         36, 37, 71, 38, 39, 70,
         4
@@ -98,7 +98,7 @@ public sealed class SimulationDispatchCoordinator
         3, 2, 3, 2, 3, 2, 3, 2,
         47, 46, 45, 44, 43, 42, 41, 40,
         55, 53, 51, 49,
-        33, 56, 57, 58, 13, 29,
+        33, 56, 57, 58, 59, 13, 29,
         34, 35, 34, 35, 34, 35, 34, 35,
         36, 37, 71, 38, 39, 70,
         4
@@ -109,7 +109,7 @@ public sealed class SimulationDispatchCoordinator
         0, 1, 0, 1, 0, 1, 0, 1, 5, 6, 7, 8, 9, 10, 11, 12,
         2, 3, 2, 3, 2, 3, 2, 3,
         40, 41, 42, 43, 44, 45, 46, 47,
-        33, 56, 57, 58, 13, 29,
+        33, 56, 57, 58, 59, 13, 29,
         4
     ];
 
@@ -118,7 +118,7 @@ public sealed class SimulationDispatchCoordinator
         1, 0, 1, 0, 1, 0, 1, 0, 6, 5, 8, 7, 10, 9, 12, 11,
         3, 2, 3, 2, 3, 2, 3, 2,
         47, 46, 45, 44, 43, 42, 41, 40,
-        33, 56, 57, 58, 13, 29,
+        33, 56, 57, 58, 59, 13, 29,
         4
     ];
 
@@ -128,7 +128,7 @@ public sealed class SimulationDispatchCoordinator
         2, 3, 2, 3, 2, 3, 2, 3,
         40, 42, 44, 46,
         48, 52,
-        33, 56, 57, 58, 13, 29,
+        33, 56, 57, 58, 59, 13, 29,
         34, 35, 34, 35,
         36, 37, 71, 38, 39, 70,
         4
@@ -140,7 +140,7 @@ public sealed class SimulationDispatchCoordinator
         3, 2, 3, 2, 3, 2, 3, 2,
         47, 45, 43, 41,
         48, 52,
-        33, 56, 57, 58, 13, 29,
+        33, 56, 57, 58, 59, 13, 29,
         34, 35, 34, 35,
         36, 37, 71, 38, 39, 70,
         4
@@ -1378,7 +1378,7 @@ public sealed class SimulationDispatchCoordinator
 
             bool buildPathBlockers = phase == 31;
             bool buildCellMaterials = phase == 32;
-            bool waterColumnPhase = phase == 33 || phase == 56 || phase == 57 || phase == 58 ||
+            bool waterColumnPhase = phase == 33 || phase == 56 || phase == 57 || phase == 58 || phase == 59 ||
                 phase == 29 || phase == 37 ||
                 phase == 39 || phase == 70 || phase == 71 || phase == 13;
             int startX = buildPathBlockers || buildCellMaterials || waterColumnPhase
