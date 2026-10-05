@@ -341,7 +341,7 @@ public sealed class UiPropertiesPanel
             backdrop.DrawRoundedRectangle(spriteBatch,filterSelector.Bounds,UiTheme.CardBackground,6);
             spriteBatch.DrawString(font,filterSelector.Label,
                 new Vector2(filterSelector.Bounds.X+12,filterSelector.Bounds.Center.Y-font.LineSpacing/2f),UiTheme.TextPrimary);
-            spriteBatch.DrawString(font,"ЛКМ — пустое · ПКМ — снять",new Vector2(bounds.X+14,filterHintY),UiTheme.TextMuted,0,Vector2.Zero,.65f,SpriteEffects.None,0);
+            spriteBatch.DrawString(font,"ЛКМ — пустое · ПКМ — стереть",new Vector2(bounds.X+14,filterHintY),UiTheme.TextMuted,0,Vector2.Zero,.65f,SpriteEffects.None,0);
         }
         if (activeTool == PhyxelToolId.Brush && selectedMaterial.ThermalRegulator is not null)
         {

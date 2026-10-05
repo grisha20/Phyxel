@@ -358,7 +358,7 @@ public static class UiLayoutRegressionTests
         var commands=brush.CreateCommands(Input(canvas.Center,leftDown:true,leftPressed:true),canvas,state,0,true,false,20,false,filterTool:true,filterRule:FilterRules.Gas);
         Require(commands.Count==1&&commands[0].Mode==BrushCommandMode.Filter&&commands[0].Reserved==FilterRules.Gas,"Filter brush mode");
         commands=brush.CreateCommands(Input(canvas.Center) with {RightDown=true},canvas,state,0,true,false,20,false,filterTool:true,filterRule:FilterRules.Gas);
-        Require(commands.Count==1&&commands[0].Mode==BrushCommandMode.Filter&&commands[0].Reserved==0,"Filter removal preserves particles");
+        Require(commands.Count==1&&commands[0].Mode==BrushCommandMode.Erase,"Right button erases particles and filters for the filter brush");
         Console.WriteLine("[PASS] Filter selector, brush/removal and 12 resolution/DPI layouts.");
     }
 

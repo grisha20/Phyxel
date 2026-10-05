@@ -3,7 +3,7 @@
   "id": "core:molten_metal",
   "name": { "ru": "Расплавленный металл", "en": "Molten Metal" },
   "kind": "liquid",
-  "flags": ["fusion-enthalpy"],
+  "flags": ["fusion-enthalpy", "non-absorbable-liquid"],
   "color": "#FF7A1E",
   "physics": { "density": 7.0, "friction": 0.55, "flowRate": 0.34 },
   "thermal": {

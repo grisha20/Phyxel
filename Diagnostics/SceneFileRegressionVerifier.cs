@@ -81,8 +81,28 @@ internal static class SceneFileRegressionVerifier
         {
             var grid = new GridCell[r.Width * r.Height];
             grid[100 * r.Width + 100] = new() { IsActive = 1, MaterialIndex = oil, Mass = mass, Temperature = 330 };
+            // The live user's save failed on shrinking carriers retaining metal.
+            grid[101 * r.Width + 100] = new() { IsActive = 1,
+                MaterialIndex = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Gunpowder),
+                Mass = .0002f, Temperature = 1050, FuelMass = .04f,
+                RetainedLiquidMaterialIndex = registry.GetRequiredRuntimeIndex("core:molten_metal") };
+            grid[101 * r.Width + 101] = new() { IsActive = 1,
+                MaterialIndex = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal),
+                Mass = .0002f, Temperature = 500, FuelMass = .05f,
+                RetainedLiquidMaterialIndex = oil };
             uint[] filters=new uint[grid.Length];filters[120*r.Width+100]=(uint)registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam)+1;
-            serializer.ApplyWorldSnapshot(r, new(r.Width, r.Height, MemoryMarshal.AsBytes(grid.AsSpan()).ToArray(),Filters:MemoryMarshal.AsBytes(filters.AsSpan()).ToArray()));
+            int coarse = ((r.Width + 3) / 4) * ((r.Height + 3) / 4);
+            var oxygen = new float[grid.Length]; oxygen[0] = 2.5f;
+            var heat = new System.Numerics.Vector2[coarse]; heat[0] = new(300, 1);
+            var air = new AirCell[coarse]; air[0] = new() { Pressure = .25f, VelocityX = .3f };
+            var motion = new System.Numerics.Vector4[grid.Length]; motion[0] = new(.3f, -.1f, 0, 0);
+            var pending = new System.Numerics.Vector4[grid.Length]; pending[0] = new(.1f, 300, 1, 0);
+            var pulse = new System.Numerics.Vector4[coarse]; pulse[0] = new(.1f, .2f, -.3f, .4f);
+            serializer.ApplyWorldSnapshot(r, new(r.Width, r.Height, MemoryMarshal.AsBytes(grid.AsSpan()).ToArray(),
+                Air: MemoryMarshal.AsBytes(air.AsSpan()).ToArray(), GasMotion: MemoryMarshal.AsBytes(motion.AsSpan()).ToArray(),
+                Oxidizer: MemoryMarshal.AsBytes(oxygen.AsSpan()).ToArray(), AirThermal: MemoryMarshal.AsBytes(heat.AsSpan()).ToArray(),
+                ReactionPending: MemoryMarshal.AsBytes(pending.AsSpan()).ToArray(), ReactionPulse: MemoryMarshal.AsBytes(pulse.AsSpan()).ToArray(),
+                Filters: MemoryMarshal.AsBytes(filters.AsSpan()).ToArray()));
         }
         GridCell Loaded(string path) => MemoryMarshal.Cast<byte, GridCell>(System.Threading.Tasks.Task.Run(() => serializer.LoadAsync(path, registry))
             .GetAwaiter().GetResult()!.World!.Grid)[100 * r.Width + 100];
@@ -94,6 +114,23 @@ internal static class SceneFileRegressionVerifier
         settings.Mode = SimulationMode.Simulation;
         Complete();
         Check(Loaded(first).Mass == .42f, "Save missed GPU world.");
+        var retainedWorld = System.Threading.Tasks.Task.Run(() => serializer.LoadAsync(first, registry))
+            .GetAwaiter().GetResult()!.World!;
+        var retainedCells = MemoryMarshal.Cast<byte, GridCell>(retainedWorld.Grid);
+        Check(retainedCells[101 * r.Width + 100].FuelMass == .04f &&
+            retainedCells[101 * r.Width + 100].Mass == .0002f &&
+            retainedCells[101 * r.Width + 100].RetainedLiquidMaterialIndex == registry.GetRequiredRuntimeIndex("core:molten_metal"),
+            "Shrinking carrier lost its retained metal on save/load.");
+        Check(retainedCells[101 * r.Width + 101].FuelMass == .05f,
+            "Shrinking coal lost its retained oil on save/load.");
+        Check(MemoryMarshal.Cast<byte, float>(retainedWorld.Oxidizer!)[0] == 2.5f &&
+            MemoryMarshal.Cast<byte, System.Numerics.Vector2>(retainedWorld.AirThermal!)[0] == new System.Numerics.Vector2(300, 1),
+            "Save lost compressed oxygen or carrier heat.");
+        Check(MemoryMarshal.Cast<byte, AirCell>(retainedWorld.Air!)[0].Pressure == .25f &&
+            MemoryMarshal.Cast<byte, System.Numerics.Vector4>(retainedWorld.GasMotion!)[0].X == .3f &&
+            MemoryMarshal.Cast<byte, System.Numerics.Vector4>(retainedWorld.ReactionPending!)[0].Y == 300 &&
+            MemoryMarshal.Cast<byte, System.Numerics.Vector4>(retainedWorld.ReactionPulse!)[0].W == .4f,
+            "Save lost air, motion or deferred reaction state.");
         Check(System.Threading.Tasks.Task.Run(() => serializer.LoadAsync(first, registry))
             .GetAwaiter().GetResult()!.State.Mode == SimulationMode.Sandbox, "Save mixed later settings into earlier snapshot.");
         Check(Get<string>("scenePath") == first && Get<bool>("hasChosenScenePath"), "Successful path not retained.");
@@ -114,6 +151,9 @@ internal static class SceneFileRegressionVerifier
         Check(cells[100 * r.Width + 100].Mass == .7f && cells[100 * r.Width + 100].Temperature == 330, "Load missed GPU state.");
         Check(Get<string>("scenePath") == first, "Load missed quick-save path.");
         Check(r.FilterCount==1 && r.FilterMap[120*r.Width+100]==(uint)registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam)+1,"Load lost the filter overlay.");
+        Check(MemoryMarshal.Cast<byte, float>(AirInventoryRegressionVerifier.Read(r, r.Oxidizer.ReadBuffer))[0] == 2.5f &&
+            MemoryMarshal.Cast<byte, System.Numerics.Vector4>(AirInventoryRegressionVerifier.Read(r, r.ReactionPending.Buffer))[0].Y == 300,
+            "Load did not restore auxiliary fields to the GPU.");
         next = Path.Combine(dir, "missing.json"); Action(false, load: true); Complete();
         Check(Get<string>("scenePath") == first, "Failed load changed path.");
         string blocked = Path.Combine(dir, "blocked-parent");

@@ -435,10 +435,6 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
     // burn at the same concentration as one with four, not at one third rate.
     float exposure = needsOxidizer ? saturate(oxygen / max(supply.y, 1)) : 1;
     float burnedMass = min(availableFuel, source.BurnRate * exposure * CombustionDeltaTime);
-    // Keep a finite carrier until its retained oil has reacted. Burnout must
-    // not normalize away the independent stock or its sensible heat.
-    if (!absorbedFuel && cell.FuelMass > 0)
-        burnedMass = min(burnedMass, max(0, availableFuel - CombustionMassEpsilon * 2));
     if(absorbedFuel)
     {
         // Stored liquid is a separate fuel ledger. Bound heat before reacting;
@@ -503,7 +499,22 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
     {
         cell.Mass = residueMass;
         flags |= BurnoutOccurred;
-        NormalizeBurnout(cell, source, target, targetIndex);
+        bool releaseLiquid = targetIndex == 0 && cell.FuelMass > 0;
+        if (releaseLiquid)
+        {
+            // Release the actual stock in this same cell, without a neighbour
+            // claim or any lost liquid. This also recovers old retained metals.
+            uint retained = RetainedLiquidIndex(cell, source);
+            float retainedEnergy = Materials[retained].HeatCapacity * cell.Temperature;
+            float retainedMass = cell.FuelMass;
+            cell = (GridCell)0;
+            cell.IsActive = 1;
+            cell.MaterialIndex = retained;
+            cell.Mass = retainedMass;
+            cell = SetCellSpecificEnthalpy(cell, retainedEnergy);
+            flags |= TargetLiquid | TargetCellular;
+        }
+        else NormalizeBurnout(cell, source, target, targetIndex);
 
         // Fuel that leaves no residue becomes a flame in its own cell instead
         // of vanishing. This is what The Powder Toy does: COAL turns into
@@ -514,7 +525,7 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
         // empty cell for a flame to be emitted into: scattered grains lying on
         // the ground would heat up, consume themselves and quietly disappear
         // without ever igniting their neighbours.
-        if (targetIndex == 0)
+        if (targetIndex == 0 && !releaseLiquid)
         {
             uint flameIndex = Emissions[sourceMaterialIndex].FlameIntoMaterialIndex;
             if (flameIndex != 0xffffffffu && flameIndex < CombustionMaterialCount)

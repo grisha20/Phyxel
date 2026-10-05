@@ -1327,6 +1327,9 @@ internal static partial class MaterialFileLoader
                 "smoke" => MaterialFlags.Smoke,
                 "phase-enthalpy" => MaterialFlags.PhaseEnthalpy,
                 "fusion-enthalpy" => MaterialFlags.FusionEnthalpy,
+                "non-absorbable-liquid" => kind == MaterialSimulationKind.Liquid
+                    ? MaterialFlags.NonAbsorbableLiquid
+                    : throw new InvalidDataException("non-absorbable-liquid requires a liquid."),
                 "liquid-convection" => MaterialFlags.LiquidConvection,
                 _ => throw new InvalidDataException($"Неизвестный flag '{value}'.")
             };

@@ -77,6 +77,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     CellMaterials[index] = cell.MaterialIndex;
 }
 
+// Mirrors MaterialFlags.NonAbsorbableLiquid; only this handler uses the tag.
+static const uint MaterialFlagNonAbsorbableLiquid = 1u << 14;
+
 float FuelPoreFraction(GridCell c, MaterialProperties m)
 {
     return m.FuelCapacity>0 && c.Mass>0 ? saturate(c.FuelMass/(c.Mass*m.FuelCapacity)) : 0;
@@ -100,6 +103,7 @@ bool TransferAbsorbedFuel(inout GridCell first, inout GridCell second,uint first
         if(first.FuelMass>0 && second.FuelMass>0 && firstLiquid!=secondLiquid) return false;
         uint species=first.FuelMass>0?firstLiquid:secondLiquid;
         if(first.FuelMass<=0 && second.FuelMass<=0)return false;
+        if((Materials[species].Flags & MaterialFlagNonAbsorbableLiquid)!=0)return false;
         if(((ma.Flags & MaterialFlagUniversalPores)==0 && species!=ma.FuelLiquidMaterialIndex) ||
            ((mb.Flags & MaterialFlagUniversalPores)==0 && species!=mb.FuelLiquidMaterialIndex))return false;
         float ca=first.Mass*ma.FuelCapacity, cb=second.Mass*mb.FuelCapacity;
@@ -116,6 +120,7 @@ bool TransferAbsorbedFuel(inout GridCell first, inout GridCell second,uint first
         MaterialProperties mr=ma;
         if(fb) { receiver=second; donor=first; mr=mb; }
         if(donor.IsActive==0 || donor.Mass<=0 || Materials[donor.MaterialIndex].SimulationKind!=SimulationKindLiquid ||
+           (Materials[donor.MaterialIndex].Flags & MaterialFlagNonAbsorbableLiquid)!=0 ||
            donor.MaterialIndex==mr.MoistureLiquidMaterialIndex || donor.Lifetime!=0 ||
            ((mr.Flags & MaterialFlagUniversalPores)==0 && donor.MaterialIndex!=mr.FuelLiquidMaterialIndex) ||
            (receiver.FuelMass>0 && RetainedLiquidIndex(receiver,mr)!=donor.MaterialIndex))return false;
@@ -188,6 +193,9 @@ void CSMoisture(uint3 id : SV_DispatchThreadID)
     }
     bool firstFuel=first.IsActive!=0 && Materials[first.MaterialIndex].MoistureCapacity>0;
     bool secondFuel=second.IsActive!=0 && Materials[second.MaterialIndex].MoistureCapacity>0;
+    uint poreWater = firstFuel ? Materials[first.MaterialIndex].MoistureLiquidMaterialIndex
+        : secondFuel ? Materials[second.MaterialIndex].MoistureLiquidMaterialIndex : 0;
+    if ((Materials[poreWater].Flags & MaterialFlagNonAbsorbableLiquid) != 0) return;
     if(firstFuel && secondFuel)
     {
         if(!FilterPathAllows(a,b,Materials[first.MaterialIndex].MoistureLiquidMaterialIndex,SimulationKindLiquid,ContactWidth))return;

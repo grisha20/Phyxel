@@ -630,9 +630,11 @@ public sealed class SimulationStateSerializer
         if (!float.IsFinite(cell.FuelMass) || cell.FuelMass < 0)
             throw new InvalidDataException("Invalid absorbed fuel mass.");
         if (cell.FuelMass == 0) return;
+        // Combustion shrinks the dry carrier, not its independent liquid stock.
+        // Preserve that finite stock until burnout releases it into the cell.
         if (material.FuelCapacity <= 0 || !float.IsFinite(cell.Mass) || cell.Mass <= 0 ||
-            cell.FuelMass / (cell.Mass * material.FuelCapacity) +
-            (material.MoistureCapacity > 0 ? cell.MoistureMass / (cell.Mass * material.MoistureCapacity) : 0) > 1.0001f)
+            (material.BurnRate <= 0 && cell.FuelMass / (cell.Mass * material.FuelCapacity) +
+            (material.MoistureCapacity > 0 ? cell.MoistureMass / (cell.Mass * material.MoistureCapacity) : 0) > 1.0001f))
             throw new InvalidDataException("Absorbed fuel is unsupported or exceeds shared pore capacity.");
     }
 

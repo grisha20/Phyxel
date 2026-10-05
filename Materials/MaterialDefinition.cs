@@ -56,7 +56,9 @@ public enum MaterialFlags : uint
     LiquidConvection = 1u << 11,
     // Compact rigid pieces use material/fluid density, without hull thinning.
     DensityBody = 1u << 12,
-    UniversalPores = 1u << 13
+    UniversalPores = 1u << 13,
+    // Molten metals and other excluded liquids cannot enter or diffuse through pores.
+    NonAbsorbableLiquid = 1u << 14
 }
 
 public static class CoreMaterialIds

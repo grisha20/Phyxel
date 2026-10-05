@@ -346,7 +346,9 @@ public sealed class PhyxelGame : Game
         }
         if(Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FILTERS")=="1"){
             InactiveSleepTime=TimeSpan.Zero;
-            oilSmokeVerification=Environment.GetEnvironmentVariable("PHYXEL_FILTER_BRUSHES_ONLY")=="1"
+            oilSmokeVerification=Environment.GetEnvironmentVariable("PHYXEL_SCENE_REPAIR_ONLY")=="1"
+                ? SceneRepairRegressionVerifier.Run(dispatchCoordinator,materialRegistry,settings).GetEnumerator()
+                : Environment.GetEnvironmentVariable("PHYXEL_FILTER_BRUSHES_ONLY")=="1"
                 ? FilterBrushRegressionVerifier.Run(dispatchCoordinator,materialRegistry,settings).GetEnumerator()
                 : FilterRegressionVerifier.Run(dispatchCoordinator,materialRegistry,settings,fps=>diagnosticFramesPerSecond=fps).GetEnumerator();
             IsFixedTimeStep=false; return;
@@ -988,7 +990,12 @@ public sealed class PhyxelGame : Game
                 }
                 SetStatus($"Сохранено: {scenePath}", 12);
             }
-            else SetStatus($"Ошибка сохранения: {Path.GetFileName(pendingSavePath ?? scenePath)}", 8);
+            else
+            {
+                Exception? error = pendingSave.Exception?.GetBaseException();
+                Console.Error.WriteLine($"PHYXEL_SAVE_FAILED path={pendingSavePath ?? scenePath}\n{error}");
+                SetStatus($"Ошибка сохранения: {error?.Message ?? "операция отменена"}", 20);
+            }
             pendingSavePath = null;
             pendingSaveSettings = null;
             pendingSave = null;

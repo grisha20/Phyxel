@@ -62,7 +62,7 @@ public sealed class CanvasBrushController
         }
 
         bool erasing = input.RightDown || !temperatureToolActive && selectedMaterialIsTool;
-        BrushCommandMode mode = filterTool ? BrushCommandMode.Filter : erasing
+        BrushCommandMode mode = input.RightDown ? BrushCommandMode.Erase : filterTool ? BrushCommandMode.Filter : erasing
             ? BrushCommandMode.Erase
             : temperatureToolActive
                 ? BrushCommandMode.SetTemperature
@@ -74,7 +74,7 @@ public sealed class CanvasBrushController
             mode,
             thermalDevice && !temperatureToolActive ? deviceTargetTemperature : targetTemperature,
             settings, deviceMaximumPower);
-        if(filterTool){var command=frameCommands[^1];command.Reserved=input.RightDown?0:filterRule;frameCommands[^1]=command;}
+        if(mode == BrushCommandMode.Filter){var command=frameCommands[^1];command.Reserved=filterRule;frameCommands[^1]=command;}
         previousGridPosition = gridPosition;
         return frameCommands;
     }
