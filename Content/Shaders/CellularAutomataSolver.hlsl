@@ -1414,7 +1414,10 @@ float CeilingJetTangent(uint2 coordinate, float2 carrier, MaterialProperties mat
     {
         uint kind=CellKindAt(uint2(coordinate.x,coordinate.y-dy));
         if (kind==SimulationKindSolid) { roof=int(coordinate.y)-dy; break; }
-        if (kind!=SimulationKindGas) break;
+        // Empty cells are gas space too. Stopping at the first empty pixel
+        // disabled the roof jet for a sparse plume, while the same furnace
+        // suddenly acquired direction only after smoke packed the gap.
+        if (kind!=SimulationKindNone && kind!=SimulationKindGas) break;
     }
     if (roof<0) return 0;
     int exits[2]={0,0};

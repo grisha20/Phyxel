@@ -137,6 +137,25 @@ internal static class AirThermalRegressionVerifier
         Check(errorE<1e-5 && errorC<1e-5 && heat.All(a=>float.IsFinite(a.X)&&float.IsFinite(a.Y)&&a.X>=-1e-6&&a.Y>=-1e-6),
             "Cached donor limits lost inventory or produced negative state");
         Console.WriteLine(FormattableString.Invariant($"PHYXEL_AIR_HEAT_LIMITERS relativeEnergy={errorE:F10} relativeCapacity={errorC:F10}"));
+        Check(heat.Where(s=>s.Y>0).All(s=>s.X/s.Y>=293.05f&&s.X/s.Y<=1893.25f),
+            "Transport created temperatures outside its initial range.");
+        // Opposing diffusion and full-CFL advection used to leave a hot,
+        // almost empty donor (1.16e8 K after just one step).
+        Array.Clear(grid);Array.Clear(air);Array.Clear(links);
+        var pair=new Vector2[an];pair[ai]=new(300,1);pair[ai+1]=new(5000,1);
+        air[ai].VelocityX=air[ai+1].VelocityX=4;
+        links[ai]=1u<<5;links[ai+1]=1u<<3;
+        ctx.UpdateSubresource(grid,r.Grid.ReadBuffer);ctx.UpdateSubresource(air,r.Air.Buffer);
+        ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer);ctx.UpdateSubresource(pair,r.AirThermal.Buffer);
+        for(int step=0;step<1000;step++)
+        {
+            SimulationDispatchCoordinator.DispatchAirHeat(r,false);heat=Read();
+            Check(heat.All(s=>float.IsFinite(s.X)&&float.IsFinite(s.Y)&&s.X>=0&&s.Y>=0&&
+                (s.Y==0?s.X==0:float.IsFinite(s.X/s.Y)&&s.X/s.Y>=299.9&&s.X/s.Y<=5000.1)),
+                $"Depleted carrier outside range at step {step}: donor={heat[ai].X/heat[ai].Y:R}, C={heat[ai].Y:R}.");
+        }
+        Check(Math.Abs(heat.Sum(s=>(double)s.X)-5300)<.053&&Math.Abs(heat.Sum(s=>(double)s.Y)-2)<.00002,"Thermal CFL reserve deleted stock.");
+        Console.WriteLine("PHYXEL_AIR_HEAT_CFL_PAIR_SUCCESS");
         // Surface exchange must carry pore stocks and latent heat, including
         // at a plateau, rather than discarding Q in a temperature clamp.
         Array.Clear(air); Array.Clear(links);

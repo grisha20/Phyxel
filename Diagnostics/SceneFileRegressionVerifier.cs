@@ -190,9 +190,8 @@ internal static class SceneFileRegressionVerifier
         cells=MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer));
         Check(cells[(100+extraTop)*r.Width+100].Mass==.7f,"Expanded scene load lost its cell.");
         Check(r.FilterCount==1&&r.FilterMap[(120+extraTop)*r.Width+100]==(uint)registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam)+1,"Expanded scene load lost the filter.");
-        // Actual conservative transport can retain heat in a nearly emptied
-        // carrier. Preserve this diagnostic state rather than imposing the
-        // particle temperature ceiling on the saved carrier field.
+        // New transport is bounded; old saved hot residues still load exactly.
+        // The codec does not impose the particle ceiling on carrier fields.
         World(.7f);
         int node=10*r.AirWidth+10, count=r.AirWidth*r.AirHeight;
         var carrier=new AirCell[count];
@@ -207,8 +206,12 @@ internal static class SceneFileRegressionVerifier
         byte[] transported=AirInventoryRegressionVerifier.Read(r,r.AirThermal.Buffer);
         var depleted=MemoryMarshal.Cast<byte,System.Numerics.Vector2>(transported)[node];
         Console.WriteLine(FormattableString.Invariant($"PHYXEL_SCENE_FILES_HOT_AIR E={depleted.X:R} C={depleted.Y:R} K={depleted.X/depleted.Y:R}"));
-        Check(depleted.X>0&&depleted.Y>0&&float.IsFinite(depleted.X/depleted.Y)&&depleted.X/depleted.Y>5273.16f,
-            "Fixture did not reproduce out-of-range carrier temperature.");
+        Check(depleted.X>0&&depleted.Y>0&&float.IsFinite(depleted.X/depleted.Y)&&depleted.X/depleted.Y<=5000.1f,
+            "New transport still creates out-of-range carrier temperature.");
+        // Preserve compatibility with scenes saved before the CFL repair.
+        thermal[node]=new(117.50018f,1.013279e-6f);
+        r.Context.UpdateSubresource(thermal,r.AirThermal.Buffer);
+        transported=AirInventoryRegressionVerifier.Read(r,r.AirThermal.Buffer);
         next=Path.Combine(dir,"Перегретый воздух.json");Action(true,saveAs:true);Complete();
         Check(Get<string>("transientStatus").StartsWith("Сохранено:"),"GPU hot-air save failed: "+Get<string>("transientStatus"));
         var hotWorld=System.Threading.Tasks.Task.Run(()=>serializer.LoadAsync(next,registry)).GetAwaiter().GetResult()!.World!;

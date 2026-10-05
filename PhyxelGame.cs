@@ -361,7 +361,9 @@ public sealed class PhyxelGame : Game
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_HANDOFF") == "1")
         {
             InactiveSleepTime = TimeSpan.Zero;
-            oilSmokeVerification = HandoffRegressionVerifier.Run(dispatchCoordinator, materialRegistry,
+            oilSmokeVerification = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_DRAFT")=="1"
+                ? FurnaceDraftRegressionVerifier.Run(dispatchCoordinator,materialRegistry,settings,fps=>diagnosticFramesPerSecond=fps).GetEnumerator()
+                : HandoffRegressionVerifier.Run(dispatchCoordinator, materialRegistry,
                 settings, temperatureProbe, status => SetStatus(status.Length==0 ? string.Empty : "Автотест: " + status, status.Length==0 ? 0 : 3),
                 path => diagnosticUiCapturePath = path,
                 fps => diagnosticFramesPerSecond=fps).GetEnumerator();

@@ -401,6 +401,27 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             debug = float3(0.25, 0.25, 0.25);
         }
+        // Colours encode magnitudes; arrows also expose the horizontal sign
+        // and the actual route through a furnace. Sample one visible carrier
+        // per 16-pixel tile, and never draw the glyph on solid/liquid cells.
+        uint2 anchor = (coordinate / 16) * 16 + 10;
+        uint2 vectorNode = min(anchor / AirCellSize,uint2(airWidth-1,airHeight-1));
+        AirCell vectorAir = AirField[vectorNode.y*airWidth+vectorNode.x];
+        float2 velocity = float2(vectorAir.VelocityX,vectorAir.VelocityY);
+        float speed = length(velocity);
+        GridCell atPixel = Grid[FlattenCoordinate(coordinate)];
+        bool gasPixel = atPixel.IsActive==0 || Materials[atPixel.MaterialIndex].SimulationKind==SimulationKindGas;
+        if(vectorAir.Blocked<=.5 && speed>.05 && gasPixel)
+        {
+            float2 axis=velocity/speed;
+            float2 local=float2(coordinate)-float2(anchor);
+            float along=dot(local,axis),across=dot(local,float2(-axis.y,axis.x));
+            float halfLength=2+2*saturate(log2(1+speed*4)/3);
+            bool shaft=abs(across)<.6 && along>=-halfLength && along<=halfLength;
+            float head=halfLength-along;
+            bool arrow=head>=0 && head<=2 && abs(abs(across)-head)<.6;
+            if(shaft||arrow)debug=lerp(debug,float3(.9,.94,1),.85);
+        }
         OutputTexture[coordinate] = FilterOverlay(coordinate,float4(debug,1));
         return;
     }

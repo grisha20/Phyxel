@@ -401,7 +401,9 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
     // ordinary metal. The y axis grows downward, so rising air is negative.
     float2 thermal = AirThermal[index];
     float carrierOverheat = thermal.y > 1e-8 ? max(0, thermal.x / thermal.y - 273.15 - AirAmbientTemperature) : 0;
-    float convection = min(AirConvectionMaximum,
+    // Finite stock carries chimney heat even after the flame has decayed.
+    // Calibrate the whole heated circuit, not just the local particle plume.
+    float convection = min(AirSandboxMode != 0 ? AirConvectionMaximum : 0.08,
         (AirSandboxMode != 0 ? meanOverheat : carrierOverheat) / AirConvectionDivisor);
     convection *= transientCount>0 ? AirTransientConvectionGain : 1.0;
     cell.VelocityY = clamp(
@@ -413,7 +415,9 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
     // summing repeated moves whose particles have already left this air node.
     // Air is one carrier volume. Per-particle drag is proportional to loading;
     // the ambient loss acts once on that volume, not once per drawn pixel.
-    float retained = gasCount > 0 ? pow(airLossProduct, 1.0 / float(gasCount)) : 1.0;
+    // Include empty slots (loss=1) in the volume average. A single smoke
+    // packet must not damp the entire 4x4 volume like sixteen packets.
+    float retained = gasCount > 0 ? pow(airLossProduct, 1.0 / float(counted)) : 1.0;
     // FIRE/SMKE's additive advection has a steady wind gain of 0.9/(1-.2).
     // With sixteen packets, summed slip drag feeds that gain back sixteen
     // times while volume loss acts once: .97 + .64 * .125 > 1. Unlimited

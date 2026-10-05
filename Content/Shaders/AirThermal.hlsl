@@ -27,7 +27,9 @@ bool Connected(int2 p, int2 d)
     return (Links[Index(p)] & (1u << uint((d.y+1)*3+d.x+1))) != 0 &&
         (Links[Index(q)] & (1u << uint((1-d.y)*3+1-d.x))) != 0;
 }
-float T(int2 p) { float2 s=Thermal[Index(p)]; return s.y>1e-8?s.x/s.y:HeatAmbient+273.15; }
+// A small positive stock still has its actual temperature. Substituting the
+// ambient below an epsilon transports it with the wrong specific energy.
+float T(int2 p) { float2 s=Thermal[Index(p)]; return s.y>0?s.x/s.y:HeatAmbient+273.15; }
 // Surface ownership adds a one-pixel halo to the gas stencil. Every fine
 // cell has one owner per step, including faces on either side of thin walls.
 groupshared uint ExchangeOwner[39*39];
@@ -135,11 +137,13 @@ float2 LimitFace(float2 f,float2 a,float2 b)
         float2 outgoing=max(0,RawFaces[raw].xy)+max(0,-RawFaces[raw-1].xy)+
             max(0,RawFaces[raw].zw)+max(0,-RawFaces[raw-12].zw);
         float2 state=Inside(q)?Thermal[Index(q)]:0;
-        // Leave a one-part-per-million reserve when a donor is exhausted.
-        // Four rounded face sums can otherwise subtract a few ulps more than
-        // the stock (also present in the uncached solver). Limit the shared
-        // flux, rather than clamp the transported state and create energy.
-        DonorLimits[k]=min(1,.999999*state.yx/max(outgoing,1e-20));
+        // Reserve half the transported capacity (multidimensional CFL).
+        // Advection can otherwise empty C while opposing thermal diffusion
+        // leaves E behind: finite stocks acquire arbitrarily large E/C.
+        // Four .025 diffusion faces
+        // fit inside this reserve. Both endpoints limit the same face, so
+        // neither energy nor capacity is clipped out of the closed system.
+        DonorLimits[k]=min(1,float2(.5,.999999)*state.yx/max(outgoing,1e-20));
     }
     GroupMemoryBarrierWithGroupSync();
     int2 p=int2(id.xy); if (!Inside(p)) return;
