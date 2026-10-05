@@ -8,6 +8,7 @@ public static class Program
     [STAThread]
     public static void Main()
     {
+        if(Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FILTER_MODEL")=="1"){Environment.ExitCode=FilterModelRegressionVerifier.Run();return;}
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_GAS_BRUSH") == "1")
         {
             Environment.ExitCode = GasBrushQueueRegressionVerifier.Run();

@@ -103,6 +103,7 @@ public sealed class SandboxUiCoordinator : IDisposable
         }
     }
 
+    public bool FilterToolActive => leftToolbar.ActiveTool == PhyxelToolId.Filter;
     public bool TemperatureToolActive => leftToolbar.ActiveTool == PhyxelToolId.Temperature;
     public bool PanToolActive => leftToolbar.ActiveTool == PhyxelToolId.Pan;
     public float TargetTemperature => propertiesPanel.TargetTemperature;
@@ -173,7 +174,8 @@ public sealed class SandboxUiCoordinator : IDisposable
         if (newlySelected.HasValue)
         {
             SelectedMaterial = newlySelected.Value;
-            leftToolbar.ActiveTool = PhyxelToolId.Brush;
+            if(FilterToolActive)settings.FilterSelection=FilterSelection.SelectedMaterial;
+            else leftToolbar.ActiveTool = PhyxelToolId.Brush;
         }
 
         bool topConsumed = currentLayout.TopBar.Contains(input.MousePosition);
@@ -304,7 +306,7 @@ public sealed class SandboxUiCoordinator : IDisposable
         Rectangle bounds = new(pointer.X - diameter / 2, pointer.Y - diameter / 2, diameter, diameter);
 
         bool erasing = eraseOverride ||
-            (!TemperatureToolActive &&
+            (!TemperatureToolActive && !FilterToolActive &&
             (MaterialSimulationKind)materialRegistry[SelectedMaterial].Properties.SimulationKind ==
                 MaterialSimulationKind.Tool);
 
@@ -314,7 +316,9 @@ public sealed class SandboxUiCoordinator : IDisposable
         // Пара контрастных колец читается на любом фоне без инверсии цвета.
         Color inner = erasing
             ? new Color(255, 150, 150, 230)
-            : TemperatureToolActive
+            : FilterToolActive
+                ? new Color(100,200,255,230)
+                : TemperatureToolActive
                 ? new Color(255, 200, 150, 230)
                 : new Color(235, 245, 255, 225);
         Color outer = new(8, 10, 14, 220);

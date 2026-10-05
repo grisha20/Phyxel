@@ -74,6 +74,33 @@ internal static class BodyBalanceRegressionVerifier
             File.WriteAllBytes(Path.Combine(dir,$"overhang-{body}-{fps}.grid"),MemoryMarshal.AsBytes(moved.AsSpan()).ToArray());
             if(fps==60)File.WriteAllBytes(Path.Combine(dir,$"overhang-{body}-before.grid"),MemoryMarshal.AsBytes(g.AsSpan()).ToArray());
         }
+        // A support blocks translation, so crossing this row requires a turn.
+        // Counterfactual without the overlay must topple into the lower region.
+        foreach (bool filtered in new[] { false, true })
+        {
+            settings.SolidGravity = false;
+            var g = Scene(ice, 0, true);
+            Start(g);
+            if (filtered)
+            {
+                var map = new uint[n];
+                uint steam = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
+                for (int x = 81; x < 379; x++) map[128 * w + x] = steam + 1;
+                serializer.ApplyWorldSnapshot(r, new(w, h, MemoryMarshal.AsBytes(g.AsSpan()).ToArray(),
+                    Filters: MemoryMarshal.AsBytes(map.AsSpan()).ToArray()));
+                coordinator.RestoreWorldActivity(r, true, true, false);
+                r.Materials.Upload(r.Context, table);
+            }
+            Advance(60, 2);
+            var moved = Read();
+            Audit(g, moved, "filter rotation");
+            int beyond = Enumerable.Range(128 * w, n - 128 * w)
+                .Count(i => moved[i].IsActive != 0 && moved[i].MaterialIndex == ice);
+            double slope = Shape(moved, ice).slope;
+            Check(filtered ? beyond == 0 : beyond > 0 && slope > .15, "filter blocks rotation " + filtered);
+            results.Add(new { test = "filter-overhang", filtered, beyond, slope });
+            Console.WriteLine($"PHYXEL_BB_FILTER filtered={filtered} beyond={beyond} slope={slope:F4}");
+        }
         foreach(uint body in new[]{ice,metal}){
             settings.SolidGravity=body==metal;var g=Scene(body,0,true,true);Start(g);Advance(60,2);var settled=Read();Audit(g,settled,"wide support");
             Check(Math.Abs(Shape(settled,body).slope)<.01,"wide support stable "+body);

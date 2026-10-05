@@ -17,6 +17,10 @@ public sealed class UiPropertiesPanel
     private readonly System.Collections.Generic.Dictionary<string, (float Temperature, float Power)> devicePreferences = new();
     private string? selectedDeviceId;
     private int deviceHintY;
+    private readonly UiIconButton filterSelector = new("Только пар");
+    private int filterHintY;
+    internal Rectangle FilterSelectorBounds => filterSelector.Bounds;
+    internal string FilterSelectorLabel => filterSelector.Label;
     internal Rectangle DeviceTemperatureBounds => deviceTemperatureSlider.Bounds;
     internal Rectangle DevicePowerBounds => devicePowerSlider.Bounds;
     public float DeviceTargetTemperature => deviceTemperatureSlider.Value;
@@ -77,10 +81,11 @@ public sealed class UiPropertiesPanel
     internal Rectangle AirFieldToggleBounds => airFieldToggle.Bounds;
     internal Rectangle BoundariesToggleBounds => boundariesToggle.Bounds;
     internal Rectangle WithoutEffectsToggleBounds => withoutEffectsToggle.Bounds;
+
     internal static bool ShowsDensity(PhyxelToolId tool) => tool == PhyxelToolId.Brush;
     internal static bool ShowsTemperature(PhyxelToolId tool) => tool == PhyxelToolId.Temperature;
     internal static bool ShowsBrushControls(PhyxelToolId tool) =>
-        tool is PhyxelToolId.Brush or PhyxelToolId.Eraser or PhyxelToolId.Temperature;
+        tool is PhyxelToolId.Brush or PhyxelToolId.Eraser or PhyxelToolId.Temperature or PhyxelToolId.Filter;
 
     public void Update(
         RawInputSnapshot input,
@@ -127,7 +132,7 @@ public sealed class UiPropertiesPanel
             materialCardBounds = new Rectangle(innerX, cursorY, innerWidth, cardHeight);
             cursorY = materialCardBounds.Bottom + (compact ? 8 : 12);
         }
-        if (compactDevice)
+        if (compactDevice || (compact && activeTool==PhyxelToolId.Filter))
         {
             // Device controls have an extra slider; show the selected device
             // in the section title instead of spending another card row.
@@ -151,6 +156,18 @@ public sealed class UiPropertiesPanel
             brushSlider.CancelDrag();
         }
 
+        filterSelector.Bounds=Rectangle.Empty;filterHintY=0;
+        if(activeTool==PhyxelToolId.Filter){
+            filterSelector.Bounds=new Rectangle(innerX,cursorY,innerWidth,Math.Clamp(font.LineSpacing+16,36,52));
+            if(filterSelector.Update(input))settings.FilterSelection=(FilterSelection)(((int)settings.FilterSelection+1)%7);
+            filterSelector.Label=FilterRules.Label(settings.FilterSelection,selectedMaterial.Name);
+            if(settings.FilterSelection==FilterSelection.SelectedMaterial &&
+               (MaterialSimulationKind)selectedMaterial.Properties.SimulationKind is not
+                   (MaterialSimulationKind.Gas or MaterialSimulationKind.Liquid or MaterialSimulationKind.Granular))
+                filterSelector.Label="Закрытый фильтр";
+            filterSelector.Label = UiCategoryPalette.TruncateToWidth(font, filterSelector.Label, Math.Max(1, innerWidth - 24));
+            cursorY=filterSelector.Bounds.Bottom+6;filterHintY=cursorY;cursorY+=Math.Max(16,(int)(font.LineSpacing*.65f))+8;
+        }
         deviceHintY = 0;
         if (showDevice)
         {
@@ -313,6 +330,10 @@ public sealed class UiPropertiesPanel
         DrawSectionLabel(spriteBatch, font, activeTool == PhyxelToolId.Pan ? "КАМЕРА" : materialCardBounds == Rectangle.Empty && selectedMaterial.ThermalRegulator is not null && activeTool == PhyxelToolId.Brush ? selectedMaterial.Name.ToUpperInvariant() : "ПАРАМЕТРЫ ИНСТРУМЕНТА",
             bounds.X + 14, toolParametersHeaderY, 0.68f);
         if (ShowsBrushControls(activeTool)) brushSlider.Draw(spriteBatch, font, backdrop, pixel);
+        if(activeTool==PhyxelToolId.Filter){
+            filterSelector.Draw(spriteBatch,font,backdrop,pixel,iconCache);
+            spriteBatch.DrawString(font,"ЛКМ — нанести · ПКМ — снять",new Vector2(bounds.X+14,filterHintY),UiTheme.TextMuted,0,Vector2.Zero,.65f,SpriteEffects.None,0);
+        }
         if (activeTool == PhyxelToolId.Brush && selectedMaterial.ThermalRegulator is not null)
         {
             deviceTemperatureSlider.Draw(spriteBatch, font, backdrop, pixel);
@@ -371,6 +392,7 @@ public sealed class UiPropertiesPanel
             PhyxelToolId.Brush => "Кисть",
             PhyxelToolId.Eraser => "Ластик",
             PhyxelToolId.Temperature => "Температура",
+            PhyxelToolId.Filter => "Фильтр",
             PhyxelToolId.Pan => "Камера / панорама",
             _ => "Инструмент"
         };
@@ -379,6 +401,7 @@ public sealed class UiPropertiesPanel
             PhyxelToolId.Brush => "brush",
             PhyxelToolId.Eraser => "eraser",
             PhyxelToolId.Temperature => "temperature",
+            PhyxelToolId.Filter => "settings",
             _ => "pan"
         };
         int iconSize = Math.Clamp(toolCardBounds.Height - 18, 24, 32);

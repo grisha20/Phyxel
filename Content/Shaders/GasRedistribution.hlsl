@@ -292,6 +292,9 @@ void ResolveContinuumPair(
 {
     GridCell first = Grid[firstIndex];
     GridCell second = Grid[secondIndex];
+    if(!FilterPathAllows(firstIndex,secondIndex,first.MaterialIndex,Materials[first.MaterialIndex].SimulationKind,Width) ||
+       !FilterPathAllows(secondIndex,firstIndex,second.MaterialIndex,Materials[second.MaterialIndex].SimulationKind,Width))return;
+
     bool firstGas = IsContinuumGas(first);
     bool secondGas = IsContinuumGas(second);
     bool firstEmpty = first.IsActive == 0;

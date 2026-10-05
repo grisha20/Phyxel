@@ -16,7 +16,8 @@ public enum PhyxelToolId
     Rectangle,
     Circle,
     Fill,
-    Eyedropper
+    Eyedropper,
+    Filter
 }
 
 public sealed record ToolDefinition(
@@ -33,6 +34,7 @@ public sealed class UiLeftToolbar
         new(PhyxelToolId.Brush, "brush", "Кисть", true, "Обычное рисование материалом"),
         new(PhyxelToolId.Eraser, "eraser", "Ластик", true, "Стирание элементов"),
         new(PhyxelToolId.Temperature, "temperature", "Температура", true, "Изменение температуры"),
+        new(PhyxelToolId.Filter, "settings", "Фильтр", true, "ЛКМ — фильтр, ПКМ — снять; выбор справа"),
         new(PhyxelToolId.Line, "line", "Линия", false, "Скоро"),
         new(PhyxelToolId.Rectangle, "rectangle", "Прямоугольник", false, "Скоро"),
         new(PhyxelToolId.Circle, "circle", "Круг", false, "Скоро"),

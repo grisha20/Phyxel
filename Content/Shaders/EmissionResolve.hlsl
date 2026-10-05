@@ -48,6 +48,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         return;
     }
+    if(!FilterPathAllows(request.SourceIndex&0x1fffffffu,destinationIndex,request.MaterialIndex,SimulationKindGas,EmissionWidth))return;
     destination.MaterialIndex = request.MaterialIndex;
     destination.Mass = min(product.Density, max(0, request.Mass));
     destination.VelocityX = 0;

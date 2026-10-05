@@ -40,6 +40,8 @@ public static class UiLayoutRegressionTests
         TestSceneSaveActions(coordinator);
         TestPanelControlBounds(registry, fonts);
         TestDeviceControlBounds(registry, fonts);
+        TestFilterControls(registry,fonts);
+        TestFilterPaletteSelection(registry, fonts, coordinator);
         TestPropertiesActions(registry, fonts);
         TestToolAndMaterialPersistence(registry, fonts, coordinator);
         TestCategoryFiltering(registry, coordinator);
@@ -325,6 +327,70 @@ public static class UiLayoutRegressionTests
             }
         }
         Console.WriteLine("[PASS] Tool and property controls stay inside panels for every resolution/DPI.");
+    }
+
+    private static void TestFilterControls(MaterialRegistry registry,UiFontSet fonts)
+    {
+        foreach(var (width,height) in Resolutions)foreach(float dpi in DpiScales){
+            var layout=UiLayoutCalculator.Calculate(new Viewport(0,0,width,height),dpi);
+            var font=fonts.Select(dpi,layout.Scale);var panel=new UiPropertiesPanel();var settings=new SimulationSettings();
+            panel.Update(Input(new Point(-1,-1)),layout.RightPanel,font,settings,PhyxelToolId.Filter,registry[CoreMaterialIds.Sand],out _);
+            Rectangle[] controls=[panel.FilterSelectorBounds,panel.BrushSliderBounds,panel.ScaleSliderBounds,panel.ClearButtonBounds,panel.ResetButtonBounds,
+                panel.SandboxModeBounds,panel.SimulationModeBounds,panel.GravityToggleBounds,panel.HydraulicsToggleBounds,
+                panel.WithoutEffectsToggleBounds,panel.BoundariesToggleBounds,panel.AirFieldToggleBounds];
+            foreach(var bounds in controls)Require(IsInside(bounds,layout.RightPanel),$"Filter control escaped {width}/{height}/{dpi}: {bounds}");
+            for(int a=0;a<controls.Length;a++)for(int b=a+1;b<controls.Length;b++)Require(!controls[a].Intersects(controls[b]),"Filter controls overlap");
+            for(int i=0;i<7;i++){
+                panel.Update(Input(panel.FilterSelectorBounds.Center,leftDown:true,leftPressed:true),layout.RightPanel,font,settings,PhyxelToolId.Filter,registry[CoreMaterialIds.Sand],out _);
+                Require((int)settings.FilterSelection==(i+1)%7,"Filter selector cycle");
+                Require(font.MeasureString(panel.FilterSelectorLabel).X<=panel.FilterSelectorBounds.Width-24,"Filter label escaped button");
+                panel.Update(Input(new Point(-1,-1)),layout.RightPanel,font,settings,PhyxelToolId.Filter,registry[CoreMaterialIds.Sand],out _);
+            }
+            settings.FilterSelection=FilterSelection.SelectedMaterial;
+            foreach(var material in registry.Materials){
+                panel.Update(Input(new Point(-1,-1)),layout.RightPanel,font,settings,PhyxelToolId.Filter,material,out _);
+                Require(font.MeasureString(panel.FilterSelectorLabel).X<=panel.FilterSelectorBounds.Width-24,"Selected filter label escaped button");
+            }
+        }
+        var brush=new CanvasBrushController();var state=new SimulationSettings();var canvas=new Rectangle(0,0,480,270);
+        var commands=brush.CreateCommands(Input(canvas.Center,leftDown:true,leftPressed:true),canvas,state,0,true,false,20,false,filterTool:true,filterRule:FilterRules.Gas);
+        Require(commands.Count==1&&commands[0].Mode==BrushCommandMode.Filter&&commands[0].Reserved==FilterRules.Gas,"Filter brush mode");
+        commands=brush.CreateCommands(Input(canvas.Center) with {RightDown=true},canvas,state,0,true,false,20,false,filterTool:true,filterRule:FilterRules.Gas);
+        Require(commands.Count==1&&commands[0].Mode==BrushCommandMode.Filter&&commands[0].Reserved==0,"Filter removal preserves particles");
+        Console.WriteLine("[PASS] Filter selector, brush/removal and 12 resolution/DPI layouts.");
+    }
+
+    private static void TestFilterPaletteSelection(
+        MaterialRegistry registry, UiFontSet fonts, SandboxUiCoordinator coordinator)
+    {
+        var viewport = new Viewport(0, 0, 1280, 720);
+        var layout = UiLayoutCalculator.Calculate(viewport, 1f);
+        var settings = new SimulationSettings();
+        ushort previousMaterial = coordinator.SelectedMaterial;
+        var previousTool = coordinator.ActiveTool;
+        var previousCategory = coordinator.CategoryPalette.ActiveCategory;
+        coordinator.ActiveTool = PhyxelToolId.Brush;
+        coordinator.SelectedMaterial = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
+        var toolbar = new UiLeftToolbar();
+        var font = fonts.Select(1f, layout.Scale);
+        var filter = toolbar.GetToolBounds(layout.LeftToolbar, font, PhyxelToolId.Filter);
+        coordinator.Update(Input(filter.Center, leftDown: true, leftPressed: true), viewport, 1f, settings);
+        Require(coordinator.FilterToolActive, "Filter toolbar button did not activate tool.");
+        var liquidsTab = coordinator.CategoryPalette.GetCategoryTabBounds(layout.BottomPalette, MaterialCategoryType.Liquids);
+        coordinator.Update(Input(liquidsTab.Center, leftDown: true, leftPressed: true), viewport, 1f, settings);
+        Require(settings.FilterSelection == FilterSelection.Steam, "Category changed filter preset.");
+        ushort expected = coordinator.CategoryPalette.ActiveMaterials[0].RuntimeIndex;
+        var firstCardPoint = new Point(layout.BottomPalette.X + 70, liquidsTab.Bottom + 24);
+        coordinator.Update(Input(firstCardPoint, leftDown: true, leftPressed: true), viewport, 1f, settings);
+        Require(coordinator.FilterToolActive && coordinator.SelectedMaterial == expected &&
+            settings.FilterSelection == FilterSelection.SelectedMaterial,
+            "Palette must retain Filter tool and select an exact material rule.");
+        Require(coordinator.BlocksBrushInput, "Palette selection leaked a canvas stroke.");
+        coordinator.SelectedMaterial = previousMaterial;
+        coordinator.ActiveTool = previousTool;
+        var restoreTab = coordinator.CategoryPalette.GetCategoryTabBounds(layout.BottomPalette, previousCategory);
+        coordinator.Update(Input(restoreTab.Center, leftDown: true, leftPressed: true), viewport, 1f, settings);
+        Console.WriteLine("[PASS] Filter toolbar activation and exact material selection through palette.");
     }
 
     private static void TestPropertiesActions(MaterialRegistry registry, UiFontSet fonts)

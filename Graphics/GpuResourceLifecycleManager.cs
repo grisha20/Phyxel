@@ -468,6 +468,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             SolidRotationPlans = solidRotationPlans,
             PathBlockerMasks = pathBlockerMasks,
             CellMaterials = cellMaterials,
+            Filters = new GpuStructuredBuffer<uint>(Device, width * height + 1),
+            FilterMap = new uint[width*height],
             WaterPressureRoutes = waterPressureRoutes,
             WaterPressureRouteScratch = waterPressureRouteScratch,
             Statistics = statistics,

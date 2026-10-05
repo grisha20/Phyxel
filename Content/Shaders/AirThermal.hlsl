@@ -16,6 +16,7 @@ RWStructuredBuffer<float4> Flux : register(u2); // right capacity/energy, down c
 #define FineAirMaterialAt(p) Grid[uint((p).y) * HeatGridWidth + uint((p).x)].MaterialIndex
 #define FineAirMaterials Materials
 #define FineAirBlockGranular true
+#define FineAirIgnoreFilters
 #include "FineAirGeometry.hlsli"
 bool Inside(int2 p) { return all(p >= 0) && p.x < int(HeatWidth) && p.y < int(HeatHeight); }
 uint Index(int2 p) { return uint(p.y) * HeatWidth + uint(p.x); }

@@ -122,6 +122,7 @@ void ProposeEmission(
     {
         return;
     }
+    if(!FilterPathAllows(sourceIndex,destinationIndex,productIndex,SimulationKindGas,CombustionWidth))return;
     bool discreteFlame = (product.Flags & MaterialFlagFlame) != 0;
     if (discreteFlame)
     {
@@ -211,7 +212,7 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
                 int2 p=int2(x,y)+offsets[k];
                 if (p.x<0 || p.y<0 || p.x>=int(width) || p.y>=int(height)) continue;
                 uint target=uint(p.y)*width+uint(p.x);
-                if (Grid[target].IsActive==0) { flameDestination=target; break; }
+                if (Grid[target].IsActive==0 && FilterPathAllows(sourceIndex,target,emission.FlameIntoMaterialIndex,SimulationKindGas,width)) { flameDestination=target; break; }
             }
         }
 
@@ -222,12 +223,12 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
         {
             int flameX = clamp(int(x) + horizontal, 0, int(width) - 1);
             candidate = (y - 1) * width + uint(flameX);
-            if (Grid[candidate].IsActive == 0) flameDestination = candidate;
+            if (Grid[candidate].IsActive == 0 && FilterPathAllows(sourceIndex,candidate,emission.FlameIntoMaterialIndex,SimulationKindGas,width)) flameDestination = candidate;
         }
         if (flameDestination == sourceIndex && y > 0)
         {
             candidate = sourceIndex - width;
-            if (Grid[candidate].IsActive == 0) flameDestination = candidate;
+            if (Grid[candidate].IsActive == 0 && FilterPathAllows(sourceIndex,candidate,emission.FlameIntoMaterialIndex,SimulationKindGas,width)) flameDestination = candidate;
         }
         if (flameDestination == sourceIndex)
         {
@@ -235,19 +236,19 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
             if (sideX >= 0 && sideX < int(width))
             {
                 candidate = y * width + uint(sideX);
-                if (Grid[candidate].IsActive == 0) flameDestination = candidate;
+                if (Grid[candidate].IsActive == 0 && FilterPathAllows(sourceIndex,candidate,emission.FlameIntoMaterialIndex,SimulationKindGas,width)) flameDestination = candidate;
             }
         }
         if (flameDestination == sourceIndex && y + 1 < height)
         {
             int flameX = clamp(int(x) + horizontal, 0, int(width) - 1);
             candidate = (y + 1) * width + uint(flameX);
-            if (Grid[candidate].IsActive == 0) flameDestination = candidate;
+            if (Grid[candidate].IsActive == 0 && FilterPathAllows(sourceIndex,candidate,emission.FlameIntoMaterialIndex,SimulationKindGas,width)) flameDestination = candidate;
         }
         if (flameDestination == sourceIndex && y + 1 < height)
         {
             candidate = sourceIndex + width;
-            if (Grid[candidate].IsActive == 0) flameDestination = candidate;
+            if (Grid[candidate].IsActive == 0 && FilterPathAllows(sourceIndex,candidate,emission.FlameIntoMaterialIndex,SimulationKindGas,width)) flameDestination = candidate;
         }
         if (flameDestination != sourceIndex)
         {
@@ -272,6 +273,7 @@ float2 OxidizerAt(uint index)
 
 float2 AvailableOxidizer(uint2 p)
 {
+    if(!FilterAirAllows(p.y*CombustionWidth+p.x))return 0;
     uint i = p.y * CombustionWidth + p.x;
     float2 sum = 0;
     if (p.x > 0) sum += OxidizerAt(i - 1);

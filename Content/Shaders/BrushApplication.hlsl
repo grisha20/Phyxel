@@ -17,6 +17,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     BrushDrawCommand command = Commands[commandIndex];
+    if(command.Mode==4)return;
     int radius = int(ceil(command.Radius));
     int2 start = int2(command.X, command.Y);
     int2 end = command.Shape == BrushCommandShapeSegment
@@ -52,6 +53,8 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     // scattered gaps visible right through the finished bar.
     // The Powder Toy has no density control at all; its brush always fills.
     MaterialProperties brushMaterial = Materials[command.MaterialIndex];
+    if((command.Mode==BrushCommandModeMaterial || command.Mode==BrushCommandModeThermalDevice) &&
+       !FilterAllows(index,command.MaterialIndex,brushMaterial.SimulationKind))return;
     bool solidStructure = brushMaterial.SimulationKind == SimulationKindSolid;
     if (command.Mode == BrushCommandModeMaterial && !insideStrokeCore && !solidStructure &&
         HashUnitFloat(index ^ command.Seed ^ FrameIndex) > command.Density)

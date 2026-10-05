@@ -57,6 +57,7 @@ internal static class CanvasWorldExpansion
             Pad(source.Oxidizer,source.Width,source.Height,size.X,size.Y,top,4,oxygen),
             Pad(source.AirThermal,aw,ah,nw,nh,top/4,8,heat),
             Pad(source.ReactionPending,source.Width,source.Height,size.X,size.Y,top,16),
-            Pad(source.ReactionPulse,aw,ah,nw,nh,top/4,16));
+            Pad(source.ReactionPulse,aw,ah,nw,nh,top/4,16),
+            Pad(source.Filters,source.Width,source.Height,size.X,size.Y,top,4));
     }
 }

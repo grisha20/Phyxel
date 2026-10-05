@@ -132,7 +132,7 @@ public sealed class PhyxelGame : Game
                 TargetElapsedTime = TimeSpan.FromSeconds(1d / targetFramesPerSecond);
             }
         }
-        if((Environment.GetEnvironmentVariable("PHYXEL_VERIFY_HANDOFF")=="1" || Environment.GetEnvironmentVariable("PHYXEL_VERIFY_ABSORPTION")=="1"))
+        if((Environment.GetEnvironmentVariable("PHYXEL_VERIFY_HANDOFF")=="1" || Environment.GetEnvironmentVariable("PHYXEL_VERIFY_ABSORPTION")=="1" || Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FILTERS")=="1"))
         {
             graphics.SynchronizeWithVerticalRetrace=false;
             IsFixedTimeStep=false;
@@ -344,6 +344,11 @@ public sealed class PhyxelGame : Game
             oilSmokeVerification = LiquidLayersRegressionVerifier.Run(dispatchCoordinator, materialRegistry,
                 settings, status => SetStatus("Автотест: " + status)).GetEnumerator();
         }
+        if(Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FILTERS")=="1"){
+            InactiveSleepTime=TimeSpan.Zero;
+            oilSmokeVerification=FilterRegressionVerifier.Run(dispatchCoordinator,materialRegistry,settings,fps=>diagnosticFramesPerSecond=fps).GetEnumerator();
+            IsFixedTimeStep=false; return;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_ABSORPTION") == "1")
         {
             oilSmokeVerification=AbsorptionRegressionVerifier.Run(dispatchCoordinator,materialRegistry,fps=>diagnosticFramesPerSecond=fps).GetEnumerator();
@@ -417,6 +422,9 @@ public sealed class PhyxelGame : Game
             var tab = userInterface.CategoryPalette.GetCategoryTabBounds(layout.BottomPalette, MaterialCategoryResolver.Resolve(preview));
             var click = default(RawInputSnapshot) with { MousePosition = tab.Center, LeftDown = true, LeftPressed = true };
             userInterface.CategoryPalette.Update(click, layout.BottomPalette, preview.RuntimeIndex, false, out _);
+        }
+        if(Enum.TryParse<FilterSelection>(Environment.GetEnvironmentVariable("PHYXEL_UI_PREVIEW_FILTER"),out var previewFilter)){
+            userInterface.ActiveTool=PhyxelToolId.Filter;settings.FilterSelection=previewFilter;
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_UI") == "1")
         {
@@ -575,7 +583,8 @@ public sealed class PhyxelGame : Game
                 userInterface.BlocksBrushInput,
                 materialRegistry[userInterface.SelectedMaterial].ThermalRegulator is not null,
                 userInterface.DeviceTargetTemperature,
-                userInterface.DeviceMaximumPower);
+                userInterface.DeviceMaximumPower,
+                userInterface.FilterToolActive,FilterRules.Select(settings.FilterSelection,materialRegistry,userInterface.SelectedMaterial));
         try
         {
             uint acceptanceFrame = frameIndex;
@@ -835,7 +844,7 @@ public sealed class PhyxelGame : Game
     {
         Width = source.Width, Height = source.Height, Scale = source.Scale,
         Gravity = source.Gravity, BrushRadius = source.BrushRadius, SpawnDensity = source.SpawnDensity,
-        Paused = source.Paused, SolidGravity = source.SolidGravity, HydraulicPressure = source.HydraulicPressure,
+        Paused = source.Paused, FilterSelection = source.FilterSelection, SolidGravity = source.SolidGravity, HydraulicPressure = source.HydraulicPressure,
         OpenBoundaries = source.OpenBoundaries, Mode = source.Mode,
         AirSimulation = source.AirSimulation, ShowAirField = source.ShowAirField,
         RenderWithoutEffects = source.RenderWithoutEffects
@@ -996,7 +1005,7 @@ public sealed class PhyxelGame : Game
                 settings.Height=loaded.World.Height;
                 bool containsMatter = SimulationStateSerializer.ContainsMatter(loaded.World);
                 bool preserveOxidizer = loaded.World.Oxidizer is { Length: > 0 } || loaded.World.AirThermal is { Length: > 0 };
-                currentResources = resourceManager.CreateOrResize(settings, containsMatter || preserveOxidizer);
+                currentResources = resourceManager.CreateOrResize(settings, containsMatter || preserveOxidizer || loaded.World.Filters is {Length:>0});
                 stateSerializer.ApplyWorldSnapshot(currentResources, loaded.World);
                 dispatchCoordinator?.RestoreWorldActivity(
                     currentResources,
@@ -1121,7 +1130,7 @@ public sealed class PhyxelGame : Game
         settings.Width=expanded.Width;settings.Height=expanded.Height;
         bool matter=SimulationStateSerializer.ContainsMatter(expanded);
         bool fields=expanded.Oxidizer is {Length:>0}||expanded.AirThermal is {Length:>0};
-        currentResources=resourceManager.CreateOrResize(settings,matter||fields);
+        currentResources=resourceManager.CreateOrResize(settings,matter||fields||expanded.Filters is {Length:>0});
         stateSerializer.ApplyWorldSnapshot(currentResources,expanded);
         dispatchCoordinator.RestoreWorldActivity(currentResources,matter,
             SimulationStateSerializer.ContainsContactTransitionSource(expanded,materialRegistry),settings.HydraulicPressure,fields);

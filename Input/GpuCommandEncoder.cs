@@ -19,7 +19,7 @@ public sealed class GpuCommandEncoder
             if (command.Mode is not (
                 BrushCommandMode.Material or
                 BrushCommandMode.Erase or
-                BrushCommandMode.SetTemperature or BrushCommandMode.ThermalDevice))
+                BrushCommandMode.SetTemperature or BrushCommandMode.ThermalDevice or BrushCommandMode.Filter))
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(source),

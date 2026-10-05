@@ -429,7 +429,8 @@ public enum BrushCommandMode : uint
     Material = 0,
     Erase = 1,
     SetTemperature = 2,
-    ThermalDevice = 3
+    ThermalDevice = 3,
+    Filter = 4
 }
 
 public enum BrushCommandShape : uint
@@ -448,7 +449,7 @@ public struct BrushDrawCommand
     public float Density;
     public BrushCommandMode Mode;
     public uint Seed;
-    public uint Reserved; // ThermalDevice: IEEE float bits of power; otherwise BodyId.
+    public uint Reserved; // ThermalDevice: IEEE power bits; Filter: permeability rule; otherwise BodyId.
     public float TargetTemperature;
     public int EndX;
     public int EndY;

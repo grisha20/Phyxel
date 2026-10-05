@@ -22,6 +22,7 @@ void MixLiquidRow(uint2 p, uint span)
     GridCell packets[16];
     uint material = WaterGrid[FlattenCoordinate(p)].MaterialIndex;
     if ((Materials[material].Flags & MaterialFlagLiquidConvection) == 0) return;
+    if(!FilterPathAllows(FlattenCoordinate(p),FlattenCoordinate(p+uint2(span-1,0)),material,SimulationKindLiquid,Width))return;
     float minimum = 5000, maximum = -273.15, meanTemperature = 0;
     // All intermediate cells must contain the same liquid and equal mass.
     // Never jump an interior wall, empty pore or oil/water interface.
@@ -68,6 +69,8 @@ void CSMain(uint3 thread : SV_DispatchThreadID)
         a.Mass < 0.99 || b.Mass < 0.99 || c.Mass < 0.99 || d.Mass < 0.99 ||
         abs(a.Mass - b.Mass) > 0.001 || abs(a.Mass - c.Mass) > 0.001 ||
         abs(a.Mass - d.Mass) > 0.001) return;
+
+    if(!FilterPathAllows(tl,br,a.MaterialIndex,SimulationKindLiquid,Width))return;
 
     // Gameplay approximation: warmer water is buoyant. A rotation is allowed
     // only when its upward packet is hotter than its downward packet, so a

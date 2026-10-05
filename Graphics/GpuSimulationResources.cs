@@ -31,6 +31,21 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuStructuredBuffer<BodyRotationPlan> SolidRotationPlans { get; init; }
     public required GpuStructuredBuffer<uint> PathBlockerMasks { get; init; }
     public required GpuStructuredBuffer<uint> CellMaterials { get; init; }
+    public required GpuStructuredBuffer<uint> Filters { get; init; }
+    public required uint[] FilterMap { get; init; }
+    public int FilterCount { get; set; }
+    private uint[]? filterUpload;
+    public void UploadFilters()
+    {
+        // GPU-only summary word avoids ray scans when the entire map is empty.
+        // Saved/CPU maps contain cells only and keep the world v16 layout.
+        filterUpload ??= new uint[FilterMap.Length + 1];
+        filterUpload[0] = (uint)FilterCount;
+        FilterMap.CopyTo(filterUpload, 1);
+        Context.ComputeShader.SetShaderResource(15, null);
+        Context.UpdateSubresource(filterUpload, Filters.Buffer);
+        Context.ComputeShader.SetShaderResource(15, Filters.View);
+    }
     public required GpuStructuredBuffer<WaterPressureRouteData> WaterPressureRoutes { get; init; }
     public required GpuStructuredBuffer<WaterPressureRouteData> WaterPressureRouteScratch { get; init; }
     public required GpuBufferPair<SimulationStatistics> Statistics { get; init; }
@@ -399,7 +414,7 @@ public sealed class GpuSimulationResources : IDisposable
         Statistics.Dispose();
         WaterPressureRouteScratch.Dispose();
         WaterPressureRoutes.Dispose();
-        CellMaterials.Dispose();
+        CellMaterials.Dispose(); Filters.Dispose();
         PathBlockerMasks.Dispose();
         BodyFlags.Dispose();
         SolidBodyMass.Dispose();

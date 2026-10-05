@@ -7,6 +7,9 @@
 bool AirFineBlocked(int2 p)
 {
     if (p.x < 0 || p.y < 0 || p.x >= int(FineAirWidth) || p.y >= int(FineAirHeight)) return true;
+    #ifndef FineAirIgnoreFilters
+    if(!FilterAirAllows(p.y*FineAirWidth+p.x))return true;
+#endif
     uint material = FineAirMaterialAt(p);
     if (material == 0) return false;
     MaterialProperties m = FineAirMaterials[material];

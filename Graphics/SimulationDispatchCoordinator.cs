@@ -423,7 +423,7 @@ public sealed class SimulationDispatchCoordinator
         bool containsMaterialCommand = ContainsMaterialCommand(commands);
         GpuSimulationResources resources = lifecycleManager.CreateOrResize(
             settings,
-            worldHasMatter || thermalActive || containsMaterialCommand || retainOxidizerField);
+            worldHasMatter || thermalActive || containsMaterialCommand || retainOxidizerField || boundResources?.FilterCount>0);
         if (!ReferenceEquals(resources, boundResources))
         {
             Clear(resources);
@@ -456,6 +456,8 @@ public sealed class SimulationDispatchCoordinator
             resources.Context.ClearUnorderedAccessView(resources.AirProjectionB.UnorderedView, new RawInt4());
             previousAirMode = settings.Mode;
         }
+        resources.Context.ComputeShader.SetShaderResource(15,resources.Filters.View);
+        ApplyFilters(resources,commands);
         SimulationFrameConstants constants = CreateConstants(settings, commands);
         if (commands.Length > 0 && resources.IsSimulationAllocated)
         {
@@ -1585,6 +1587,8 @@ public sealed class SimulationDispatchCoordinator
     private static void Clear(GpuSimulationResources resources)
     {
         RawInt4 zero = new(0, 0, 0, 0);
+        Array.Clear(resources.FilterMap); resources.FilterCount=0;
+        resources.Context.ClearUnorderedAccessView(resources.Filters.UnorderedView,zero);
         resources.Context.ClearUnorderedAccessView(resources.ContactSummary.UnorderedView, zero);
         foreach (UnorderedAccessView view in resources.Grid.UnorderedAccessViews)
         {
@@ -1665,6 +1669,37 @@ public sealed class SimulationDispatchCoordinator
         };
     }
 
+    private void ApplyFilters(GpuSimulationResources resources, ReadOnlySpan<BrushDrawCommand> commands)
+    {
+        bool changed = false;
+        foreach (var command in commands)
+        {
+            if (command.Mode is not (BrushCommandMode.Filter or BrushCommandMode.Erase)) continue;
+            uint rule = command.Mode == BrushCommandMode.Filter ? command.Reserved : 0;
+            FilterRules.Validate(rule, materialRegistry.Count);
+            int endX = command.Shape == BrushCommandShape.Segment ? command.EndX : command.X;
+            int endY = command.Shape == BrushCommandShape.Segment ? command.EndY : command.Y;
+            int radius = (int)MathF.Ceiling(command.Radius);
+            float dx = endX - command.X, dy = endY - command.Y, length = dx * dx + dy * dy;
+            for (int y = Math.Max(0, Math.Min(command.Y, endY) - radius);
+                 y <= Math.Min(resources.Height - 1, Math.Max(command.Y, endY) + radius); y++)
+            for (int x = Math.Max(0, Math.Min(command.X, endX) - radius);
+                 x <= Math.Min(resources.Width - 1, Math.Max(command.X, endX) + radius); x++)
+            {
+                float t = length > 0 ? Math.Clamp(((x - command.X) * dx + (y - command.Y) * dy) / length, 0, 1) : 0;
+                float rx = x - command.X - t * dx, ry = y - command.Y - t * dy;
+                if (rx * rx + ry * ry > command.Radius * command.Radius) continue;
+                int index = y * resources.Width + x;
+                uint previous = resources.FilterMap[index];
+                if (previous == rule) continue;
+                resources.FilterCount += (rule != 0 ? 1 : 0) - (previous != 0 ? 1 : 0);
+                resources.FilterMap[index] = rule;
+                changed = true;
+            }
+        }
+        if (changed) resources.UploadFilters();
+    }
+
     private void RegisterActivity(
         ReadOnlySpan<BrushDrawCommand> commands,
         int width,
@@ -1680,6 +1715,12 @@ public sealed class SimulationDispatchCoordinator
         }
         foreach (BrushDrawCommand command in commands)
         {
+            if(command.Mode==BrushCommandMode.Filter){
+                topologyDirty=true;cellularSleeping=false;solidSleeping=false;solidMotionNeedsCellular=true;
+                contactTransitionPotential|=worldHasMatter;finalizeCellularRest=false;settledObservations=0;
+                activeMinX=0;activeMinY=0;activeMaxX=width-1;activeMaxY=height-1;activeRegionValid=true;
+                continue;
+            }
             if (command.Mode == BrushCommandMode.SetTemperature)
             {
                 thermalActive |= worldHasMatter;
@@ -3354,7 +3395,7 @@ public sealed class SimulationDispatchCoordinator
     {
         foreach (BrushDrawCommand command in commands)
         {
-            if (command.Mode is BrushCommandMode.Material or BrushCommandMode.ThermalDevice)
+            if (command.Mode is BrushCommandMode.Material or BrushCommandMode.ThermalDevice or BrushCommandMode.Filter)
             {
                 return true;
             }
@@ -3366,7 +3407,7 @@ public sealed class SimulationDispatchCoordinator
     {
         foreach (BrushDrawCommand command in commands)
         {
-            if (command.Mode is BrushCommandMode.Material or BrushCommandMode.Erase or BrushCommandMode.ThermalDevice)
+            if (command.Mode is BrushCommandMode.Material or BrushCommandMode.Erase or BrushCommandMode.ThermalDevice or BrushCommandMode.Filter)
             {
                 return true;
             }

@@ -356,6 +356,10 @@ void AnalyzeSolidBodies(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         return;
     }
+    uint filterFlags=0;
+    if(coordinate.y==0 || !FilterPathAllows(index,index-Width,cell.MaterialIndex,SimulationKindSolid,Width))filterFlags|=BodyBlockedUp;
+    if(coordinate.y+1>=Height || !FilterPathAllows(index,index+Width,cell.MaterialIndex,SimulationKindSolid,Width))filterFlags|=BodyBlocked;
+    uint filterIgnored;InterlockedOr(BodyFlags[cell.BodyId-1],filterFlags,filterIgnored);
     if ((Materials[cell.MaterialIndex].Flags & MaterialFlagDensityBody) != 0)
     {
         uint flags = BodyActive;
@@ -584,6 +588,8 @@ bool TryReserveDisplacementTarget(
         {
             continue;
         }
+        uint liquidId=SourceGrid[FlattenCoordinate(sourceCoordinate)].MaterialIndex;
+        if(!FilterPathAllows(FlattenCoordinate(sourceCoordinate),targetIndex,liquidId,SimulationKindLiquid,Width))continue;
         uint previous;
         InterlockedCompareExchange(
             DisplacementReservations[targetIndex],

@@ -4,6 +4,8 @@ namespace Phyxel.Core;
 
 public sealed class SimulationSettings
 {
+    public FilterSelection FilterSelection { get; set; } = FilterSelection.Steam;
+
     public const int NativeWidth = 1920;
     public const int NativeHeight = 1080;
     public const int MaximumBrushCommands = 256;

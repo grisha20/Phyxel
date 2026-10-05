@@ -349,6 +349,19 @@ void Collect(GridCell cell)
     }
 }
 
+float4 FilterOverlay(uint2 coordinate,float4 color)
+{
+    if(FilterCells[0]==0)return color;
+    uint filter=FilterCells[coordinate.y*Width+coordinate.x+1];
+    if(filter!=0){
+        float3 tint=(filter&FilterGas)!=0?float3(.25,.8,.6):float3(.25,.65,.95);
+        if((filter&FilterPowder)!=0)tint=float3(.95,.65,.25);
+        bool mesh=(coordinate.x+coordinate.y)%4<2;
+        color.rgb=lerp(color.rgb,tint,mesh?.6:.18);
+    }
+    return color;
+}
+
 [numthreads(16, 16, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -380,7 +393,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             debug = float3(0.25, 0.25, 0.25);
         }
-        OutputTexture[coordinate] = float4(debug, 1);
+        OutputTexture[coordinate] = FilterOverlay(coordinate,float4(debug,1));
         return;
     }
 
@@ -397,7 +410,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             flatColor = AbsorbentColor(cell);
             flatColor.a = 1;
         }
-        OutputTexture[coordinate] = flatColor;
+        OutputTexture[coordinate] = FilterOverlay(coordinate,flatColor);
         if (SimulationPhase != 0)
         {
             Collect(cell);
@@ -494,7 +507,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     color.rgb += fireGlow * FireGlowIntensity * fireGlowTransmission;
     color.rgb = saturate(color.rgb);
-    OutputTexture[coordinate] = color;
+    OutputTexture[coordinate] = FilterOverlay(coordinate,color);
     if (SimulationPhase != 0)
     {
         Collect(cell);

@@ -397,7 +397,7 @@ internal static class WorldCellCodecRegressionVerifier
         string worldPath = Path.ChangeExtension(scenePath, ".world");
         RawWorldFile raw = await SimulationStateSerializer.ReadWorldAsync(worldPath, CancellationToken.None) ??
             throw new InvalidOperationException("Saved v5 world file is missing.");
-        Require(raw.Version == 15, "CurrentVersion is not 15.");
+        Require(raw.Version == 16, "CurrentVersion is not 16.");
         Require(raw.StoredCellStride == 56, "Current writer did not store the explicit 56-byte stride.");
         Require(new FileInfo(worldPath).Length == CurrentHeaderSize + 24 + raw.CellBytes.Length,
             "v10 world did not preserve its header and empty extensions.");
@@ -482,7 +482,7 @@ internal static class WorldCellCodecRegressionVerifier
         Require(loaded?.Oxidizer is not null && loaded.Oxidizer.AsSpan().SequenceEqual(oxygen),
             "World v8 did not preserve exhausted, fractional and compressed oxidizer byte-for-byte.");
         var raw = await SimulationStateSerializer.ReadWorldAsync(Path.ChangeExtension(path, ".world"), CancellationToken.None);
-        Require(raw?.Version == 15 && raw.StoredCellStride == 56 && raw.Oxidizer is not null,
+        Require(raw?.Version == 16 && raw.StoredCellStride == 56 && raw.Oxidizer is not null,
             "v8 changed GridCell layout or omitted the oxidizer section.");
         byte[] oldOxygen = MemoryMarshal.AsBytes(new float[] { 0, .37f, 1 }.AsSpan()).ToArray();
         Require(WorldCellCodec.Decode(new RawWorldFile(7, 3, 1, 40, EncodeV6Cells(MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray()), oldOxygen)).Oxidizer!.AsSpan().SequenceEqual(oldOxygen),

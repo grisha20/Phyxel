@@ -22,8 +22,8 @@ RWStructuredBuffer<float> DestinationAvailable : register(u2);
 #define FineAirMaterials Materials
 #define FineAirBlockGranular true
 #include "FineAirGeometry.hlsli"
-float Capacity(uint i) { return OxidizerCapacity(Cells[i], Materials[Cells[i].MaterialIndex]); }
-float Space(uint i) { return OxidizerSpace(Cells[i], Materials[Cells[i].MaterialIndex]); }
+float Capacity(uint i) { if(!FilterAirAllows(i))return 0;return OxidizerCapacity(Cells[i], Materials[Cells[i].MaterialIndex]); }
+float Space(uint i) { if(!FilterAirAllows(i))return 0;return OxidizerSpace(Cells[i], Materials[Cells[i].MaterialIndex]); }
 float Amount(uint i) { return max(0, SourceOxygen[i]); }
 bool Inside(int2 p) { return all(p >= 0) && p.x < int(OxygenWidth) && p.y < int(OxygenHeight); }
 uint Index(int2 p) { return uint(p.y) * OxygenWidth + uint(p.x); }
@@ -46,6 +46,7 @@ float RawFace(int2 a, int2 b)
 {
     if (!Inside(b)) return 0;
     uint ia=Index(a),ib=Index(b);
+    if(!FilterAirAllows(ia)||!FilterAirAllows(ib))return 0;
     float ma=Amount(ia),mb=Amount(ib),sa=Space(ia),sb=Space(ib);
     float diffusion=min(.24,12*OxygenDeltaTime);
     // Occupied solids/liquids may evacuate their trapped stock but never
@@ -104,6 +105,7 @@ void CSTransport(uint3 tid : SV_DispatchThreadID)
 }
 float NeighborSum(uint2 p)
 {
+    if(!FilterAirAllows(p.y*OxygenWidth+p.x))return 0;
     uint i=p.y*OxygenWidth+p.x; float sum=0;
     if (p.x>0) sum+=AvailableOxygen[i-1];
     if (p.x+1<OxygenWidth) sum+=AvailableOxygen[i+1];

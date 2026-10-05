@@ -402,3 +402,39 @@ GridCell CreateEmptyCell()
 uint RetainedLiquidIndex(GridCell c, MaterialProperties m)
 { return c.RetainedLiquidMaterialIndex != 0 ? c.RetainedLiquidMaterialIndex : m.FuelLiquidMaterialIndex; }
 static const uint MaterialFlagUniversalPores = 1u << 13;
+
+// Stationary selective overlay. Word 0 is occupied-cell count; fine cells follow.
+StructuredBuffer<uint> FilterCells : register(t15);
+static const uint FilterIdMask=511, FilterGas=1u<<16, FilterLiquid=1u<<17,
+    FilterAir=1u<<18, FilterClosed=1u<<19, FilterPowder=1u<<20;
+bool FilterAllows(uint index,uint material,uint kind)
+{
+    if(FilterCells[0]==0)return true;
+    uint rule=FilterCells[index+1];
+    return rule==0 || ((rule&FilterClosed)==0 &&
+        (((rule&FilterIdMask)!=0 && (rule&FilterIdMask)==material+1) ||
+         (kind==SimulationKindGas&&(rule&FilterGas)!=0) ||
+         (kind==SimulationKindLiquid&&(rule&FilterLiquid)!=0) ||
+         (kind==SimulationKindGranular&&(rule&FilterPowder)!=0)));
+}
+bool FilterAirAllows(uint index)
+{if(FilterCells[0]==0)return true;uint rule=FilterCells[index+1];return rule==0 || ((rule&FilterClosed)==0 && (rule&FilterAir)!=0);}
+// Supercover ray: both faces at a diagonal corner must permit the packet.
+bool FilterPathAllows(uint first,uint last,uint material,uint kind,uint width)
+{
+    if(material==0 || FilterCells[0]==0)return true;
+    int2 p=int2(first%width,first/width),target=int2(last%width,last/width);
+    int2 delta=abs(target-p),step=int2(target.x>=p.x?1:-1,target.y>=p.y?1:-1);
+    int error=delta.x-delta.y;uint budget=max(delta.x,delta.y)+1;
+    [loop] for(uint i=0;i<budget;i++){
+        if(!FilterAllows(p.y*width+p.x,material,kind))return false;
+        if(all(p==target))return true;
+        int twice=2*error;bool x=twice>-delta.y,y=twice<delta.x;
+        if(x&&y){
+            if(!FilterAllows(p.y*width+p.x+step.x,material,kind) ||
+               !FilterAllows((p.y+step.y)*width+p.x,material,kind))return false;
+        }
+        if(x){error-=delta.y;p.x+=step.x;}if(y){error+=delta.x;p.y+=step.y;}
+    }
+    return false;
+}

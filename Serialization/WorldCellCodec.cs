@@ -14,7 +14,7 @@ internal sealed record RawWorldFile(
     byte[] CellBytes,
     byte[]? Oxidizer = null,
     byte[]? AirThermal = null,
-    byte[]? ReactionPending = null,byte[]? ReactionPulse = null,byte[]? Air = null,byte[]? GasMotion = null);
+    byte[]? ReactionPending = null,byte[]? ReactionPulse = null,byte[]? Air = null,byte[]? GasMotion = null,byte[]? Filters = null);
 
 internal static class WorldCellCodec
 {
@@ -67,7 +67,7 @@ internal static class WorldCellCodec
             6 or 7 or 8 or 9 or 10 or 11 => V6CellStride,
             12 or 13 => V12CellStride,
             14 => V14CellStride,
-            15 => CurrentCellStride,
+            15 or 16 => CurrentCellStride,
             _ => throw new InvalidDataException($"Unsupported world version {version}.")
         };
         if (storedCellStride != expectedStride)
@@ -104,6 +104,7 @@ internal static class WorldCellCodec
 
     public static SimulationWorldSnapshot Decode(RawWorldFile world)
     {
+        ValidateFilters(world.Width,world.Height,world.Filters);
         long expectedLength = ValidateStoredWorld(
             world.Version,
             world.Width,
@@ -117,7 +118,7 @@ internal static class WorldCellCodec
             ValidateAirThermal(world.Width,world.Height,world.AirThermal);
             return new SimulationWorldSnapshot(world.Width, world.Height, [],
                 Air:world.Air,GasMotion:world.GasMotion,Oxidizer: world.Oxidizer is null ? null : (byte[])world.Oxidizer.Clone(),
-                AirThermal: world.AirThermal is null ? null : (byte[])world.AirThermal.Clone(),ReactionPending:world.ReactionPending,ReactionPulse:world.ReactionPulse);
+                AirThermal: world.AirThermal is null ? null : (byte[])world.AirThermal.Clone(),ReactionPending:world.ReactionPending,ReactionPulse:world.ReactionPulse,Filters:world.Filters);
         }
         if (world.CellBytes.Length != expectedLength)
         {
@@ -128,7 +129,7 @@ internal static class WorldCellCodec
         {
             3 or 4 => DecodeLegacy(world),
             5 => DecodeV5(world),
-            6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 => DecodeCurrent(world),
+            6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 => DecodeCurrent(world),
             _ => throw new InvalidDataException($"Unsupported world version {world.Version}.")
         };
     }
@@ -157,6 +158,13 @@ internal static class WorldCellCodec
         }
 
         return new SimulationWorldSnapshot(world.Width, world.Height, currentBytes);
+    }
+
+    internal static void ValidateFilters(int width,int height,byte[]? bytes)
+    {
+        if(bytes is not {Length:>0})return;
+        if(bytes.LongLength!=(long)width*height*4)throw new InvalidDataException("Filter dimensions do not match world.");
+        foreach(uint rule in MemoryMarshal.Cast<byte,uint>(bytes))Phyxel.Core.FilterRules.Validate(rule,MaterialRegistry.MaximumMaterials);
     }
 
     internal static void ValidateOxidizer(int width, int height, byte[]? bytes, bool compressed = true)
@@ -250,7 +258,7 @@ internal static class WorldCellCodec
         return new SimulationWorldSnapshot(world.Width,world.Height,currentBytes,
             world.Air is null?null:(byte[])world.Air.Clone(),world.GasMotion is null?null:(byte[])world.GasMotion.Clone(),
             world.Oxidizer is null?null:(byte[])world.Oxidizer.Clone(),world.AirThermal is null?null:(byte[])world.AirThermal.Clone(),
-            world.ReactionPending is null?null:(byte[])world.ReactionPending.Clone(),world.ReactionPulse is null?null:(byte[])world.ReactionPulse.Clone());
+            world.ReactionPending is null?null:(byte[])world.ReactionPending.Clone(),world.ReactionPulse is null?null:(byte[])world.ReactionPulse.Clone(),world.Filters is null?null:(byte[])world.Filters.Clone());
     }
 
     private static SimulationWorldSnapshot DecodeV5(RawWorldFile world)

@@ -194,6 +194,7 @@ void PlanRotation(uint3 thread : SV_DispatchThreadID)
     {InterlockedOr(Blocked[c.BodyId-1],2,ignored);return;}
     int2 target=Target(index,plan);
     if(!InWorld(target)){InterlockedOr(Blocked[c.BodyId-1],1,ignored);return;}
+    if(!FilterPathAllows(index,FlattenCoordinate(uint2(target)),c.MaterialIndex,SimulationKindSolid,Width)){InterlockedOr(Blocked[c.BodyId-1],1,ignored);return;}
     int steps=max(abs(target.x-p.x),abs(target.y-p.y));
     // Check the swept segment too, so thin walls cannot be skipped.
     for(int step=1;step<=steps;step++)

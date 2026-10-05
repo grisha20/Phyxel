@@ -81,7 +81,8 @@ internal static class SceneFileRegressionVerifier
         {
             var grid = new GridCell[r.Width * r.Height];
             grid[100 * r.Width + 100] = new() { IsActive = 1, MaterialIndex = oil, Mass = mass, Temperature = 330 };
-            serializer.ApplyWorldSnapshot(r, new(r.Width, r.Height, MemoryMarshal.AsBytes(grid.AsSpan()).ToArray()));
+            uint[] filters=new uint[grid.Length];filters[120*r.Width+100]=(uint)registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam)+1;
+            serializer.ApplyWorldSnapshot(r, new(r.Width, r.Height, MemoryMarshal.AsBytes(grid.AsSpan()).ToArray(),Filters:MemoryMarshal.AsBytes(filters.AsSpan()).ToArray()));
         }
         GridCell Loaded(string path) => MemoryMarshal.Cast<byte, GridCell>(System.Threading.Tasks.Task.Run(() => serializer.LoadAsync(path, registry))
             .GetAwaiter().GetResult()!.World!.Grid)[100 * r.Width + 100];
@@ -112,6 +113,7 @@ internal static class SceneFileRegressionVerifier
         var cells = MemoryMarshal.Cast<byte, GridCell>(AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer));
         Check(cells[100 * r.Width + 100].Mass == .7f && cells[100 * r.Width + 100].Temperature == 330, "Load missed GPU state.");
         Check(Get<string>("scenePath") == first, "Load missed quick-save path.");
+        Check(r.FilterCount==1 && r.FilterMap[120*r.Width+100]==(uint)registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam)+1,"Load lost the filter overlay.");
         next = Path.Combine(dir, "missing.json"); Action(false, load: true); Complete();
         Check(Get<string>("scenePath") == first, "Failed load changed path.");
         string blocked = Path.Combine(dir, "blocked-parent");
@@ -139,6 +141,7 @@ internal static class SceneFileRegressionVerifier
         cells=MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer));
         Check(r.Width>=oldWidth&&extraTop>0,"Canvas did not expand the real grid.");
         Check(cells[(100+extraTop)*r.Width+100].Mass==.7f&&cells[(100+extraTop)*r.Width+100].Temperature==330,"Canvas expansion changed the existing cell.");
+        Check(r.FilterMap[(120+extraTop)*r.Width+100]==(uint)registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam)+1,"Canvas expansion changed the filter overlay.");
         next=Path.Combine(dir,"Расширенная сцена.json");Action(true,saveAs:true);Complete();
         int savedWidth=r.Width,savedHeight=r.Height;
         coordinator.ClearCurrentWorld(settings);Set("currentResources",coordinator.DispatchFrame(settings,[],0));
@@ -146,6 +149,7 @@ internal static class SceneFileRegressionVerifier
         Check(r.Width==savedWidth&&r.Height==savedHeight&&settings.Width==savedWidth&&settings.Height==savedHeight,"Load reverted expanded dimensions to 16:9.");
         cells=MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer));
         Check(cells[(100+extraTop)*r.Width+100].Mass==.7f,"Expanded scene load lost its cell.");
+        Check(r.FilterCount==1&&r.FilterMap[(120+extraTop)*r.Width+100]==(uint)registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam)+1,"Expanded scene load lost the filter.");
         Console.WriteLine($"PHYXEL_SCENE_FILES_SUCCESS checks={checks} choices={choices}");
     }
 }

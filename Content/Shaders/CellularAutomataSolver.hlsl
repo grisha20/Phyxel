@@ -312,6 +312,8 @@ void MarkMovement(inout GridCell first, inout GridCell second, float horizontal,
 // Rates use elapsed seconds; no oil ID or render-FPS coefficient is involved.
 bool LiquidStepAllowedLoaded(uint sourceIndex, uint destinationIndex, float load)
 {
+    GridCell filtered=Grid[sourceIndex];
+    if(!FilterPathAllows(sourceIndex,destinationIndex,filtered.MaterialIndex,CellKind(filtered),Width))return false;
     GridCell source = Grid[sourceIndex];
     MaterialProperties material = Materials[source.MaterialIndex];
     if (material.SimulationKind != SimulationKindLiquid ||
@@ -351,6 +353,8 @@ void SwapCells(uint firstIndex, uint secondIndex, float horizontal, float vertic
 {
     GridCell first = Grid[firstIndex];
     GridCell second = Grid[secondIndex];
+    if(!FilterPathAllows(firstIndex,secondIndex,first.MaterialIndex,CellKind(first),Width) ||
+       !FilterPathAllows(secondIndex,firstIndex,second.MaterialIndex,CellKind(second),Width))return;
     // Free downward flight in air is gravity, not supported viscous flow.
     bool freeFall = horizontal == 0 && CellKind(first) == SimulationKindLiquid &&
         (CellKind(second) == SimulationKindNone || CellKind(second) == SimulationKindGas);
@@ -448,6 +452,8 @@ void MoveGasCell(
 {
     GridCell mover = Grid[sourceIndex];
     GridCell displaced = Grid[targetIndex];
+    if(!FilterPathAllows(sourceIndex,targetIndex,mover.MaterialIndex,CellKind(mover),Width) ||
+       !FilterPathAllows(targetIndex,sourceIndex,displaced.MaterialIndex,CellKind(displaced),Width))return;
     // Only gas/empty pairs enter this helper. Moisture belongs to granular
     // fuel, so do not carry its two extra words through every gas move.
     mover.MoistureMass = 0; mover.MoistureEnergy = 0;
@@ -486,6 +492,8 @@ void ExchangeGranularWithLiquid(
 {
     GridCell granular = Grid[granularIndex];
     GridCell liquid = Grid[liquidIndex];
+    if(!FilterPathAllows(granularIndex,liquidIndex,granular.MaterialIndex,CellKind(granular),Width) ||
+       !FilterPathAllows(liquidIndex,granularIndex,liquid.MaterialIndex,CellKind(liquid),Width))return;
 
     granular.RestFrames = 0;
     granular.VelocityX = horizontal;
@@ -513,6 +521,7 @@ void TransferLiquidMass(
     GridCell destination,
     float amount)
 {
+    if(!FilterPathAllows(sourceIndex,destinationIndex,source.MaterialIndex,SimulationKindLiquid,Width))return;
     float sourceMass = source.Mass;
     float destinationMass = destination.Mass;
     float transferred = min(amount, min(sourceMass, max(0, 1.0 - destinationMass)));
@@ -831,6 +840,7 @@ bool WaterSupported(uint2 coordinate)
 
 bool WaterCanEnter(uint waterMaterial, uint destinationMaterial, uint2 destination)
 {
+    if(!FilterAllows(FlattenCoordinate(destination),waterMaterial,SimulationKindLiquid))return false;
     uint destinationKind = CellKindFromMaterial(destinationMaterial);
     if (destinationKind == 2 || (destinationKind == SimulationKindGranular &&
         (!LiquidCanDisplaceGrain(destination, waterMaterial) || GranularLoadedToSink(destination, waterMaterial))))
@@ -1040,6 +1050,8 @@ bool MoveOrdinaryWater(uint sourceIndex, uint destinationIndex, int direction)
     GridCell target = Grid[destinationIndex];
     MarkMovement(water, target, direction * 58, 0);
     water.BodyId = (water.BodyId & FuelBurningMarker) | ((FrameIndex + 1) & ~FuelBurningMarker);
+    if(!FilterPathAllows(sourceIndex,destinationIndex,water.MaterialIndex,SimulationKindLiquid,Width) ||
+       !FilterPathAllows(destinationIndex,sourceIndex,target.MaterialIndex,CellKind(target),Width))return false;
     Grid[sourceIndex] = target;
     Grid[destinationIndex] = water;
     uint targetMaterial = CellMaterials[destinationIndex];
@@ -1243,7 +1255,7 @@ bool WaterPathFilled(uint firstX, uint secondX, uint y)
     uint row = y * Width;
     for (uint x = start; x <= end; x++)
     {
-        if (CellKindAtIndex(row + x) != 4)
+        if (CellKindAtIndex(row + x) != 4 || !FilterAllows(row+x,CellMaterials[row+x],SimulationKindLiquid))
         {
             return false;
         }
@@ -1258,7 +1270,7 @@ bool WaterPathFilledBetween(uint firstX, uint secondX, uint y)
     uint row = y * Width;
     for (uint x = start; x < end; x++)
     {
-        if (CellKindAtIndex(row + x) != 4)
+        if (CellKindAtIndex(row + x) != 4 || !FilterAllows(row+x,CellMaterials[row+x],SimulationKindLiquid))
         {
             return false;
         }
@@ -1589,6 +1601,7 @@ bool ConsolidateDiluteCombustionGas(uint firstIndex, uint secondIndex)
     // sensible heat and momentum. Painted nominal packets are never merged.
     if (SolidPass == 0) return false; // finite Simulation only
     GridCell first = Grid[firstIndex], second = Grid[secondIndex];
+    if(!FilterPathAllows(firstIndex,secondIndex,first.MaterialIndex,CellKind(first),Width))return false;
     if (first.IsActive == 0 || second.IsActive == 0 || first.MaterialIndex != second.MaterialIndex) return false;
     MaterialProperties material = Materials[first.MaterialIndex];
     if ((material.Flags & MaterialFlagThermalCarbonDioxide) == 0 ||
@@ -2848,6 +2861,7 @@ void ApplyWaterColumnMove(uint x)
     float horizontal = destinationX > sourceX ? 54 : -54;
     if (!LiquidLevelStepAllowed(sourceIndex, destinationIndex)) return;
     MarkMovement(water, empty, horizontal, 36);
+    if(!FilterPathAllows(sourceIndex,destinationIndex,water.MaterialIndex,SimulationKindLiquid,Width))return;
     Grid[sourceIndex] = empty;
     Grid[destinationIndex] = water;
     CellMaterials[sourceIndex] = 0;
@@ -3062,7 +3076,7 @@ bool WaterRemovalPreservesConnectivity(uint2 coordinate)
 void RelaxWaterPressureRoute(uint2 coordinate)
 {
     uint index = FlattenCoordinate(coordinate);
-    if (CellKindAtIndex(index) != 4)
+    if (CellKindAtIndex(index) != 4 || !FilterAllows(index,CellMaterials[index],SimulationKindLiquid))
     {
         WritePressureRoute(index, EmptyPressureRoute());
         return;
@@ -3100,7 +3114,7 @@ void RelaxWaterPressureRoute(uint2 coordinate)
             continue;
         }
         uint candidateIndex = FlattenCoordinate(uint2(candidate));
-        if (CellKindAtIndex(candidateIndex) != 4)
+        if (CellKindAtIndex(candidateIndex) != 4 || !FilterAllows(candidateIndex,CellMaterials[candidateIndex],SimulationKindLiquid))
         {
             continue;
         }
@@ -3360,6 +3374,7 @@ void ApplyPressurizedWaterReturnSlot(uint sourceX, uint lane, uint donorParity)
     float horizontal = sourceX == sourceWaterX ? 0 : sourceX > sourceWaterX ? 54 : -54;
     if (!LiquidStepAllowed(sourceWaterIndex, destinationIndex)) return;
     MarkMovement(water, empty, horizontal, 38);
+    if(!FilterPathAllows(sourceWaterIndex,destinationIndex,water.MaterialIndex,SimulationKindLiquid,Width))return;
     Grid[sourceWaterIndex] = empty;
     Grid[destinationIndex] = water;
     CellMaterials[sourceWaterIndex] = 0;
@@ -3442,6 +3457,7 @@ void ApplyPressurizedWaterMoveSlot(uint sourceX, uint lane)
         return;
     }
     MarkMovement(water, empty, horizontal, 36);
+    if(!FilterPathAllows(sourceIndex,destinationIndex,water.MaterialIndex,SimulationKindLiquid,Width))return;
     Grid[sourceIndex] = empty;
     Grid[destinationIndex] = water;
     CellMaterials[sourceIndex] = 0;
