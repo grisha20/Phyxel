@@ -11,6 +11,12 @@ if($Baseline){
  foreach($taskShader in @('CellularAutomataSolver.hlsl','SolidBodySolver.hlsl')){
   $taskSource=@(& git -C $taskRepo show "ac762df:Content/Shaders/$taskShader") -join "`n"
   if($LASTEXITCODE -ne 0){throw 'Cannot read pre-fix shader'}
+  if($taskShader -eq 'CellularAutomataSolver.hlsl'){
+   # Current phase58 must not fall through to the old diagonal solver.
+   $taskEntry='(void CSMain\(uint3 dispatchThreadId : SV_DispatchThreadID\)\s*\{)'
+   if([regex]::Matches($taskSource,$taskEntry).Count -ne 1){throw 'Unexpected legacy cellular entry point'}
+   $taskSource=[regex]::Replace($taskSource,$taskEntry,'$1'+"`n    if (SimulationPhase == 58) return;")
+  }
   [IO.File]::WriteAllText((Join-Path $taskRuntime "Content/Shaders/$taskShader"),$taskSource,[Text.UTF8Encoding]::new($false))
  }
  $taskExe=Join-Path $taskRuntime 'Phyxel.exe'

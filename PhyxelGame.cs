@@ -47,6 +47,7 @@ public sealed class PhyxelGame : Game
     private SimulationDispatchCoordinator? dispatchCoordinator;
     private SandboxUiCoordinator? userInterface;
     private GpuSimulationResources? currentResources;
+    private IEnumerator<GpuSimulationResources>? oilSmokeVerification;
     private Task? pendingSave;
     private Task<LoadedSimulationScene?>? pendingLoad;
     private bool pendingWorldCapture;
@@ -319,6 +320,11 @@ public sealed class PhyxelGame : Game
             catch (Exception exception) { Console.WriteLine($"PHYXEL_OIL_LOCALITY_FAILED {exception}"); Environment.ExitCode=1; }
             Exit(); return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_OIL_SMOKE_FLOW") == "1")
+        {
+            oilSmokeVerification = OilSmokeFlowRegressionVerifier.Run(dispatchCoordinator, materialRegistry,
+                settings, status => SetStatus("Автотест: " + status)).GetEnumerator();
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_MATERIAL_ENVIRONMENT") == "1")
         {
             try { MaterialEnvironmentRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
@@ -435,7 +441,36 @@ public sealed class PhyxelGame : Game
         latestInput = input;
         if (input.EscapePressed)
         {
+            if (oilSmokeVerification is not null) Environment.ExitCode = 2;
             Exit();
+            return;
+        }
+        if (oilSmokeVerification is not null)
+        {
+            // Keep layout and the message pump active without letting input alter the fixture.
+            userInterface.Update(default(RawInputSnapshot) with { MousePosition = input.MousePosition },
+                GraphicsDevice.Viewport, uiDpiOverride ?? UiDisplayScale.GetDpiScale(Window.Handle), settings);
+            try
+            {
+                if (oilSmokeVerification.MoveNext())
+                {
+                    currentResources = oilSmokeVerification.Current;
+                    frameIndex++;
+                }
+                else
+                {
+                    oilSmokeVerification.Dispose();
+                    oilSmokeVerification = null;
+                    Exit();
+                }
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"PHYXEL_OS_FAILED {exception}");
+                Environment.ExitCode = 1;
+                Exit();
+            }
+            base.Update(gameTime);
             return;
         }
         ProcessSerializationCompletion();
@@ -625,6 +660,7 @@ public sealed class PhyxelGame : Game
 
     protected override void UnloadContent()
     {
+        oilSmokeVerification?.Dispose();
         simulationClockTrace.Dispose();
         userInterface?.Dispose();
         resourceManager?.Dispose();
@@ -780,7 +816,7 @@ public sealed class PhyxelGame : Game
         capture.Save(fullPath, System.Drawing.Imaging.ImageFormat.Png);
         uiScreenshotCaptured = true;
         Console.WriteLine($"PHYXEL_UI_SCREENSHOT {width}x{height} {fullPath}");
-        Exit();
+        if (oilSmokeVerification is null) Exit();
     }
 
     private void ProcessSerializationCompletion()

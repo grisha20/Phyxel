@@ -162,6 +162,30 @@ internal static class ChimneyTransportRegressionVerifier
                 .All(i => horizontal ? i / r.Width > wall : i % r.Width > wall), $"Crossed fine wall {horizontal}/{shift}");
             Conserved(grid, result.Grid, CoreMaterialIds.Smoke);
         }
+        // The wall-jet escape must find a real opening. A sealed chamber
+        // retains every packet and its heat even with a packed smoke layer.
+        foreach (bool finite in new[] { false, true })
+        {
+            var grid = new GridCell[n];
+            for (int x = 160; x <= 320; x++)
+            {
+                grid[180 * r.Width + x] = Cell(CoreMaterialIds.Metal);
+                grid[215 * r.Width + x] = Cell(CoreMaterialIds.Metal);
+            }
+            for (int y = 181; y < 215; y++)
+            {
+                grid[y * r.Width + 160] = Cell(CoreMaterialIds.Metal);
+                grid[y * r.Width + 320] = Cell(CoreMaterialIds.Metal);
+            }
+            for (int y = 181; y <= 192; y++)
+            for (int x = 161; x < 320; x++) grid[y * r.Width + x] = Cell(CoreMaterialIds.Smoke);
+            var result = Run(grid, Carrier(0, 0), finite, ticks: 180);
+            uint smoke = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke);
+            Check(Enumerable.Range(0, n).Where(i => result.Grid[i].IsActive != 0 && result.Grid[i].MaterialIndex == smoke)
+                .All(i => i % r.Width > 160 && i % r.Width < 320 && i / r.Width > 180 && i / r.Width < 215),
+                $"Sealed smoke chamber leaked: {finite}");
+            Conserved(grid, result.Grid, CoreMaterialIds.Smoke);
+        }
         string root = Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR") ?? "artifacts/chimney-transport";
         Directory.CreateDirectory(root);
         File.WriteAllText(Path.Combine(root, "result.json"), $"{{\"passed\":true,\"checks\":{checks}}}");

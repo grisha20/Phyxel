@@ -310,16 +310,41 @@ void MarkMovement(inout GridCell first, inout GridCell second, float horizontal,
 
 // A liquid without the optional mobility contract retains its old solver.
 // Rates use elapsed seconds; no oil ID or render-FPS coefficient is involved.
-bool LiquidStepAllowed(uint sourceIndex, uint destinationIndex)
+bool LiquidStepAllowedLoaded(uint sourceIndex, uint destinationIndex, float load)
 {
     GridCell source = Grid[sourceIndex];
     MaterialProperties material = Materials[source.MaterialIndex];
     if (material.SimulationKind != SimulationKindLiquid ||
         material.LiquidFlowTemperatureSensitivity <= 0) return true;
-    float rate = 18.0 * material.FlowRate * LiquidMobility(material, source.Temperature);
+    float rate = 18.0 * material.FlowRate * LiquidMobility(material, source.Temperature) * load;
     float chance = 1.0 - exp(-rate * max(0.0, DeltaTime));
     uint seed = sourceIndex ^ HashValue(destinationIndex + 7919u * SimulationPhase) ^ HashValue(FrameIndex);
     return HashUnitFloat(seed) < chance;
+}
+
+bool LiquidStepAllowed(uint sourceIndex, uint destinationIndex)
+{
+    return LiquidStepAllowedLoaded(sourceIndex, destinationIndex, 1.0);
+}
+
+// A deep liquid column drives supported downhill leveling more strongly than a film.
+// This bounded local head closure keeps viscosity and does not move distant columns.
+bool LiquidLevelStepAllowed(uint sourceIndex, uint destinationIndex)
+{
+    // Only the short surface patches use this head closure. Applying it to
+    // every existing drain/column move would wash out the viscosity response.
+    if (SimulationPhase != 58) return LiquidStepAllowed(sourceIndex, destinationIndex);
+    uint materialIndex = CellMaterials[sourceIndex];
+    if (Materials[materialIndex].LiquidFlowTemperatureSensitivity <= 0 ||
+        destinationIndex / Width < sourceIndex / Width)
+        return LiquidStepAllowed(sourceIndex, destinationIndex);
+    uint depth = 1;
+    [loop] for (uint step = 1; step < 16 && sourceIndex / Width + step < Height; step++)
+    {
+        if (CellMaterials[sourceIndex + step * Width] != materialIndex) break;
+        depth++;
+    }
+    return LiquidStepAllowedLoaded(sourceIndex, destinationIndex, (float)depth);
 }
 
 void SwapCells(uint firstIndex, uint secondIndex, float horizontal, float vertical)
@@ -1010,7 +1035,7 @@ bool FindOrdinaryWaterDestination(
 
 bool MoveOrdinaryWater(uint sourceIndex, uint destinationIndex, int direction)
 {
-    if (!LiquidStepAllowed(sourceIndex, destinationIndex)) return false;
+    if (!LiquidLevelStepAllowed(sourceIndex, destinationIndex)) return false;
     GridCell water = Grid[sourceIndex];
     GridCell target = Grid[destinationIndex];
     MarkMovement(water, target, direction * 58, 0);
@@ -1358,6 +1383,45 @@ float HeavyGasSideDensity(uint2 coordinate, int direction)
     return accessible > 0 ? gas / accessible : -1;
 }
 
+float CeilingJetTangent(uint2 coordinate, float2 carrier, MaterialProperties material)
+{
+    // A rising packed layer impinging on a roof must turn toward an outlet.
+    // Independent random tangents made neighbouring smoke packets face each
+    // other and jam forever. This bounded wall-jet closure shares a direction
+    // across the connected near-wall layer, without moving/deleting mass here.
+    // Preserve a faster resolved tangent and the direction of strong opposing wind.
+    if ((material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0 ||
+        material.GasBuoyancy >= 0) return 0;
+    int roof = -1;
+    [loop] for (int dy=1; dy<=32 && dy<=int(coordinate.y); dy++)
+    {
+        uint kind=CellKindAt(uint2(coordinate.x,coordinate.y-dy));
+        if (kind==SimulationKindSolid) { roof=int(coordinate.y)-dy; break; }
+        if (kind!=SimulationKindGas) break;
+    }
+    if (roof<0) return 0;
+    int exits[2]={0,0};
+    [unroll] for(int side=0;side<2;side++)
+    {
+        int direction=side==0?-1:1;
+        [loop] for(int step=1;step<=256;step++)
+        {
+            int x=int(coordinate.x)+direction*step;
+            if(x<0||x>=int(Width)) break;
+            uint path=CellKindAt(uint2(x,roof+1));
+            if(path!=SimulationKindNone&&path!=SimulationKindGas) break;
+            uint above=CellKindAt(uint2(x,roof));
+            if(above==SimulationKindNone||above==SimulationKindGas){exits[side]=step;break;}
+            if(above!=SimulationKindSolid) break;
+        }
+    }
+    if(exits[0]==0&&exits[1]==0) return 0; // closed chamber is not ventilated
+    int direction=exits[0]>0&&(exits[1]==0||exits[0]<exits[1])?-1:1;
+    if(exits[0]>0&&exits[0]==exits[1]) direction=carrier.x<0?-1:1;
+    if(abs(carrier.x)>=1.2 && carrier.x*direction<0) return 0;
+    return direction*min(GasMaximumSpeed,max(4.0*material.MotionAdvection,length(carrier)));
+}
+
 void IntegrateGasMotion(uint2 coordinate)
 {
     uint index = FlattenCoordinate(coordinate);
@@ -1388,8 +1452,9 @@ void IntegrateGasMotion(uint2 coordinate)
     // gases keep their diffusion and velocity at a surface, just as in space.
     bool legacySurfaceCarrier = (Materials[cell.MaterialIndex].Flags &
         (MaterialFlagFlame | MaterialFlagSmoke)) != 0;
+    float ceilingTangent=CeilingJetTangent(coordinate,drift,Materials[cell.MaterialIndex]);
     if (SolidPass == 0 && legacySurfaceCarrier && carriesAlongSurface &&
-        abs(state.VelocityX) > 0.0001 && dot(drift, drift) < 0.0025)
+        ceilingTangent==0 && abs(state.VelocityX) > 0.0001 && dot(drift, drift) < 0.0025)
     {
         float surfaceAdvection = Materials[cell.MaterialIndex].MotionAdvection;
         state.VelocityX = state.VelocityX > 0 ? surfaceAdvection : -surfaceAdvection;
@@ -1466,6 +1531,8 @@ void IntegrateGasMotion(uint2 coordinate)
             drift.y * airCoupling * GasAirVelocityScale + gravity.y + diffusionImpulse.y,
         -GasMaximumSpeed,
         GasMaximumSpeed);
+    if(ceilingTangent!=0) state.VelocityX=sign(ceilingTangent)*
+        max(abs(ceilingTangent),state.VelocityX*sign(ceilingTangent));
     state.OffsetX = clamp(
         state.OffsetX + state.VelocityX,
         -float(GasMotionSubSteps),
@@ -2194,6 +2261,7 @@ bool FindOrdinarySurfaceDestination(
     out uint destinationTop)
 {
     uint sourceMaterial = CellMaterials[FlattenCoordinate(uint2(sourceX, sourceTop))];
+    bool viscous = Materials[sourceMaterial].LiquidFlowTemperatureSensitivity > 0;
     uint sourceBaseLimit; uint sourceTopIgnored;
     if (!UnpackWaterColumn(WaterColumnState[sourceX], sourceTopIgnored, sourceBaseLimit)) return false;
     uint reachableLeft = sourceX;
@@ -2243,7 +2311,7 @@ bool FindOrdinarySurfaceDestination(
             uint ignoredBase;
             if (wasRejected ||
                 !UnpackWaterColumn(WaterColumnState[column], top, ignoredBase) ||
-                top <= sourceTop + 1 || top > min(sourceBaseLimit, ignoredBase) ||
+                top <= sourceTop + (viscous ? 0u : 1u) || top > min(sourceBaseLimit, ignoredBase) ||
                 CellMaterials[FlattenCoordinate(uint2(column, top))] != sourceMaterial)
             {
                 continue;
@@ -2254,8 +2322,11 @@ bool FindOrdinarySurfaceDestination(
                 continue;
             }
             uint distance = max(sourceX, column) - min(sourceX, column);
+            // Viscous pools still need hydrostatic leveling. Keep it local
+            // and let MoveOrdinaryWater apply the temperature-dependent clock.
+            if (Materials[sourceMaterial].LiquidFlowTemperatureSensitivity > 0 && distance > 8) continue;
             if (destinationX == Width || top > destinationTop ||
-                (top == destinationTop && distance < bestDistance))
+                (top == destinationTop && (viscous ? distance > bestDistance : distance < bestDistance)))
             {
                 destinationX = column;
                 destinationTop = top;
@@ -2290,7 +2361,7 @@ bool FindOrdinarySurfaceDestination(
     return false;
 }
 
-bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight)
+bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight, bool viscousOnly)
 {
     uint sourceLeft = Width;
     uint sourceRight = Width;
@@ -2316,9 +2387,9 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight)
         bool perchedOnBody = base + 1 < Height &&
             (Materials[CellMaterials[FlattenCoordinate(uint2(column, base + 1))]].Flags & MaterialFlagDensityBody) != 0;
         bool sourceReady = abs(surface.VelocityY) <= 8 &&
+            (Materials[surface.MaterialIndex].LiquidFlowTemperatureSensitivity > 0) == viscousOnly &&
             // Viscous liquids use local, clocked flow; a bulk water shortcut
             // would bypass viscosity and visibly teleport a freshly fed oil.
-            Materials[surface.MaterialIndex].LiquidFlowTemperatureSensitivity <= 0 &&
             !perchedOnBody && (aboveKind == 0 || aboveKind == 5) &&
             top < base && CellMaterials[FlattenCoordinate(uint2(column, top + 1))] == surface.MaterialIndex;
         if (sourceReady && (sourceLeft == Width || top < sourceTop))
@@ -2338,6 +2409,14 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight)
     }
 
     uint sourceCandidates[2] = { sourceLeft, sourceRight };
+    bool viscousSource = Materials[CellMaterials[FlattenCoordinate(uint2(sourceLeft,sourceTop))]].LiquidFlowTemperatureSensitivity > 0;
+    // A one-cell head permits a local surface hop. Alternate plateau ends
+    // so a nearest-neighbour ping-pong at one wall cannot starve the far bank.
+    if(viscousSource && (FrameIndex & 1)!=0)
+    {
+        sourceCandidates[0]=sourceRight;
+        sourceCandidates[1]=sourceLeft;
+    }
     uint sourceX = Width;
     uint destinationX = Width;
     uint destinationTop = 0;
@@ -2361,7 +2440,7 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight)
         uint distance = max(candidateSourceX, candidateDestinationX) -
             min(candidateSourceX, candidateDestinationX);
         if (sourceX == Width || candidateDestinationTop > destinationTop ||
-            (candidateDestinationTop == destinationTop && distance < bestDistance))
+            (candidateDestinationTop == destinationTop && (viscousSource ? distance > bestDistance : distance < bestDistance)))
         {
             sourceX = candidateSourceX;
             destinationX = candidateDestinationX;
@@ -2443,7 +2522,7 @@ void ResolveOrdinarySurfaceBlock(uint x)
     [loop]
     for (uint transfer = 0; transfer < transferBudget; transfer++)
     {
-        if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight))
+        if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight, false))
         {
             break;
         }
@@ -2489,11 +2568,42 @@ void ResolveOrdinaryLocalSurfaceBlock(uint x)
     [loop]
     for (uint transfer = 0; transfer < transferBudget; transfer++)
     {
-        if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight))
+        if (!ResolveOrdinarySurfaceTransfer(blockLeft, blockRight, false))
         {
             break;
         }
     }
+}
+
+void ResolveViscousSurfaceBlock(uint x)
+{
+    // Disjoint short patches avoid starving an entire pool behind one plateau.
+    // Alternate their seams; each actual transfer still crosses at most 8 cells.
+    uint patchWidth=16, offset=(FrameIndex & 1)*8;
+    int start;
+    if(x==0)start=-int(offset);
+    else if(x>=offset && (x-offset)%patchWidth==0)start=int(x);
+    else return;
+    uint left=uint(max(0,start)),right=uint(min(int(Width)-1,start+int(patchWidth)-1));
+    // A hydrostatic surface patch needs a supported basin. A falling drain
+    // or a deep neighbouring outlet keeps its existing viscosity/gravity path;
+    // feeding it with this extra pool-head pass would accelerate cold efflux.
+    uint minimumBase=Height, maximumBase=0;
+    [loop] for(uint column=left;column<=right;column++)
+    {
+        uint top, base;
+        if(!UnpackWaterColumn(WaterColumnState[column],top,base))continue;
+        if(Materials[CellMaterials[FlattenCoordinate(uint2(column,top))]].LiquidFlowTemperatureSensitivity<=0)continue;
+        if(base+1<Height)
+        {
+            uint below=CellKindAt(uint2(column,base+1));
+            if(below==SimulationKindNone||below==SimulationKindGas)return;
+        }
+        minimumBase=min(minimumBase,base);maximumBase=max(maximumBase,base);
+    }
+    if(minimumBase<Height && maximumBase-minimumBase>1)return;
+    [loop] for(uint transfer=0;transfer<4;transfer++)
+        if(!ResolveOrdinarySurfaceTransfer(left,right,true))break;
 }
 
 void ApplyWaterColumnMove(uint x)
@@ -2526,7 +2636,7 @@ void ApplyWaterColumnMove(uint x)
     GridCell water = Grid[sourceIndex];
     GridCell empty = CreateEmptyCell();
     float horizontal = destinationX > sourceX ? 54 : -54;
-    if (!LiquidStepAllowed(sourceIndex, destinationIndex)) return;
+    if (!LiquidLevelStepAllowed(sourceIndex, destinationIndex)) return;
     MarkMovement(water, empty, horizontal, 36);
     Grid[sourceIndex] = empty;
     Grid[destinationIndex] = water;
@@ -3603,6 +3713,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (SimulationPhase == 57)
     {
         ResolveOrdinaryLocalSurfaceBlock(coordinate.x);
+        return;
+    }
+    if (SimulationPhase == 58)
+    {
+        ResolveViscousSurfaceBlock(coordinate.x);
         return;
     }
     if (SimulationPhase == 30)
