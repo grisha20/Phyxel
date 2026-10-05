@@ -15,7 +15,7 @@ namespace Phyxel.Diagnostics;
 
 internal static class LiquidTemperatureRegressionVerifier
 {
-    internal static void Run(SimulationDispatchCoordinator coordinator, MaterialRegistry registry)
+    internal static IEnumerable<GpuSimulationResources> Run(SimulationDispatchCoordinator coordinator, MaterialRegistry registry)
     {
         string dir = Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR") ?? "artifacts/liquid-temperature";
         Directory.CreateDirectory(dir);
@@ -24,6 +24,7 @@ internal static class LiquidTemperatureRegressionVerifier
         var r = coordinator.DispatchFrame(settings, [new() { X = 20, EndX = 20, Y = 20, EndY = 20,
             Radius = 1, Density = 1, Mode = BrushCommandMode.Material,
             MaterialIndex = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Water) }], 0);
+        yield return r;
         int w = r.Width, n = w * r.Height, checks = 0, failures = 0;
         double maximumEnergyResidual = 0;
         uint fixture = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fixture);
@@ -70,6 +71,7 @@ internal static class LiquidTemperatureRegressionVerifier
                 for (int frame = 1; frame <= fps * 30; frame++) {
                     uint target = (uint)Math.Floor(frame * 20.0 / fps + 1e-8);
                     while (tick < target) coordinator.DispatchThermalDiffusion(r, false, ++tick, true);
+                    if(frame%8==0)yield return r;
                 }
                 var after = Read(); Balance(before, after, material + " mix " + fps);
                 byte[] raw = MemoryMarshal.AsBytes(after.AsSpan()).ToArray();
@@ -87,7 +89,7 @@ internal static class LiquidTemperatureRegressionVerifier
             }
             foreach (int kind in new[] {1,2,3}) {
                 var before = Basin(kind); Start(before);
-                for (uint tick = 1; tick <= 200; tick++) coordinator.DispatchThermalDiffusion(r,false,tick,true);
+                for (uint tick = 1; tick <= 200; tick++) {coordinator.DispatchThermalDiffusion(r,false,tick,true);if(tick%8==0)yield return r;}
                 var after = Read(); Balance(before,after,material+" stable "+kind);
                 Check(before.Select(c=>c.BodyId).SequenceEqual(after.Select(c=>c.BodyId)),material+" stable/barrier tags "+kind);
                 Check(Enumerable.Range(0,n).All(i=>Math.Abs(before[i].Temperature-after[i].Temperature)<.0001),material+" stable/barrier temperature "+kind);
@@ -111,7 +113,7 @@ internal static class LiquidTemperatureRegressionVerifier
                 for(int x=90;x<=210;x++) before[215*w+x]=Cell(fixture);
                 for(int y=100;y<150;y++) for(int x=121;x<180;x++) before[y*w+x]=Cell(oil,temperature);
                 settings.Mode=mode;settings.Paused=false; Start(before);
-                for(int f=0;f<fps*2;f++) coordinator.DispatchFrame(settings,[],1f/fps);
+                for(int f=0;f<fps*2;f++) {coordinator.DispatchFrame(settings,[],1f/fps);if(f%8==0)yield return r;}
                 var after=Read();
                 // Walls conduct in normal fixtures. Account for all bodies in Q audit.
                 Balance(before,after,$"drain {mode} {fps} {temperature}");

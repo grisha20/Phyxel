@@ -46,6 +46,7 @@ public static class UiLayoutRegressionTests
         TestBrushToolModesAndInputBreaks(registry);
         TestCameraPanZoomAndInputIsolation();
         TestCanvasWorldExpansion();
+        TestCursorProbeMappingAndText(registry,coordinator);
         TestButtonVisualStates();
         TestMaterialCards(fonts.Regular);
         TestMaterialCategorization(registry);
@@ -69,6 +70,42 @@ public static class UiLayoutRegressionTests
         var load = coordinator.Update(input with { SavePressed = false, LoadPressed = true }, view, 1, settings);
         Require(load.LoadRequested && !load.SaveRequested, "Load shortcut requested save.");
         Console.WriteLine("[PASS] Quick save / Save As / load actions.");
+    }
+
+    private static void TestCursorProbeMappingAndText(MaterialRegistry registry,SandboxUiCoordinator ui)
+    {
+        foreach(var resolution in Resolutions)foreach(float dpi in DpiScales)
+        {
+            var settings=new SimulationSettings();var viewport=new Viewport(0,0,resolution.Width,resolution.Height);
+            ui.Update(Input(new Point(-1,-1)),viewport,dpi,settings);
+            Rectangle canvas=ui.CanvasBounds;Point size=CanvasWorldExpansion.RequiredSize(480,270,canvas);
+            Rectangle fitted=CanvasWorldExpansion.CoverBounds(canvas,size.X,size.Y);
+            var camera=new CanvasCameraController();
+            foreach(int zoomStep in new[]{0,1,2})
+            {
+                Rectangle view=camera.Update(Input(canvas.Center,wheelDelta:zoomStep==0?0:120),canvas,fitted,true,false);
+                if(zoomStep>0)
+                {
+                    camera.Update(Input(canvas.Center,leftDown:true),canvas,fitted,true,false);
+                    view=camera.Update(Input(canvas.Center+new Point(24,12),leftDown:true),canvas,fitted,true,false);
+                    camera.Update(Input(canvas.Center),canvas,fitted,true,false);
+                }
+                foreach(Point pointer in new[]{canvas.Location,canvas.Center,new Point(canvas.Right-1,canvas.Bottom-1)})
+                {
+                    ui.Update(Input(pointer) with {RightDown=true},viewport,dpi,settings);
+                    Require(!ui.PointerConsumed,"Eraser stroke consumed the canvas probe.");
+                    Point? cell=GpuTemperatureProbe.MapPointerToCell(pointer,view,size.X,size.Y);
+                    if(view.Contains(pointer))
+                        Require(cell is {} p&&p.X>=0&&p.X<size.X&&p.Y>=0&&p.Y<size.Y,"Zoomed/expanded probe coordinate invalid.");
+                    else Require(cell is null,"Pointer outside the rendered world returned a probe coordinate.");
+                }
+            }
+        }
+        var value=new TemperatureProbeResult {IsActive=1,MaterialIndex=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal),Temperature=73};
+        Require(UiStatusBar.FormatTemperatureProbe(registry,value).Contains("73,0"),"Finite GPU temperature absent from status.");
+        value.Temperature=123;
+        Require(UiStatusBar.FormatTemperatureProbe(registry,value).Contains("123,0"),"Changing GPU temperature absent from status.");
+        Console.WriteLine("[PASS] Cursor/eraser probe mapping across window/DPI/zoom/expanded world and changing status text.");
     }
 
     private static void TestSceneStatusText(SpriteFont font)

@@ -9,7 +9,7 @@ public static class PhaseEnthalpy
     public static float EffectiveCapacity(GridCell c, ReadOnlySpan<MaterialProperties> materials)
     {
         var m=materials[(int)c.MaterialIndex];
-        return m.HeatCapacity*Math.Max(c.Mass,.0001f) + (c.MoistureMass>0 && m.MoistureCapacity>0
+        return m.HeatCapacity*Math.Max(c.Mass,0) + (c.MoistureMass>0 && m.MoistureCapacity>0
             ? c.MoistureMass*materials[(int)m.MoistureLiquidMaterialIndex].HeatCapacity : 0)
             + (c.FuelMass>0 && m.FuelCapacity>0 ? c.FuelMass*materials[(int)m.FuelLiquidMaterialIndex].HeatCapacity : 0);
     }

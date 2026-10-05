@@ -157,6 +157,9 @@ public sealed class SimulationDispatchCoordinator
     private bool pressurePowderPotential;
     private bool fluidMatter;
     private bool liquidMatter;
+    private double viscousSurfaceAccumulator;
+    private int viscousSurfaceTicksThisFrame;
+    private ulong viscousSurfaceTickIndex;
     private bool gasMatter;
     private readonly FixedStepGasScheduler gasScheduler = new();
     private bool gasTimingPending;
@@ -601,6 +604,12 @@ public sealed class SimulationDispatchCoordinator
             // Existing water/granular movement keeps its established schedule.
             float cellularPreviousDelta = constants.DeltaTime;
             constants.DeltaTime = Math.Clamp(elapsedSeconds, 0, .1f);
+            // Clock the short supported-liquid patches independently of render
+            // FPS. Both cellular substeps used the same frame parity before,
+            // so their shared seams advanced only 30 times/s at 30 FPS.
+            viscousSurfaceAccumulator += constants.DeltaTime;
+            viscousSurfaceTicksThisFrame = Math.Min(12,(int)((viscousSurfaceAccumulator+1e-6)*120));
+            viscousSurfaceAccumulator = Math.Max(0,viscousSurfaceAccumulator-viscousSurfaceTicksThisFrame/120d);
             DispatchCellularAutomata(
                 resources,
                 ref constants,
@@ -624,6 +633,7 @@ public sealed class SimulationDispatchCoordinator
                     useOptimizedSchedule: false);
             }
             constants.DeltaTime = cellularPreviousDelta;
+            Phyxel.Diagnostics.NonfiniteStateTrace.Observe(resources,frameIndex,"cellular");
             hydraulicWarmupFrames = settings.HydraulicPressure
                 ? Math.Max(0, hydraulicWarmupFrames - 1)
                 : 0;
@@ -719,6 +729,7 @@ public sealed class SimulationDispatchCoordinator
                 {
                     airTickIndex++;
                     DispatchAirSimulation(resources, unchecked((uint)airTickIndex), settings.Mode == SimulationMode.Sandbox, settings.OpenBoundaries);
+                    Phyxel.Diagnostics.NonfiniteStateTrace.Observe(resources,frameIndex,"air");
                 }
                 constants.DebugReserved2 = unchecked((uint)gasMotionTickIndex);
                 if (gasMatter) DispatchGasMotion(resources, ref constants, settings.AirSimulation,
@@ -733,6 +744,7 @@ public sealed class SimulationDispatchCoordinator
                     DispatchCombustion(resources, (float)FixedAirStep, measure, settings.OpenBoundaries,
                         settings.Mode == SimulationMode.Simulation, settings.AirSimulation);
                     combustionDispatches++;
+                    Phyxel.Diagnostics.NonfiniteStateTrace.Observe(resources,frameIndex,"combustion");
                 }
             }
             if (gasMotionTicks > 0)
@@ -755,12 +767,14 @@ public sealed class SimulationDispatchCoordinator
                 (ulong)thermalTicks + (ulong)tick + 1));
             bool measure = thermalScheduler.TotalTicks >= 40 && !thermalTimingPending;
             DispatchThermalDiffusion(resources, measure, thermalTick, liquidMatter);
+            Phyxel.Diagnostics.NonfiniteStateTrace.Observe(resources,frameIndex,"thermal");
             if (materialRegistry.RegistryHasContactTransitions && contactTransitionPotential)
             {
                 uint tickIndex = unchecked((uint)(thermalScheduler.TotalTicks -
                     (ulong)thermalTicks + (ulong)tick + 1));
                 bool measureContact = thermalScheduler.TotalTicks >= 40 && !contactTimingPending;
                 DispatchContactTransitions(resources, tickIndex, measureContact);
+                Phyxel.Diagnostics.NonfiniteStateTrace.Observe(resources,frameIndex,"contact");
                 // A transition resets RestFrames on the GPU. Conservatively
                 // schedule a cellular step after each fixed contact tick; this
                 // avoids a blocking summary readback while keeping the 20 Hz
@@ -785,6 +799,7 @@ public sealed class SimulationDispatchCoordinator
             PhaseSummaryReadbackScheduleResult readbackResult =
                 DispatchPhaseTransitions(resources, thermalTicks, measure);
             phaseDispatches++;
+            Phyxel.Diagnostics.NonfiniteStateTrace.Observe(resources,frameIndex,"phase");
             maximumPhaseDispatchesPerFrame = Math.Max(maximumPhaseDispatchesPerFrame, phaseDispatchCount);
             lastPhaseDispatchFrame = frameIndex;
             presentationDirty = true;
@@ -898,6 +913,9 @@ public sealed class SimulationDispatchCoordinator
         contactTransitionPotential = containsContactTransitionSource;
         thermalScheduler.Reset();
         gasScheduler.Reset();
+        viscousSurfaceAccumulator=0;
+        viscousSurfaceTicksThisFrame=0;
+        viscousSurfaceTickIndex=0;
         ResetThermalTiming();
         ResetGasTiming();
         ResetContactTiming();
@@ -1437,8 +1455,22 @@ public sealed class SimulationDispatchCoordinator
             constants.DispatchExtentX = (uint)dispatchW;
             constants.DispatchExtentY = (uint)dispatchH;
 
-            UpdateConstants(context, resources, ref constants);
-            context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
+            uint previousFrame=constants.FrameIndex;
+            float previousDelta=constants.DeltaTime;
+            int repeats=phase==58 ? (primaryStep ? viscousSurfaceTicksThisFrame : 0) : 1;
+            for(int repeat=0;repeat<repeats;repeat++)
+            {
+                if(phase==58)
+                {
+                    constants.FrameIndex=unchecked((uint)++viscousSurfaceTickIndex);
+                    constants.DeltaTime=1f/120;
+                }
+                UpdateConstants(context, resources, ref constants);
+                context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
+            }
+            constants.FrameIndex=previousFrame;
+            constants.DeltaTime=previousDelta;
+            if(primaryStep && (phase==33||phase==58))Phyxel.Diagnostics.NonfiniteStateTrace.Surface(resources,previousFrame,phase);
         }
 
         // Unbind once at the end
@@ -1505,12 +1537,16 @@ public sealed class SimulationDispatchCoordinator
         {
             DispatchFireGlowDeposit(resources);
             DispatchFireGlowDiffuse(resources);
-            DispatchGasVisual(resources, decay: false);
             DispatchGasVisual(resources, decay: true);
+            DispatchGasVisual(resources, decay: false);
         }
         if (fireGlowTicks > 0)
         {
             DispatchFireGlowDeposit(resources);
+            // Keep the gas field in the displayed phase between fixed ticks.
+            // Decaying it after presentation made 100-FPS intermediate frames
+            // alternate bright/depleted CO2 even with a stationary physical gas.
+            DispatchGasVisual(resources, decay: true);
             DispatchGasVisual(resources, decay: false);
         }
         constants.SimulationPhase = collect ? 1u : 0u;
@@ -1543,7 +1579,6 @@ public sealed class SimulationDispatchCoordinator
         if (fireGlowTicks > 0)
         {
             DispatchFireGlowDiffuse(resources);
-            DispatchGasVisual(resources, decay: true);
         }
     }
 
@@ -1725,6 +1760,9 @@ public sealed class SimulationDispatchCoordinator
         ResetGasTiming();
         gasMotionAccumulator = 0;
         gasMotionTickIndex = 0;
+        viscousSurfaceAccumulator=0;
+        viscousSurfaceTicksThisFrame=0;
+        viscousSurfaceTickIndex=0;
         gasBrushQueue.Reset();
         fireGlowAccumulator = 0;
         airFieldPopulated = false;

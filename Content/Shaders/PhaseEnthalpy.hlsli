@@ -19,7 +19,11 @@ float VapourEnthalpyReference(MaterialProperties liquid, MaterialProperties vapo
 float CellEffectiveCapacity(GridCell c)
 {
     MaterialProperties m=Materials[c.MaterialIndex];
-    return m.HeatCapacity*max(c.Mass,.0001) + (c.MoistureMass>0 && m.MoistureCapacity>0
+    // Capacity and specific enthalpy must describe the same actual parcel.
+    // A mass floor here, followed by heat/actual-mass in air exchange, made
+    // minute combustion products overshoot by orders of magnitude and reach
+    // infinity/NaN. Positive sub-resolution stock is retained, not erased.
+    return m.HeatCapacity*max(c.Mass,0) + (c.MoistureMass>0 && m.MoistureCapacity>0
         ? c.MoistureMass*Materials[m.MoistureLiquidMaterialIndex].HeatCapacity : 0)
         + (c.FuelMass>0 && m.FuelCapacity>0 ? c.FuelMass*Materials[m.FuelLiquidMaterialIndex].HeatCapacity : 0);
 }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System;
 using System.IO;
 using System.Linq;
@@ -12,7 +13,7 @@ namespace Phyxel.Diagnostics;
 
 internal static class LiquidFeedRegressionVerifier
 {
-    internal static void Run(SimulationDispatchCoordinator coordinator, MaterialRegistry registry)
+    internal static IEnumerable<GpuSimulationResources> Run(SimulationDispatchCoordinator coordinator, MaterialRegistry registry)
     {
         string dir=Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")??"artifacts/liquid-feed";
         Directory.CreateDirectory(dir);
@@ -24,6 +25,7 @@ internal static class LiquidFeedRegressionVerifier
         var table=registry.CreateGpuTable();var serializer=new SimulationStateSerializer();
         var r=coordinator.DispatchFrame(settings,[new(){X=20,Y=20,EndX=20,EndY=20,Radius=1,Density=1,
             Mode=BrushCommandMode.Material,MaterialIndex=(ushort)coal}],0);
+        yield return r;
         int w=r.Width,n=w*r.Height,checks=0;bool passed=true;
         GridCell Cell(uint id,float t=20)=>new(){IsActive=1,MaterialIndex=id,Mass=1,Temperature=t};
         GridCell[] Read()=>MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer)).ToArray();
@@ -41,7 +43,7 @@ internal static class LiquidFeedRegressionVerifier
             serializer.ApplyWorldSnapshot(r,new(w,r.Height,MemoryMarshal.AsBytes(grid.AsSpan()).ToArray()));
             coordinator.RestoreWorldActivity(r,true,contacts,false,true);
         }
-        void Step(int frames,int fps){for(int f=0;f<frames;f++)coordinator.DispatchFrame(settings,[],1f/fps);}
+        IEnumerable<GpuSimulationResources> Step(int frames,int fps){for(int f=0;f<frames;f++){coordinator.DispatchFrame(settings,[],1f/fps);if(f%8==0)yield return r;}}
         void Capture(GridCell[] g,string name)=>File.WriteAllBytes(Path.Combine(dir,name+".grid"),MemoryMarshal.AsBytes(g.AsSpan()).ToArray());
         GridCell[] Scene(uint liquid,int hole,bool hot=false){
             var g=new GridCell[n];
@@ -55,7 +57,7 @@ internal static class LiquidFeedRegressionVerifier
         }
         foreach(uint liquid in new[]{water,oil})foreach(int hole in new[]{1,3})
         foreach(var mode in new[]{SimulationMode.Sandbox,SimulationMode.Simulation})foreach(int fps in new[]{30,60,100}){
-            var before=Scene(liquid,hole);Start(before,mode,false);Step(fps*10,fps);var after=Read();
+            var before=Scene(liquid,hole);Start(before,mode,false);foreach(var frame in Step(fps*10,fps))yield return frame;var after=Read();
             string label=$"{liquid}-{hole}-{mode}-{fps}";int tank=InTank(after);
             Check(tank==0,"coal lifted into tank "+label+" count="+tank);
             Check(Enumerable.Range(0,n).Any(i=>i/w>=124&&after[i].IsActive!=0&&after[i].MaterialIndex==liquid),"feed did not reach chamber "+label);
@@ -66,7 +68,7 @@ internal static class LiquidFeedRegressionVerifier
         }
         foreach(uint liquid in new[]{water,oil}){
             var before=new GridCell[n];before[100*w+140]=Cell(liquid);before[101*w+140]=Cell(coal);
-            Start(before,SimulationMode.Sandbox,false);Step(1,60);var after=Read();
+            Start(before,SimulationMode.Sandbox,false);foreach(var frame in Step(1,60))yield return frame;var after=Read();
             int at=Array.FindIndex(after,IsCoal);Check(at>=0&&at/w>=101,"free falling drop lifted coal "+liquid);
         }
         // Repeat the actual water contact/wetting path, with both hydraulic
@@ -74,7 +76,7 @@ internal static class LiquidFeedRegressionVerifier
         foreach(bool hydraulic in new[]{false,true})foreach(uint liquid in new[]{water,oil})
         foreach(var mode in new[]{SimulationMode.Sandbox,SimulationMode.Simulation})foreach(int fps in new[]{30,60,100}){
             settings.HydraulicPressure=hydraulic;
-            var before=Scene(liquid,1);Start(before,mode,true);Step(fps*10,fps);var after=Read();
+            var before=Scene(liquid,1);Start(before,mode,true);foreach(var frame in Step(fps*10,fps))yield return frame;var after=Read();
             string label=$"{liquid}-{hydraulic}-{mode}-{fps}";
             Check(InTank(after)==0,"actual contact lifted coal "+label);
             Check(Enumerable.Range(0,n).Any(i=>i/w>=124&&after[i].IsActive!=0&&after[i].MaterialIndex==liquid),"actual feed blocked "+label);
@@ -90,6 +92,7 @@ internal static class LiquidFeedRegressionVerifier
             double flameTime=0,peak=0;
             for(int f=0;f<fps*10;f++){
                 coordinator.DispatchFrame(settings,[],1f/fps);
+                if(f%8==0)yield return r;
                 if(f%(fps/10)==0){var sample=Read();int flames=sample.Count(c=>c.IsActive!=0&&c.MaterialIndex==fire&&c.Lifetime>0);flameTime+=flames*.1;peak=Math.Max(peak,flames);}
             }
             var after=Read();double burned=Fuel(before,oil)-Fuel(after,oil);
@@ -102,6 +105,7 @@ internal static class LiquidFeedRegressionVerifier
             Start(dry,mode,true);double controlFlame=0,controlPeak=0;
             for(int f=0;f<fps*10;f++){
                 coordinator.DispatchFrame(settings,[],1f/fps);
+                if(f%8==0)yield return r;
                 if(f%(fps/10)==0){int flames=Read().Count(c=>c.IsActive!=0&&c.MaterialIndex==fire&&c.Lifetime>0);controlFlame+=flames*.1;controlPeak=Math.Max(controlPeak,flames);}
             }
             Check(flameTime>=controlFlame*1.1,"oil failed to add integrated flame "+mode+" "+fps);

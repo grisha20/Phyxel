@@ -143,6 +143,12 @@ internal static class OilAbsorptionRegressionVerifier
             for(int i=0;i<3;i++)ctx.ComputeShader.SetShaderResource(i,null);for(int i=0;i<6;i++)ctx.ComputeShader.SetUnorderedAccessView(i,null);
             ctx.ComputeShader.Set(null);return Read();
         }
+        // Isolate the retained-oil ledger from a concurrently burning host.
+        // Production now allows both reactions; their combined contract follows.
+        var oilOnly=(MaterialProperties[])table.Clone();
+        oilOnly[coal].IgnitionTemperature=float.MaxValue;
+        oilOnly[coal].FlameSpreadRate=0;
+        r.Materials.Upload(r.Context,oilOnly);
         foreach(bool finite in new[]{false,true}) foreach(string cover in new[]{"air","water","solid","wet","inert"})
         {
             var before=new GridCell[n];before[p]=Cell(coal,300);before[p].FuelMass=.2f;
@@ -169,7 +175,7 @@ internal static class OilAbsorptionRegressionVerifier
         Check(Math.Abs(Energy(capAfter)-Energy(capped)-capBurn*(table[oil].HeatPerMass-table[oil].HeatCapacity*1099))<.02,"Cap discarded heat");
 
         // Five seconds without an external cooler reach the thermal limit.
-        // Oil consumption must stop there while preserving the dry support.
+        // The isolated oil reaction must stop there while preserving its carrier.
         foreach(bool finite in new[]{false,true})
         {
             var initial=new GridCell[n];initial[p]=Cell(coal,1000);initial[p].FuelMass=.25f;
@@ -178,6 +184,22 @@ internal static class OilAbsorptionRegressionVerifier
             Check(burning[p].FuelMass>0 && burning[p].FuelMass<.25f && burning[p].Mass==1 &&
                 burning[p].MaterialIndex==coal && burning[p].Temperature<=1100.01f,
                 "Five-second oil cap/support "+finite);
+        }
+
+        r.Materials.Upload(r.Context,table);
+        foreach(bool finite in new[]{false,true}) foreach(float oxygen in new[]{0f,.01f,1f})
+        {
+            var initial=new GridCell[n];initial[p]=Cell(coal,300);initial[p].Lifetime=1;initial[p].FuelMass=.2f;
+            var reacted=React(initial,finite,oxygen);
+            float dryBurn=initial[p].Mass-reacted[p].Mass, oilBurn=initial[p].FuelMass-reacted[p].FuelMass;
+            // Existing concentration extinction threshold is .20, including ignition.
+            bool shouldBurn=!finite||oxygen>.20f;
+            Check(shouldBurn ? dryBurn>0&&oilBurn>0 : dryBurn==0&&oilBurn==0,"Combined dry/oil reaction gate");
+            var demands=MemoryMarshal.Cast<byte,float>(AirInventoryRegressionVerifier.Read(r,r.OxidizerDemand.Buffer));
+            float expected=finite ? dryBurn*registry[coal].Combustion!.OxidizerPerMass+oilBurn*registry[oil].Combustion!.OxidizerPerMass : 0;
+            Check(Math.Abs(demands[p]-expected)<1e-6 && (!finite||demands[p]<=4*oxygen/5+1e-6),"Combined dry/oil oxygen reservation");
+            Check(float.IsFinite(reacted[p].Temperature)&&reacted[p].Temperature<=1100.01f,"Combined reaction temperature");
+            Console.WriteLine($"PHYXEL_OIL_ABSORPTION_COMBINED finite={finite} oxygen={oxygen} dry={dryBurn} oil={oilBurn} demand={demands[p]}");
         }
 
         var saved=new GridCell[n];saved[p]=Cell(table[coal].MoistureWetMaterialIndex,100);saved[p].MoistureMass=.07f;
@@ -265,7 +287,7 @@ internal static class OilAbsorptionRegressionVerifier
             bool rejected=false;try{_ = new MaterialRegistry(coreDir,Path.Combine(dir,"empty-external"));}
             catch(InvalidDataException){rejected=true;}Check(rejected,"Invalid absorption material reached GPU: "+invalid);
         }
-        File.WriteAllText(Path.Combine(dir,"result.txt"),$"checks={checks}\nGrid52 Material224 writer14\n");
+        File.WriteAllText(Path.Combine(dir,"result.txt"),$"checks={checks}\nGrid52 Material244 writer14\n");
         Console.WriteLine($"PHYXEL_OIL_ABSORPTION_SUCCESS checks={checks}");
     }
 }

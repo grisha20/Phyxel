@@ -16,7 +16,7 @@ namespace Phyxel.Diagnostics;
 
 internal static class WoodCycleRegressionVerifier
 {
-    internal static void Run(SimulationDispatchCoordinator coordinator,MaterialRegistry registry)
+    internal static IEnumerable<GpuSimulationResources> Run(SimulationDispatchCoordinator coordinator,MaterialRegistry registry)
     {
         string dir=Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")??"artifacts/wood-cycle";
         Directory.CreateDirectory(dir);
@@ -27,6 +27,7 @@ internal static class WoodCycleRegressionVerifier
             fixture=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fixture),oil=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Oil);
         var r=coordinator.DispatchFrame(settings,[new(){X=20,Y=20,EndX=20,EndY=20,Radius=1,Density=1,
             Mode=BrushCommandMode.Material,MaterialIndex=wood}],0);
+        yield return r;
         int w=r.Width,h=r.Height,n=w*h,p=120*w+160,checks=0,failures=0;
         var physical=registry.CreateGpuTable();var table=physical.ToArray();
         for(int i=0;i<table.Length;i++)table[i].ThermalConductivity=0;
@@ -41,28 +42,28 @@ internal static class WoodCycleRegressionVerifier
             Check(Math.Abs(Energy(a)-Energy(b))<.0001*Math.Max(1,Math.Abs(Energy(a))),label+" energy");}
         void Upload(GridCell[] g){serializer.ApplyWorldSnapshot(r,new(w,h,MemoryMarshal.AsBytes(g.AsSpan()).ToArray()));
             coordinator.RestoreWorldActivity(r,true,true,false);r.Materials.Upload(r.Context,table);}
-        void Advance(int fps,float seconds){settings.Paused=false;for(int f=0;f<(int)Math.Round(fps*seconds);f++){
+        IEnumerable<GpuSimulationResources> Advance(int fps,float seconds){settings.Paused=false;for(int f=0;f<(int)Math.Round(fps*seconds);f++){
             coordinator.DispatchFrame(settings,[],1f/fps);
-            coordinator.ObserveStatistics(MemoryMarshal.Cast<byte,SimulationStatistics>(AirInventoryRegressionVerifier.Read(r,r.Statistics.ReadBuffer))[0]);}}
+            coordinator.ObserveStatistics(MemoryMarshal.Cast<byte,SimulationStatistics>(AirInventoryRegressionVerifier.Read(r,r.Statistics.ReadBuffer))[0]);if(f%8==0)yield return r;}}
         GridCell[] Pocket(uint id,float t=20){var g=new GridCell[n];g[p]=Cell(id,t);g[p+1]=Cell(water,20,.5f);
             foreach(int o in new[]{-1,-w,w,2,1-w,1+w})g[p+o]=Cell(fixture);return g;}
         // Real clocks, not direct moisture dispatch; the piece and donor cannot fall.
         foreach(var mode in new[]{SimulationMode.Sandbox,SimulationMode.Simulation})foreach(int fps in new[]{30,60,100}){
-            settings.Mode=mode;var g=Pocket(wood);Upload(g);Advance(fps,1);var a=Read();
+            settings.Mode=mode;var g=Pocket(wood);Upload(g);foreach(var frame in Advance(fps,1))yield return frame;var a=Read();
             Check(Math.Abs(a[p].MoistureMass-.20)<.0001,"water uptake .25 per dry mass "+mode+"/"+fps);
             Check(a[p].MaterialIndex==wood&&a[p].Mass==g[p].Mass,"same wood remains fixed "+mode+"/"+fps);
             Balance(g,a,"wood uptake "+mode+"/"+fps);
             metrics.Add(new{scenario="uptake",mode=mode.ToString(),fps,moisture=a[p].MoistureMass});
         }
         foreach(var mode in new[]{SimulationMode.Sandbox,SimulationMode.Simulation})foreach(int fps in new[]{30,60,100}){
-            settings.Mode=mode;var oily=Pocket(wood);oily[p+1]=Cell(oil);Upload(oily);Advance(fps,1);var a=Read();
+            settings.Mode=mode;var oily=Pocket(wood);oily[p+1]=Cell(oil);Upload(oily);foreach(var frame in Advance(fps,1))yield return frame;var a=Read();
             Check(a[p].MoistureMass==0&&Math.Abs(a[p].FuelMass-.032)<.0001,"oil separate and slower than water "+mode+"/"+fps);
             Balance(oily,a,"wood oil uptake "+mode+"/"+fps);
             metrics.Add(new{scenario="oil-uptake",mode=mode.ToString(),fps,fuel=a[p].FuelMass});
         }
         // Old JSON reproduces the absent mechanism; don't invent unsupported wet cells.
         if(!baseline){
-            var g=Pocket(wood);Upload(g);Advance(60,8);var soaked=Read();
+            var g=Pocket(wood);Upload(g);foreach(var frame in Advance(60,8))yield return frame;var soaked=Read();
             Check(Math.Abs(soaked[p].MoistureMass-.24)<.0001,"wood pore capacity");Balance(g,soaked,"saturation");
             settings.Paused=true;var before=Read();coordinator.DispatchFrame(settings,[],1);
             Check(MemoryMarshal.AsBytes(before.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(Read().AsSpan())),"paused water byte exact");
@@ -70,7 +71,7 @@ internal static class WoodCycleRegressionVerifier
             Task.Run(()=>serializer.SaveAsync(path,settings,(ushort)wood,snapshot,registry)).GetAwaiter().GetResult();
             var loaded=Task.Run(()=>serializer.LoadAsync(path,registry)).GetAwaiter().GetResult()!;
             Check(snapshot.Grid.AsSpan().SequenceEqual(loaded.World!.Grid),"wood save/reload byte exact");
-            Upload(soaked);Advance(60,1);var continued=Read();Upload(MemoryMarshal.Cast<byte,GridCell>(loaded.World.Grid).ToArray());Advance(60,1);
+            Upload(soaked);foreach(var frame in Advance(60,1))yield return frame;var continued=Read();Upload(MemoryMarshal.Cast<byte,GridCell>(loaded.World.Grid).ToArray());foreach(var frame in Advance(60,1))yield return frame;
             Check(MemoryMarshal.AsBytes(continued.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(Read().AsSpan())),"wet wood continuation same after reload");
             var probeConstants=new TemperatureProbeConstants{X=(uint)(p%w),Y=(uint)(p/w),Width=(uint)w,Height=(uint)h};
             r.Context.UpdateSubresource(ref probeConstants,r.TemperatureProbeConstants);
@@ -85,7 +86,7 @@ internal static class WoodCycleRegressionVerifier
                 var drying=new GridCell[n];drying[p]=Cell(wood,100);drying[p].MoistureMass=.1f;
                 drying[p].MoistureEnergy=.1f*physical[water].TransitionAboveLatentHeat;
                 foreach(int o in new[]{-1,-w,w})drying[p+o]=Cell(fixture,100);
-                Upload(drying);Advance(fps,2);var dried=Read();
+                Upload(drying);foreach(var frame in Advance(fps,2))yield return frame;var dried=Read();
                 Check(dried[p].MaterialIndex==wood&&dried[p].Mass==.8f&&dried[p].MoistureMass==0,"actual clock dries wood "+mode+"/"+fps);
                 Check(Math.Abs(dried.Where(c=>c.IsActive!=0&&c.MaterialIndex==registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam)).Sum(c=>c.Mass)-.1)<.00001,"actual clock returns steam "+mode+"/"+fps);
                 Balance(drying,dried,"real drying "+mode+"/"+fps);
@@ -107,12 +108,12 @@ internal static class WoodCycleRegressionVerifier
             }
             foreach(bool finite in new[]{false,true}){
                 var wet=new GridCell[n];wet[p]=Cell(wood,100);wet[p].MoistureMass=.1f;Upload(wet);
-                for(uint tick=0;tick<60;tick++)React(tick,finite,1);
+                for(uint tick=0;tick<60;tick++){React(tick,finite,1);if(tick%8==0)yield return r;}
                 Check(Read()[p].Mass==.8f&&Read()[p].MaterialIndex==wood,"wet wood fuel suppressed "+finite);
                 var dry=new GridCell[n];dry[p]=Cell(wood,400);Upload(dry);
-                if(finite){for(uint tick=0;tick<60;tick++)React(tick,true,0);Check(Read()[p].Mass==.8f,"inert Simulation wood no burn");}
+                if(finite){for(uint tick=0;tick<60;tick++){React(tick,true,0);if(tick%8==0)yield return r;}Check(Read()[p].Mass==.8f,"inert Simulation wood no burn");}
                 float converted=0;
-                for(uint tick=1;tick<=732;tick++){React(tick,finite,1);if(Read()[p].MaterialIndex==coal){converted=tick/60f;break;}}
+                for(uint tick=1;tick<=732;tick++){React(tick,finite,1);if(tick%8==0)yield return r;if(Read()[p].MaterialIndex==coal){converted=tick/60f;break;}}
                 var residue=Read()[p];Check(converted>=6&&converted<=6.2f&&Math.Abs(residue.Mass-.2)<.00001,"dry wood leaves coal in6s "+finite);
                 Check(residue.MoistureMass==0&&residue.FuelMass==0,"residue not born wet/oiled");
                 metrics.Add(new{scenario="burnout",finite,seconds=converted,residue=residue.Mass});
@@ -120,10 +121,14 @@ internal static class WoodCycleRegressionVerifier
             foreach(bool finite in new[]{false,true}){
                 var dry=new GridCell[n];dry[p]=Cell(wood,400);Upload(dry);React(1,finite,1);var dryAfter=Read();
                 var soakedOil=new GridCell[n];soakedOil[p]=Cell(wood,400);soakedOil[p].FuelMass=.15f;Upload(soakedOil);React(1,finite,1);var oilAfter=Read();
-                Check(oilAfter[p].Mass==.8f&&oilAfter[p].FuelMass<.15f,"wood oil burns before dry base "+finite);
+                Check(oilAfter[p].Mass<.8f&&oilAfter[p].FuelMass<.15f,"wood oil supplements burning dry base "+finite);
                 double dryQ=Energy(dryAfter)-Energy(dry),oilQ=Energy(oilAfter)-Energy(soakedOil);
                 Check(oilQ>dryQ*1.5,"oil gives stronger heat than dry wood "+finite);
-                Check(Math.Abs(oilQ-(.15-oilAfter[p].FuelMass)*(physical[oil].HeatPerMass-400*physical[oil].HeatCapacity))<.001,"wood oil energy ledger "+finite);
+                double dryBurn=.8f-oilAfter[p].Mass, oilBurn=.15f-oilAfter[p].FuelMass;
+                double afterDryTemperature=400+dryBurn*physical[wood].HeatPerMass/PhaseEnthalpy.EffectiveCapacity(soakedOil[p],physical);
+                double expectedQ=dryBurn*(physical[wood].HeatPerMass-afterDryTemperature*physical[wood].HeatCapacity)+
+                    oilBurn*(physical[oil].HeatPerMass-afterDryTemperature*physical[oil].HeatCapacity);
+                Check(Math.Abs(oilQ-expectedQ)<.001,"wood combined dry/oil energy ledger "+finite);
                 foreach(string cover in new[]{"wet","solid","inert"}){
                     var closed=soakedOil.ToArray();if(cover=="wet"){closed[p].MoistureMass=.02f;closed[p].Temperature=100;}
                     if(cover=="solid")foreach(int offset in new[]{-1,1,-w,w})closed[p+offset]=Cell(fixture,400);
@@ -131,10 +136,10 @@ internal static class WoodCycleRegressionVerifier
                     Check(Read()[p].FuelMass==.15f||(!finite&&cover=="inert"),"wood oil inhibited "+finite+"/"+cover);
                 }
             }
-            var mixed=Pocket(wood);mixed[p].MoistureMass=.12f;mixed[p+1]=Cell(oil);Upload(mixed);Advance(60,5);var mixedAfter=Read();
+            var mixed=Pocket(wood);mixed[p].MoistureMass=.12f;mixed[p+1]=Cell(oil);Upload(mixed);foreach(var frame in Advance(60,5))yield return frame;var mixedAfter=Read();
             Balance(mixed,mixedAfter,"wood mixed pores");Check(mixedAfter[p].FuelMass>0&&mixedAfter[p].MoistureMass/(.8f*.3f)+mixedAfter[p].FuelMass/(.8f*.25f)<=1.0001,"wood shared pores");
             var oilChain=new GridCell[n];for(int x=0;x<5;x++)oilChain[p+x]=Cell(wood);oilChain[p].FuelMass=.2f;
-            Upload(oilChain);Advance(60,8);var wicked=Read();Balance(oilChain,wicked,"wood oil wick");Check(wicked[p+2].FuelMass>1e-5,"wood oil reaches depth two");
+            Upload(oilChain);foreach(var frame in Advance(60,8))yield return frame;var wicked=Read();Balance(oilChain,wicked,"wood oil wick");Check(wicked[p+2].FuelMass>1e-5,"wood oil reaches depth two");
             string oilPath=Path.Combine(dir,"oily-wood.json");settings.Paused=true;
             var oilSnapshot=new SimulationWorldSnapshot(w,h,MemoryMarshal.AsBytes(mixedAfter.AsSpan()).ToArray());
             Task.Run(()=>serializer.SaveAsync(oilPath,settings,(ushort)wood,oilSnapshot,registry)).GetAwaiter().GetResult();
@@ -169,6 +174,7 @@ internal static class WoodCycleRegressionVerifier
                     BrushDrawCommand[] commands=f<fps*2?[new(){X=191,Y=120,EndX=191,EndY=120,Radius=2,Density=1,Mode=BrushCommandMode.Material,MaterialIndex=fire}]:[];
                     coordinator.DispatchFrame(settings,commands,1f/fps);
                     coordinator.ObserveStatistics(MemoryMarshal.Cast<byte,SimulationStatistics>(AirInventoryRegressionVerifier.Read(r,r.Statistics.ReadBuffer))[0]);
+                    if(f%8==0)yield return r;
                     if(f%(fps/2)!=fps/2-1)continue;burning=Read();
                     if(f==fps/2-1)Check(burning[120*w+150].MaterialIndex==wood,"remote wood not instantly charred at0.5s "+mode+"/"+fps);
                     if(firstRight==0&&Enumerable.Range(171,20).Any(x=>Enumerable.Range(120,4).Any(y=>burning[y*w+x].MaterialIndex==coal)))firstRight=(f+1)/(float)fps;
@@ -190,7 +196,7 @@ internal static class WoodCycleRegressionVerifier
             var powderBoard=new GridCell[n];uint powder=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Gunpowder);
             for(int x=150;x<=190;x++){for(int y=120;y<124;y++)powderBoard[y*w+x]=Cell(wood);powderBoard[124*w+x]=Cell(fixture);}
             for(int x=181;x<191;x++)for(int y=117;y<120;y++)powderBoard[y*w+x]=Cell(powder,400,physical[powder].Density);
-            Upload(powderBoard);Advance(60,20);var after=Read();
+            Upload(powderBoard);foreach(var frame in Advance(60,20))yield return frame;var after=Read();
             double remaining=after.Where(c=>c.IsActive!=0&&(c.MaterialIndex==wood||c.MaterialIndex==coal||c.MaterialIndex==physical[coal].MoistureWetMaterialIndex)).Sum(c=>(double)c.Mass);
             double consumed=41*4*.8-remaining;
             Check(consumed>.1,"powder ignites dry wood "+mode);

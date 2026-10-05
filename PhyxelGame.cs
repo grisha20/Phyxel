@@ -67,6 +67,14 @@ public sealed class PhyxelGame : Game
     private uint frameIndex;
     private RawInputSnapshot latestInput;
     private bool uiScreenshotCaptured;
+    private string? diagnosticUiCapturePath;
+    private int diagnosticFramesPerSecond;
+    private long diagnosticFrameStart;
+    private bool diagnosticTimerResolution;
+    [System.Runtime.InteropServices.DllImport("winmm.dll")]
+    private static extern uint timeBeginPeriod(uint period);
+    [System.Runtime.InteropServices.DllImport("winmm.dll")]
+    private static extern uint timeEndPeriod(uint period);
 
     public PhyxelGame()
     {
@@ -123,6 +131,15 @@ public sealed class PhyxelGame : Game
                 IsFixedTimeStep = true;
                 TargetElapsedTime = TimeSpan.FromSeconds(1d / targetFramesPerSecond);
             }
+        }
+        if(Environment.GetEnvironmentVariable("PHYXEL_VERIFY_HANDOFF")=="1")
+        {
+            graphics.SynchronizeWithVerticalRetrace=false;
+            IsFixedTimeStep=false;
+            diagnosticFramesPerSecond=100;
+            // Windows' default 15.6ms sleep quantum would cap this fixture near
+            // 64 FPS even with an empty grid. Release the request at shutdown.
+            diagnosticTimerResolution=timeBeginPeriod(1)==0;
         }
         scenePath = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SCENE_PATH") ??
             (acceptance.Active && !acceptance.RequiresSavedScene
@@ -185,21 +202,21 @@ public sealed class PhyxelGame : Game
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_OIL_PHASES") == "1")
         {
-            try { OilPhaseRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
-            catch (Exception e) { Console.WriteLine($"PHYXEL_OIL_PHASES_FAILED {e}"); Environment.ExitCode = 1; }
-            Exit(); return;
+            oilSmokeVerification = OilPhaseRegressionVerifier.Run(dispatchCoordinator, materialRegistry).GetEnumerator();
+            IsFixedTimeStep = false;
+            return;
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_TEMPERATURE") == "1")
         {
-            try { LiquidTemperatureRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
-            catch (Exception e) { Console.WriteLine($"PHYXEL_LIQUID_TEMPERATURE_FAILED {e}"); Environment.ExitCode = 1; }
-            Exit(); return;
+            oilSmokeVerification = LiquidTemperatureRegressionVerifier.Run(dispatchCoordinator, materialRegistry).GetEnumerator();
+            IsFixedTimeStep = false;
+            return;
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_FEED") == "1")
         {
-            try { LiquidFeedRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
-            catch (Exception exception) { Console.WriteLine($"PHYXEL_LIQUID_FEED_FAILED {exception}"); Environment.ExitCode = 1; }
-            Exit();return;
+            oilSmokeVerification = LiquidFeedRegressionVerifier.Run(dispatchCoordinator, materialRegistry).GetEnumerator();
+            IsFixedTimeStep = false;
+            return;
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_OIL_ABSORPTION") == "1")
         {
@@ -223,9 +240,8 @@ public sealed class PhyxelGame : Game
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_WOOD") == "1")
         {
-            try { WoodCycleRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
-            catch (Exception exception) { Console.WriteLine($"PHYXEL_WOOD_FAILED {exception}"); Environment.ExitCode=1; }
-            Exit();
+            oilSmokeVerification = WoodCycleRegressionVerifier.Run(dispatchCoordinator, materialRegistry).GetEnumerator();
+            IsFixedTimeStep = false;
             return;
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FUEL_MOISTURE") == "1")
@@ -316,9 +332,9 @@ public sealed class PhyxelGame : Game
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_OIL_LOCALITY") == "1")
         {
-            try { OilLocalityRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
-            catch (Exception exception) { Console.WriteLine($"PHYXEL_OIL_LOCALITY_FAILED {exception}"); Environment.ExitCode=1; }
-            Exit(); return;
+            oilSmokeVerification = OilLocalityRegressionVerifier.Run(dispatchCoordinator, materialRegistry).GetEnumerator();
+            IsFixedTimeStep = false;
+            return;
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_OIL_SMOKE_FLOW") == "1")
         {
@@ -329,6 +345,14 @@ public sealed class PhyxelGame : Game
         {
             oilSmokeVerification = LiquidLayersRegressionVerifier.Run(dispatchCoordinator, materialRegistry,
                 settings, status => SetStatus("Автотест: " + status)).GetEnumerator();
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_HANDOFF") == "1")
+        {
+            InactiveSleepTime = TimeSpan.Zero;
+            oilSmokeVerification = HandoffRegressionVerifier.Run(dispatchCoordinator, materialRegistry,
+                settings, temperatureProbe, status => SetStatus(status.Length==0 ? string.Empty : "Автотест: " + status, status.Length==0 ? 0 : 3),
+                path => diagnosticUiCapturePath = path,
+                fps => diagnosticFramesPerSecond=fps).GetEnumerator();
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_MATERIAL_ENVIRONMENT") == "1")
         {
@@ -441,6 +465,23 @@ public sealed class PhyxelGame : Game
             CompleteCanvasExpansion();
             return;
         }
+        // Diagnostic wall-clock fixtures present exactly one Draw per update.
+        // MonoGame fixed-step catch-up may run several updates per Draw, which
+        // would make an update counter an invalid rendered-FPS measurement.
+        if(diagnosticFramesPerSecond>0)
+        {
+            long now=System.Diagnostics.Stopwatch.GetTimestamp();
+            double remaining=1d/diagnosticFramesPerSecond-
+                (now-diagnosticFrameStart)/(double)System.Diagnostics.Stopwatch.Frequency;
+            if(diagnosticFrameStart!=0 && remaining>0)
+            {
+                if(remaining>.002)System.Threading.Thread.Sleep((int)((remaining-.001)*1000));
+                while((System.Diagnostics.Stopwatch.GetTimestamp()-diagnosticFrameStart)/
+                    (double)System.Diagnostics.Stopwatch.Frequency<1d/diagnosticFramesPerSecond)
+                    System.Threading.Thread.SpinWait(32);
+            }
+            diagnosticFrameStart=System.Diagnostics.Stopwatch.GetTimestamp();
+        }
         RawInputSnapshot input = inputSampler.Sample(gameTime);
         if (sceneDialogOpen) return;
         latestInput = input;
@@ -452,6 +493,8 @@ public sealed class PhyxelGame : Game
         }
         if (oilSmokeVerification is not null)
         {
+            transientStatusRemaining=Math.Max(0,transientStatusRemaining-input.DeltaSeconds);
+            if(transientStatusRemaining==0)transientStatus=string.Empty;
             // Keep layout and the message pump active without letting input alter the fixture.
             userInterface.Update(default(RawInputSnapshot) with { MousePosition = input.MousePosition },
                 GraphicsDevice.Viewport, uiDpiOverride ?? UiDisplayScale.GetDpiScale(Window.Handle), settings);
@@ -471,7 +514,13 @@ public sealed class PhyxelGame : Game
             }
             catch (Exception exception)
             {
-                string test = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_LAYERS") == "1" ? "LL" : "OS";
+                string test = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_HANDOFF") == "1" ? "HANDOFF" :
+                    Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_LAYERS") == "1" ? "LL" :
+                    Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_TEMPERATURE") == "1" ? "LIQUID_TEMPERATURE" :
+                    Environment.GetEnvironmentVariable("PHYXEL_VERIFY_WOOD") == "1" ? "WOOD" :
+                    Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_FEED") == "1" ? "LIQUID_FEED" :
+                    Environment.GetEnvironmentVariable("PHYXEL_VERIFY_OIL_LOCALITY") == "1" ? "OIL_LOCALITY" :
+                    Environment.GetEnvironmentVariable("PHYXEL_VERIFY_OIL_PHASES") == "1" ? "OIL_PHASES" : "OS";
                 Console.WriteLine($"PHYXEL_{test}_FAILED {exception}");
                 Environment.ExitCode = 1;
                 Exit();
@@ -666,6 +715,7 @@ public sealed class PhyxelGame : Game
 
     protected override void UnloadContent()
     {
+        if(diagnosticTimerResolution){timeEndPeriod(1);diagnosticTimerResolution=false;}
         oilSmokeVerification?.Dispose();
         simulationClockTrace.Dispose();
         userInterface?.Dispose();
@@ -787,8 +837,9 @@ public sealed class PhyxelGame : Game
 
     private void CaptureUiScreenshotIfRequested()
     {
+        bool diagnosticCapture=diagnosticUiCapturePath is not null;
         uint captureFrame = uint.TryParse(Environment.GetEnvironmentVariable("PHYXEL_UI_CAPTURE_FRAME"), out uint requestedFrame) ? requestedFrame : 1;
-        if (uiScreenshotCaptured || string.IsNullOrWhiteSpace(uiScreenshotPath) || frameIndex < captureFrame)
+        if (!diagnosticCapture && (uiScreenshotCaptured || string.IsNullOrWhiteSpace(uiScreenshotPath) || frameIndex < captureFrame))
         {
             return;
         }
@@ -797,7 +848,7 @@ public sealed class PhyxelGame : Game
         int height = GraphicsDevice.PresentationParameters.BackBufferHeight;
         Color[] pixels = new Color[width * height];
         GraphicsDevice.GetBackBufferData(pixels);
-        string fullPath = Path.GetFullPath(uiScreenshotPath);
+        string fullPath = Path.GetFullPath(diagnosticUiCapturePath ?? uiScreenshotPath!);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         using System.Drawing.Bitmap capture = new(
             width,
@@ -820,9 +871,10 @@ public sealed class PhyxelGame : Game
         System.Runtime.InteropServices.Marshal.Copy(bgra, 0, data.Scan0, bgra.Length);
         capture.UnlockBits(data);
         capture.Save(fullPath, System.Drawing.Imaging.ImageFormat.Png);
-        uiScreenshotCaptured = true;
+        diagnosticUiCapturePath=null;
+        if(!diagnosticCapture)uiScreenshotCaptured = true;
         Console.WriteLine($"PHYXEL_UI_SCREENSHOT {width}x{height} {fullPath}");
-        if (oilSmokeVerification is null) Exit();
+        if (!diagnosticCapture && oilSmokeVerification is null) Exit();
     }
 
     private void ProcessSerializationCompletion()

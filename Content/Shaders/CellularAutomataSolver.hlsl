@@ -1074,6 +1074,11 @@ void ResolveOrdinaryWaterBlock(uint2 coordinate)
 
     uint2 source = leftKind == 4 ? left : right;
     uint sourceIndex = leftKind == 4 ? leftIndex : rightIndex;
+    // Viscous pools already have a supported, clocked head solver (58).
+    // The water ledge shortcut moves their surface into empty shafts before
+    // that solver runs, manufacturing falling steps only with hydraulics off.
+    // Adjacent gravity/edge flow remains available for genuine oil drains.
+    if (Materials[CellMaterials[sourceIndex]].LiquidFlowTemperatureSensitivity > 0) return;
     int direction = leftKind == 4 ? 1 : -1;
     uint2 destination;
     if (!FindOrdinaryWaterDestination(
@@ -2234,6 +2239,19 @@ bool SameLiquidColumnsConnected(uint firstX, uint secondX, uint top, uint base, 
     [loop]
     for (int column = int(firstX) + direction; column != int(secondX) + direction; column += direction)
     {
+        // Phase 33 already measured the topmost contiguous run. Prove the
+        // ordinary pool connection with those endpoints instead of rescanning
+        // its entire depth for every candidate and every surface transfer.
+        // Buried layers/secondary runs still need the exact fallback below.
+        uint cachedTop, cachedBase;
+        if (UnpackWaterColumn(WaterColumnState[column], cachedTop, cachedBase) &&
+            CellMaterials[FlattenCoordinate(uint2(column, cachedTop))] == material &&
+            cachedTop <= runBase && runBase <= cachedBase)
+        {
+            runTop = max(top, cachedTop);
+            runBase = cachedBase;
+            continue;
+        }
         int overlap = -1;
         [loop]
         for (int y = int(runBase); y >= int(runTop); y--)
@@ -2386,7 +2404,7 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight, bool viscou
         uint aboveKind = top > 0 ? CellKindAt(uint2(column, top - 1)) : 2;
         bool perchedOnBody = base + 1 < Height &&
             (Materials[CellMaterials[FlattenCoordinate(uint2(column, base + 1))]].Flags & MaterialFlagDensityBody) != 0;
-        bool sourceReady = abs(surface.VelocityY) <= 8 &&
+        bool sourceReady = (viscousOnly || abs(surface.VelocityY) <= 8) &&
             (Materials[surface.MaterialIndex].LiquidFlowTemperatureSensitivity > 0) == viscousOnly &&
             // Viscous liquids use local, clocked flow; a bulk water shortcut
             // would bypass viscosity and visibly teleport a freshly fed oil.
@@ -2435,7 +2453,7 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight, bool viscou
             GridCell candidateCell=Grid[FlattenCoordinate(uint2(candidateSourceX,candidateTop))];
             uint above=candidateTop>0?CellKindAt(uint2(candidateSourceX,candidateTop-1)):SimulationKindSolid;
             bool perched=candidateBase+1<Height && (Materials[CellMaterials[FlattenCoordinate(uint2(candidateSourceX,candidateBase+1))]].Flags & MaterialFlagDensityBody)!=0;
-            if(abs(candidateCell.VelocityY)>8 || perched || (above!=SimulationKindNone && above!=SimulationKindGas) ||
+            if((!viscousOnly && abs(candidateCell.VelocityY)>8) || perched || (above!=SimulationKindNone && above!=SimulationKindGas) ||
                 Materials[candidateCell.MaterialIndex].LiquidFlowTemperatureSensitivity<=0)continue;
         }
         uint candidateDestinationX;
@@ -2450,6 +2468,11 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight, bool viscou
         {
             continue;
         }
+        // Each local donor has its own mobility clock. One rejected highest
+        // pair must not starve every other supported donor in this patch.
+        if (viscousOnly && !LiquidLevelStepAllowed(
+            FlattenCoordinate(uint2(candidateSourceX,candidateTop)),
+            FlattenCoordinate(uint2(candidateDestinationX,candidateDestinationTop-1)))) continue;
         uint distance = max(candidateSourceX, candidateDestinationX) -
             min(candidateSourceX, candidateDestinationX);
         uint head=candidateDestinationTop-candidateTop;
@@ -2485,7 +2508,7 @@ bool ResolveOrdinarySurfaceTransfer(uint blockLeft, uint blockRight, bool viscou
     GridCell destinationSurface = Grid[destinationSurfaceIndex];
     if (CellKindAtIndex(sourceIndex) != 4 ||
         (destinationKind != 0 && destinationKind != 5) ||
-        abs(destinationSurface.VelocityY) > 8)
+        (!viscousOnly && abs(destinationSurface.VelocityY) > 8))
     {
         return false;
     }
@@ -2593,6 +2616,56 @@ void ResolveOrdinaryLocalSurfaceBlock(uint x)
     }
 }
 
+bool FindSupportedViscousBottom(uint x, uint top, uint base, out uint bottom)
+{
+    uint material=CellMaterials[FlattenCoordinate(uint2(x,top))];
+    bottom=base;
+    uint gap=0;
+    bool lowerRun=false, supported=false;
+    // Ordinary side flow leaves small holes inside a filled column. They are
+    // not an open drain: prove the same liquid reaches a bed, with no gap >3.
+    [loop] for(uint y=base+1;y<Height;y++)
+    {
+        uint id=CellMaterials[FlattenCoordinate(uint2(x,y))];
+        if(id==material){bottom=y;gap=0;lowerRun=true;continue;}
+        uint kind=CellKindFromMaterial(id);
+        if(kind==SimulationKindNone || kind==SimulationKindGas)
+        {if(++gap>3)return false;continue;}
+        supported=gap==0 && (Materials[id].Flags & MaterialFlagDensityBody)==0;
+        break;
+    }
+    if(bottom+1==Height && gap==0)supported=true;
+    return lowerRun && supported;
+}
+
+bool CloseSupportedViscousGaps(uint x, uint top, uint base)
+{
+    uint bottom;
+    if(!FindSupportedViscousBottom(x,top,base,bottom))return false;
+    uint material=CellMaterials[FlattenCoordinate(uint2(x,top))];
+    uint falls=0;
+    [loop] for(int y=int(bottom)-1;y>=int(top) && falls<8;y--)
+    {
+        uint hole=FlattenCoordinate(uint2(x,uint(y)));
+        uint kind=CellKindAtIndex(hole);
+        if(kind!=SimulationKindNone && kind!=SimulationKindGas)continue;
+        [loop] for(uint distance=1;distance<=8 && int(distance)<=y-int(top);distance++)
+        {
+            uint donor=hole-distance*Width;
+            if(CellMaterials[donor]!=material)continue;
+            // The existing free-fall path swaps full packets, including any
+            // displaced gas; no mass/enthalpy is erased or moved sideways.
+            // Internal compression has the supported column's bounded head;
+            // a film still uses load1 and every packet keeps its own mobility.
+            float load=min(16.0,float(bottom-top+1));
+            if(!LiquidStepAllowedLoaded(donor,hole,load))break;
+            SwapCells(donor,hole,0,60);falls++;break;
+        }
+    }
+    if(falls>0)BuildWaterColumnInfo(x);
+    return falls>0;
+}
+
 void ResolveViscousSurfaceBlock(uint x)
 {
     // Disjoint short patches avoid starving an entire pool behind one plateau.
@@ -2606,6 +2679,24 @@ void ResolveViscousSurfaceBlock(uint x)
     // A hydrostatic surface patch needs a supported basin. A falling drain
     // or a deep neighbouring outlet keeps its existing viscosity/gravity path;
     // feeding it with this extra pool-head pass would accelerate cold efflux.
+    // Prove the entire patch BEFORE closing holes. A column next to an
+    // outlet must not receive the basin shortcut just because its neighbour
+    // containing the open shaft would be rejected later in the scan.
+    uint provenBase=Height,provenColumn=Width;
+    [loop] for(uint column=left;column<=right;column++)
+    {
+        uint top,base;
+        if(!UnpackWaterColumn(WaterColumnState[column],top,base))continue;
+        if(Materials[CellMaterials[FlattenCoordinate(uint2(column,top))]].LiquidFlowTemperatureSensitivity<=0)continue;
+        if(base+1<Height)
+        {
+            uint below=CellKindAt(uint2(column,base+1));
+            if(below==SimulationKindNone||below==SimulationKindGas)
+                if(!FindSupportedViscousBottom(column,top,base,base))return;
+        }
+        if(provenColumn+1==column && abs(int(base)-int(provenBase))>3)return;
+        provenColumn=column;provenBase=base;
+    }
     uint previousBase=Height, previousColumn=Width,minimumBase=Height,maximumBase=0;
     [loop] for(uint column=left;column<=right;column++)
     {
@@ -2615,7 +2706,13 @@ void ResolveViscousSurfaceBlock(uint x)
         if(base+1<Height)
         {
             uint below=CellKindAt(uint2(column,base+1));
-            if(below==SimulationKindNone||below==SimulationKindGas)return;
+            if(below==SimulationKindNone||below==SimulationKindGas)
+            {
+                if(!CloseSupportedViscousGaps(column,top,base))return;
+                UnpackWaterColumn(WaterColumnState[column],top,base);
+                below=base+1<Height ? CellKindAt(uint2(column,base+1)) : SimulationKindSolid;
+                if(below==SimulationKindNone||below==SimulationKindGas)return;
+            }
         }
         // A curved bed is supported too. Reject an abrupt drain shaft,
         // rather than rejecting the accumulated slope across the whole patch.
@@ -2626,11 +2723,11 @@ void ResolveViscousSurfaceBlock(uint x)
     // On a sloping bed examine every donor and alternate its scan direction.
     // One transfer per patch avoids repeatedly exchanging the same one-cell
     // head within a tick, which pins a staircase instead of diffusing it.
-    // Flat puddles/drains retain their accepted viscosity budget.
+    // Flat basins use more local head exchanges, with the same mobility clock.
     bool slopingBed=minimumBase<Height && maximumBase-minimumBase>1;
-    uint transferBudget=slopingBed?1u:4u;
+    uint transferBudget=slopingBed?1u:16u;
     [loop] for(uint transfer=0;transfer<transferBudget;transfer++)
-        if(!ResolveOrdinarySurfaceTransfer(left,right,true,slopingBed))break;
+        if(!ResolveOrdinarySurfaceTransfer(left,right,true,true))break;
 }
 
 bool ReadLiquidLayer(uint x, out uint surface, out uint boundary,

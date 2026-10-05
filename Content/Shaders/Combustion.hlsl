@@ -142,6 +142,19 @@ void ProposeEmission(
     request.FlameLifetimeMultiplier = discreteFlame ? flameLifetimeMultiplier : 1;
     request.SourceIndex = sourceIndex | (discreteFlame
         ? (selfOxidizing ? SelfOxidizingFlameMarker : (FiniteOxidizer != 0 ? ReactedFuelFlameMarker : 0)) : 0);
+    // Host and retained fuel share this cell's three product slots. Combine
+    // matching proposals; overwriting a slot would lose the first reaction's
+    // product and could leave a claim pointing at another destination.
+    EmissionRequest previous = EmissionRequests[requestIndex];
+    if (previous.Mass > 0)
+    {
+        if (previous.DestinationIndex != destinationIndex || previous.MaterialIndex != productIndex) return;
+        request.Temperature = discreteFlame ? max(previous.Temperature, temperature) :
+            (previous.Temperature * previous.Mass + temperature * request.Mass) / (previous.Mass + request.Mass);
+        request.Mass = min(product.Density, previous.Mass + request.Mass);
+        request.FlameLifetimeMultiplier = max(previous.FlameLifetimeMultiplier, request.FlameLifetimeMultiplier);
+        request.SourceIndex |= previous.SourceIndex;
+    }
     EmissionRequests[requestIndex] = request;
     uint ignored;
     InterlockedMin(EmissionClaims[destinationIndex], requestIndex, ignored);
@@ -300,10 +313,8 @@ uint LiveFlameCount(uint2 coordinate)
     return count;
 }
 
-[numthreads(16, 16, 1)]
-void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void ReactFuel(uint2 coordinate, bool absorbedFuel)
 {
-    uint2 coordinate = dispatchThreadId.xy;
     if (coordinate.x >= CombustionWidth || coordinate.y >= CombustionHeight)
     {
         return;
@@ -328,7 +339,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         Grid[index] = cell;
         return;
     }
-    bool absorbedFuel=cell.FuelMass>0 && source.FuelCapacity>0;
+    if (absorbedFuel && (cell.FuelMass <= 0 || source.FuelCapacity <= 0)) return;
     uint sourceMaterialIndex = absorbedFuel ? source.FuelLiquidMaterialIndex : cell.MaterialIndex;
     if(absorbedFuel) source=Materials[sourceMaterialIndex];
     uint targetIndex = source.BurnedIntoMaterialIndex;
@@ -418,6 +429,10 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     // burn at the same concentration as one with four, not at one third rate.
     float exposure = needsOxidizer ? saturate(oxygen / max(supply.y, 1)) : 1;
     float burnedMass = min(availableFuel, source.BurnRate * exposure * CombustionDeltaTime);
+    // Keep a finite carrier until its retained oil has reacted. Burnout must
+    // not normalize away the independent stock or its sensible heat.
+    if (!absorbedFuel && cell.FuelMass > 0)
+        burnedMass = min(burnedMass, max(0, availableFuel - CombustionMassEpsilon * 2));
     if(absorbedFuel)
     {
         // Stored liquid is a separate fuel ledger. Bound heat before reacting;
@@ -431,8 +446,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         // 1/5 per consumer prevents overdraw without float atomics or races.
         float oxidizerPerMass = Emissions[sourceMaterialIndex].OxidizerPerMass;
         if (oxidizerPerMass <= 0) oxidizerPerMass = OxidizerPerFuelMass;
-        burnedMass = min(burnedMass, oxygen / (5 * oxidizerPerMass));
-        OxidizerDemand[index] = burnedMass * oxidizerPerMass;
+        float reserved = OxidizerDemand[index];
+        burnedMass = min(burnedMass, max(0, oxygen / 5 - reserved) / oxidizerPerMass);
+        OxidizerDemand[index] = reserved + burnedMass * oxidizerPerMass;
     }
     if (burnedMass <= 0) return;
 
@@ -448,8 +464,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    float capacityMass = max(cell.Mass, source.Density);
-    float capacity = max(0.01, source.HeatCapacity * capacityMass);
+    float capacity = max(0.01, CellEffectiveCapacity(cell));
     float generatedRise = burnedMass * source.HeatPerMass / capacity;
     float permittedRise = max(0.0, source.MaximumCombustionTemperature - cell.Temperature);
     if (CombustionHasReactionSources != 0 && source.ReactionPressurePerMass > 0)
@@ -457,7 +472,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         // Partition reaction heat before the fuel disappears. The released
         // portion remains pending until this location has a visible gas node.
         // It cannot vanish just because a smoke/flame spawn lost its claim.
-        float remainingCapacity = max(0, cell.Mass - burnedMass) * source.HeatCapacity;
+        float remainingCapacity = max(0, CellEffectiveCapacity(cell) - burnedMass * source.HeatCapacity);
         float rise = remainingCapacity > 0 ? min(permittedRise,
             burnedMass * source.HeatPerMass / remainingCapacity) : 0;
         float releasedCapacity = burnedMass * source.HeatCapacity;
@@ -523,4 +538,14 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float reactionFraction = FiniteOxidizer != 0
         ? saturate(burnedMass / max(source.BurnRate * CombustionDeltaTime, 0.0000001)) : 1;
     ProposeEmissions(index, sourceMaterialIndex, CombustionWidth, CombustionHeight, cell, reactionFraction);
+}
+
+[numthreads(16, 16, 1)]
+void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    // Oil supplements the dry host's reaction. Selecting the oil material as
+    // the ONLY reaction switched off a latched coal as soon as the first drop
+    // entered its pores, including below oil's contact-ignition threshold.
+    ReactFuel(dispatchThreadId.xy, false);
+    ReactFuel(dispatchThreadId.xy, true);
 }

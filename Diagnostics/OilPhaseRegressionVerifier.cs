@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System;
 using System.IO;
 using System.Linq;
@@ -15,7 +16,7 @@ namespace Phyxel.Diagnostics;
 
 internal static class OilPhaseRegressionVerifier
 {
-    internal static void Run(SimulationDispatchCoordinator coordinator, MaterialRegistry registry)
+    internal static IEnumerable<GpuSimulationResources> Run(SimulationDispatchCoordinator coordinator, MaterialRegistry registry)
     {
         string dir=Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")??"artifacts/oil-phases";
         Directory.CreateDirectory(dir);
@@ -26,6 +27,7 @@ internal static class OilPhaseRegressionVerifier
         var table=registry.CreateGpuTable();
         var r=coordinator.DispatchFrame(settings,[new(){X=20,Y=20,EndX=20,EndY=20,Radius=1,Density=1,
             Mode=BrushCommandMode.Material,MaterialIndex=(ushort)oil}],0);
+        yield return r;
         int w=r.Width,n=w*r.Height,at=100*w+140,checks=0; bool passed=true; double maxError=0;
         var data=new System.Collections.Generic.List<object>();
         GridCell Cell(uint id,float t=20,float mass=1)=>new(){IsActive=1,MaterialIndex=id,Mass=mass,Temperature=t};
@@ -91,7 +93,7 @@ internal static class OilPhaseRegressionVerifier
             var g=new GridCell[n];for(int y=-1;y<=1;y++)for(int x=-1;x<=2;x++)if(y!=0||x<0||x>1)g[at+y*w+x]=Cell(fixture);
             g[at]=Cell(oil,hot?287:18);g[at+1]=Cell(metal,hot?340:-35,7.8f);
             Upload(g);coordinator.RestoreWorldActivity(r,true,false,false);settings.Mode=mode;settings.Paused=false;
-            for(int f=0;f<fps*5;f++)coordinator.DispatchFrame(settings,[],1f/fps);
+            for(int f=0;f<fps*5;f++){coordinator.DispatchFrame(settings,[],1f/fps);if(f%8==0)yield return r;}
             var after=Read();Balance(g,after,$"pocket-{mode}-{fps}-{hot}");
             Check(after[at].MaterialIndex==oil&&Math.Abs(after[at].Temperature-(hot?287:18))<.005&&
                 (hot?after[at].PhaseProgress>1:after[at].PhaseProgress< -1),"Partial plateau "+mode+" "+fps+" "+hot);
@@ -102,11 +104,20 @@ internal static class OilPhaseRegressionVerifier
         foreach(var mode in new[]{SimulationMode.Sandbox,SimulationMode.Simulation})foreach(int fps in new[]{30,60,100}){
             var g=new GridCell[n];for(int y=130;y<150;y++)for(int x=130;x<150;x++)g[y*w+x]=Cell(oil,-150);
             Upload(g);coordinator.RestoreWorldActivity(r,true,false,false);settings.Mode=mode;settings.Paused=false;
-            for(int f=0;f<fps*2;f++)coordinator.DispatchFrame(settings,[],1f/fps);
-            var frozen=Read();Check(frozen.Count(c=>c.IsActive!=0&&c.MaterialIndex==solid)==400,"Freeze basin "+mode+fps);
+            for(int f=0;f<fps*2;f++){coordinator.DispatchFrame(settings,[],1f/fps);if(f%8==0)yield return r;}
+            var frozen=Read();
+            File.WriteAllBytes(Path.Combine(dir,$"freeze-{mode}-{fps}-2.bin"),MemoryMarshal.AsBytes(frozen.AsSpan()).ToArray());
+            Check(frozen.Count(c=>c.IsActive!=0&&c.MaterialIndex==solid)==400,"Freeze basin "+mode+fps);
             Balance(g,frozen,"Freeze basin");
-            for(int f=0;f<fps;f++)coordinator.DispatchFrame(settings,[],1f/fps);
-            Check(MemoryMarshal.AsBytes(frozen.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(Read().AsSpan())),"Frozen stopped "+mode+fps);
+            for(int f=0;f<fps;f++){coordinator.DispatchFrame(settings,[],1f/fps);if(f%8==0)yield return r;}
+            var stopped=Read();
+            File.WriteAllBytes(Path.Combine(dir,$"freeze-{mode}-{fps}-3.bin"),MemoryMarshal.AsBytes(stopped.AsSpan()).ToArray());
+            // BB/FB rebuild body membership and rest counters after landing.
+            // The baseline shows this bookkeeping at 30 FPS too. Compare all
+            // physical fields and positions byte-for-byte, excluding only those
+            // two service fields; this still catches flow/phase/heat changes.
+            for(int i=0;i<n;i++){frozen[i].BodyId=stopped[i].BodyId=0;frozen[i].RestFrames=stopped[i].RestFrames=0;}
+            Check(MemoryMarshal.AsBytes(frozen.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(stopped.AsSpan())),"Frozen physical state stopped "+mode+fps);
         }
         settings.Paused=true;
         // Transport alone: disable only this fuel's burn target and wall/gas
@@ -124,6 +135,7 @@ internal static class OilPhaseRegressionVerifier
             Upload(g);coordinator.RestoreWorldActivity(r,true,true,false);settings.Mode=mode;settings.Paused=false;
             for(int f=0;f<fps*3;f++){
                 coordinator.DispatchFrame(settings,[],1f/fps);
+                if(f%8==0)yield return r;
                 if((f+1)%fps==0){var after=Read();Balance(g,after,"Vapour transport");
                     Check(after.Where((c,i)=>c.IsActive!=0&&c.MaterialIndex==vapour&&
                         (i%w<=100||i%w>=160||i/w<=75||i/w>=140)).Count()==0,"Vapour crossed wall "+mode+fps);
@@ -187,7 +199,7 @@ internal static class OilPhaseRegressionVerifier
         var save=new GridCell[n];save[at]=Cell(oil,18);save[at].PhaseProgress=-100;
         save[at+2]=Cell(vapour,285);save[at+2].PhaseProgress=100;save[at+4]=Cell(solid,18.5f);save[at+4].PhaseProgress=100;
         save[at+6]=Cell(oil,150);save[at+6].BodyId=CombustionRuntime.FuelBurningMarker;
-        Upload(save);settings.Paused=true;var paused=Read();for(int f=0;f<60;f++)coordinator.DispatchFrame(settings,[],1f/60);
+        Upload(save);settings.Paused=true;var paused=Read();for(int f=0;f<60;f++){coordinator.DispatchFrame(settings,[],1f/60);if(f%8==0)yield return r;}
         Check(MemoryMarshal.AsBytes(paused.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(Read().AsSpan())),"Pause unchanged");
         var serializer=new SimulationStateSerializer();string path=Path.Combine(dir,"partial-oil.json");
         var snapshot=new SimulationWorldSnapshot(w,r.Height,MemoryMarshal.AsBytes(save.AsSpan()).ToArray());

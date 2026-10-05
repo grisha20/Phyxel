@@ -14,7 +14,7 @@ namespace Phyxel.Diagnostics;
 
 internal static class OilLocalityRegressionVerifier
 {
-    internal static void Run(SimulationDispatchCoordinator coordinator, MaterialRegistry registry)
+    internal static IEnumerable<GpuSimulationResources> Run(SimulationDispatchCoordinator coordinator, MaterialRegistry registry)
     {
         string dir=Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")??"artifacts/oil-locality";
         Directory.CreateDirectory(dir);
@@ -24,6 +24,7 @@ internal static class OilLocalityRegressionVerifier
             frozen=registry.GetRequiredRuntimeIndex(iceSupport?CoreMaterialIds.Ice:CoreMaterialIds.FrozenOil),fixture=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fixture);
         var r=coordinator.DispatchFrame(settings,[new(){X=20,Y=20,EndX=20,EndY=20,Radius=1,Density=1,
             Mode=BrushCommandMode.Material,MaterialIndex=water}],0);
+        yield return r;
         int w=r.Width,h=r.Height,checks=0,failures=0; var results=new List<object>();
         var physical=registry.CreateGpuTable(); var table=physical.ToArray();
         for(int i=0;i<table.Length;i++)table[i].ThermalConductivity=0;
@@ -66,6 +67,7 @@ internal static class OilLocalityRegressionVerifier
                     ? new[]{new BrushDrawCommand{X=310,Y=248,EndX=310,EndY=248,Radius=3,Density=.82f,
                         Mode=BrushCommandMode.Material,MaterialIndex=oil,Seed=unchecked((uint)(71001+f))}}:Array.Empty<BrushDrawCommand>();
                 coordinator.DispatchFrame(settings,commands,1f/fps);
+                if(f%4==0)yield return r;
                 coordinator.ObserveStatistics(MemoryMarshal.Cast<byte,SimulationStatistics>(AirInventoryRegressionVerifier.Read(r,r.Statistics.ReadBuffer))[0]);
                 var after=Read();var positions=new HashSet<int>(Enumerable.Range(0,after.Length).Where(i=>after[i].IsActive!=0&&after[i].MaterialIndex==oil));
                 foreach(int i in positions.Where(i=>!previous.Contains(i))){
