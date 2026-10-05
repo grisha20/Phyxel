@@ -182,11 +182,18 @@ internal static class WorldCellCodec
         if (bytes is null || bytes.Length==0) return;
         if (bytes.Length!=(long)((width+3)/4)*((height+3)/4)*8)
             throw new InvalidDataException("Air heat section does not match carrier dimensions.");
+        // Carrier transport can leave finite energy in a nearly empty node.
+        // The particle temperature ceiling is not an invariant of this field;
+        // retain the exact state so a problematic scene can be reproduced.
+        int index=0;
         foreach(var state in MemoryMarshal.Cast<byte,System.Numerics.Vector2>(bytes))
+        {
             if (!float.IsFinite(state.X) || !float.IsFinite(state.Y) || state.X<0 || state.Y<0 ||
                 (state.Y==0 && state.X!=0) ||
-                (state.Y>0 && (!float.IsFinite(state.X/state.Y) || state.X/state.Y>5273.16f)))
-                throw new InvalidDataException("Invalid air energy/capacity.");
+                (state.Y>0 && !float.IsFinite(state.X/state.Y)))
+                throw new InvalidDataException(FormattableString.Invariant($"Invalid air energy/capacity at node {index}: E={state.X:R}, C={state.Y:R}."));
+            index++;
+        }
     }
 
     internal static void ValidateReactionState(int width,int height,byte[]? pending,byte[]? pulse,byte[]? air,byte[]? motion)

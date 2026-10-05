@@ -86,7 +86,17 @@ internal static class WorldCellCodecRegressionVerifier
             }
             foreach(var invalid in new System.Numerics.Vector4[] { new(float.NaN,0,0,0),new(257,0,0,0),new(1,65,0,0),new(1,0,0,-1) })
                 ExpectInvalid(()=>WorldCellCodec.ValidateReactionState(3,1,null,MemoryMarshal.AsBytes(new[]{invalid}.AsSpan()).ToArray(),null,null));
-            foreach(var invalid in new System.Numerics.Vector2[] { new(float.NaN,1),new(1,-1),new(1,0),new(6000,1),new(float.MaxValue,1e-35f) })
+            // Finite carrier heat above the particle ceiling is representable
+            // and must remain available for diagnosing overheated scenes.
+            foreach(var hot in new System.Numerics.Vector2[] { new(6000,1),new(117.50018f,1.013279e-6f),new(0,0) })
+            {
+                byte[] hotBytes=MemoryMarshal.AsBytes(new[]{hot}.AsSpan()).ToArray();
+                var hotWorld=heatWorld with { AirThermal=hotBytes };
+                await serializer.SaveAsync(heatPath,new SimulationSettings(),materials.GetRequiredRuntimeIndex(CoreMaterialIds.Sand),hotWorld,materials);
+                var hotLoaded=await serializer.LoadAsync(heatPath,materials);
+                Require(hotLoaded!.World!.AirThermal!.AsSpan().SequenceEqual(hotBytes),"Finite overheated carrier was changed on save/load.");
+            }
+            foreach(var invalid in new System.Numerics.Vector2[] { new(float.NaN,1),new(float.PositiveInfinity,1),new(-1,1),new(1,-1),new(1,0),new(float.MaxValue,1e-35f) })
             {
                 var invalidBytes=MemoryMarshal.AsBytes(new[] { invalid }.AsSpan()).ToArray();
                 ExpectInvalid(()=>WorldCellCodec.ValidateAirThermal(3,1,invalidBytes));
