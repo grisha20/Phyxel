@@ -23,7 +23,8 @@ public sealed class UiStatusBar
         double displayedFps,
         float currentScale,
         bool isPaused,
-        string transientStatus = "")
+        string transientStatus = "",
+        string? filterBrush = null)
     {
         backdrop.Draw(spriteBatch, bounds, 0);
 
@@ -46,7 +47,7 @@ public sealed class UiStatusBar
             x = swatch.Right + 8;
         }
 
-        string materialText = $"Материал: {materialName}";
+        string materialText = filterBrush is null ? $"Материал: {materialName}" : $"Кисть: {filterBrush}";
         spriteBatch.DrawString(font, materialText, new Vector2(x, textY), UiTheme.TextPrimary);
         x += (int)font.MeasureString(materialText).X + 18;
 

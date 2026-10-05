@@ -436,7 +436,7 @@ internal static class FuelMoistureRegressionVerifier
         Task.Run(()=>serializer.SaveAsync(reservoirPath,settings,(ushort)coal,new(w,r.Height,
             MemoryMarshal.AsBytes(reservoir.AsSpan()).ToArray()),registry)).GetAwaiter().GetResult();
         var v12Json=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(reservoirPath))!;
-        Check(v12Json["Version"]!.GetValue<int>()==16,"reservoir writer version");
+        Check(v12Json["Version"]!.GetValue<int>()==17,"reservoir writer version");
         v12Json["Version"]=12; File.WriteAllText(reservoirPath,v12Json.ToJsonString());
         string v12WorldPath=Path.ChangeExtension(reservoirPath,".world"); var v12Bytes=File.ReadAllBytes(v12WorldPath);
         v12Bytes=WorldCellCodecRegressionVerifier.RepackWorldPrefix(v12Bytes,n,48);

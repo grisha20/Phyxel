@@ -406,13 +406,14 @@ static const uint MaterialFlagUniversalPores = 1u << 13;
 // Stationary selective overlay. Word 0 is occupied-cell count; fine cells follow.
 StructuredBuffer<uint> FilterCells : register(t15);
 static const uint FilterIdMask=511, FilterGas=1u<<16, FilterLiquid=1u<<17,
-    FilterAir=1u<<18, FilterClosed=1u<<19, FilterPowder=1u<<20;
+    FilterAir=1u<<18, FilterClosed=1u<<19, FilterPowder=1u<<20, FilterAllParticles=1u<<21;
 bool FilterAllows(uint index,uint material,uint kind)
 {
     if(FilterCells[0]==0)return true;
     uint rule=FilterCells[index+1];
     return rule==0 || ((rule&FilterClosed)==0 &&
-        (((rule&FilterIdMask)!=0 && (rule&FilterIdMask)==material+1) ||
+        ((rule&FilterAllParticles)!=0 ||
+         ((rule&FilterIdMask)!=0 && (rule&FilterIdMask)==material+1) ||
          (kind==SimulationKindGas&&(rule&FilterGas)!=0) ||
          (kind==SimulationKindLiquid&&(rule&FilterLiquid)!=0) ||
          (kind==SimulationKindGranular&&(rule&FilterPowder)!=0)));

@@ -159,7 +159,7 @@ public sealed class UiPropertiesPanel
         filterSelector.Bounds=Rectangle.Empty;filterHintY=0;
         if(activeTool==PhyxelToolId.Filter){
             filterSelector.Bounds=new Rectangle(innerX,cursorY,innerWidth,Math.Clamp(font.LineSpacing+16,36,52));
-            if(filterSelector.Update(input))settings.FilterSelection=(FilterSelection)(((int)settings.FilterSelection+1)%7);
+            filterSelector.Enabled = false; // Individual brushes are selected from the bottom palette.
             filterSelector.Label=FilterRules.Label(settings.FilterSelection,selectedMaterial.Name);
             if(settings.FilterSelection==FilterSelection.SelectedMaterial &&
                (MaterialSimulationKind)selectedMaterial.Properties.SimulationKind is not
@@ -324,15 +324,24 @@ public sealed class UiPropertiesPanel
         if (toolCardBounds != Rectangle.Empty) DrawToolCard(spriteBatch, font, backdrop, pixel, iconCache, activeTool);
         if (materialCardBounds != Rectangle.Empty)
         {
-            DrawMaterialCard(spriteBatch, font, backdrop, pixel, selectedMaterial, previewCache);
+            if (activeTool == PhyxelToolId.Filter)
+            {
+                backdrop.DrawRoundedRectangle(spriteBatch, materialCardBounds, UiTheme.CardBackground, 7);
+                UiFilterCardRenderer.Draw(spriteBatch,pixel,
+                    new Rectangle(materialCardBounds.X+5,materialCardBounds.Y+5,materialCardBounds.Width-10,materialCardBounds.Height-10),
+                    settings.FilterSelection);
+            }
+            else DrawMaterialCard(spriteBatch, font, backdrop, pixel, selectedMaterial, previewCache);
         }
 
         DrawSectionLabel(spriteBatch, font, activeTool == PhyxelToolId.Pan ? "КАМЕРА" : materialCardBounds == Rectangle.Empty && selectedMaterial.ThermalRegulator is not null && activeTool == PhyxelToolId.Brush ? selectedMaterial.Name.ToUpperInvariant() : "ПАРАМЕТРЫ ИНСТРУМЕНТА",
             bounds.X + 14, toolParametersHeaderY, 0.68f);
         if (ShowsBrushControls(activeTool)) brushSlider.Draw(spriteBatch, font, backdrop, pixel);
         if(activeTool==PhyxelToolId.Filter){
-            filterSelector.Draw(spriteBatch,font,backdrop,pixel,iconCache);
-            spriteBatch.DrawString(font,"ЛКМ — нанести · ПКМ — снять",new Vector2(bounds.X+14,filterHintY),UiTheme.TextMuted,0,Vector2.Zero,.65f,SpriteEffects.None,0);
+            backdrop.DrawRoundedRectangle(spriteBatch,filterSelector.Bounds,UiTheme.CardBackground,6);
+            spriteBatch.DrawString(font,filterSelector.Label,
+                new Vector2(filterSelector.Bounds.X+12,filterSelector.Bounds.Center.Y-font.LineSpacing/2f),UiTheme.TextPrimary);
+            spriteBatch.DrawString(font,"ЛКМ — пустое · ПКМ — снять",new Vector2(bounds.X+14,filterHintY),UiTheme.TextMuted,0,Vector2.Zero,.65f,SpriteEffects.None,0);
         }
         if (activeTool == PhyxelToolId.Brush && selectedMaterial.ThermalRegulator is not null)
         {

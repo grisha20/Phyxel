@@ -4,6 +4,7 @@ using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Input;
+using Phyxel.Core;
 using Phyxel.Materials;
 using Phyxel.Physics;
 
@@ -17,6 +18,17 @@ public sealed class UiCategoryPalette
     private readonly MaterialCardPreviewCache previewCache;
     private MaterialCategoryType activeCategory = MaterialCategoryType.Powders;
     private int scrollOffset;
+    internal FilterSelection? ClickedFilter { get; private set; }
+    private FilterSelection? hoveredFilter;
+    internal FilterSelection? HoveredFilter => hoveredFilter;
+    private static readonly FilterSelection[] filterBrushes = Enum.GetValues<FilterSelection>();
+    internal static IReadOnlyList<FilterSelection> FilterBrushes => filterBrushes;
+    internal void ShowFilters(FilterSelection selection = FilterSelection.Steam)
+    {
+        if (activeCategory != MaterialCategoryType.Filters)
+            scrollOffset = (int)selection * (FilterCardWidth + FilterCardGap);
+        activeCategory = MaterialCategoryType.Filters;
+    }
     private ushort? hoveredMaterial;
     private bool hoveredMaterialPressed;
     private MaterialCategoryType? hoveredCategory;
@@ -100,6 +112,8 @@ public sealed class UiCategoryPalette
         bool isTemperatureActive,
         out bool pointerConsumed)
     {
+        ClickedFilter = null;
+        hoveredFilter = null;
         pointerConsumed = bounds.Contains(input.MousePosition);
         ushort? newlySelectedMaterial = null;
         hoveredMaterial = null;
@@ -133,6 +147,12 @@ public sealed class UiCategoryPalette
             }
 
             tabX += tabWidth + tabGap;
+        }
+
+        if (activeCategory == MaterialCategoryType.Filters)
+        {
+            UpdateFilterCards(input, bounds);
+            return null;
         }
 
         // 2. Material Cards Strip
@@ -209,7 +229,9 @@ public sealed class UiCategoryPalette
         UiIconTextureCache iconCache,
         Rectangle bounds,
         ushort selectedMaterial,
-        bool isTemperatureActive)
+        bool isTemperatureActive,
+        bool isFilterActive = false,
+        FilterSelection selectedFilter = FilterSelection.Steam)
     {
         backdrop.Draw(spriteBatch, bounds, 8);
 
@@ -260,6 +282,12 @@ public sealed class UiCategoryPalette
             spriteBatch.DrawString(font, tabLabel, textPos, isSelectedTab ? UiTheme.TextPrimary : UiTheme.TextSecondary);
 
             tabX += tabWidthDraw + tabGapDraw;
+        }
+
+        if (activeCategory == MaterialCategoryType.Filters)
+        {
+            DrawFilterCards(spriteBatch, font, backdrop, pixel, iconCache, bounds, isFilterActive, selectedFilter);
+            return;
         }
 
         // Draw Material Cards Strip
@@ -360,6 +388,85 @@ public sealed class UiCategoryPalette
             }
 
             cardX += cardWidth + gap;
+        }
+    }
+
+    private const int FilterCardWidth = 112;
+    private const int FilterCardGap = 6;
+
+    private Rectangle FilterStrip(Rectangle bounds, out int maxScroll)
+    {
+        int total = filterBrushes.Length * (FilterCardWidth + FilterCardGap) - FilterCardGap;
+        bool overflow = total > GetCardsStripBounds(bounds, false).Width;
+        Rectangle strip = GetCardsStripBounds(bounds, overflow);
+        maxScroll = Math.Max(0, total - strip.Width);
+        return strip;
+    }
+
+    internal Rectangle GetFilterCardBounds(Rectangle bounds, int index)
+    {
+        Rectangle strip = FilterStrip(bounds, out _);
+        return new Rectangle(strip.X - scrollOffset + index * (FilterCardWidth + FilterCardGap),
+            strip.Y, FilterCardWidth, strip.Height);
+    }
+
+    private void UpdateFilterCards(RawInputSnapshot input, Rectangle bounds)
+    {
+        Rectangle strip = FilterStrip(bounds, out int maxScroll);
+        scrollOffset = Math.Clamp(scrollOffset, 0, maxScroll);
+        if (strip.Contains(input.MousePosition) && input.WheelDelta != 0)
+            scrollOffset = Math.Clamp(scrollOffset - Math.Sign(input.WheelDelta) * 120, 0, maxScroll);
+        leftArrowButton.Enabled = rightArrowButton.Enabled = maxScroll > 0;
+        leftArrowButton.Bounds = new Rectangle(bounds.X + 8, strip.Y, 28, strip.Height);
+        rightArrowButton.Bounds = new Rectangle(strip.Right + 4, strip.Y, 28, strip.Height);
+        if (leftArrowButton.Update(input)) scrollOffset = Math.Max(0, scrollOffset - 120);
+        if (rightArrowButton.Update(input)) scrollOffset = Math.Min(maxScroll, scrollOffset + 120);
+        for (int i = 0; i < filterBrushes.Length; i++)
+        {
+            // Only fully visible cards are interactive and drawn. Arrow/gap clicks
+            // cannot select a card which extends beyond the strip.
+            Rectangle card = GetFilterCardBounds(bounds, i);
+            if (card.Left < strip.Left || card.Right > strip.Right) continue;
+            if (card.Contains(input.MousePosition))
+            {
+                hoveredFilter = filterBrushes[i];
+                if (input.LeftPressed) ClickedFilter = filterBrushes[i];
+            }
+        }
+    }
+
+    private void DrawFilterCards(SpriteBatch batch, SpriteFont font,
+        UiPanelBackdropRenderer backdrop, Texture2D pixel, UiIconTextureCache icons,
+        Rectangle bounds, bool active, FilterSelection selection)
+    {
+        Rectangle strip = FilterStrip(bounds, out int maxScroll);
+        if (maxScroll > 0)
+        {
+            leftArrowButton.Draw(batch, font, backdrop, pixel, icons);
+            rightArrowButton.Draw(batch, font, backdrop, pixel, icons);
+        }
+        for (int i = 0; i < filterBrushes.Length; i++)
+        {
+            Rectangle card = GetFilterCardBounds(bounds, i);
+            if (card.Left < strip.Left || card.Right > strip.Right) continue;
+            FilterSelection brush = filterBrushes[i];
+            bool selected = active && brush == selection;
+            backdrop.DrawRoundedRectangle(batch, card,
+                selected ? UiTheme.CardActive : hoveredFilter == brush ? UiTheme.CardHover : UiTheme.CardBackground, 7);
+            Rectangle picture = new(card.X + 6, card.Y + 5, card.Width - 12,
+                Math.Max(1, card.Height - ComputeMaterialLabelOverlayHeight(font) - 10));
+            UiFilterCardRenderer.Draw(batch, pixel, picture, brush);
+            string title = UiFilterCardRenderer.CardTitle(brush);
+            Vector2 measured = font.MeasureString(title);
+            float titleScale = Math.Min(.9f, Math.Min((card.Width-10)/Math.Max(1,measured.X),
+                ComputeMaterialLabelOverlayHeight(font)/Math.Max(1f,measured.Y)));
+            Vector2 size = measured * titleScale;
+            batch.DrawString(font, title,
+                new Vector2(card.Center.X - size.X / 2, card.Bottom - ComputeMaterialLabelOverlayHeight(font) / 2f - size.Y / 2),
+                selected ? UiTheme.CardSelectedBorder : UiTheme.TextSecondary,
+                0, Vector2.Zero, titleScale, SpriteEffects.None, 0);
+            UiIconRenderer.DrawStrokedRectangle(batch, pixel, card, selected ? 3 : 1,
+                selected ? UiTheme.CardSelectedBorder : UiTheme.BorderColor);
         }
     }
 

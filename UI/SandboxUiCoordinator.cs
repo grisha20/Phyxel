@@ -141,7 +141,10 @@ public sealed class SandboxUiCoordinator : IDisposable
         settings.Paused = paused;
 
         // 2. Left toolbar update
+        bool wasFilterTool = FilterToolActive;
         leftToolbar.Update(input, currentLayout.LeftToolbar, font, out bool leftConsumed);
+
+        if (FilterToolActive && !wasFilterTool) categoryPalette.ShowFilters(settings.FilterSelection);
 
         // 3. Properties panel update
         MaterialDefinition currentMatDef = materialRegistry.TryGet(SelectedMaterial, out MaterialDefinition mat)
@@ -174,8 +177,13 @@ public sealed class SandboxUiCoordinator : IDisposable
         if (newlySelected.HasValue)
         {
             SelectedMaterial = newlySelected.Value;
-            if(FilterToolActive)settings.FilterSelection=FilterSelection.SelectedMaterial;
-            else leftToolbar.ActiveTool = PhyxelToolId.Brush;
+            leftToolbar.ActiveTool = PhyxelToolId.Brush;
+        }
+
+        if (categoryPalette.ClickedFilter is { } selectedFilter)
+        {
+            settings.FilterSelection = selectedFilter;
+            leftToolbar.ActiveTool = PhyxelToolId.Filter;
         }
 
         bool topConsumed = currentLayout.TopBar.Contains(input.MousePosition);
@@ -264,7 +272,9 @@ public sealed class SandboxUiCoordinator : IDisposable
             iconTextures,
             currentLayout.BottomPalette,
             SelectedMaterial,
-            TemperatureToolActive);
+            TemperatureToolActive,
+            FilterToolActive,
+            settings.FilterSelection);
 
         // 5. Bottom Status Bar
         statusBar.Draw(
@@ -281,7 +291,8 @@ public sealed class SandboxUiCoordinator : IDisposable
             framesPerSecond,
             settings.Scale,
             settings.Paused,
-            transientStatus);
+            categoryPalette.HoveredFilter is { } hovered ? UiFilterCardRenderer.Description(hovered) : transientStatus,
+            FilterToolActive ? FilterRules.Label(settings.FilterSelection, currentMatDef.Name) : null);
     }
 
     public void DrawBrushIndicator(

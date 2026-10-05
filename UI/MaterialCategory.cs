@@ -13,7 +13,8 @@ public enum MaterialCategoryType
     Gases,
     Solids,
     Combustion,
-    Tools
+    Tools,
+    Filters
 }
 
 public sealed record MaterialCategoryDefinition(
@@ -31,7 +32,8 @@ public static class MaterialCategoryResolver
         new(MaterialCategoryType.Gases, "Газы", UiTheme.CategoryGases, "oo"),
         new(MaterialCategoryType.Solids, "Твёрдые", UiTheme.CategorySolids, "[]"),
         new(MaterialCategoryType.Combustion, "Горение", UiTheme.CategoryCombustion, "^^"),
-        new(MaterialCategoryType.Tools, "Инструменты", UiTheme.CategoryTools, "++")
+        new(MaterialCategoryType.Tools, "Инструменты", UiTheme.CategoryTools, "++"),
+        new(MaterialCategoryType.Filters, "Фильтры", new Color(100, 200, 255), "#")
     ];
 
     public static MaterialCategoryType Resolve(MaterialDefinition material)

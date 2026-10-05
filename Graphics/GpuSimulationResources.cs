@@ -35,6 +35,23 @@ public sealed class GpuSimulationResources : IDisposable
     public required uint[] FilterMap { get; init; }
     public int FilterCount { get; set; }
     private uint[]? filterUpload;
+    private Buffer? filterOccupancyStaging;
+    internal Buffer GetFilterOccupancyStaging(int bytes)
+    {
+        if (filterOccupancyStaging is null || filterOccupancyStaging.Description.SizeInBytes < bytes)
+        {
+            filterOccupancyStaging?.Dispose();
+            filterOccupancyStaging = new Buffer(Device, new BufferDescription
+            {
+                SizeInBytes = bytes,
+                Usage = ResourceUsage.Staging,
+                BindFlags = BindFlags.None,
+                CpuAccessFlags = CpuAccessFlags.Read,
+                OptionFlags = ResourceOptionFlags.None
+            });
+        }
+        return filterOccupancyStaging;
+    }
     public void UploadFilters()
     {
         // GPU-only summary word avoids ray scans when the entire map is empty.
@@ -302,6 +319,7 @@ public sealed class GpuSimulationResources : IDisposable
         StatisticsStaging.Dispose();
         SceneTransferQuery.Dispose();
         GridStaging.Dispose();
+        filterOccupancyStaging?.Dispose();
         FrameConstants.Dispose();
         TemperatureProbeQuery.Dispose();
         ThermalTimestampEndQuery.Dispose();

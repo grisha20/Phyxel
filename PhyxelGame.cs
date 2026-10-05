@@ -346,7 +346,9 @@ public sealed class PhyxelGame : Game
         }
         if(Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FILTERS")=="1"){
             InactiveSleepTime=TimeSpan.Zero;
-            oilSmokeVerification=FilterRegressionVerifier.Run(dispatchCoordinator,materialRegistry,settings,fps=>diagnosticFramesPerSecond=fps).GetEnumerator();
+            oilSmokeVerification=Environment.GetEnvironmentVariable("PHYXEL_FILTER_BRUSHES_ONLY")=="1"
+                ? FilterBrushRegressionVerifier.Run(dispatchCoordinator,materialRegistry,settings).GetEnumerator()
+                : FilterRegressionVerifier.Run(dispatchCoordinator,materialRegistry,settings,fps=>diagnosticFramesPerSecond=fps).GetEnumerator();
             IsFixedTimeStep=false; return;
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_ABSORPTION") == "1")
@@ -425,6 +427,7 @@ public sealed class PhyxelGame : Game
         }
         if(Enum.TryParse<FilterSelection>(Environment.GetEnvironmentVariable("PHYXEL_UI_PREVIEW_FILTER"),out var previewFilter)){
             userInterface.ActiveTool=PhyxelToolId.Filter;settings.FilterSelection=previewFilter;
+            userInterface.CategoryPalette.ShowFilters(previewFilter);
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_UI") == "1")
         {

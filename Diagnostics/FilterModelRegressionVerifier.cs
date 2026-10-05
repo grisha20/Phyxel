@@ -28,15 +28,18 @@ internal static class FilterModelRegressionVerifier
                 FilterSelection.Steam=>material.Id==CoreMaterialIds.Steam,FilterSelection.Water=>material.Id==CoreMaterialIds.Water,
                 FilterSelection.Oil=>material.Id==CoreMaterialIds.Oil,FilterSelection.Gases=>kind==MaterialSimulationKind.Gas,
                 FilterSelection.Liquids=>kind==MaterialSimulationKind.Liquid,FilterSelection.Powders=>kind==MaterialSimulationKind.Granular,
+                FilterSelection.Wall or FilterSelection.AirOnly=>false, FilterSelection.NoAir=>true,
                 _=>material.Id=="test:filter_liquid"};
             Check(FilterRules.Allows(rule,material.RuntimeIndex,kind)==expected,"preset "+preset+"/"+material.Id);
         }
         Check(FilterRules.Select(FilterSelection.SelectedMaterial,registry,registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal))==FilterRules.Closed,"immobile selection");
         Check(!FilterRules.AirAllows(FilterRules.Closed|FilterRules.AmbientAir),"closed air");
-        foreach(uint rule in new[]{1u<<31,FilterRules.AmbientAir,511u}){
+        foreach(uint rule in new[]{1u<<31,511u}){
             bool invalid=false;try{FilterRules.Validate(rule,registry.Count);}catch(InvalidDataException){invalid=true;}Check(invalid,"bad rule "+rule);
         }
-        uint[] rules=[(uint)selected+1,FilterRules.Gas|FilterRules.AmbientAir,FilterRules.Closed,0];
+        Check(FilterRules.AirAllows(FilterRules.AmbientAir),"air-only passes ambient air");
+        Check(!FilterRules.AirAllows(FilterRules.AllParticles),"all-particles blocks ambient air");
+        uint[] rules=[(uint)selected+1,FilterRules.AmbientAir,FilterRules.Closed,FilterRules.AllParticles];
         var world=new SimulationWorldSnapshot(2,2,new byte[4*Marshal.SizeOf<GridCell>()],Filters:MemoryMarshal.AsBytes(rules.AsSpan()).ToArray());
         var serializer=new SimulationStateSerializer();string path=Path.Combine(dir,"filters.json");
         await serializer.SaveAsync(path,new(){FilterSelection=FilterSelection.SelectedMaterial},selected,world,registry);
@@ -48,7 +51,7 @@ internal static class FilterModelRegressionVerifier
         Check(loaded.State.FilterSelection==FilterSelection.SelectedMaterial,"selected preset saved");
         var expanded=CanvasWorldExpansion.Expand(loaded.World,new(6,6));
         var expandedRules=MemoryMarshal.Cast<byte,uint>(expanded.Filters!).ToArray();
-        Check(expandedRules[4*6]==restored[0]&&expandedRules[5*6]==restored[2]&&expandedRules.ToArray().Count(x=>x!=0)==3,"expand map");
+        Check(expandedRules[4*6]==restored[0]&&expandedRules[5*6]==restored[2]&&expandedRules.ToArray().Count(x=>x!=0)==4,"expand map");
         File.Delete(Path.Combine(external,"test.json"));var absent=new MaterialRegistry(core,external);loaded=await serializer.LoadAsync(path,absent);
         Check(MemoryMarshal.Cast<byte,uint>(loaded!.World!.Filters!)[0]==FilterRules.Closed,"unknown species seals filter");
         // A genuine v15 file has the same cell/field prefix and no overlay tail.
@@ -56,6 +59,17 @@ internal static class FilterModelRegressionVerifier
         var json=JsonNode.Parse(await File.ReadAllTextAsync(old))!;json["Version"]=15;await File.WriteAllTextAsync(old,json.ToJsonString());
         byte[] bytes=await File.ReadAllBytesAsync(Path.ChangeExtension(old,".world"));BitConverter.GetBytes(15).CopyTo(bytes,4);await File.WriteAllBytesAsync(Path.ChangeExtension(old,".world"),bytes);
         loaded=await serializer.LoadAsync(old,registry);Check(loaded!.World!.Filters is null,"v15 remains readable without overlay");
+        // Previous v16 files with a genuine old filter encoding still load.
+        string previous=Path.Combine(dir,"v16.json");uint[] oldRules=[0,FilterRules.Gas|FilterRules.AmbientAir,FilterRules.Closed,0];
+        await serializer.SaveAsync(previous,new(){FilterSelection=FilterSelection.Gases},0,
+            new(2,2,new byte[4*56],Filters:MemoryMarshal.AsBytes(oldRules.AsSpan()).ToArray()),registry);
+        var previousJson=JsonNode.Parse(await File.ReadAllTextAsync(previous))!;previousJson["Version"]=16;
+        await File.WriteAllTextAsync(previous,previousJson.ToJsonString());
+        byte[] previousBytes=await File.ReadAllBytesAsync(Path.ChangeExtension(previous,".world"));
+        BitConverter.GetBytes(16).CopyTo(previousBytes,4);await File.WriteAllBytesAsync(Path.ChangeExtension(previous,".world"),previousBytes);
+        var previousLoaded=await serializer.LoadAsync(previous,registry);
+        Check(previousLoaded!.State.FilterSelection==FilterSelection.Gases &&
+            MemoryMarshal.Cast<byte,uint>(previousLoaded.World!.Filters!).SequenceEqual(oldRules),"v16 filter scene compatible");
         byte[] full=await File.ReadAllBytesAsync(Path.ChangeExtension(path,".world"));await File.WriteAllBytesAsync(Path.ChangeExtension(path,".world"),full[..^1]);
         bool rejected=false;try{await serializer.LoadAsync(path,registry);}catch(Exception e)when(e is InvalidDataException or EndOfStreamException){rejected=true;}Check(rejected,"truncated map rejected");
         Console.WriteLine($"PHYXEL_FILTER_MODEL_SUCCESS checks={checks}");

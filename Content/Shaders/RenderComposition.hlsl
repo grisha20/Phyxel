@@ -355,6 +355,9 @@ float4 FilterOverlay(uint2 coordinate,float4 color)
     uint filter=FilterCells[coordinate.y*Width+coordinate.x+1];
     if(filter!=0){
         float3 tint=(filter&FilterGas)!=0?float3(.25,.8,.6):float3(.25,.65,.95);
+        if((filter&FilterClosed)!=0)tint=float3(.65,.68,.72);
+        if(filter==FilterAir)tint=float3(.6,.8,.95);
+        if((filter&FilterAllParticles)!=0)tint=float3(.9,.45,.65);
         if((filter&FilterPowder)!=0)tint=float3(.95,.65,.25);
         bool mesh=(coordinate.x+coordinate.y)%4<2;
         color.rgb=lerp(color.rgb,tint,mesh?.6:.18);

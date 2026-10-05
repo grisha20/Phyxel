@@ -105,7 +105,7 @@ internal static class FilterRegressionVerifier
         int unfilteredBlue;using(var image=new Bitmap(unfilteredPath))unfilteredBlue=image.GetPixel(218,120).B;
         var command=new BrushDrawCommand{X=220,Y=120,EndX=220,EndY=120,Radius=3,Density=1,Mode=BrushCommandMode.Filter,Reserved=steam+1};
         coordinator.DispatchFrame(settings,[command],0);yield return r;
-        Record(new{test="paint-paused",ok=r.FilterCount>0&&Read()[120*w+220].Mass==1},r.FilterCount>0&&Read()[120*w+220].Mass==1);
+        Record(new{test="paint-paused",ok=r.FilterCount>0&&r.FilterMap[120*w+220]==0&&Read()[120*w+220].Mass==1},r.FilterCount>0&&r.FilterMap[120*w+220]==0&&Read()[120*w+220].Mass==1);
         foreach(bool effects in new[]{true,false}){settings.RenderWithoutEffects=!effects;coordinator.DispatchFrame(settings,[],0);yield return r;
             string path=Path.Combine(dir,$"filter-{effects}.png");SimulationScreenshotWriter.Save(r,path);using var bitmap=new Bitmap(path);var color=bitmap.GetPixel(218,120);
             bool ok=color.B>unfilteredBlue+10;Record(new{test="visible",effects,unfilteredBlue,color.R,color.G,color.B,ok},ok);}

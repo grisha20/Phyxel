@@ -1681,20 +1681,51 @@ public sealed class SimulationDispatchCoordinator
             int endY = command.Shape == BrushCommandShape.Segment ? command.EndY : command.Y;
             int radius = (int)MathF.Ceiling(command.Radius);
             float dx = endX - command.X, dy = endY - command.Y, length = dx * dx + dy * dy;
-            for (int y = Math.Max(0, Math.Min(command.Y, endY) - radius);
-                 y <= Math.Min(resources.Height - 1, Math.Max(command.Y, endY) + radius); y++)
-            for (int x = Math.Max(0, Math.Min(command.X, endX) - radius);
-                 x <= Math.Min(resources.Width - 1, Math.Max(command.X, endX) + radius); x++)
+            int minX = Math.Max(0, Math.Min(command.X, endX) - radius);
+            int minY = Math.Max(0, Math.Min(command.Y, endY) - radius);
+            int maxX = Math.Min(resources.Width - 1, Math.Max(command.X, endX) + radius);
+            int maxY = Math.Min(resources.Height - 1, Math.Max(command.Y, endY) + radius);
+            if (minX > maxX || minY > maxY) continue;
+            int boxWidth = maxX - minX + 1;
+            int stride = Marshal.SizeOf<GridCell>();
+            int activeOffset = (int)Marshal.OffsetOf<GridCell>(nameof(GridCell.IsActive));
+            SharpDX.Direct3D11.Buffer? staging = null;
+            DataBox occupancy = default;
+            // Read only the stroke's bounding rows, never a full-grid snapshot.
+            // The private staging buffer cannot overwrite an in-flight scene save.
+            if (rule != 0)
             {
-                float t = length > 0 ? Math.Clamp(((x - command.X) * dx + (y - command.Y) * dy) / length, 0, 1) : 0;
-                float rx = x - command.X - t * dx, ry = y - command.Y - t * dy;
-                if (rx * rx + ry * ry > command.Radius * command.Radius) continue;
-                int index = y * resources.Width + x;
-                uint previous = resources.FilterMap[index];
-                if (previous == rule) continue;
-                resources.FilterCount += (rule != 0 ? 1 : 0) - (previous != 0 ? 1 : 0);
-                resources.FilterMap[index] = rule;
-                changed = true;
+                staging = resources.GetFilterOccupancyStaging(checked(boxWidth * (maxY - minY + 1) * stride));
+                for (int y = minY; y <= maxY; y++)
+                {
+                    int firstByte = (y * resources.Width + minX) * stride;
+                    resources.Context.CopySubresourceRegion(resources.Grid.ReadBuffer, 0,
+                        new ResourceRegion(firstByte, 0, 0, firstByte + boxWidth * stride, 1, 1),
+                        staging, 0, (y - minY) * boxWidth * stride);
+                }
+                occupancy = resources.Context.MapSubresource(staging, 0, MapMode.Read, MapFlags.None);
+            }
+            try
+            {
+                for (int y = minY; y <= maxY; y++)
+                for (int x = minX; x <= maxX; x++)
+                {
+                    float t = length > 0 ? Math.Clamp(((x - command.X) * dx + (y - command.Y) * dy) / length, 0, 1) : 0;
+                    float rx = x - command.X - t * dx, ry = y - command.Y - t * dy;
+                    if (rx * rx + ry * ry > command.Radius * command.Radius) continue;
+                    int index = y * resources.Width + x;
+                    uint previous = resources.FilterMap[index];
+                    if (rule != 0 && (previous != 0 || Marshal.ReadInt32(occupancy.DataPointer,
+                        ((y - minY) * boxWidth + x - minX) * stride + activeOffset) != 0)) continue;
+                    if (previous == rule) continue;
+                    resources.FilterCount += (rule != 0 ? 1 : 0) - (previous != 0 ? 1 : 0);
+                    resources.FilterMap[index] = rule;
+                    changed = true;
+                }
+            }
+            finally
+            {
+                if (staging is not null) resources.Context.UnmapSubresource(staging, 0);
             }
         }
         if (changed) resources.UploadFilters();

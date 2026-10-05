@@ -340,11 +340,13 @@ public static class UiLayoutRegressionTests
                 panel.WithoutEffectsToggleBounds,panel.BoundariesToggleBounds,panel.AirFieldToggleBounds];
             foreach(var bounds in controls)Require(IsInside(bounds,layout.RightPanel),$"Filter control escaped {width}/{height}/{dpi}: {bounds}");
             for(int a=0;a<controls.Length;a++)for(int b=a+1;b<controls.Length;b++)Require(!controls[a].Intersects(controls[b]),"Filter controls overlap");
-            for(int i=0;i<7;i++){
-                panel.Update(Input(panel.FilterSelectorBounds.Center,leftDown:true,leftPressed:true),layout.RightPanel,font,settings,PhyxelToolId.Filter,registry[CoreMaterialIds.Sand],out _);
-                Require((int)settings.FilterSelection==(i+1)%7,"Filter selector cycle");
-                Require(font.MeasureString(panel.FilterSelectorLabel).X<=panel.FilterSelectorBounds.Width-24,"Filter label escaped button");
+            foreach (var preset in Enum.GetValues<FilterSelection>())
+            {
+                settings.FilterSelection = preset;
                 panel.Update(Input(new Point(-1,-1)),layout.RightPanel,font,settings,PhyxelToolId.Filter,registry[CoreMaterialIds.Sand],out _);
+                Require(font.MeasureString(panel.FilterSelectorLabel).X<=panel.FilterSelectorBounds.Width-24,"Filter label escaped button");
+                panel.Update(Input(panel.FilterSelectorBounds.Center,leftDown:true,leftPressed:true),layout.RightPanel,font,settings,PhyxelToolId.Filter,registry[CoreMaterialIds.Sand],out _);
+                Require(settings.FilterSelection == preset,"Read-only filter label changed brush");
             }
             settings.FilterSelection=FilterSelection.SelectedMaterial;
             foreach(var material in registry.Materials){
@@ -363,34 +365,60 @@ public static class UiLayoutRegressionTests
     private static void TestFilterPaletteSelection(
         MaterialRegistry registry, UiFontSet fonts, SandboxUiCoordinator coordinator)
     {
-        var viewport = new Viewport(0, 0, 1280, 720);
-        var layout = UiLayoutCalculator.Calculate(viewport, 1f);
-        var settings = new SimulationSettings();
         ushort previousMaterial = coordinator.SelectedMaterial;
         var previousTool = coordinator.ActiveTool;
         var previousCategory = coordinator.CategoryPalette.ActiveCategory;
-        coordinator.ActiveTool = PhyxelToolId.Brush;
-        coordinator.SelectedMaterial = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
-        var toolbar = new UiLeftToolbar();
-        var font = fonts.Select(1f, layout.Scale);
-        var filter = toolbar.GetToolBounds(layout.LeftToolbar, font, PhyxelToolId.Filter);
-        coordinator.Update(Input(filter.Center, leftDown: true, leftPressed: true), viewport, 1f, settings);
-        Require(coordinator.FilterToolActive, "Filter toolbar button did not activate tool.");
-        var liquidsTab = coordinator.CategoryPalette.GetCategoryTabBounds(layout.BottomPalette, MaterialCategoryType.Liquids);
-        coordinator.Update(Input(liquidsTab.Center, leftDown: true, leftPressed: true), viewport, 1f, settings);
-        Require(settings.FilterSelection == FilterSelection.Steam, "Category changed filter preset.");
-        ushort expected = coordinator.CategoryPalette.ActiveMaterials[0].RuntimeIndex;
-        var firstCardPoint = new Point(layout.BottomPalette.X + 70, liquidsTab.Bottom + 24);
-        coordinator.Update(Input(firstCardPoint, leftDown: true, leftPressed: true), viewport, 1f, settings);
-        Require(coordinator.FilterToolActive && coordinator.SelectedMaterial == expected &&
-            settings.FilterSelection == FilterSelection.SelectedMaterial,
-            "Palette must retain Filter tool and select an exact material rule.");
-        Require(coordinator.BlocksBrushInput, "Palette selection leaked a canvas stroke.");
+        foreach (var resolution in Resolutions) foreach (float dpi in DpiScales)
+        {
+            var viewport = new Viewport(0, 0, resolution.Width, resolution.Height);
+            var layout = UiLayoutCalculator.Calculate(viewport, dpi);
+            var settings = new SimulationSettings();
+            coordinator.ActiveTool = PhyxelToolId.Brush;
+            coordinator.SelectedMaterial = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand);
+            var toolbar = new UiLeftToolbar();
+            var font = fonts.Select(dpi, layout.Scale);
+            var filter = toolbar.GetToolBounds(layout.LeftToolbar, font, PhyxelToolId.Filter);
+            coordinator.Update(Input(filter.Center, leftDown: true, leftPressed: true), viewport, dpi, settings);
+            Require(coordinator.FilterToolActive && coordinator.CategoryPalette.ActiveCategory == MaterialCategoryType.Filters,
+                "Filter toolbar did not open individual brushes.");
+            var brushes = UiCategoryPalette.FilterBrushes;
+            Require(brushes.Count == 10 && brushes.Distinct().Count() == 10,"Filter catalog incomplete/duplicated");
+            for (int index = 0; index < brushes.Count; index++)
+            {
+                Rectangle card = coordinator.CategoryPalette.GetFilterCardBounds(layout.BottomPalette, index);
+                for (int scroll = 0; card.Right > layout.BottomPalette.Right - 40 && scroll < 30; scroll++)
+                {
+                    coordinator.Update(Input(new Point(layout.BottomPalette.Center.X, card.Center.Y), wheelDelta: -120),viewport,dpi,settings);
+                    card = coordinator.CategoryPalette.GetFilterCardBounds(layout.BottomPalette, index);
+                }
+                Require(IsInside(card, layout.BottomPalette),"Filter card escaped palette");
+                coordinator.Update(Input(card.Center,leftDown:true,leftPressed:true),viewport,dpi,settings);
+                Require(coordinator.FilterToolActive && settings.FilterSelection == brushes[index],"Card did not select its own filter brush");
+                Require(coordinator.BlocksBrushInput,"Filter palette click leaked a canvas stroke");
+            }
+            var liquidsTab = coordinator.CategoryPalette.GetCategoryTabBounds(layout.BottomPalette,MaterialCategoryType.Liquids);
+            coordinator.Update(Input(liquidsTab.Center,leftDown:true,leftPressed:true),viewport,dpi,settings);
+            ushort expected = coordinator.CategoryPalette.ActiveMaterials[0].RuntimeIndex;
+            coordinator.Update(Input(new Point(layout.BottomPalette.X+70,liquidsTab.Bottom+24),leftDown:true,leftPressed:true),viewport,dpi,settings);
+            Require(!coordinator.FilterToolActive && coordinator.ActiveTool == PhyxelToolId.Brush && coordinator.SelectedMaterial == expected,
+                "Material card must select an ordinary material brush");
+        }
+        var narrow = new Rectangle(0,0,420,180);
+        coordinator.CategoryPalette.ShowFilters();
+        coordinator.CategoryPalette.Update(Input(new Point(200,120),wheelDelta:-120),narrow,coordinator.SelectedMaterial,false,out _);
+        Require(coordinator.CategoryPalette.ScrollOffset>0,"Narrow filter palette did not scroll");
+        for(int scroll=0;scroll<20;scroll++)
+            coordinator.CategoryPalette.Update(Input(new Point(200,120),wheelDelta:-120),narrow,coordinator.SelectedMaterial,false,out _);
+        var lastCard=coordinator.CategoryPalette.GetFilterCardBounds(narrow,9);
+        coordinator.CategoryPalette.Update(Input(lastCard.Center,leftDown:true,leftPressed:true),narrow,coordinator.SelectedMaterial,false,out _);
+        Require(coordinator.CategoryPalette.ClickedFilter==FilterSelection.NoAir,"Last filter is inaccessible by scrolling");
         coordinator.SelectedMaterial = previousMaterial;
         coordinator.ActiveTool = previousTool;
-        var restoreTab = coordinator.CategoryPalette.GetCategoryTabBounds(layout.BottomPalette, previousCategory);
-        coordinator.Update(Input(restoreTab.Center, leftDown: true, leftPressed: true), viewport, 1f, settings);
-        Console.WriteLine("[PASS] Filter toolbar activation and exact material selection through palette.");
+        var restoredView = new Viewport(0,0,1280,720);
+        var restoreLayout = UiLayoutCalculator.Calculate(restoredView,1f);
+        var restoreTab = coordinator.CategoryPalette.GetCategoryTabBounds(restoreLayout.BottomPalette, previousCategory);
+        coordinator.Update(Input(restoreTab.Center,leftDown:true,leftPressed:true),restoredView,1f,new());
+        Console.WriteLine("[PASS] All 10 individual filter brushes, scroll, ordinary material selection and 12 resolution/DPI layouts.");
     }
 
     private static void TestPropertiesActions(MaterialRegistry registry, UiFontSet fonts)
@@ -586,7 +614,8 @@ public static class UiLayoutRegressionTests
             [MaterialCategoryType.Solids] =
                 [CoreMaterialIds.Ice, CoreMaterialIds.Metal, CoreMaterialIds.Stone, CoreMaterialIds.Fixture, CoreMaterialIds.Wood],
             [MaterialCategoryType.Combustion] = [CoreMaterialIds.Fire],
-            [MaterialCategoryType.Tools] = [CoreMaterialIds.Eraser, CoreMaterialIds.Heater, CoreMaterialIds.Cooler]
+            [MaterialCategoryType.Tools] = [CoreMaterialIds.Eraser, CoreMaterialIds.Heater, CoreMaterialIds.Cooler],
+            [MaterialCategoryType.Filters] = []
         };
 
         foreach (MaterialCategoryDefinition category in MaterialCategoryResolver.AllCategories)

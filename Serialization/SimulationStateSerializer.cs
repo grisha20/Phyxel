@@ -35,6 +35,7 @@ public sealed record SimulationSceneState(
 // v10 persists pending reaction packets, pressure waves and their finite
 // volume stock, plus Air/GasMotion. v9 carrier heat and v8 oxidizer stay intact.
 // v16 adds an optional fine filter map, remapped through the scene palette.
+// v17 extends rules with all-particle passage independently of ambient air.
 // v15 appends retained-liquid identity to the v14 52-byte prefix (56-byte cells).
 // Wet boiling storage may retain
 // excess heat while vapour awaits an outlet. v12 remains readable.
@@ -78,7 +79,7 @@ public sealed class SimulationStateSerializer
     private const uint WorldFileMagic = 0x5058594C;
     private const int LegacyWorldHeaderSize = 20;
     private const int CurrentWorldHeaderSize = 28;
-    private const int CurrentVersion = 16;
+    private const int CurrentVersion = 17;
     private const string RemovedGoldSandId = "core:gold_sand";
     private const string RenamedConcreteId = "core:concrete";
     private const string RenamedGasId = "core:gas";
@@ -237,7 +238,7 @@ public sealed class SimulationStateSerializer
                 warnings,
                 options),
             4 => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, true),
-            5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
+            5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
             _ => null
         };
     }
@@ -741,7 +742,7 @@ public sealed class SimulationStateSerializer
 
         uint magic = BinaryPrimitives.ReadUInt32LittleEndian(prefix.AsSpan(0, 4));
         int version = BinaryPrimitives.ReadInt32LittleEndian(prefix.AsSpan(4, 4));
-        if (magic != WorldFileMagic || version is not (3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or CurrentVersion))
+        if (magic != WorldFileMagic || version is not (3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or CurrentVersion))
         {
             throw new InvalidDataException("Формат снимка мира не поддерживается.");
         }
