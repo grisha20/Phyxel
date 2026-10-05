@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -12,7 +13,7 @@ namespace Phyxel.Diagnostics;
 
 internal static class SubmergedHeapRegressionVerifier
 {
-    internal static void Run(SimulationDispatchCoordinator coordinator,MaterialRegistry registry)
+    internal static IEnumerable<GpuSimulationResources> Run(SimulationDispatchCoordinator coordinator,MaterialRegistry registry)
     {
         string dir=Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")??"artifacts/submerged-heaps";
         Directory.CreateDirectory(dir);
@@ -46,7 +47,7 @@ internal static class SubmergedHeapRegressionVerifier
             serializer.ApplyWorldSnapshot(r,new(w,r.Height,MemoryMarshal.AsBytes(grid.AsSpan()).ToArray()));
             coordinator.RestoreWorldActivity(r,true,contacts,false,true);
         }
-        void Step(int frames,int fps){for(int frame=0;frame<frames;frame++)coordinator.DispatchFrame(settings,[],1f/fps);}
+        IEnumerable<GpuSimulationResources> Step(int frames,int fps){for(int frame=0;frame<frames;frame++){coordinator.DispatchFrame(settings,[],1f/fps);if(frame%8==7)yield return r;}yield return r;}
         void Capture(GridCell[] grid,string name)=>File.WriteAllBytes(Path.Combine(dir,name+".grid"),MemoryMarshal.AsBytes(grid.AsSpan()).ToArray());
         (int width,int height,int jump) Shape(GridCell[] grid,uint id){
             int[] top=new int[119];Array.Fill(top,210);
@@ -58,7 +59,7 @@ internal static class SubmergedHeapRegressionVerifier
         foreach(uint grain in new[]{sand,stone}){
             var grid=Basin();
             for(int y=134;y<210;y++)for(int x=158;x<=162;x++){grid[y*w+x]=Cell(grain);grid[y*w+x].RestFrames=30;}
-            Start(grid,mode);Step(fps*10,fps);var after=Read();var shape=Shape(after,grain);
+            Start(grid,mode);foreach(var live in Step(fps*10,fps)) yield return live;var after=Read();var shape=Shape(after,grain);
             Check(shape.jump<=3,"column cliff "+grain+" "+mode+" "+fps+" jump="+shape.jump);
             Check(shape.width>5,"column did not spread "+grain+" "+mode+" "+fps);
             Balance(grid,after,"column "+grain+" "+mode+" "+fps);Capture(after,$"column-{grain}-{mode}-{fps}");
@@ -69,7 +70,7 @@ internal static class SubmergedHeapRegressionVerifier
             for(int frame=0;frame<600;frame++){
                 BrushDrawCommand[] brush=frame<90?[new(){X=160,Y=105,EndX=160,EndY=105,Radius=3,Density=.82f,
                     Mode=BrushCommandMode.Material,MaterialIndex=(ushort)sand}]:[];
-                coordinator.DispatchFrame(settings,brush,1f/60);
+                coordinator.DispatchFrame(settings,brush,1f/60);if(frame%8==7)yield return r;
             }
             var after=Read();var shape=Shape(after,sand);Check(shape.jump<=3,"actual sand brush cliff "+mode+" jump="+shape.jump);
             Capture(after,"brush-"+mode);Console.WriteLine($"PHYXEL_SUBMERGED_BRUSH mode={mode} width={shape.width} height={shape.height} jump={shape.jump}");
@@ -81,7 +82,7 @@ internal static class SubmergedHeapRegressionVerifier
             for(int y=111;y<135;y++)for(int x=160-(y-110);x<=160+(y-110);x++)grid[y*w+x]=Cell(coal);
             for(int y=98;y<111;y++)for(int x=160-(y-97);x<=160+(y-97);x++)grid[y*w+x]=Cell(stone);
             int totalStone=grid.Count(c=>c.IsActive!=0&&c.MaterialIndex==stone);
-            Start(grid,mode);Capture(grid,$"mixed-initial-{mode}-{fps}");Step(fps*20,fps);var after=Read();
+            Start(grid,mode);Capture(grid,$"mixed-initial-{mode}-{fps}");foreach(var live in Step(fps*20,fps)) yield return live;var after=Read();
             int sunkStone=Enumerable.Range(0,n).Count(i=>i/w>=150&&after[i].IsActive!=0&&after[i].MaterialIndex==stone);
             int[] surfaces=Enumerable.Range(0,119).Select(dx=>Enumerable.Range(75,135)
                 .Where(y=>after[y*w+101+dx].IsActive!=0&&after[y*w+101+dx].MaterialIndex==water)
@@ -102,7 +103,7 @@ internal static class SubmergedHeapRegressionVerifier
             var load=Basin();int mouth=129*w+160;load[mouth]=Cell(coal);
             for(int y=123;y<=129;y++)foreach(int x in new[]{159,161})load[y*w+x]=Cell(fixture);
             if(loaded)for(int y=125;y<129;y++)load[y*w+160]=Cell(stone);
-            Start(load,mode,false);Step((int)Math.Ceiling(fps/30f),fps);var pressed=Read();
+            Start(load,mode,false);foreach(var live in Step((int)Math.Ceiling(fps/30f),fps)) yield return live;var pressed=Read();
             int grain=Array.FindIndex(pressed,c=>c.IsActive!=0&&c.MaterialIndex==coal);
             Check(loaded?grain>mouth:grain==mouth,"dry floating load displacement loaded="+loaded+" position="+grain/w);
             Check(pressed.All(c=>c.MoistureMass==0),"load test accidentally absorbed water");
@@ -118,7 +119,7 @@ internal static class SubmergedHeapRegressionVerifier
                 bool pouring=frame<60 || (frame>=180 && frame<240);
                 BrushDrawCommand[] brush=pouring?[new(){X=160,Y=100,EndX=160,EndY=100,Radius=2,Density=.82f,
                     Mode=BrushCommandMode.Material,MaterialIndex=(ushort)material}]:[];
-                coordinator.DispatchFrame(settings,brush,1f/60);
+                coordinator.DispatchFrame(settings,brush,1f/60);if(frame%8==7)yield return r;
                 if(frame==179)Capture(Read(),"sequential-charcoal-"+mode);
             }
             var after=Read();int count=after.Count(c=>c.IsActive!=0&&c.MaterialIndex==stone);
@@ -135,10 +136,10 @@ internal static class SubmergedHeapRegressionVerifier
         for(int x=139;x<=181;x++)dry[210*w+x]=Cell(fixture);
         for(int y=170;y<210;y++)foreach(int x in new[]{139,181})dry[y*w+x]=Cell(fixture);
         for(int y=175;y<179;y++)for(int x=150;x<=170;x++)dry[y*w+x]=Cell(stone);
-        Start(dry,SimulationMode.Sandbox);Step(300,60);var dryAfter=Read();
+        Start(dry,SimulationMode.Sandbox);foreach(var live in Step(300,60)) yield return live;var dryAfter=Read();
         Check(!Enumerable.Range(0,n).Any(i=>i/w>=180&&dryAfter[i].IsActive!=0&&dryAfter[i].MaterialIndex==stone),"dry powders density-sorted");
         Balance(dry,dryAfter,"dry mixed");
-        File.WriteAllText(Path.Combine(dir,"layout.txt"),$"{w} {r.Height} 52 {sand} {coal} {table[coal].MoistureWetMaterialIndex} {stone} {water} {fixture}");
+        File.WriteAllText(Path.Combine(dir,"layout.txt"),$"{w} {r.Height} 56 {sand} {coal} {table[coal].MoistureWetMaterialIndex} {stone} {water} {fixture}");
         Console.WriteLine($"PHYXEL_SUBMERGED_RESULT passed={passed} checks={checks}");if(!passed)Environment.ExitCode=1;
     }
 }

@@ -96,13 +96,18 @@ bool TransferAbsorbedFuel(inout GridCell first, inout GridCell second)
     MaterialProperties carrier;
     if(fa && fb)
     {
-        if(ma.FuelLiquidMaterialIndex!=mb.FuelLiquidMaterialIndex) return false;
+        uint firstLiquid=RetainedLiquidIndex(first,ma),secondLiquid=RetainedLiquidIndex(second,mb);
+        if(first.FuelMass>0 && second.FuelMass>0 && firstLiquid!=secondLiquid) return false;
+        uint species=first.FuelMass>0?firstLiquid:secondLiquid;
+        if(first.FuelMass<=0 && second.FuelMass<=0)return false;
+        if(((ma.Flags & MaterialFlagUniversalPores)==0 && species!=ma.FuelLiquidMaterialIndex) ||
+           ((mb.Flags & MaterialFlagUniversalPores)==0 && species!=mb.FuelLiquidMaterialIndex))return false;
         float ca=first.Mass*ma.FuelCapacity, cb=second.Mass*mb.FuelCapacity;
         float difference=first.FuelMass/ca-second.FuelMass/cb;
         fromFirst=difference>0;
         amount=abs(difference)*ca*cb/(ca+cb);
         amount=min(amount,min(ma.FuelAbsorptionRate,mb.FuelAbsorptionRate)*min(first.Mass,second.Mass)*ContactDeltaTime*4);
-        carrier=Materials[ma.FuelLiquidMaterialIndex];
+        carrier=Materials[species];
     }
     else
     {
@@ -110,9 +115,12 @@ bool TransferAbsorbedFuel(inout GridCell first, inout GridCell second)
         GridCell receiver=first, donor=second;
         MaterialProperties mr=ma;
         if(fb) { receiver=second; donor=first; mr=mb; }
-        if(donor.IsActive==0 || donor.MaterialIndex!=mr.FuelLiquidMaterialIndex || donor.Mass<=0) return false;
+        if(donor.IsActive==0 || donor.Mass<=0 || Materials[donor.MaterialIndex].SimulationKind!=SimulationKindLiquid ||
+           donor.MaterialIndex==mr.MoistureLiquidMaterialIndex || donor.Lifetime!=0 ||
+           ((mr.Flags & MaterialFlagUniversalPores)==0 && donor.MaterialIndex!=mr.FuelLiquidMaterialIndex) ||
+           (receiver.FuelMass>0 && RetainedLiquidIndex(receiver,mr)!=donor.MaterialIndex))return false;
         amount=mr.FuelAbsorptionRate*receiver.Mass*ContactDeltaTime*4;
-        carrier=Materials[mr.FuelLiquidMaterialIndex];
+        carrier=Materials[donor.MaterialIndex];
     }
     GridCell donor=first, receiver=second;
     MaterialProperties md=ma, mr=mb;
@@ -123,7 +131,9 @@ bool TransferAbsorbedFuel(inout GridCell first, inout GridCell second)
     if(amount<=0) return false;
     float ed=donor.Mass*CellSpecificEnthalpy(donor), er=receiver.Mass*CellSpecificEnthalpy(receiver);
     float carried=amount*carrier.HeatCapacity*donor.Temperature;
-    if(donorAbsorbent) donor.FuelMass-=amount; else donor.Mass-=amount;
+    uint retained=donorAbsorbent ? RetainedLiquidIndex(donor,md) : donor.MaterialIndex;
+    if(donorAbsorbent) { donor.FuelMass-=amount;if(donor.FuelMass<=0)donor.RetainedLiquidMaterialIndex=0; } else donor.Mass-=amount;
+    receiver.RetainedLiquidMaterialIndex=retained;
     receiver.FuelMass+=amount;
     receiver=SetCellSpecificEnthalpy(receiver,(er+carried)/receiver.Mass);
     receiver.RestFrames=0;
@@ -172,7 +182,8 @@ void CSMoisture(uint3 id : SV_DispatchThreadID)
         Grid[a]=first; Grid[b]=second;
         CellMaterials[a]=first.IsActive!=0?first.MaterialIndex:0;
         CellMaterials[b]=second.IsActive!=0?second.MaterialIndex:0;
-        return;
+        // Continue with the water stock too: oil redistribution must not
+        // monopolize this pair while its gradient approaches equilibrium.
     }
     bool firstFuel=first.IsActive!=0 && Materials[first.MaterialIndex].MoistureCapacity>0;
     bool secondFuel=second.IsActive!=0 && Materials[second.MaterialIndex].MoistureCapacity>0;

@@ -6,5 +6,20 @@
   "color": "#DAB85C",
   "physics": { "density": 1.5, "friction": 0.75, "flowRate": 0.18 },
   "thermal": { "initialTemperature": 30.0, "conductivity": 0.15, "heatCapacity": 0.83 },
-  "ui": { "order": 10, "hidden": false }
+  "ui": { "order": 10, "hidden": false },
+  "moisture": {
+    "liquid": "core:water",
+    "dry": "core:sand",
+    "wet": "core:sand",
+    "capacity": 0.3,
+    "absorptionRate": 1.0,
+    "dryingRate": 0.1
+  },
+  "liquidAbsorption": {
+    "liquid": "core:oil",
+    "capacity": 0.25,
+    "absorptionRate": 0.2,
+    "saturatedDensity": 1.65,
+    "allLiquids": true
+  }
 }

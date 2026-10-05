@@ -165,7 +165,7 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             "TransitionAboveTemperature offset must be 56.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.TransitionAboveMaterialIndex)).ToInt32() == 60,
             "TransitionAboveMaterialIndex offset must be 60.");
-        Require(Marshal.SizeOf<GridCell>() == 52, "GridCell must be 52 bytes.");
+        Require(Marshal.SizeOf<GridCell>() == 56, "GridCell must be 56 bytes.");
 
         string shaderPath = Path.Combine(
             AppContext.BaseDirectory,
@@ -220,7 +220,8 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             MaterialProperties properties = material.Properties;
             Require((MaterialSimulationKind)properties.SimulationKind == expected.Kind,
                 $"{expected.Id} kind changed.");
-            Require((MaterialFlags)properties.Flags == expected.Flags, $"{expected.Id} flags changed.");
+            MaterialFlags expectedFlags=expected.Flags | (material.FuelAbsorption is {AllLiquids:true}?MaterialFlags.UniversalPores:MaterialFlags.None);
+            Require((MaterialFlags)properties.Flags == expectedFlags, $"{expected.Id} flags changed.");
             Require(Same(properties.Density, expected.Density), $"{expected.Id} density changed.");
             Require(Same(properties.Friction, expected.Friction), $"{expected.Id} friction changed.");
             Require(Same(properties.FlowRate, expected.FlowRate), $"{expected.Id} flowRate changed.");

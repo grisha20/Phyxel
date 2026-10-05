@@ -9,5 +9,5 @@ try{
  $env:PHYXEL_VERIFY_SUBMERGED_HEAPS='1';$env:PHYXEL_WINDOWED='1';$env:PHYXEL_ARTIFACT_DIR=$taskDir
  $taskProcess=Start-Process (Join-Path $taskRepo 'bin/Debug/net8.0-windows/Phyxel.exe') -WorkingDirectory $taskRepo -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput "$taskDir/run.log" -RedirectStandardError "$taskDir/error.log"
  Get-Content "$taskDir/run.log" | Where-Object {$_ -like 'PHYXEL_SUBMERGED*'}
- if($taskProcess.ExitCode -ne 0){throw 'Submerged heap checks failed.'}
+ if($taskProcess.ExitCode -ne 0 -or -not((Get-Content "$taskDir/run.log") -match '^PHYXEL_SUBMERGED_RESULT passed=True ')){throw 'Submerged heap checks failed or did not complete.'}
 }finally{foreach($taskKey in $taskKeys){[Environment]::SetEnvironmentVariable($taskKey,$taskSaved[$taskKey])}}

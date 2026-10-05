@@ -132,7 +132,7 @@ public sealed class PhyxelGame : Game
                 TargetElapsedTime = TimeSpan.FromSeconds(1d / targetFramesPerSecond);
             }
         }
-        if(Environment.GetEnvironmentVariable("PHYXEL_VERIFY_HANDOFF")=="1")
+        if((Environment.GetEnvironmentVariable("PHYXEL_VERIFY_HANDOFF")=="1" || Environment.GetEnvironmentVariable("PHYXEL_VERIFY_ABSORPTION")=="1"))
         {
             graphics.SynchronizeWithVerticalRetrace=false;
             IsFixedTimeStep=false;
@@ -233,9 +233,8 @@ public sealed class PhyxelGame : Game
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SUBMERGED_HEAPS") == "1")
         {
-            try { SubmergedHeapRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
-            catch (Exception exception) { Console.WriteLine($"PHYXEL_SUBMERGED_FAILED {exception}"); Environment.ExitCode=1; }
-            Exit();
+            oilSmokeVerification = SubmergedHeapRegressionVerifier.Run(dispatchCoordinator,materialRegistry).GetEnumerator();
+            IsFixedTimeStep = false;
             return;
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_WOOD") == "1")
@@ -246,9 +245,8 @@ public sealed class PhyxelGame : Game
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FUEL_MOISTURE") == "1")
         {
-            try { FuelMoistureRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
-            catch (Exception exception) { Console.WriteLine($"PHYXEL_FUEL_MOISTURE_FAILED {exception}"); Environment.ExitCode=1; }
-            Exit();
+            oilSmokeVerification = FuelMoistureRegressionVerifier.Run(dispatchCoordinator,materialRegistry).GetEnumerator();
+            IsFixedTimeStep = false;
             return;
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_WETTING_CONTACT") == "1")
@@ -345,6 +343,11 @@ public sealed class PhyxelGame : Game
         {
             oilSmokeVerification = LiquidLayersRegressionVerifier.Run(dispatchCoordinator, materialRegistry,
                 settings, status => SetStatus("Автотест: " + status)).GetEnumerator();
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_ABSORPTION") == "1")
+        {
+            oilSmokeVerification=AbsorptionRegressionVerifier.Run(dispatchCoordinator,materialRegistry,fps=>diagnosticFramesPerSecond=fps).GetEnumerator();
+            IsFixedTimeStep=false; return;
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_HANDOFF") == "1")
         {
@@ -514,7 +517,10 @@ public sealed class PhyxelGame : Game
             }
             catch (Exception exception)
             {
-                string test = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_HANDOFF") == "1" ? "HANDOFF" :
+                string test = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FUEL_MOISTURE")=="1" ? "FUEL_MOISTURE" :
+                    Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SUBMERGED_HEAPS")=="1" ? "SUBMERGED" :
+                    Environment.GetEnvironmentVariable("PHYXEL_VERIFY_ABSORPTION")=="1" ? "ABSORPTION" :
+                    Environment.GetEnvironmentVariable("PHYXEL_VERIFY_HANDOFF") == "1" ? "HANDOFF" :
                     Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_LAYERS") == "1" ? "LL" :
                     Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_TEMPERATURE") == "1" ? "LIQUID_TEMPERATURE" :
                     Environment.GetEnvironmentVariable("PHYXEL_VERIFY_WOOD") == "1" ? "WOOD" :

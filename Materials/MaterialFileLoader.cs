@@ -30,6 +30,7 @@ internal static partial class MaterialFileLoader
         public JsonElement ContactTransitions { get; set; }
         public JsonElement Moisture { get; set; }
         public JsonElement FuelAbsorption { get; set; }
+        public JsonElement LiquidAbsorption { get; set; }
         public MaterialUiDocument? Ui { get; set; }
 
         [JsonExtensionData]
@@ -482,7 +483,7 @@ internal static partial class MaterialFileLoader
             LiquidFlow = ParseLiquidFlow(physics.LiquidFlow, kind),
             LiquidContactTransition = liquidContactTransition,
             Moisture = ParseMoisture(document.Moisture, kind, lifecycle, transitions),
-            FuelAbsorption = ParseFuelAbsorption(document.FuelAbsorption, kind),
+            FuelAbsorption = ParseLiquidAbsorption(document.LiquidAbsorption, document.FuelAbsorption, kind),
             Gas = gas is null ? null : new MaterialGasDefinition(
                 gas.Diffusion,
                 gas.Buoyancy,
@@ -564,13 +565,21 @@ internal static partial class MaterialFileLoader
         public Dictionary<string, JsonElement>? UnknownFields { get; set; }
     }
 
+    private static MaterialFuelAbsorptionDefinition? ParseLiquidAbsorption(JsonElement current, JsonElement legacy, MaterialSimulationKind kind)
+    {
+        bool present=current.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null);
+        if(present && legacy.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
+            throw new InvalidDataException("Specify liquidAbsorption or legacy fuelAbsorption, not both.");
+        return ParseFuelAbsorption(present?current:legacy,kind);
+    }
+
     private static MaterialFuelAbsorptionDefinition? ParseFuelAbsorption(JsonElement json, MaterialSimulationKind kind)
     {
         if (json.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null) return null;
         if (json.ValueKind != JsonValueKind.Object || kind is not (MaterialSimulationKind.Granular or MaterialSimulationKind.Solid))
             throw new InvalidDataException("fuelAbsorption requires granular or solid material with shared pores.");
         foreach (var p in json.EnumerateObject())
-            if (p.Name is not ("liquid" or "capacity" or "absorptionRate" or "saturatedDensity"))
+            if (p.Name is not ("liquid" or "capacity" or "absorptionRate" or "saturatedDensity" or "allLiquids"))
                 throw new InvalidDataException("Unknown fuelAbsorption field: " + p.Name);
         if (!json.TryGetProperty("liquid", out var id) || id.ValueKind != JsonValueKind.String ||
             string.IsNullOrWhiteSpace(id.GetString())) throw new InvalidDataException("Missing absorbed fuel liquid.");
@@ -580,7 +589,10 @@ internal static partial class MaterialFileLoader
                 !float.IsFinite(f) || f <= 0 || f > 10) throw new InvalidDataException("Invalid fuelAbsorption parameter: " + key);
             return f;
         }
-        return new(MaterialRegistry.NormalizeId(id.GetString()!), Number("capacity"), Number("absorptionRate"), Number("saturatedDensity"));
+        bool all=false;
+        if(json.TryGetProperty("allLiquids",out var allValue))
+        { if(allValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw new InvalidDataException("allLiquids must be boolean."); all=allValue.GetBoolean(); }
+        return new(MaterialRegistry.NormalizeId(id.GetString()!), Number("capacity"), Number("absorptionRate"), Number("saturatedDensity"),all);
     }
 
     private static MaterialMoistureDefinition? ParseMoisture(JsonElement json,

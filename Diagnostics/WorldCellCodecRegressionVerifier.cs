@@ -200,7 +200,7 @@ internal static class WorldCellCodecRegressionVerifier
             "LegacyGridCellV5 must remain 36 bytes.");
         Require(
             Marshal.SizeOf<GridCell>() == WorldCellCodec.CurrentCellStride,
-            "GridCell must be 52 bytes.");
+            "GridCell must be 56 bytes.");
         string shaderPath = Path.Combine(AppContext.BaseDirectory, "Content", "Shaders", "PhysicsShared.hlsli");
         string shader = File.ReadAllText(shaderPath);
         int layoutStart = shader.IndexOf("struct GridCell", StringComparison.Ordinal);
@@ -397,8 +397,8 @@ internal static class WorldCellCodecRegressionVerifier
         string worldPath = Path.ChangeExtension(scenePath, ".world");
         RawWorldFile raw = await SimulationStateSerializer.ReadWorldAsync(worldPath, CancellationToken.None) ??
             throw new InvalidOperationException("Saved v5 world file is missing.");
-        Require(raw.Version == 14, "CurrentVersion is not 14.");
-        Require(raw.StoredCellStride == 52, "Current writer did not store the explicit 52-byte stride.");
+        Require(raw.Version == 15, "CurrentVersion is not 15.");
+        Require(raw.StoredCellStride == 56, "Current writer did not store the explicit 56-byte stride.");
         Require(new FileInfo(worldPath).Length == CurrentHeaderSize + 24 + raw.CellBytes.Length,
             "v10 world did not preserve its header and empty extensions.");
 
@@ -482,7 +482,7 @@ internal static class WorldCellCodecRegressionVerifier
         Require(loaded?.Oxidizer is not null && loaded.Oxidizer.AsSpan().SequenceEqual(oxygen),
             "World v8 did not preserve exhausted, fractional and compressed oxidizer byte-for-byte.");
         var raw = await SimulationStateSerializer.ReadWorldAsync(Path.ChangeExtension(path, ".world"), CancellationToken.None);
-        Require(raw?.Version == 14 && raw.StoredCellStride == 52 && raw.Oxidizer is not null,
+        Require(raw?.Version == 15 && raw.StoredCellStride == 56 && raw.Oxidizer is not null,
             "v8 changed GridCell layout or omitted the oxidizer section.");
         byte[] oldOxygen = MemoryMarshal.AsBytes(new float[] { 0, .37f, 1 }.AsSpan()).ToArray();
         Require(WorldCellCodec.Decode(new RawWorldFile(7, 3, 1, 40, EncodeV6Cells(MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray()), oldOxygen)).Oxidizer!.AsSpan().SequenceEqual(oldOxygen),
@@ -545,15 +545,15 @@ internal static class WorldCellCodecRegressionVerifier
 
         GridCell valid = new() { MaterialIndex = 0, Mass = 1, IsActive = 1, Temperature = 20 };
         byte[] currentCell = EncodeCurrentCells(valid);
-        await ExpectInvalidCurrentWorldAsync(directory, "v14-wrong-stride", 51, 52, currentCell);
-        await ExpectInvalidCurrentWorldAsync(directory, "v14-truncated", 52, 52, currentCell[..^1]);
-        await ExpectInvalidCurrentWorldAsync(directory, "v14-trailing", 52, 52, [.. currentCell, 0x7f]);
+        await ExpectInvalidCurrentWorldAsync(directory, "v15-wrong-stride", 55, 56, currentCell);
+        await ExpectInvalidCurrentWorldAsync(directory, "v15-truncated", 56, 56, currentCell[..^1]);
+        await ExpectInvalidCurrentWorldAsync(directory, "v15-trailing", 56, 56, [.. currentCell, 0x7f]);
         await ExpectInvalidTemperatureAsync(directory, "v6-nan", float.NaN);
         await ExpectInvalidTemperatureAsync(directory, "v6-infinity", float.PositiveInfinity);
         await ExpectInvalidTemperatureAsync(directory, "v6-too-cold", -273.16f);
         await ExpectInvalidTemperatureAsync(directory, "v6-too-hot", 5000.01f);
         WorldCellCodec.Decode(new RawWorldFile(
-            14,
+            15,
             2,
             1,
             WorldCellCodec.CurrentCellStride,
@@ -690,7 +690,7 @@ internal static class WorldCellCodecRegressionVerifier
     {
         byte[] header = new byte[28];
         BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0, 4), WorldFileMagic);
-        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(4, 4), 14);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(4, 4), 15);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(8, 4), width);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(12, 4), height);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(16, 4), stride);

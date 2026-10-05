@@ -45,11 +45,12 @@
     "order": 90,
     "hidden": false
   },
-  "fuelAbsorption": {
+  "liquidAbsorption": {
     "liquid": "core:oil",
     "capacity": 0.25,
     "absorptionRate": 0.025,
-    "saturatedDensity": 0.9
+    "saturatedDensity": 0.9,
+    "allLiquids": true
   },
   "moisture": {
     "liquid": "core:water",

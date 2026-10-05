@@ -13,6 +13,7 @@ struct GridCell
     float MoistureMass;
     float MoistureEnergy;
     float FuelMass;
+    uint RetainedLiquidMaterialIndex;
 };
 
 // Free liquid/gas fuel only; distinct from rigid-body IDs and FIRE markers.
@@ -317,9 +318,9 @@ cbuffer SimulationFrameConstants : register(b0)
     uint DebugView;
     uint OpenBoundaries;
 
-    // Номер подшага движения газа. Обязан входить в seed: без него все проходы
-    // за кадр получают одно случайное число, и восемь попыток вырождаются в
-    // одну, повторённую восемь раз с вероятностью, уже делённой на восемь.
+    // РќРѕРјРµСЂ РїРѕРґС€Р°РіР° РґРІРёР¶РµРЅРёСЏ РіР°Р·Р°. РћР±СЏР·Р°РЅ РІС…РѕРґРёС‚СЊ РІ seed: Р±РµР· РЅРµРіРѕ РІСЃРµ РїСЂРѕС…РѕРґС‹
+    // Р·Р° РєР°РґСЂ РїРѕР»СѓС‡Р°СЋС‚ РѕРґРЅРѕ СЃР»СѓС‡Р°Р№РЅРѕРµ С‡РёСЃР»Рѕ, Рё РІРѕСЃРµРјСЊ РїРѕРїС‹С‚РѕРє РІС‹СЂРѕР¶РґР°СЋС‚СЃСЏ РІ
+    // РѕРґРЅСѓ, РїРѕРІС‚РѕСЂС‘РЅРЅСѓСЋ РІРѕСЃРµРјСЊ СЂР°Р· СЃ РІРµСЂРѕСЏС‚РЅРѕСЃС‚СЊСЋ, СѓР¶Рµ РґРµР»С‘РЅРЅРѕР№ РЅР° РІРѕСЃРµРјСЊ.
     uint GasSubStep;
     uint DebugReserved2; // Ordinary-gas physical tick; independent of render FPS.
 };
@@ -396,3 +397,8 @@ GridCell CreateEmptyCell()
 {
     return (GridCell)0;
 }
+
+// Zero is the legacy marker; explicit species survives movement and palette remapping.
+uint RetainedLiquidIndex(GridCell c, MaterialProperties m)
+{ return c.RetainedLiquidMaterialIndex != 0 ? c.RetainedLiquidMaterialIndex : m.FuelLiquidMaterialIndex; }
+static const uint MaterialFlagUniversalPores = 1u << 13;

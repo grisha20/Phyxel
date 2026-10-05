@@ -19,7 +19,8 @@ public struct GridCell
     // with the cell. The reservoir is released when drying has an outlet.
     public float MoistureMass;
     public float MoistureEnergy;
-    public float FuelMass; // Absorbed combustible liquid; distinct from water.
+    public float FuelMass; // Retained non-water liquid; legacy field name.
+    public uint RetainedLiquidMaterialIndex; // 0: historical configured liquid; otherwise explicit species.
 
     // Tagged by PhaseEnthalpy/FusionEnthalpy; liquid freezing is negative.
     // World v11 preserves this progress without increasing the cell stride.
@@ -621,6 +622,7 @@ public struct TemperatureProbeResult
     public float Temperature;
     public uint Reserved;
     public float FuelFraction;
+    public uint RetainedLiquidMaterialIndex;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

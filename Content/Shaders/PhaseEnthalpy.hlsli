@@ -25,7 +25,7 @@ float CellEffectiveCapacity(GridCell c)
     // infinity/NaN. Positive sub-resolution stock is retained, not erased.
     return m.HeatCapacity*max(c.Mass,0) + (c.MoistureMass>0 && m.MoistureCapacity>0
         ? c.MoistureMass*Materials[m.MoistureLiquidMaterialIndex].HeatCapacity : 0)
-        + (c.FuelMass>0 && m.FuelCapacity>0 ? c.FuelMass*Materials[m.FuelLiquidMaterialIndex].HeatCapacity : 0);
+        + (c.FuelMass>0 && m.FuelCapacity>0 ? c.FuelMass*Materials[RetainedLiquidIndex(c,m)].HeatCapacity : 0);
 }
 float CellSpecificEnthalpy(GridCell c)
 {

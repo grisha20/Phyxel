@@ -203,7 +203,7 @@ internal static class OilAbsorptionRegressionVerifier
         }
 
         var saved=new GridCell[n];saved[p]=Cell(table[coal].MoistureWetMaterialIndex,100);saved[p].MoistureMass=.07f;
-        saved[p].MoistureEnergy=15;saved[p].FuelMass=.1f;
+        saved[p].MoistureEnergy=15;saved[p].FuelMass=.1f;saved[p].RetainedLiquidMaterialIndex=oil;
         string path=Path.Combine(dir,"partial.json");
         Task.Run(()=>serializer.SaveAsync(path,settings,(ushort)coal,new(w,r.Height,MemoryMarshal.AsBytes(saved.AsSpan()).ToArray()),registry)).GetAwaiter().GetResult();
         var loaded=Task.Run(()=>serializer.LoadAsync(path,registry)).GetAwaiter().GetResult()!;
@@ -228,7 +228,7 @@ internal static class OilAbsorptionRegressionVerifier
                 new(w,r.Height,MemoryMarshal.AsBytes(invalid.AsSpan()).ToArray()),registry)).GetAwaiter().GetResult();}
             catch(InvalidDataException){rejected=true;}Check(rejected,"Bad fuel accepted "+bad);
         }
-        foreach(uint invalidMaterial in new[]{oil,water,registry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand)})
+        foreach(uint invalidMaterial in new[]{oil,water,registry.GetRequiredRuntimeIndex(CoreMaterialIds.Stone)})
         {
             var invalid=new GridCell[n];invalid[p]=Cell(invalidMaterial);invalid[p].FuelMass=.1f;bool rejected=false;
             try{Task.Run(()=>serializer.SaveAsync(Path.Combine(dir,"invalid-carrier.json"),settings,(ushort)invalidMaterial,
@@ -268,26 +268,28 @@ internal static class OilAbsorptionRegressionVerifier
         }
         // Invalid configurations fail before a material reaches the GPU.
         string cores=Path.Combine(AppContext.BaseDirectory,"Materials/core");
-        foreach(string invalid in new[]{"missing","water","gas","zero","unknown-field","partner"})
+        foreach(string invalid in new[]{"missing","water","gas","zero","unknown-field","partner","all-liquids-not-bool","duplicate"})
         {
             string coreDir=Path.Combine(dir,"invalid-core-"+invalid);Directory.CreateDirectory(coreDir);
             foreach(string file in Directory.GetFiles(cores,"*.json"))File.Copy(file,Path.Combine(coreDir,Path.GetFileName(file)),true);
             foreach(string file in new[]{"coal.json","wet_charcoal.json"})
             {
                 string target=Path.Combine(coreDir,file);var json=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(target))!;
-                var definition=json["fuelAbsorption"]!.AsObject();
+                var definition=json["liquidAbsorption"]!.AsObject();
                 if(invalid=="missing")definition["liquid"]="test:absent";
                 if(invalid=="water")definition["liquid"]=CoreMaterialIds.Water;
                 if(invalid=="gas")definition["liquid"]=CoreMaterialIds.Fire;
                 if(invalid=="zero")definition["capacity"]=0;
                 if(invalid=="unknown-field")definition["unused"]=1;
                 if(invalid=="partner" && file=="coal.json")definition["absorptionRate"]=.03;
+                if(invalid=="all-liquids-not-bool")definition["allLiquids"]="true";
+                if(invalid=="duplicate")json["fuelAbsorption"]=definition.DeepClone();
                 File.WriteAllText(target,json.ToJsonString());
             }
             bool rejected=false;try{_ = new MaterialRegistry(coreDir,Path.Combine(dir,"empty-external"));}
             catch(InvalidDataException){rejected=true;}Check(rejected,"Invalid absorption material reached GPU: "+invalid);
         }
-        File.WriteAllText(Path.Combine(dir,"result.txt"),$"checks={checks}\nGrid52 Material244 writer14\n");
+        File.WriteAllText(Path.Combine(dir,"result.txt"),$"checks={checks}\nGrid56 Material244 writer15\n");
         Console.WriteLine($"PHYXEL_OIL_ABSORPTION_SUCCESS checks={checks}");
     }
 }

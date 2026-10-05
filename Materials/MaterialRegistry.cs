@@ -667,10 +667,10 @@ public sealed class MaterialRegistry
             return "Moisture liquid needs a reversible latent-heat vapour pair.";
         if ((dry.Properties.SimulationKind != (uint)MaterialSimulationKind.Granular &&
              dry.Properties.SimulationKind != (uint)MaterialSimulationKind.Solid) ||
-            wet.Properties.SimulationKind != dry.Properties.SimulationKind || dry.Combustion is null ||
+            wet.Properties.SimulationKind != dry.Properties.SimulationKind ||
             dry.Moisture != m || wet.Moisture != m || (source.Id != dry.Id && source.Id != wet.Id) ||
             dry.Properties.HeatCapacity != wet.Properties.HeatCapacity)
-            return "Dry/wet solid or granular partners must share kind, moisture settings and dry heat capacity; dry partner must be combustible.";
+            return "Dry/wet solid or granular partners must share kind, moisture settings and dry heat capacity.";
         return null;
     }
 
@@ -683,7 +683,7 @@ public sealed class MaterialRegistry
             return "Absorbed fuel requires shared dry/wet pore partners and a liquid.";
         if (core && !liquid.IsBundled) return "Non-core absorbed fuel reference.";
         if (liquid.Properties.SimulationKind != (uint)MaterialSimulationKind.Liquid ||
-            liquid.Combustion is not { BurnedIntoId: CoreMaterialIds.Empty } ||
+            (!f.AllLiquids && liquid.Combustion is not { BurnedIntoId: CoreMaterialIds.Empty }) ||
             liquid.Lifecycle is not null || f.LiquidId == m.LiquidId || dry.FuelAbsorption != f || wet.FuelAbsorption != f)
             return "Absorbed fuel must be a liquid fuel without residue; both pore partners must share its definition. Free-liquid phases do not act inside pores.";
         return null;
@@ -751,6 +751,7 @@ public sealed class MaterialRegistry
         if (source.FuelAbsorption is { } fuel)
         {
             properties.FuelLiquidMaterialIndex = indexedById[fuel.LiquidId].RuntimeIndex;
+            if(fuel.AllLiquids) properties.Flags |= (uint)MaterialFlags.UniversalPores;
             properties.FuelCapacity = fuel.Capacity;
             properties.FuelAbsorptionRate = fuel.AbsorptionRate;
             properties.FuelSaturatedDensity = fuel.SaturatedDensity;

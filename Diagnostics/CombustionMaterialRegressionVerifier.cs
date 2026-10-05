@@ -245,6 +245,7 @@ internal static class CombustionMaterialRegressionVerifier
             node["id"] = id;
             node.AsObject().Remove("moisture");
             node.AsObject().Remove("fuelAbsorption");
+            node.AsObject().Remove("liquidAbsorption");
             if (configured) node["combustion"]!["oxidizerPerMass"] = 4;
             else node["combustion"]!.AsObject().Remove("oxidizerPerMass");
             string directory = CreateDirectory(root, id.Replace(':', '-'));
@@ -319,7 +320,7 @@ internal static class CombustionMaterialRegressionVerifier
             "MaximumCombustionTemperature offset must be 96.");
         Require(Marshal.OffsetOf<MaterialProperties>(nameof(MaterialProperties.TransitionAboveLatentHeat)).ToInt32() == 100,
             "TransitionAboveLatentHeat offset must be 100.");
-        Require(Marshal.SizeOf<GridCell>() == 52, "GridCell must be 52 bytes.");
+        Require(Marshal.SizeOf<GridCell>() == 56, "GridCell must be 56 bytes.");
         Require(Marshal.SizeOf<MaterialEmissionProperties>() == 32 &&
             Marshal.OffsetOf<MaterialEmissionProperties>(nameof(MaterialEmissionProperties.OxidizerPerMass)).ToInt32() == 24,
             "Reaction budget must reuse emission padding without changing the 32-byte ABI.");

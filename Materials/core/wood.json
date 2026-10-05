@@ -33,10 +33,11 @@
     "dryingRate": 0.08,
     "capillaryRate": 1.0
   },
-  "fuelAbsorption": {
+  "liquidAbsorption": {
     "liquid": "core:oil",
     "capacity": 0.25,
     "absorptionRate": 0.04,
-    "saturatedDensity": 1.0
+    "saturatedDensity": 1.0,
+    "allLiquids": true
   }
 }

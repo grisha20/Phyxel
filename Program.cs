@@ -44,6 +44,8 @@ public static class Program
             return;
         }
 
+        if(Environment.GetEnvironmentVariable("PHYXEL_VERIFY_ABSORPTION_MODEL")=="1")
+        {Environment.ExitCode=AbsorptionModelRegressionVerifier.Run();return;}
         using PhyxelGame game = new();
         game.Run();
     }

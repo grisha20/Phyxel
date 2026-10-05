@@ -22,7 +22,8 @@ internal static class WorldCellCodec
     public const int V5CellStride = 36;
     public const int V6CellStride = 40;
     public const int V12CellStride = 48;
-    public const int CurrentCellStride = 52;
+    public const int V14CellStride = 52;
+    public const int CurrentCellStride = 56;
 
     public static void ValidateLayoutContracts()
     {
@@ -65,7 +66,8 @@ internal static class WorldCellCodec
             5 => V5CellStride,
             6 or 7 or 8 or 9 or 10 or 11 => V6CellStride,
             12 or 13 => V12CellStride,
-            14 => CurrentCellStride,
+            14 => V14CellStride,
+            15 => CurrentCellStride,
             _ => throw new InvalidDataException($"Unsupported world version {version}.")
         };
         if (storedCellStride != expectedStride)
@@ -126,7 +128,7 @@ internal static class WorldCellCodec
         {
             3 or 4 => DecodeLegacy(world),
             5 => DecodeV5(world),
-            6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 => DecodeCurrent(world),
+            6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 => DecodeCurrent(world),
             _ => throw new InvalidDataException($"Unsupported world version {world.Version}.")
         };
     }
@@ -206,9 +208,9 @@ internal static class WorldCellCodec
         ValidateOxidizer(world.Width, world.Height, world.Oxidizer, world.Version >= 8);
         ValidateAirThermal(world.Width,world.Height,world.AirThermal);
         byte[] currentBytes;
-        if (world.Version < 14)
+        if (world.Version < 15)
         {
-            int stride=world.Version<12 ? V6CellStride : V12CellStride;
+            int stride=world.Version<12 ? V6CellStride : world.Version<14 ? V12CellStride : V14CellStride;
             int count=world.CellBytes.Length / stride;
             currentBytes=new byte[checked(count*CurrentCellStride)];
             for(int i=0;i<count;i++)

@@ -6,12 +6,14 @@ namespace Phyxel.Materials;
 /// liquid freezing negative. Liquid energy reference remains c*T.</summary>
 public static class PhaseEnthalpy
 {
+    public static uint RetainedLiquidIndex(GridCell c,MaterialProperties m) =>
+        c.RetainedLiquidMaterialIndex != 0 ? c.RetainedLiquidMaterialIndex : m.FuelLiquidMaterialIndex;
     public static float EffectiveCapacity(GridCell c, ReadOnlySpan<MaterialProperties> materials)
     {
         var m=materials[(int)c.MaterialIndex];
         return m.HeatCapacity*Math.Max(c.Mass,0) + (c.MoistureMass>0 && m.MoistureCapacity>0
             ? c.MoistureMass*materials[(int)m.MoistureLiquidMaterialIndex].HeatCapacity : 0)
-            + (c.FuelMass>0 && m.FuelCapacity>0 ? c.FuelMass*materials[(int)m.FuelLiquidMaterialIndex].HeatCapacity : 0);
+            + (c.FuelMass>0 && m.FuelCapacity>0 ? c.FuelMass*materials[(int)RetainedLiquidIndex(c,m)].HeatCapacity : 0);
     }
     public static bool Enabled(MaterialProperties m) =>
         (m.Flags & (uint)(MaterialFlags.PhaseEnthalpy | MaterialFlags.FusionEnthalpy)) != 0;

@@ -55,7 +55,8 @@ public enum MaterialFlags : uint
     FusionEnthalpy = 1u << 10,
     LiquidConvection = 1u << 11,
     // Compact rigid pieces use material/fluid density, without hull thinning.
-    DensityBody = 1u << 12
+    DensityBody = 1u << 12,
+    UniversalPores = 1u << 13
 }
 
 public static class CoreMaterialIds
@@ -165,7 +166,7 @@ public sealed record MaterialMotionDefinition(
     float Collision);
 
 public sealed record MaterialFuelAbsorptionDefinition(
-    string LiquidId, float Capacity, float AbsorptionRate, float SaturatedDensity);
+    string LiquidId, float Capacity, float AbsorptionRate, float SaturatedDensity, bool AllLiquids = false);
 
 public sealed record MaterialThermalRegulatorDefinition(bool Heating, float TargetTemperature, float MaximumPower);
 

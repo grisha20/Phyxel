@@ -340,8 +340,12 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
         return;
     }
     if (absorbedFuel && (cell.FuelMass <= 0 || source.FuelCapacity <= 0)) return;
-    uint sourceMaterialIndex = absorbedFuel ? source.FuelLiquidMaterialIndex : cell.MaterialIndex;
-    if(absorbedFuel) source=Materials[sourceMaterialIndex];
+    uint sourceMaterialIndex = absorbedFuel ? RetainedLiquidIndex(cell,source) : cell.MaterialIndex;
+    if(absorbedFuel) {
+        source=Materials[sourceMaterialIndex];
+        // Residue-producing pore reactions need a separate ledger; never erase their stock.
+        if(source.BurnedIntoMaterialIndex != 0) return;
+    }
     uint targetIndex = source.BurnedIntoMaterialIndex;
 
     // Liquid fuel reacts only at a gas face, including in Sandbox. Buried or
@@ -455,6 +459,7 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
     if(absorbedFuel)
     {
         cell.FuelMass=max(0,cell.FuelMass-burnedMass);
+        if(cell.FuelMass==0)cell.RetainedLiquidMaterialIndex=0;
         cell.Temperature+=burnedMass*source.HeatPerMass/CellEffectiveCapacity(cell);
         cell.RestFrames=0;
         Grid[index]=cell;

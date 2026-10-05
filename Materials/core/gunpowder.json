@@ -47,7 +47,14 @@
     "dry": "core:gunpowder",
     "wet": "core:gunpowder",
     "capacity": 0.3,
-    "absorptionRate": 0.3,
+    "absorptionRate": 1.5,
     "dryingRate": 0.1
+  },
+  "liquidAbsorption": {
+    "liquid": "core:oil",
+    "capacity": 0.25,
+    "absorptionRate": 0.2,
+    "saturatedDensity": 1.6,
+    "allLiquids": true
   }
 }

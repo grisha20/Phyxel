@@ -42,8 +42,8 @@ internal static class ThermalDiffusionRegressionVerifier
             "ThermalSimulationConstants must be 32 bytes.");
         Require(Marshal.SizeOf<TemperatureProbeConstants>() == 16,
             "TemperatureProbeConstants must be 16 bytes.");
-        Require(Marshal.SizeOf<TemperatureProbeResult>() == 20,
-            "TemperatureProbeResult must be 20 bytes.");
+        Require(Marshal.SizeOf<TemperatureProbeResult>() == 24,
+            "TemperatureProbeResult must be 24 bytes, including the retained liquid species.");
         Require(Marshal.SizeOf<BrushDrawCommand>() == 48,
             "BrushDrawCommand must be 48 bytes.");
         Require(Enum.GetUnderlyingType(typeof(BrushCommandMode)) == typeof(uint) &&

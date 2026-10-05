@@ -22,7 +22,7 @@ float4 AbsorbentColor(GridCell cell)
     MaterialProperties material = Materials[cell.MaterialIndex];
     // Colour actual retained stock in both render modes. Early impregnation
     // must be readable even on nearly black grains; this changes no mass.
-    if (material.SimulationKind == SimulationKindSolid && cell.Mass > 0)
+    if (cell.Mass > 0 && material.MoistureCapacity > 0)
     {
         float water = material.MoistureCapacity > 0
             ? saturate(cell.MoistureMass / (cell.Mass * material.MoistureCapacity)) : 0;
@@ -31,7 +31,7 @@ float4 AbsorbentColor(GridCell cell)
     if (cell.Mass > 0 && material.FuelCapacity > 0 && cell.FuelMass > 0)
     {
         float oil = saturate(cell.FuelMass / (cell.Mass * material.FuelCapacity));
-        color.rgb = lerp(color.rgb, float3(.30, .20, .07), .85 * pow(oil, .4));
+        color.rgb = lerp(color.rgb, MaterialColor(RetainedLiquidIndex(cell,material)).rgb * .6, .85 * pow(oil, .4));
     }
     return color;
 }

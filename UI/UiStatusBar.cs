@@ -138,9 +138,10 @@ public sealed class UiStatusBar
         if (material.Moisture is not null)
         {
             float fraction = BitConverter.UInt32BitsToSingle(value.Reserved);
+            string liquidName=registry.TryGet((ushort)(value.RetainedLiquidMaterialIndex!=0?value.RetainedLiquidMaterialIndex:material.Properties.FuelLiquidMaterialIndex),out var retained)?retained.Name:"Жидкость";
             if (float.IsFinite(value.FuelFraction) && value.FuelFraction > 0 && value.FuelFraction <= 1)
                 return string.Create(CultureInfo.GetCultureInfo("ru-RU"),
-                    $"Под курсором: {material.Name} ({tempStr} °C · влага {fraction:P0} · масло {value.FuelFraction:P0})");
+                    $"Под курсором: {material.Name} ({tempStr} °C · влага {fraction:P0} · {liquidName} {value.FuelFraction:P0})");
             if (float.IsFinite(fraction) && fraction > 0 && fraction <= 1)
                 return string.Create(CultureInfo.GetCultureInfo("ru-RU"),
                     $"Под курсором: {material.Name} ({tempStr} °C · влага {fraction:P0})");

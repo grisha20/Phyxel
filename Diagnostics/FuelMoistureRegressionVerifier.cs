@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -16,7 +17,7 @@ namespace Phyxel.Diagnostics;
 
 internal static class FuelMoistureRegressionVerifier
 {
-    internal static void Run(SimulationDispatchCoordinator coordinator, MaterialRegistry registry)
+    internal static IEnumerable<GpuSimulationResources> Run(SimulationDispatchCoordinator coordinator, MaterialRegistry registry)
     {
         string directory=Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR") ?? "artifacts/fuel-moisture";
         Directory.CreateDirectory(directory);
@@ -36,7 +37,7 @@ internal static class FuelMoistureRegressionVerifier
         using var legacyShader=legacyBytecode is null ? null : new ComputeShader(r.Device,legacyBytecode);
         GridCell Cell(uint id,float temperature=20,float mass=1) => new() { IsActive=1,MaterialIndex=id,Mass=mass,Temperature=temperature };
         GridCell[] Read() => MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer)).ToArray();
-        double Mass(GridCell[] grid) => grid.Where(c=>c.IsActive!=0).Sum(c=>(double)c.Mass+c.MoistureMass);
+        double Mass(GridCell[] grid) => grid.Where(c=>c.IsActive!=0).Sum(c=>(double)c.Mass+c.MoistureMass+c.FuelMass);
         double Energy(GridCell[] grid) => grid.Where(c=>c.IsActive!=0).Sum(c=>(double)c.Mass*PhaseEnthalpy.SpecificEnergy(c,table));
         void Balance(GridCell[] before,GridCell[] after,string label) {
             Check(Math.Abs(Mass(after)-Mass(before))<.0001*Math.Max(1,Mass(before)),label+" mass");
@@ -88,7 +89,7 @@ internal static class FuelMoistureRegressionVerifier
             int donor=reverse?origin+1:origin, recipient=reverse?origin:origin+1;
             pair[donor]=Cell(table[charcoal].MoistureWetMaterialIndex,20,2);
             pair[donor].MoistureMass=.7f; pair[recipient]=Cell(powder);
-            Upload(pair); for(uint tick=0;tick<80;tick++) Contact(tick);
+            Upload(pair); for(uint tick=0;tick<80;tick++) { Contact(tick); if(tick%16==15) yield return r; }
             var equalized=Read(); Balance(pair,equalized,"unequal wick "+reverse);
             Check(Math.Abs(equalized[donor].MoistureMass/.7f-equalized[recipient].MoistureMass/.3f)<.001,
                 "unequal wick did not equalize saturation "+reverse);
@@ -96,17 +97,17 @@ internal static class FuelMoistureRegressionVerifier
                 "unequal wick capacity/dry mass "+reverse);
         }
         uint testCoal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal);
-        foreach(uint blocker in new[] {0u,fixture,registry.GetRequiredRuntimeIndex(CoreMaterialIds.Sand)}) {
+        foreach(uint blocker in new[] {0u,fixture,registry.GetRequiredRuntimeIndex(CoreMaterialIds.Stone)}) {
             var blocked=new GridCell[n]; blocked[origin]=Cell(table[testCoal].MoistureWetMaterialIndex);
             blocked[origin].MoistureMass=.35f; blocked[origin+2]=Cell(testCoal);
             if(blocker!=0) blocked[origin+1]=Cell(blocker);
-            Upload(blocked); for(uint tick=0;tick<160;tick++) Contact(tick);
+            Upload(blocked); for(uint tick=0;tick<160;tick++) { Contact(tick); if(tick%16==15) yield return r; }
             Check(Read()[origin+2].MoistureMass==0,"wick crossed barrier "+blocker);
             Balance(blocked,Read(),"wick barrier "+blocker);
         }
         var diagonal=new GridCell[n]; diagonal[origin]=Cell(table[testCoal].MoistureWetMaterialIndex);
         diagonal[origin].MoistureMass=.35f; diagonal[origin+w+1]=Cell(testCoal);
-        Upload(diagonal); for(uint tick=0;tick<80;tick++) Contact(tick);
+        Upload(diagonal); for(uint tick=0;tick<80;tick++) { Contact(tick); if(tick%16==15) yield return r; }
         Check(Read()[origin+w+1].MoistureMass==0,"wick crossed diagonal");
         Balance(diagonal,Read(),"wick diagonal");
 
@@ -117,7 +118,7 @@ internal static class FuelMoistureRegressionVerifier
             column[origin-w]=Cell(water,20,2);
             Upload(column);
             for(uint tick=0;tick<160;tick++) {
-                Contact(tick);
+                Contact(tick); if(tick%16==15) yield return r;
                 if(tick==3) Check(Read()[origin+2*w].MoistureMass==0,id+" wick jumped two grains in .2s");
             }
             var soaked=Read();
@@ -150,7 +151,7 @@ internal static class FuelMoistureRegressionVerifier
                 (steam,1,false),(registry.GetRequiredRuntimeIndex(CoreMaterialIds.Ice),1,false),(water,w+1,false) }) {
                 var grid=new GridCell[n]; grid[origin]=Cell(fuelId); grid[origin].Lifetime=id==CoreMaterialIds.Coal?1:0;
                 grid[origin+offset]=Cell(neighbour,20,.4f);
-                Upload(grid); for(uint tick=1;tick<=80;tick++) Contact(tick); var after=Read();
+                Upload(grid); for(uint tick=1;tick<=80;tick++) { Contact(tick); if(tick%16==15) yield return r; } var after=Read();
                 Check(allowed ? after[origin].MoistureMass>.1 && after[origin].MaterialIndex==wetId : after[origin].MoistureMass==0,
                     id+" selector "+neighbour+" "+offset);
                 if(allowed) Check(after[origin].Lifetime==0 && after[origin+offset].Mass<.4f,id+" conserved uptake/latch");
@@ -159,7 +160,7 @@ internal static class FuelMoistureRegressionVerifier
             // Four grains compete for a single small water packet, carrying boiling progress.
             var shared=new GridCell[n]; shared[origin]=Cell(water,100,.08f); shared[origin].Lifetime=100;
             foreach(int offset in new[] {-1,1,-w,w}) shared[origin+offset]=Cell(fuelId,20);
-            Upload(shared); for(uint tick=1;tick<=40;tick++) Contact(tick); var sharedAfter=Read();
+            Upload(shared); for(uint tick=1;tick<=40;tick++) { Contact(tick); if(tick%16==15) yield return r; } var sharedAfter=Read();
             Check(Math.Abs(sharedAfter.Sum(c=>(double)c.MoistureMass)+sharedAfter.Where(c=>c.IsActive!=0&&c.MaterialIndex==water).Sum(c=>(double)c.Mass)-.08)<1e-6,
                 id+" shared donor spent twice"); Balance(shared,sharedAfter,id+" shared donor");
 
@@ -197,7 +198,7 @@ internal static class FuelMoistureRegressionVerifier
 
             // Below boiling: even a long wait does not create steam.
             var cold=new GridCell[n]; cold[origin]=Cell(wetId,90); cold[origin].MoistureMass=.1f;
-            Upload(cold); for(uint tick=1;tick<=80;tick++) Contact(tick); var coldAfter=Read();
+            Upload(cold); for(uint tick=1;tick<=80;tick++) { Contact(tick); if(tick%16==15) yield return r; } var coldAfter=Read();
             Check(coldAfter[origin].MoistureMass==.1f&&coldAfter.Count(c=>c.IsActive!=0&&c.MaterialIndex==steam)==0,id+" cold evaporation");
             Check(BitConverter.ToUInt32(AirInventoryRegressionVerifier.Read(r,r.ContactSummary.Buffer))==0,id+" cold fuel falsely wakes gas");
             Balance(cold,coldAfter,id+" cold");
@@ -206,14 +207,14 @@ internal static class FuelMoistureRegressionVerifier
             var sealedGrid=new GridCell[n]; sealedGrid[origin]=Cell(wetId,100); sealedGrid[origin].MoistureMass=.1f;
             sealedGrid[origin].MoistureEnergy=.1f*table[water].TransitionAboveLatentHeat;
             foreach(int offset in new[] {-1,1,-w,w}) sealedGrid[origin+offset]=Cell(fixture,100);
-            Upload(sealedGrid); for(uint tick=1;tick<=80;tick++) Contact(tick); var closed=Read();
+            Upload(sealedGrid); for(uint tick=1;tick<=80;tick++) { Contact(tick); if(tick%16==15) yield return r; } var closed=Read();
             Check(closed[origin].MoistureMass==.1f && closed[origin].MoistureEnergy==sealedGrid[origin].MoistureEnergy,id+" sealed loss");
             Balance(sealedGrid,closed,id+" sealed");
             // Collector removes emitted steam after measuring it, keeping the face open.
             closed[origin+1]=default; double beforeMass=Mass(closed),beforeEnergy=Energy(closed),collectedMass=0,collectedEnergy=0;
             Upload(closed);
             for(uint tick=81;tick<=160;tick++) {
-                Contact(tick); closed=Read(); var emitted=closed[origin+1];
+                Contact(tick); if(tick%16==15) yield return r; closed=Read(); var emitted=closed[origin+1];
                 if(emitted.IsActive!=0) { collectedMass+=emitted.Mass; collectedEnergy+=emitted.Mass*PhaseEnthalpy.SpecificEnergy(emitted,table); closed[origin+1]=default; Upload(closed); }
             }
             Check(closed[origin].MoistureMass==0&&closed[origin].MaterialIndex==fuelId,id+" no dry return");
@@ -320,13 +321,13 @@ internal static class FuelMoistureRegressionVerifier
         var cyclic=new GridCell[n]; cyclic[origin]=Cell(coal);
         for(int cycle=0;cycle<3;cycle++) {
             cyclic[origin+1]=Cell(water,20,.07f); Upload(cyclic);
-            for(uint tick=1;tick<=20;tick++) Contact(tick); cyclic=Read();
+            for(uint tick=1;tick<=20;tick++) { Contact(tick); if(tick%16==15) yield return r; } cyclic=Read();
             Check(Math.Abs(cyclic[origin].MoistureMass-.07f)<1e-6 && cyclic[origin+1].IsActive==0,"Repeated uptake "+cycle);
             // Explicit external heat: bring the stored water to fully paid boiling.
             cyclic[origin].Temperature=100; cyclic[origin].MoistureEnergy=cyclic[origin].MoistureMass*table[water].TransitionAboveLatentHeat;
             double cycleMass=Mass(cyclic),cycleEnergy=Energy(cyclic),steamMass=0,steamEnergy=0; Upload(cyclic);
             for(uint tick=21;tick<=60;tick++) {
-                Contact(tick); cyclic=Read();
+                Contact(tick); if(tick%16==15) yield return r; cyclic=Read();
                 for(int i=0;i<n;i++) if(cyclic[i].IsActive!=0&&cyclic[i].MaterialIndex==steam) {
                     steamMass+=cyclic[i].Mass; steamEnergy+=cyclic[i].Mass*PhaseEnthalpy.SpecificEnergy(cyclic[i],table); cyclic[i]=default;
                 }
@@ -373,7 +374,7 @@ internal static class FuelMoistureRegressionVerifier
             settings.Paused=false; settings.AirSimulation=false; settings.Mode=mode;
             serializer.ApplyWorldSnapshot(r,new(w,r.Height,MemoryMarshal.AsBytes(heap.AsSpan()).ToArray()));
             coordinator.RestoreWorldActivity(r,true,true,false,true);
-            for(int frame=0;frame<fps;frame++) coordinator.DispatchFrame(settings,[],1f/fps);
+            for(int frame=0;frame<fps;frame++) { coordinator.DispatchFrame(settings,[],1f/fps); if(frame%8==7) yield return r; }
             var poured=Read();
             int innerWater=Enumerable.Range(0,n).Count(i=>i/w>=origin/w+2 && i/w<origin/w+16 &&
                 Math.Abs(i%w-origin%w)<=10 && poured[i].IsActive!=0 && poured[i].MaterialIndex==water);
@@ -435,7 +436,7 @@ internal static class FuelMoistureRegressionVerifier
         Task.Run(()=>serializer.SaveAsync(reservoirPath,settings,(ushort)coal,new(w,r.Height,
             MemoryMarshal.AsBytes(reservoir.AsSpan()).ToArray()),registry)).GetAwaiter().GetResult();
         var v12Json=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(reservoirPath))!;
-        Check(v12Json["Version"]!.GetValue<int>()==14,"reservoir writer version");
+        Check(v12Json["Version"]!.GetValue<int>()==15,"reservoir writer version");
         v12Json["Version"]=12; File.WriteAllText(reservoirPath,v12Json.ToJsonString());
         string v12WorldPath=Path.ChangeExtension(reservoirPath,".world"); var v12Bytes=File.ReadAllBytes(v12WorldPath);
         v12Bytes=WorldCellCodecRegressionVerifier.RepackWorldPrefix(v12Bytes,n,48);
@@ -454,7 +455,7 @@ internal static class FuelMoistureRegressionVerifier
         Upload(normalizedHot);
         double retainedMass=Mass(normalizedHot),retainedEnergy=Energy(normalizedHot),releasedMass=0,releasedEnergy=0;
         for(uint tick=0;tick<100;tick++) {
-            Contact(tick); normalizedHot=Read(); var output=normalizedHot[origin+1];
+            Contact(tick); if(tick%16==15) yield return r; normalizedHot=Read(); var output=normalizedHot[origin+1];
             if(output.IsActive!=0) {
                 releasedMass+=output.Mass; releasedEnergy+=output.Mass*PhaseEnthalpy.SpecificEnergy(output,table);
                 normalizedHot[origin+1]=default; Upload(normalizedHot);
@@ -480,7 +481,7 @@ internal static class FuelMoistureRegressionVerifier
             for(int frame=0;frame<900;frame++) {
                 BrushDrawCommand[] brush=frame<120 ? [new() { X=160,Y=98,EndX=160,EndY=98,Radius=6,Density=1,
                     Mode=BrushCommandMode.Material,MaterialIndex=(ushort)water }] : [];
-                coordinator.DispatchFrame(settings,brush,1f/60);
+                coordinator.DispatchFrame(settings,brush,1f/60); if(frame%8==7) yield return r;
                 if((frame+1)%60!=0) continue;
                 var poured=Read(); wetted|=poured.Any(c=>c.MoistureMass>0);
                 int interior=Enumerable.Range(0,n).Count(i=>i/w>=120 && i/w<=147 &&
@@ -494,7 +495,7 @@ internal static class FuelMoistureRegressionVerifier
             Check(wetted,"hot pour did not wet surface "+mode);
             Check(finalInterior>initialInterior,"hot pour wet front did not grow inward "+mode);
         }
-        File.WriteAllText(Path.Combine(directory,"pour-layout.txt"),$"{w} {r.Height} 52 {coal} {table[coal].MoistureWetMaterialIndex} {water} {steam} {fixture}");
+        File.WriteAllText(Path.Combine(directory,"pour-layout.txt"),$"{w} {r.Height} 56 {coal} {table[coal].MoistureWetMaterialIndex} {water} {steam} {fixture}");
         settings.Paused=true;
         var pocket=new GridCell[n];
         for(int k=0;k<2;k++) {
@@ -509,13 +510,13 @@ internal static class FuelMoistureRegressionVerifier
             settings.AirSimulation=air; settings.Mode=mode; settings.Paused=false;
             serializer.ApplyWorldSnapshot(r,new(w,r.Height,MemoryMarshal.AsBytes(pocket.AsSpan()).ToArray()));
             coordinator.RestoreWorldActivity(r,true,true,false,true);
-            for(int frame=0;frame<fps*2;frame++) coordinator.DispatchFrame(settings,[],1f/fps);
+            for(int frame=0;frame<fps*2;frame++) { coordinator.DispatchFrame(settings,[],1f/fps); if(frame%8==7) yield return r; }
             var after=Read(); double[] values=[after[origin].MoistureMass,after[origin+8].MoistureMass,Mass(after),Energy(after)];
             reference??=values;
             Check(values.Zip(reference,(a,b)=>Math.Abs(a-b)<.0001*Math.Max(1,Math.Abs(b))).All(v=>v),"frame cadence "+air+" "+mode+" "+fps);
             Check(values[0]>.3&&values[1]>.25,"actual scheduler missed moisture");
             settings.Paused=true; byte[] before=MemoryMarshal.AsBytes(after.AsSpan()).ToArray();
-            for(int frame=0;frame<3;frame++) coordinator.DispatchFrame(settings,[],1f/fps);
+            for(int frame=0;frame<3;frame++) { coordinator.DispatchFrame(settings,[],1f/fps); if(frame%8==7) yield return r; }
             Check(before.AsSpan().SequenceEqual(MemoryMarshal.AsBytes(Read().AsSpan())),"pause altered moisture "+fps);
             Console.WriteLine($"PHYXEL_FUEL_MOISTURE_CLOCK mode={mode} air={air} fps={fps} coal={values[0]:F8} powder={values[1]:F8}");
         }
@@ -531,7 +532,7 @@ internal static class FuelMoistureRegressionVerifier
             settings.Paused=false; settings.AirSimulation=false; settings.Mode=mode;
             serializer.ApplyWorldSnapshot(r,new(w,r.Height,MemoryMarshal.AsBytes(wickPocket.AsSpan()).ToArray()));
             coordinator.RestoreWorldActivity(r,true,true,false,true);
-            for(int frame=0;frame<fps*8;frame++) coordinator.DispatchFrame(settings,[],1f/fps);
+            for(int frame=0;frame<fps*8;frame++) { coordinator.DispatchFrame(settings,[],1f/fps); if(frame%8==7) yield return r; }
             var after=Read();
             double[] values=Enumerable.Range(0,12).Select(depth=>(double)after[origin+depth*w].MoistureMass).Concat(new[] {Mass(after),Energy(after)}).ToArray();
             wickReference??=values;
@@ -540,23 +541,23 @@ internal static class FuelMoistureRegressionVerifier
             Balance(wickPocket,after,"production wick "+mode+" "+fps);
             Console.WriteLine($"PHYXEL_FUEL_MOISTURE_WICK_CLOCK mode={mode} fps={fps} depth3={values[3]:F8} water={Mass(after):F8} energy={Energy(after):F8}");
         }
-        Upload(wickPocket); for(uint tick=0;tick<80;tick++) Contact(tick);
+        Upload(wickPocket); for(uint tick=0;tick<80;tick++) { Contact(tick); if(tick%16==15) yield return r; }
         var half=Read(); settings.Paused=true;
         string wickSave=Path.Combine(directory,"wick-half.json");
         Task.Run(()=>serializer.SaveAsync(wickSave,settings,(ushort)coal,new(w,r.Height,
             MemoryMarshal.AsBytes(half.AsSpan()).ToArray()),registry)).GetAwaiter().GetResult();
         var wickLoaded=Task.Run(()=>serializer.LoadAsync(wickSave,registry)).GetAwaiter().GetResult()!;
-        for(int frame=0;frame<3;frame++) coordinator.DispatchFrame(settings,[],1f/60);
+        for(int frame=0;frame<3;frame++) { coordinator.DispatchFrame(settings,[],1f/60); if(frame%8==7) yield return r; }
         Check(MemoryMarshal.AsBytes(half.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(Read().AsSpan())),"wick pause changed front");
-        for(uint tick=80;tick<160;tick++) Contact(tick); var continued=Read();
+        for(uint tick=80;tick<160;tick++) { Contact(tick); if(tick%16==15) yield return r; } var continued=Read();
         Upload(MemoryMarshal.Cast<byte,GridCell>(wickLoaded.World!.Grid).ToArray());
-        for(uint tick=80;tick<160;tick++) Contact(tick);
+        for(uint tick=80;tick<160;tick++) { Contact(tick); if(tick%16==15) yield return r; }
         Check(MemoryMarshal.AsBytes(continued.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(Read().AsSpan())),"wick reload continuation changed front");
         if(legacyShader is null) foreach(float scale in new[] {.25f,.35f,.50f,.75f,.85f,1f}) {
             settings.ApplyScale(scale); settings.Paused=true;
             var resized=coordinator.DispatchFrame(settings,[new() { X=20,Y=20,EndX=20,EndY=20,Radius=1,Density=1,
                 Mode=BrushCommandMode.Material,MaterialIndex=(ushort)coal }],0);
-            Check(resized.Grid.ReadBuffer.Description.SizeInBytes==resized.Width*resized.Height*52,"grid allocation stride "+scale);
+            Check(resized.Grid.ReadBuffer.Description.SizeInBytes==resized.Width*resized.Height*Marshal.SizeOf<GridCell>(),"grid allocation stride "+scale);
             coordinator.ClearCurrentWorld(settings);
             var cleared=coordinator.DispatchFrame(settings,[],0);
             Check(MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(cleared,cleared.Grid.ReadBuffer)).ToArray()
@@ -565,7 +566,7 @@ internal static class FuelMoistureRegressionVerifier
                 Mode=BrushCommandMode.Material,MaterialIndex=(ushort)coal }],0);
             Check(MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(restarted,restarted.Grid.ReadBuffer)).ToArray()
                 .All(c=>c.MoistureMass==0&&c.MoistureEnergy==0),"restart restored cleared moisture "+scale);
-            Console.WriteLine($"PHYXEL_FUEL_MOISTURE_ALLOCATION scale={scale} width={resized.Width} height={resized.Height} stride=52");
+            Console.WriteLine($"PHYXEL_FUEL_MOISTURE_ALLOCATION scale={scale} width={resized.Width} height={resized.Height} stride=56");
         }
         Console.WriteLine($"PHYXEL_FUEL_MOISTURE_RESULT passed={passed} checks={checks}");
         if(!passed) Environment.ExitCode=1;

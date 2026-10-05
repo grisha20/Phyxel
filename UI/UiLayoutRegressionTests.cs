@@ -745,7 +745,7 @@ public static class UiLayoutRegressionTests
                 Require(GpuTemperatureProbe.MapPointerToCell(point,view,size.X,size.Y)!=null,"New canvas area has no cell mapping.");
         }
         const int width=12,height=10;int count=width*height;
-        var cells=new GridCell[count];for(int i=0;i<count;i++)cells[i]=new(){MaterialIndex=(uint)i,IsActive=1,Mass=i+.5f,Temperature=i-20,MoistureMass=.1f,FuelMass=.3f};
+        var cells=new GridCell[count];for(int i=0;i<count;i++)cells[i]=new(){MaterialIndex=(uint)i,IsActive=1,Mass=i+.5f,Temperature=i-20,MoistureMass=.1f,FuelMass=.3f,RetainedLiquidMaterialIndex=(uint)(count-i)};
         byte[] Packet(int n,int stride){var bytes=new byte[n*stride];for(int i=0;i<bytes.Length;i++)bytes[i]=(byte)(i%251);return bytes;}
         var original=new SimulationWorldSnapshot(width,height,MemoryMarshal.AsBytes(cells.AsSpan()).ToArray(),
             Packet(9,16),Packet(count,16),Packet(count,4),Packet(9,8),Packet(count,16),Packet(9,16));
@@ -753,7 +753,7 @@ public static class UiLayoutRegressionTests
         Require(expanded.Width==16&&expanded.Height==14,"Expanded dimensions wrong.");
         var expandedCells=MemoryMarshal.Cast<byte,GridCell>(expanded.Grid);
         for(int y=0;y<height;y++)for(int x=0;x<width;x++)
-            Require(MemoryMarshal.AsBytes(cells.AsSpan(y*width+x,1)).SequenceEqual(expanded.Grid.AsSpan(((y+4)*16+x)*52,52)),"Canvas resize changed a world packet.");
+            Require(MemoryMarshal.AsBytes(cells.AsSpan(y*width+x,1)).SequenceEqual(expanded.Grid.AsSpan(((y+4)*16+x)*Marshal.SizeOf<GridCell>(),Marshal.SizeOf<GridCell>())),"Canvas resize changed a world packet.");
         Require(expandedCells[..(16*4)].ToArray().All(c=>c.IsActive==0),"Added sky is occupied.");
         foreach(var pair in new[]{(original.Air!,expanded.Air!,16),
             (original.AirThermal!,expanded.AirThermal!,8),(original.ReactionPulse!,expanded.ReactionPulse!,16)})

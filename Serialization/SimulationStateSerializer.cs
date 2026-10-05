@@ -33,7 +33,7 @@ public sealed record SimulationSceneState(
 // World v11 extends v10 auxiliary validation for negative fusion progress.
 // v10 persists pending reaction packets, pressure waves and their finite
 // volume stock, plus Air/GasMotion. v9 carrier heat and v8 oxidizer stay intact.
-// World v14 appends absorbed fuel to the v12/v13 prefix (52-byte cells).
+// v15 appends retained-liquid identity to the v14 52-byte prefix (56-byte cells).
 // Wet boiling storage may retain
 // excess heat while vapour awaits an outlet. v12 remains readable.
 // v3..v11 migrate their historic strides; missing moisture starts at zero.
@@ -75,7 +75,7 @@ public sealed class SimulationStateSerializer
     private const uint WorldFileMagic = 0x5058594C;
     private const int LegacyWorldHeaderSize = 20;
     private const int CurrentWorldHeaderSize = 28;
-    private const int CurrentVersion = 14;
+    private const int CurrentVersion = 15;
     private const string RemovedGoldSandId = "core:gold_sand";
     private const string RenamedConcreteId = "core:concrete";
     private const string RenamedGasId = "core:gas";
@@ -231,7 +231,7 @@ public sealed class SimulationStateSerializer
                 warnings,
                 options),
             4 => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, true),
-            5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
+            5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
             _ => null
         };
     }
@@ -401,6 +401,12 @@ public sealed class SimulationStateSerializer
                     $"Снимок содержит неизвестный runtime-индекс материала {cell.MaterialIndex}.");
             }
             usedRuntimeIndices[cell.MaterialIndex] = true;
+            if(cell.FuelMass>0)
+            {
+                uint retained=PhaseEnthalpy.RetainedLiquidIndex(cell,materialRegistry[cell.MaterialIndex].Properties);
+                ValidateRetainedLiquid(retained,materialRegistry,materialRegistry[cell.MaterialIndex].Properties);
+                usedRuntimeIndices[retained]=true;
+            }
             ValidatePhaseAuxiliary(cell, materialRegistry[cell.MaterialIndex].Properties);
         }
 
@@ -427,6 +433,9 @@ public sealed class SimulationStateSerializer
                 continue;
             }
             uint runtimeIndex = encodedCells[index].MaterialIndex;
+            if(encodedCells[index].FuelMass>0)
+                encodedCells[index].RetainedLiquidMaterialIndex=runtimeToScene[PhaseEnthalpy.RetainedLiquidIndex(encodedCells[index],materialRegistry[runtimeIndex].Properties)];
+            else encodedCells[index].RetainedLiquidMaterialIndex=0;
             encodedCells[index].MaterialIndex = runtimeToScene[runtimeIndex];
         }
         return (new SimulationWorldSnapshot(world.Width, world.Height, encodedGrid, world.Air,world.GasMotion,
@@ -487,6 +496,19 @@ public sealed class SimulationStateSerializer
             uint runtimeIndex = sceneToRuntime[sceneIndex];
             cells[index].MaterialIndex = runtimeIndex;
             MaterialProperties moistureMaterial=materialRegistry[runtimeIndex].Properties;
+            if(cells[index].FuelMass>0)
+            {
+                uint retainedScene=cells[index].RetainedLiquidMaterialIndex;
+                // v14 and old programmatic snapshots omit the species: use that host's configured carrier.
+                if(retainedScene==0) cells[index].RetainedLiquidMaterialIndex=moistureMaterial.FuelLiquidMaterialIndex;
+                else {
+                    if(retainedScene>=sceneToRuntime.Length || missing[retainedScene])
+                        throw new InvalidDataException("Retained liquid is missing from the scene palette; refusing to replace or discard it.");
+                    cells[index].RetainedLiquidMaterialIndex=sceneToRuntime[retainedScene];
+                }
+                ValidateRetainedLiquid(cells[index].RetainedLiquidMaterialIndex,materialRegistry,moistureMaterial);
+            }
+            else cells[index].RetainedLiquidMaterialIndex=0;
             ValidateAbsorbedFuel(cells[index], moistureMaterial);
             if (cells[index].MoistureMass > 0 &&
                 (moistureMaterial.MoistureCapacity <= 0 || !float.IsFinite(cells[index].Mass) || cells[index].Mass <= 0 ||
@@ -552,6 +574,15 @@ public sealed class SimulationStateSerializer
     {
         warnings.Add(message);
         Console.Error.WriteLine($"PHYXEL_SCENE_WARNING {message}");
+    }
+
+    private static void ValidateRetainedLiquid(uint index,MaterialRegistry registry,MaterialProperties host)
+    {
+        if(index==0 || index>=registry.Count || registry[index].Properties.SimulationKind!=(uint)MaterialSimulationKind.Liquid)
+            throw new InvalidDataException("Retained species must be a registered liquid.");
+        if(index==host.MoistureLiquidMaterialIndex ||
+           ((host.Flags & (uint)MaterialFlags.UniversalPores)==0 && index!=host.FuelLiquidMaterialIndex))
+            throw new InvalidDataException("Host does not accept this species in its second retained liquid stock.");
     }
 
     private static void ValidateAbsorbedFuel(GridCell cell, MaterialProperties material)
@@ -666,7 +697,7 @@ public sealed class SimulationStateSerializer
 
         uint magic = BinaryPrimitives.ReadUInt32LittleEndian(prefix.AsSpan(0, 4));
         int version = BinaryPrimitives.ReadInt32LittleEndian(prefix.AsSpan(4, 4));
-        if (magic != WorldFileMagic || version is not (3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or CurrentVersion))
+        if (magic != WorldFileMagic || version is not (3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or CurrentVersion))
         {
             throw new InvalidDataException("Формат снимка мира не поддерживается.");
         }

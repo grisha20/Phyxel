@@ -15,6 +15,7 @@ struct TemperatureProbeResult
     float Temperature;
     uint Reserved;
     float FuelFraction;
+    uint RetainedLiquidMaterialIndex;
 };
 
 StructuredBuffer<GridCell> Grid : register(t0);
@@ -33,6 +34,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             output.IsActive = 1;
             output.MaterialIndex = cell.MaterialIndex;
             output.Temperature = cell.Temperature;
+            output.RetainedLiquidMaterialIndex=cell.FuelMass>0?RetainedLiquidIndex(cell,Materials[cell.MaterialIndex]):0;
             output.FuelFraction=cell.FuelMass/max(cell.Mass+cell.MoistureMass+cell.FuelMass,.0001);
             if (Materials[cell.MaterialIndex].MoistureCapacity > 0)
                 output.Reserved = asuint(cell.MoistureMass / max(cell.Mass + cell.MoistureMass, .0001));
