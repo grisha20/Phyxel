@@ -18,8 +18,12 @@ public sealed class MaterialCardPreviewCache : IDisposable
             ["core:co2"] = "co2.png",
             ["core:ice"] = "ice.png",
             ["core:metal"] = "metal.png",
-            ["core:heater"] = "metal.png",
-            ["core:cooler"] = "metal.png",
+            ["core:steel"] = "steel.png",
+            ["core:cast_iron"] = "cast_iron.png",
+            ["core:copper"] = "copper.png",
+            ["core:fixture"] = "fixture.png",
+            ["core:heater"] = "heater.png",
+            ["core:cooler"] = "cooler.png",
             ["core:stone"] = "stone.png",
             ["core:wood"] = "wood.png",
             ["core:fire"] = "fire.png",
@@ -56,11 +60,8 @@ public sealed class MaterialCardPreviewCache : IDisposable
             }
         }
 
-        previews["core:steel"] = CreateAlloyPreview(graphicsDevice, false);
-        previews["core:cast_iron"] = CreateAlloyPreview(graphicsDevice, true);
-        previews["core:copper"] = CreateAlloyPreview(graphicsDevice, false, copper: true);
         Console.WriteLine(
-            $"PHYXEL_UI_PREVIEWS loaded={previews.Count} expected={PreviewFileNames.Count + 3} directory={previewDirectory}");
+            $"PHYXEL_UI_PREVIEWS loaded={previews.Count} expected={PreviewFileNames.Count} directory={previewDirectory}");
     }
 
     public Texture2D FallbackTexture { get; }
@@ -90,29 +91,6 @@ public sealed class MaterialCardPreviewCache : IDisposable
             }
         }
 
-        texture.SetData(pixels);
-        return texture;
-    }
-
-    // Native textures: brushed steel/copper and a dark, granular cast surface.
-    private static Texture2D CreateAlloyPreview(GraphicsDevice device, bool castIron, bool copper = false)
-    {
-        const int width = 256, height = 160;
-        var texture = new Texture2D(device, width, height, false, SurfaceFormat.Color);
-        var pixels = new Color[width * height];
-        for (int y = 0; y < height; y++)
-        for (int x = 0; x < width; x++)
-        {
-            uint hash = unchecked((uint)(x * 73856093) ^ (uint)(y * 19349663));
-            hash ^= hash >> 13; hash *= 1274126177; hash ^= hash >> 16;
-            int grain = (int)(hash & 31) - 15;
-            float shine = MathF.Max(0, 1 - MathF.Abs((x + .7f * y) / width - .65f));
-            int value = castIron ? 75 + grain + (int)(shine * 15) :
-                125 + grain / 3 + (y % 3 == 0 ? -8 : 0) + (int)(shine * 78);
-            pixels[y * width + x] = copper
-                ? new Color(Math.Min(255, value + 40), value * 2 / 3, value / 3)
-                : new Color(value, value + (castIron ? 2 : 5), value + (castIron ? 4 : 12));
-        }
         texture.SetData(pixels);
         return texture;
     }

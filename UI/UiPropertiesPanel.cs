@@ -442,7 +442,7 @@ public sealed class UiPropertiesPanel
         spriteBatch.Draw(pixel, previewBounds, material.Color);
         if (previewCache.TryGetPreview(material.Id, out Texture2D preview))
         {
-            spriteBatch.Draw(preview, previewBounds, UiCategoryPalette.CalculateAspectFillSource(preview, previewBounds), material.ThermalRegulator is null ? Color.White : material.Color);
+            spriteBatch.Draw(preview, previewBounds, UiCategoryPalette.CalculateAspectFillSource(preview, previewBounds), Color.White);
         }
         else
         {

@@ -54,6 +54,13 @@ readability floor for 1280x720 and a 1.5x ceiling for high-DPI 2560x1440.
 Category colors remain semantic: powders `#DAB85C`, liquids `#4BA0EB`, gases
 `#8CC8BE`, solids `#A591D7`, combustion `#F06432`, tools `#AFB9C3`.
 
+## Material card artwork
+
+Metal, steel, cast iron, copper, fixture, heater and cooler use individual PNG
+illustrations. Loaded artwork is drawn in its original colors in both the palette
+and properties panel; labels and selection borders remain UI overlays.
+See [artwork provenance, prompts and verification](MATERIAL_CARD_IMAGES.md).
+
 ## States
 
 Buttons, tool rows, category tabs and material cards share the state order
