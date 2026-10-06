@@ -560,6 +560,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             PhaseEventCounters = phaseEvents,
             PhaseEventStaging = phaseEventStaging,
             ThermalEnergyLedger = thermalLedger,
+            BulkThermalDegrees = new(Device, width * height),
+            BulkThermalDegreesShader = allocateSimulation ? CompileShader("BulkHeatDegrees.hlsl", "CSMain") : null,
             ThermalEnergyStaging = thermalEnergyStaging,
             PhaseSummaryReadbackSlots = phaseSummaryReadbackSlots,
             CombustionConstants = combustionConstants,
@@ -697,7 +699,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
                 StringComparison.Ordinal).Replace("#include \"OxidizerShared.hlsli\"",
                     File.ReadAllText(Path.Combine(shaderDirectory, "OxidizerShared.hlsli")), StringComparison.Ordinal)
             .Replace("#include \"FineAirGeometry.hlsli\"",
-                File.ReadAllText(Path.Combine(shaderDirectory, "FineAirGeometry.hlsli")), StringComparison.Ordinal);
+                File.ReadAllText(Path.Combine(shaderDirectory, "FineAirGeometry.hlsli")), StringComparison.Ordinal)
+            .Replace("#include \"BulkThermalGeometry.hlsli\"",
+                File.ReadAllText(Path.Combine(shaderDirectory, "BulkThermalGeometry.hlsli")), StringComparison.Ordinal);
         string cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"phyxel-compute-shader-v1\0{entryPoint}\0{shaderSource}")));
         string cachePath = Path.Combine(

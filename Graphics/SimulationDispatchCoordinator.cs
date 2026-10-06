@@ -1891,12 +1891,17 @@ public sealed class SimulationDispatchCoordinator
         if (convectWater) DispatchWaterConvection(resources, tickIndex);
         context.ClearUnorderedAccessView(resources.Grid.WriteUnorderedView, new RawInt4());
         context.UpdateSubresource(ref constants, resources.ThermalConstants);
-        context.ComputeShader.Set(resources.ThermalDiffusionShader);
+        context.ComputeShader.Set(resources.BulkThermalDegreesShader);
         context.ComputeShader.SetConstantBuffer(0, resources.ThermalConstants);
         context.ComputeShader.SetShaderResources(
             0,
             resources.Grid.ReadView,
             resources.Materials.View);
+        context.ComputeShader.SetUnorderedAccessView(0, resources.BulkThermalDegrees.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        context.ComputeShader.SetUnorderedAccessView(0, null);
+        context.ComputeShader.SetShaderResource(2, resources.BulkThermalDegrees.View);
+        context.ComputeShader.Set(resources.ThermalDiffusionShader);
         context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.WriteUnorderedView);
         if (resources.ThermalEnergyLedger is not null)
             context.ComputeShader.SetUnorderedAccessView(1, resources.ThermalEnergyLedger.UnorderedView);
@@ -1910,7 +1915,7 @@ public sealed class SimulationDispatchCoordinator
             context.End(resources.ThermalTimestampDisjointQuery);
             thermalTimingPending = true;
         }
-        Unbind(context, 2, resources.ThermalEnergyLedger is null ? 1 : 2);
+        Unbind(context, 3, resources.ThermalEnergyLedger is null ? 1 : 2);
         resources.Grid.Swap();
     }
 

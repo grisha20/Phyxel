@@ -14,6 +14,7 @@ cbuffer ThermalConstants : register(b0)
 
 StructuredBuffer<GridCell> SourceGrid : register(t0);
 StructuredBuffer<MaterialProperties> Materials : register(t1);
+StructuredBuffer<uint> BulkDegrees : register(t2);
 RWStructuredBuffer<GridCell> DestinationGrid : register(u0);
 struct ThermalEnergyLedgerCell { float DeviceHeat; float AmbientHeat; };
 RWStructuredBuffer<ThermalEnergyLedgerCell> EnergyLedger : register(u1);
@@ -215,6 +216,42 @@ float RadiantHeatFlow(GridCell cell, uint2 coordinate)
     return heat;
 }
 
+#include "BulkThermalGeometry.hlsli"
+
+// Accelerate heat resolution inside thick high-conductivity painted walls.
+// The homogeneous interior guard excludes wet/gas surface diagonals and
+// radiation, leaving a .20 exchange budget beyond the local .80 bound.
+float BulkHeatFlow(GridCell cell, uint2 coordinate)
+{
+    MaterialProperties material = Materials[cell.MaterialIndex];
+    uint degree = BulkDegrees[coordinate.y * ThermalWidth + coordinate.x];
+    if (material.SimulationKind != SimulationKindSolid || material.ThermalConductivity <= .5 ||
+        degree == 0) return 0;
+    float conductivity = pow(saturate((material.ThermalConductivity - .5) * 2), 2);
+    float fraction = min(.20, 4.0 * ThermalDeltaTime) * conductivity;
+    float heat = 0;
+    [unroll] for (int direction = 0; direction < 4; direction++)
+    {
+        int2 step = direction == 0 ? int2(-1, 0) : direction == 1 ? int2(1, 0) :
+            direction == 2 ? int2(0, -1) : int2(0, 1);
+        [loop] for (int distance = 2; distance <= 16; distance += 2)
+        {
+            int2 p = int2(coordinate) + step * distance;
+            if (p.x < 1 || p.y < 1 || p.x + 1 >= (int)ThermalWidth || p.y + 1 >= (int)ThermalHeight) break;
+            GridCell other = SourceGrid[p.y * ThermalWidth + p.x];
+            uint otherDegree = BulkDegrees[p.y * ThermalWidth + p.x];
+            if (other.IsActive == 0 || other.MaterialIndex != cell.MaterialIndex) continue;
+            if (otherDegree == 0 || abs(other.Temperature - cell.Temperature) < .000001) continue;
+            // max(endpoint degrees) is symmetric, while each endpoint's
+            // incident sum is <= its .20 budget even in a thin painted plate.
+            if (HasBulkPath(int2(coordinate), p, cell.MaterialIndex)) heat +=
+                fraction / max(degree, otherDegree) * min(EffectiveCapacity(cell), EffectiveCapacity(other)) *
+                (other.Temperature - cell.Temperature);
+        }
+    }
+    return heat;
+}
+
 bool IsEmptyAt(int2 coordinate)
 {
     if (coordinate.x < 0 || coordinate.y < 0 ||
@@ -310,6 +347,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             DiagonalGasContactWeight, true);
 
     heatFlow += RadiantHeatFlow(cell, coordinate);
+    heatFlow += BulkHeatFlow(cell, coordinate);
     MaterialProperties material = Materials[cell.MaterialIndex];
     float ambientHeat = 0;
     float deviceHeat = 0;

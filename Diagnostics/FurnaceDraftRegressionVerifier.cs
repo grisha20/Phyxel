@@ -21,6 +21,12 @@ internal static class FurnaceDraftRegressionVerifier
     {
         string dir=Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")??"artifacts/furnace-draft";
         Directory.CreateDirectory(dir);
+        if (Environment.GetEnvironmentVariable("PHYXEL_DRAFT_BULK_TRACE") == "1")
+        {
+            BulkHeatRegressionVerifier.Run(coordinator, registry);
+            Console.WriteLine("PHYXEL_DRAFT_COMPLETE");
+            yield break;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_DRAFT_SURFACE_TRACE") == "1")
         {
             FurnaceSurfaceHeatVerifier.Run(coordinator, registry);
@@ -59,7 +65,8 @@ internal static class FurnaceDraftRegressionVerifier
         var rows=new List<object>();
         uint coal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal),fire=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire),
             smoke=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke),co2=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Co2),
-            metal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal),molten=registry.GetRequiredRuntimeIndex("core:molten_metal");
+            metal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal),molten=registry.GetRequiredRuntimeIndex("core:molten_metal"),
+            water=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
         bool powder=Environment.GetEnvironmentVariable("PHYXEL_DRAFT_POWDER")=="1";
         if(powder)
         {
@@ -98,6 +105,7 @@ internal static class FurnaceDraftRegressionVerifier
             settings.Paused=false;frameRate(100);
             yield return r;
             double initialMass=MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray().Where(c=>c.IsActive!=0&&c.MaterialIndex==coal).Sum(c=>(double)c.Mass);
+            double initialWaterMass=MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray().Where(c=>c.IsActive!=0&&c.MaterialIndex==water).Sum(c=>(double)c.Mass);
             bool thermalBounded=true,acceptance=false;
             for(int frame=0;frame<=fps*seconds;frame++)
             {
@@ -108,12 +116,20 @@ internal static class FurnaceDraftRegressionVerifier
                     var heat=MemoryMarshal.Cast<byte,System.Numerics.Vector2>(AirInventoryRegressionVerifier.Read(r,r.AirThermal.Buffer)).ToArray();
                     var air=MemoryMarshal.Cast<byte,AirCell>(AirInventoryRegressionVerifier.Read(r,r.Air.Buffer)).ToArray();
                     double chimney=0, pipe=0, roofT=0,outerT=0,escaped=0;int cn=0,pn=0,rn=0,on=0;
-                    int burning=0,flames=0;double mass=0;
+                    int burning=0,flames=0,boilingCells=0;double mass=0,waterMass=0,waterHeat=0,waterLatent=0;
+                    float minWater=5000,maxWater=-273.15f;
                     for(int y=0;y<r.Height;y++)for(int x=0;x<r.Width;x++)
                     {
                         var c=grid[y*r.Width+x];if(c.IsActive==0)continue;
                         if(c.MaterialIndex==coal){mass+=c.Mass;if(c.Lifetime>0)burning++;}
                         if(c.MaterialIndex==fire)flames++;
+                        if(c.MaterialIndex==water)
+                        {
+                            waterMass+=c.Mass;waterHeat+=c.Mass*c.Temperature;
+                            waterLatent+=c.Mass*Math.Max(0,c.Lifetime);
+                            minWater=Math.Min(minWater,c.Temperature);maxWater=Math.Max(maxWater,c.Temperature);
+                            if(c.Temperature>=99.99f&&c.Lifetime>.01f)boilingCells++;
+                        }
                         if((c.MaterialIndex==smoke||c.MaterialIndex==co2)&&x<190&&y<45)escaped+=c.Mass;
                         if(c.MaterialIndex==metal||c.MaterialIndex==molten)
                         {
@@ -127,6 +143,7 @@ internal static class FurnaceDraftRegressionVerifier
                         if(air[y*r.AirWidth+x].Blocked<.5){pipe+=air[y*r.AirWidth+x].VelocityX;pn++;}
                     var row=new{mode=mode.ToString(),fps,seconds=frame/fps,mass,burning,flames,escaped,
                         chimney=chimney/Math.Max(1,cn),pipe=pipe/Math.Max(1,pn),roofT=roofT/Math.Max(1,rn),outerT=outerT/Math.Max(1,on),
+                        waterMass,waterMean=waterHeat/Math.Max(.00001,waterMass),minWater,maxWater,waterLatent,boilingCells,
                         maxAirK=heat.Where(s=>s.Y>0).Max(s=>(double)s.X/s.Y),
                         minAirK=heat.Where(s=>s.Y>0).Min(s=>(double)s.X/s.Y)};
                     thermalBounded &= heat.All(s=>float.IsFinite(s.X)&&float.IsFinite(s.Y)&&s.X>=0&&s.Y>=0&&
@@ -139,6 +156,8 @@ internal static class FurnaceDraftRegressionVerifier
                         // different reaction's steady chimney target.
                         acceptance=thermalBounded&&(powder||seconds<40||
                             (row.chimney>=1&&row.pipe<0&&row.roofT>110&&mass<initialMass&&escaped>0));
+                        if(Environment.GetEnvironmentVariable("PHYXEL_DRAFT_BOILER")=="1")
+                            acceptance &= seconds>=120&&row.waterMean>=95&&row.waterLatent>=2256&&row.waterMass<initialWaterMass;
                         if(!acceptance)failures++;
                         Console.WriteLine("PHYXEL_DRAFT_ACCEPTANCE "+JsonSerializer.Serialize(new{mode=mode.ToString(),fps,powder,acceptance,thermalBounded}));
                     }

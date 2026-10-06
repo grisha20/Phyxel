@@ -159,6 +159,8 @@ public sealed class GpuSimulationResources : IDisposable
     public GpuStructuredBuffer<uint>? PhaseEventCounters { get; init; }
     public Buffer? PhaseEventStaging { get; init; }
     public GpuStructuredBuffer<ThermalEnergyLedgerCell>? ThermalEnergyLedger { get; init; }
+    public required GpuStructuredBuffer<uint> BulkThermalDegrees { get; init; }
+    public ComputeShader? BulkThermalDegreesShader { get; init; }
     public Buffer? ThermalEnergyStaging { get; init; }
     public required GpuPhaseSummaryReadbackSlot[] PhaseSummaryReadbackSlots { get; init; }
     public required Buffer CombustionConstants { get; init; }
@@ -426,6 +428,7 @@ public sealed class GpuSimulationResources : IDisposable
         PhaseEventCounters?.Dispose();
         PhaseEventStaging?.Dispose();
         ThermalEnergyLedger?.Dispose();
+        BulkThermalDegrees.Dispose(); BulkThermalDegreesShader?.Dispose();
         ThermalEnergyStaging?.Dispose();
         PhaseConstants.Dispose();
         foreach (GpuPhaseSummaryReadbackSlot slot in CombustionSummaryReadbackSlots)
