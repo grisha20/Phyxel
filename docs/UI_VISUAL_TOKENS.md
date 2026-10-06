@@ -7,7 +7,10 @@ file.
 
 The editable Figma specification uses Inter as the closest design-time analogue.
 It records `Segoe UI` as the runtime fallback. No Inter binary is redistributed by
-this repository, so no additional font licence is required by the build.
+this repository. This does not establish redistribution rights for the compiled
+Segoe UI bitmap fonts: using an installed Windows font and shipping a converted
+SpriteFont are different cases. See the outstanding font item in the
+[licensing review](LICENSING_REVIEW.md) before distributing a build.
 
 ## Geometry at 1920x1080, 100% DPI
 

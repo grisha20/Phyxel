@@ -90,6 +90,7 @@ dotnet run --project Phyxel.csproj -c Debug
 
 ## Документация
 
+- [Предварительная проверка лицензий и происхождения кода](docs/LICENSING_REVIEW.md)
 - [Паспорта веществ и правило работы](docs/materials/README.md)
 - [Текущее состояние](docs/PROJECT_STATUS.md)
 - [Архитектура](docs/ARCHITECTURE.md)
