@@ -36,8 +36,23 @@ public sealed class RawInputSampler
             controlDown && keyboard.IsKeyDown(Keys.S) && previousKeyboard.IsKeyUp(Keys.S),
             controlDown && keyboard.IsKeyDown(Keys.L) && previousKeyboard.IsKeyUp(Keys.L),
             Math.Clamp((float)gameTime.ElapsedGameTime.TotalSeconds, 0f, 1f / 20f));
+        var historyKeys = HistoryKeys(keyboard, previousKeyboard);
+        snapshot = snapshot with
+        {
+            UndoPressed = historyKeys.Undo,
+            RedoPressed = historyKeys.Redo
+        };
         previousMouse = mouse;
         previousKeyboard = keyboard;
         return snapshot;
+    }
+
+    internal static (bool Undo, bool Redo) HistoryKeys(KeyboardState current, KeyboardState previous)
+    {
+        bool control = current.IsKeyDown(Keys.LeftControl) || current.IsKeyDown(Keys.RightControl);
+        bool shift = current.IsKeyDown(Keys.LeftShift) || current.IsKeyDown(Keys.RightShift);
+        bool z = current.IsKeyDown(Keys.Z) && previous.IsKeyUp(Keys.Z);
+        return (control && !shift && z,
+            control && (shift && z || current.IsKeyDown(Keys.Y) && previous.IsKeyUp(Keys.Y)));
     }
 }

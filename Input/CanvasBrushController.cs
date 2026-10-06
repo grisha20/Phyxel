@@ -21,6 +21,7 @@ public sealed class CanvasBrushController
     private bool suppressUntilRelease;
 
     public BrushDrawCommand? LinePreview => pendingLine;
+    public bool CommandsStartStroke { get; private set; }
 
     public void CancelStroke()
     {
@@ -44,6 +45,7 @@ public sealed class CanvasBrushController
         bool filterTool = false,uint filterRule = 0)
     {
         frameCommands.Clear();
+        CommandsStartStroke = false;
         if (canvasBounds != previousCanvasBounds)
         {
             CancelStroke();
@@ -72,6 +74,7 @@ public sealed class CanvasBrushController
             bool held = lineUsesRightButton ? input.RightDown : input.LeftDown;
             if (released)
             {
+                CommandsStartStroke = true;
                 frameCommands.Add(line);
                 pendingLine = null;
                 strokeActive = false;
@@ -92,6 +95,7 @@ public sealed class CanvasBrushController
 
         Point gridPosition = MapToGrid(input.MousePosition, canvasBounds, settings);
         bool startingStroke = !strokeActive;
+        CommandsStartStroke = startingStroke && !input.ShiftDown;
         if (startingStroke && input.ShiftDown && !input.LeftPressed && !input.RightPressed)
             return frameCommands;
         if (!strokeActive)

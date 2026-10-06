@@ -230,13 +230,14 @@ public sealed class UiLeftToolbar
             itemY += itemHeight + 6;
         }
 
-        int footerHeight = font.LineSpacing * 2 + 18;
+        int footerHeight = font.LineSpacing * 3 + 18;
         if (itemY + footerHeight + 8 < bounds.Bottom)
         {
             Rectangle footer = new(bounds.X + 10, itemY + 4, bounds.Width - 20, footerHeight);
             backdrop.DrawRoundedRectangle(spriteBatch, footer, UiTheme.FieldBackground, 5);
             spriteBatch.DrawString(font, "ЛКМ  Рисовать", new Vector2(footer.X + 10, footer.Y + 6), UiTheme.TextMuted);
             spriteBatch.DrawString(font, "ПКМ  Стирать", new Vector2(footer.X + 10, footer.Y + 7 + font.LineSpacing), UiTheme.TextMuted);
+            spriteBatch.DrawString(font, "Ctrl+Z  Отмена", new Vector2(footer.X + 10, footer.Y + 8 + font.LineSpacing * 2), UiTheme.TextMuted);
         }
 
         // Draw Tooltip if hovered

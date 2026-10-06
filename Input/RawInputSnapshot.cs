@@ -16,4 +16,8 @@ public readonly record struct RawInputSnapshot(
     bool EscapePressed,
     bool SavePressed,
     bool LoadPressed,
-    float DeltaSeconds);
+    float DeltaSeconds)
+{
+    public bool UndoPressed { get; init; }
+    public bool RedoPressed { get; init; }
+}

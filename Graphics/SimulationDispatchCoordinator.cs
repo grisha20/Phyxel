@@ -914,6 +914,9 @@ public sealed class SimulationDispatchCoordinator
         resources.Context.ClearUnorderedAccessView(resources.AirProjectionB.UnorderedView, new RawInt4());
         resources.OxidizerCarrierWarm = false;
         retainOxidizerField = preserveOxidizer;
+        // Input queues and display accumulation belong to the previous timeline.
+        gasBrushQueue.Reset();
+        gasVisualNeedsRebuild = true;
         thermalActive = containsMatter;
         contactTransitionPotential = containsContactTransitionSource;
         thermalScheduler.Reset();

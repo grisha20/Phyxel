@@ -23,6 +23,8 @@ public sealed class PhyxelGame : Game
     private readonly SimulationSettings settings = new();
     private readonly RawInputSampler inputSampler = new();
     private readonly CanvasBrushController brushController = new();
+    private readonly WorldEditHistory editHistory = new();
+    private readonly SimulationStateSerializer historySerializer = new();
     private readonly CanvasCameraController cameraController = new();
     private readonly GpuCommandEncoder commandEncoder = new();
     private readonly SimulationStateSerializer stateSerializer = new();
@@ -170,6 +172,12 @@ public sealed class PhyxelGame : Game
         resourceManager.PrepareSimulation(settings);
         dispatchCoordinator = new SimulationDispatchCoordinator(resourceManager, materialRegistry);
         userInterface = new SandboxUiCoordinator(materialRegistry, fonts, resourceManager);
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_UNDO") == "1")
+        {
+            try { UndoRegressionVerifier.Run(this, dispatchCoordinator, materialRegistry); }
+            catch (Exception e) { Console.WriteLine($"PHYXEL_UNDO_FAILED {e}"); Environment.ExitCode = 1; }
+            Exit(); return;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_BODY_SUITE") == "1")
         {
             string diagnosticsRoot=Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")??"artifacts/body-suite";
@@ -588,6 +596,12 @@ public sealed class PhyxelGame : Game
             pendingSave is not null || pendingWorldCapture || pendingLoad is not null);
         ProcessUiActions(actions);
         if (actions.ExitRequested) return;
+        if (!acceptance.Active && IsActive && !userInterface.PauseMenuOpen && (input.UndoPressed || input.RedoPressed))
+        {
+            RestoreEditHistory(input.RedoPressed);
+            base.Update(gameTime);
+            return;
+        }
         if (!acceptance.Active && EnsureCanvasWorldFits(userInterface.CanvasBounds)) return;
         acceptance.ConfigureSettings(frameIndex, settings);
         acceptance.ApplyRuntimeControls(
@@ -619,6 +633,7 @@ public sealed class PhyxelGame : Game
                 userInterface.TemperatureToolActive,
                 userInterface.TargetTemperature,
                 userInterface.BlocksBrushInput ||
+                FileOperationPending ||
                 !IsActive && (string.IsNullOrEmpty(uiScreenshotPath) ||
                     Environment.GetEnvironmentVariable("PHYXEL_UI_PREVIEW_INPUT") != "line") ||
                 !userInterface.CanvasBounds.Contains(input.MousePosition),
@@ -630,7 +645,8 @@ public sealed class PhyxelGame : Game
         {
             uint acceptanceFrame = frameIndex;
             float physicalElapsedSeconds = acceptance.AdjustElapsedSeconds(input.DeltaSeconds);
-            currentResources = DispatchInteractiveFrame(commandEncoder.Encode(commands), physicalElapsedSeconds);
+            currentResources = DispatchEditorFrame(commandEncoder.Encode(commands),
+                !acceptance.Active && brushController.CommandsStartStroke, physicalElapsedSeconds);
             simulationClockTrace.Observe(physicalElapsedSeconds, settings, dispatchCoordinator);
             if (simulationClockTrace.ExitRequested) Exit();
             acceptance.RecordAirPressureTrace(acceptanceFrame, currentResources);
@@ -665,6 +681,8 @@ public sealed class PhyxelGame : Game
             exception.ResultCode.Code == unchecked((int)0x8007000E) && settings.Scale > 0.25f)
         {
             settings.ApplyScale(settings.Scale - 0.25f);
+            editHistory.Clear();
+            brushController.CancelStroke();
             temperatureProbe.Reset();
             SetStatus("Видеопамять ограничена: масштаб снижен");
         }
@@ -685,6 +703,80 @@ public sealed class PhyxelGame : Game
             return dispatchCoordinator!.DispatchFrame(settings, commands, elapsedSeconds);
         }
         finally { settings.Paused = wasPaused; }
+    }
+
+    private bool FileOperationPending => pendingSave is not null || pendingWorldCapture ||
+        pendingLoad is not null || canvasExpansionPending || pendingAcceptanceCheckpoint;
+
+    internal GpuSimulationResources DispatchEditorFrame(ReadOnlySpan<BrushDrawCommand> commands,
+        bool startsStroke, float elapsedSeconds)
+    {
+        if (startsStroke && commands.Length > 0 && !RecordEdit()) commands = [];
+        return DispatchInteractiveFrame(commands, elapsedSeconds);
+    }
+
+    private SimulationWorldSnapshot CaptureHistoryWorld()
+    {
+        currentResources ??= resourceManager!.CreateOrResize(settings, false);
+        historySerializer.BeginWorldCapture(currentResources);
+        // Wait only at the start of an edit, never once per painted frame. The
+        // GPU copies are ordered before the edit; shared save staging is idle.
+        SimulationWorldSnapshot? snapshot;
+        while (!historySerializer.TryCompleteWorldCapture(currentResources, out snapshot))
+            System.Threading.Thread.Yield();
+        return snapshot!;
+    }
+
+    private bool RecordEdit()
+    {
+        if (FileOperationPending) { SetStatus("Дождитесь завершения сохранения или загрузки"); return false; }
+        if (currentResources is { } r && (r.Width != settings.Width || r.Height != settings.Height))
+        {
+            editHistory.Clear();
+            currentResources = resourceManager!.CreateOrResize(settings, false);
+        }
+        // Refuse a snapshot before allocating its CPU arrays if it exceeds the
+        // history budget. Existing history cannot cross an unrecorded edit.
+        var resources = currentResources;
+        long estimate = resources is { IsSimulationAllocated: true }
+            ? (long)resources.GridStaging.Description.SizeInBytes + resources.AirStaging.Description.SizeInBytes +
+                resources.GasMotionStaging.Description.SizeInBytes + resources.OxidizerStaging.Description.SizeInBytes +
+                resources.AirThermalStaging.Description.SizeInBytes + resources.ReactionPendingStaging.Description.SizeInBytes +
+                resources.ReactionPulseStaging.Description.SizeInBytes + (resources.FilterCount > 0 ? (long)resources.FilterMap.Length * 4 : 0)
+            : 0;
+        if (estimate > editHistory.MaximumBytes)
+        {
+            editHistory.Clear();
+            SetStatus("Большая сцена: этот штрих не поместится в историю отмены", 8);
+            return true;
+        }
+        editHistory.Record(CaptureHistoryWorld());
+        return true;
+    }
+
+    internal bool RestoreEditHistory(bool forward)
+    {
+        if (FileOperationPending) { SetStatus("Дождитесь завершения сохранения или загрузки"); return false; }
+        brushController.CancelStroke();
+        if (!(forward ? editHistory.CanRedo : editHistory.CanUndo))
+        { SetStatus(forward ? "Нечего повторять" : "Нечего отменять"); return false; }
+        var current = CaptureHistoryWorld();
+        if (!editHistory.Restore(forward, current, out var restored) || restored is null) return false;
+        if (restored.Width != settings.Width || restored.Height != settings.Height)
+        { editHistory.Clear(); SetStatus("История сброшена после изменения размера мира"); return false; }
+        bool matter = SimulationStateSerializer.ContainsMatter(restored);
+        bool fields = restored.Oxidizer is { Length: > 0 } || restored.AirThermal is { Length: > 0 };
+        currentResources = resourceManager!.CreateOrResize(settings, matter || fields || restored.Filters is { Length: > 0 });
+        historySerializer.ApplyWorldSnapshot(currentResources, restored);
+        dispatchCoordinator!.RestoreWorldActivity(currentResources, matter,
+            SimulationStateSerializer.ContainsContactTransitionSource(restored, materialRegistry!),
+            settings.HydraulicPressure, fields);
+        settings.Paused = true;
+        temperatureProbe.Reset();
+        currentResources = DispatchInteractiveFrame([], 0);
+        ResetElapsedTime();
+        SetStatus(forward ? "Действие восстановлено · пауза" : "Действие отменено · пауза");
+        return true;
     }
 
     private static int ReadWindowDimension(string variableName, int fallback)
@@ -801,6 +893,7 @@ public sealed class PhyxelGame : Game
             Exit();
             return;
         }
+        if ((actions.ClearRequested || actions.ResetRequested) && !RecordEdit()) return;
         if (actions.ClearRequested)
         {
             dispatchCoordinator.ClearCurrentWorld(settings);
@@ -826,6 +919,8 @@ public sealed class PhyxelGame : Game
         }
         if (actions.ScaleChanged)
         {
+            editHistory.Clear();
+            brushController.CancelStroke();
             temperatureProbe.Reset();
         }
         if (actions.HydraulicsChanged)
@@ -1057,6 +1152,8 @@ public sealed class PhyxelGame : Game
         }
         if (pendingLoad.IsCompletedSuccessfully && pendingLoad.Result is { } loaded)
         {
+            editHistory.Clear();
+            brushController.CancelStroke();
             temperatureProbe.Reset();
             SimulationStateSerializer.Apply(loaded.State, settings);
             userInterface.SelectedMaterial = loaded.State.SelectedMaterial;
@@ -1171,6 +1268,8 @@ public sealed class PhyxelGame : Game
         if(size.X==settings.Width&&size.Y==settings.Height)return false;
         // Guard pathological repeated resizes; camera still covers the panel.
         if(size.X>4096||size.Y>4096|| (long)size.X*size.Y>8388608)return false;
+        editHistory.Clear();
+        brushController.CancelStroke();
         if(currentResources is not {IsSimulationAllocated:true} ||
             currentResources.Width!=settings.Width || currentResources.Height!=settings.Height)
         {

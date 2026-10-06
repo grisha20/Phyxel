@@ -613,7 +613,8 @@ public static class UiLayoutRegressionTests
             [MaterialCategoryType.Liquids] = [CoreMaterialIds.Water, CoreMaterialIds.Oil],
             [MaterialCategoryType.Gases] = [CoreMaterialIds.Steam, CoreMaterialIds.Co2],
             [MaterialCategoryType.Solids] =
-                [CoreMaterialIds.Ice, CoreMaterialIds.Metal, CoreMaterialIds.Stone, CoreMaterialIds.Fixture, CoreMaterialIds.Wood],
+                [CoreMaterialIds.Ice, CoreMaterialIds.Metal, "core:steel", "core:cast_iron",
+                    CoreMaterialIds.Stone, CoreMaterialIds.Fixture, CoreMaterialIds.Wood],
             [MaterialCategoryType.Combustion] = [CoreMaterialIds.Fire],
             [MaterialCategoryType.Tools] = [CoreMaterialIds.Eraser, CoreMaterialIds.Heater, CoreMaterialIds.Cooler],
             [MaterialCategoryType.Filters] = []
