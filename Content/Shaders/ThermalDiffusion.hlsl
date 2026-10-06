@@ -149,6 +149,72 @@ float ContactHeatFlow(
     return edgeCoefficient * (neighbor.Temperature - cell.Temperature);
 }
 
+// Bounded game approximation of radiant heat across a resolved air gap.
+// Both endpoints gather exactly the same pair from SourceGrid: no atomics,
+// extra heat source, or change to air/gas momentum. Condensed matter occludes.
+static const int RadiantRange = 24;
+
+bool IsRadiantGas(MaterialProperties material)
+{
+    return material.SimulationKind == SimulationKindGas &&
+        (material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0;
+}
+
+float RadiantPair(GridCell cell, GridCell other, int distance)
+{
+    MaterialProperties a = Materials[cell.MaterialIndex];
+    MaterialProperties b = Materials[other.MaterialIndex];
+    if (a.ThermalConductivity <= 0 || b.ThermalConductivity <= 0) return 0;
+    bool gasA = IsRadiantGas(a);
+    uint gasFlags = gasA ? a.Flags : b.Flags;
+    float solidConductivity = gasA ? b.ThermalConductivity : a.ThermalConductivity;
+    // Conductivity is not emissivity. Use explicit game strengths for the
+    // existing luminous-flame/soot roles, bounded by the receiving surface.
+    float coupling = saturate(solidConductivity) *
+        ((gasFlags & MaterialFlagFlame) != 0 ? 1.0 : 0.25);
+    // Four rays contain at most 46 total weights (distances 2..24).
+    // .18 plus the contact bound .80 stays below unity for either endpoint.
+    float fraction = min(0.18, 10.8 * ThermalDeltaTime);
+    float weight = (RadiantRange + 1.0 - distance) / RadiantRange;
+    float coefficient = min(EffectiveCapacity(cell), EffectiveCapacity(other)) *
+        coupling * fraction * weight / 48.0;
+    return coefficient * (other.Temperature - cell.Temperature);
+}
+
+float RadiantHeatFlow(GridCell cell, uint2 coordinate)
+{
+    MaterialProperties material = Materials[cell.MaterialIndex];
+    bool emitter = IsRadiantGas(material);
+    if ((!emitter && material.SimulationKind != SimulationKindSolid) ||
+        material.ThermalConductivity <= 0) return 0;
+    float heat = 0;
+    [unroll]
+    for (int direction = 0; direction < 4; direction++)
+    {
+        int2 step = direction == 0 ? int2(-1, 0) : direction == 1 ? int2(1, 0) :
+            direction == 2 ? int2(0, -1) : int2(0, 1);
+        [loop]
+        for (int distance = 1; distance <= RadiantRange; distance++)
+        {
+            int2 p = int2(coordinate) + step * distance;
+            if (p.x < 0 || p.y < 0 || p.x >= (int)ThermalWidth || p.y >= (int)ThermalHeight) break;
+            GridCell other = SourceGrid[p.y * ThermalWidth + p.x];
+            if (other.IsActive == 0) continue;
+            MaterialProperties otherMaterial = Materials[other.MaterialIndex];
+            if (otherMaterial.SimulationKind == SimulationKindGas)
+            {
+                if (!emitter && distance > 1 && IsRadiantGas(otherMaterial))
+                    heat += RadiantPair(cell, other, distance);
+                continue;
+            }
+            if (emitter && distance > 1 && otherMaterial.SimulationKind == SimulationKindSolid)
+                heat += RadiantPair(cell, other, distance);
+            break;
+        }
+    }
+    return heat;
+}
+
 bool IsEmptyAt(int2 coordinate)
 {
     if (coordinate.x < 0 || coordinate.y < 0 ||
@@ -243,6 +309,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         heatFlow += ContactHeatFlow(cell, capacity, index, index + ThermalWidth + 1,
             DiagonalGasContactWeight, true);
 
+    heatFlow += RadiantHeatFlow(cell, coordinate);
     MaterialProperties material = Materials[cell.MaterialIndex];
     float ambientHeat = 0;
     float deviceHeat = 0;

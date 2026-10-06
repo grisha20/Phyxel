@@ -21,6 +21,12 @@ internal static class FurnaceDraftRegressionVerifier
     {
         string dir=Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")??"artifacts/furnace-draft";
         Directory.CreateDirectory(dir);
+        if (Environment.GetEnvironmentVariable("PHYXEL_DRAFT_SURFACE_TRACE") == "1")
+        {
+            FurnaceSurfaceHeatVerifier.Run(coordinator, registry);
+            Console.WriteLine("PHYXEL_DRAFT_COMPLETE");
+            yield break;
+        }
         string path=Environment.GetEnvironmentVariable("PHYXEL_DRAFT_SCENE")??Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Phyxel","Начало паровая печь.json");
         if(Environment.GetEnvironmentVariable("PHYXEL_DRAFT_EMISSION_TRACE")=="1")
@@ -143,10 +149,15 @@ internal static class FurnaceDraftRegressionVerifier
                         settings.ShowAirField=true;coordinator.DispatchFrame(settings,[],0);
                         SimulationScreenshotWriter.Save(r,Path.Combine(dir,$"{mode}-{fps}-{frame/fps}-air.png"));
                         settings.ShowAirField=false;
+                        settings.RenderWithoutEffects=true;coordinator.DispatchFrame(settings,[],0);
+                        SimulationScreenshotWriter.Save(r,Path.Combine(dir,$"{mode}-{fps}-{frame/fps}-plain.png"));
+                        settings.RenderWithoutEffects=false;
                     }
                 }
                 if(frame%8==0)yield return r;
             }
+            Console.WriteLine("PHYXEL_DRAFT_TIMING " + JsonSerializer.Serialize(new
+                { mode=mode.ToString(), fps, thermal=coordinator.ThermalGpuTiming }));
             serializer.BeginWorldCapture(r);
             SimulationWorldSnapshot? snapshot;
             while(!serializer.TryCompleteWorldCapture(r,out snapshot))yield return r;
