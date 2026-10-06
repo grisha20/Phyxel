@@ -27,6 +27,16 @@ internal static class FurnaceDraftRegressionVerifier
         var loaded=System.Threading.Tasks.Task.Run(()=>serializer.LoadAsync(path,registry)).GetAwaiter().GetResult()!;
         var world=loaded.World!;
         if(world.Width!=672||world.Height!=394)throw new InvalidDataException("Measurement regions require user's 672x394 furnace.");
+        if(Environment.GetEnvironmentVariable("PHYXEL_DRAFT_HEAT_TRACE")=="1")
+        {
+            SimulationStateSerializer.Apply(loaded.State,settings);settings.Width=world.Width;settings.Height=world.Height;settings.Paused=true;
+            var traceResources=coordinator.DispatchFrame(settings,[new(){X=20,Y=20,Radius=1,Density=1,
+                MaterialIndex=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal)}],0);
+            TraceExteriorHeat(traceResources,coordinator,registry,serializer,world,dir);
+            Console.WriteLine("PHYXEL_DRAFT_COMPLETE");
+            yield return traceResources;
+            yield break;
+        }
         var rates=Environment.GetEnvironmentVariable("PHYXEL_DRAFT_MATRIX")=="1"?new[]{30,60,100}:new[]{60};
         var modes=Environment.GetEnvironmentVariable("PHYXEL_DRAFT_MATRIX")=="1"?
             new[]{SimulationMode.Simulation,SimulationMode.Sandbox}:new[]{SimulationMode.Simulation};
@@ -166,6 +176,72 @@ internal static class FurnaceDraftRegressionVerifier
         if(failures>0&&Environment.GetEnvironmentVariable("PHYXEL_DRAFT_BASELINE")!="1")
             throw new InvalidDataException($"Furnace draft acceptance failed: {failures}.");
         Console.WriteLine("PHYXEL_DRAFT_COMPLETE");
+    }
+
+    private static void TraceExteriorHeat(GpuSimulationResources r,SimulationDispatchCoordinator coordinator,
+        MaterialRegistry registry,SimulationStateSerializer serializer,SimulationWorldSnapshot world,string dir)
+    {
+        var start=System.Threading.Tasks.Task.Run(()=>serializer.LoadAsync(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Phyxel","Начало паровая печь.json"),registry)).GetAwaiter().GetResult()!.World!;
+        if(start.Width!=world.Width||start.Height!=world.Height)throw new InvalidDataException("Heat trace geometry mismatch.");
+        var original=MemoryMarshal.Cast<byte,GridCell>(start.Grid).ToArray();
+        var before=MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray();var table=registry.CreateGpuTable();
+        uint metal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal),molten=registry.GetRequiredRuntimeIndex("core:molten_metal");
+        int w=world.Width,h=world.Height;
+        bool IsMetal(GridCell c)=>c.IsActive!=0&&(c.MaterialIndex==metal||c.MaterialIndex==molten);
+        var outer=new bool[before.Length];var inner=new bool[before.Length];var below=new bool[before.Length];
+        for(int x=150;x<510;x++)
+        {
+            int top=-1,bottom=-1;
+            for(int y=349;y<h;y++)if(original[y*w+x].IsActive!=0&&original[y*w+x].MaterialIndex==metal)
+            {if(top<0)top=y;bottom=y;}
+            if(top<0)continue;
+            for(int y=top;y<=bottom;y++)if(IsMetal(before[y*w+x]))
+            {inner[y*w+x]=y<=top+1;outer[y*w+x]=y>=bottom-1;}
+            for(int y=bottom+1;y<h;y++)below[y*w+x]=true;
+        }
+        double Energy(GridCell c)=>c.IsActive!=0?c.Mass*(double)PhaseEnthalpy.SpecificEnergy(c,table):0;
+        double BodyEnergy(GridCell[] cells)=>cells.Sum(Energy);
+        double AirEnergy()=>MemoryMarshal.Cast<byte,System.Numerics.Vector2>(AirInventoryRegressionVerifier.Read(r,r.AirThermal.Buffer)).ToArray().Sum(v=>(double)v.X);
+        GridCell[] Read()=>MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer)).ToArray();
+        object Region(GridCell[] after,bool[] mask)
+        {
+            var ids=Enumerable.Range(0,mask.Length).Where(i=>mask[i]).ToArray();
+            var changes=ids.Select(i=>Energy(after[i])-Energy(before[i])).ToArray();
+            return new{cells=ids.Length,initialT=ids.Average(i=>(double)before[i].Temperature),
+                finalT=ids.Average(i=>(double)after[i].Temperature),netQ=changes.Sum(),
+                receivedQ=changes.Where(q=>q>0).Sum(),releasedQ=-changes.Where(q=>q<0).Sum()};
+        }
+        var reports=new List<object>();
+        int moltenCount=before.Count(c=>c.IsActive!=0&&c.MaterialIndex==molten);
+        int displaced=Enumerable.Range(0,before.Length).Count(i=>before[i].IsActive!=0&&before[i].MaterialIndex==molten&&original[i].IsActive==0);
+        var belowMolten=Enumerable.Range(0,before.Length).Where(i=>below[i]&&before[i].IsActive!=0&&before[i].MaterialIndex==molten).ToArray();
+        var profiles=new[]{200,300,450}.Select(x=>new{x,cells=Enumerable.Range(349,h-349)
+            .Where(y=>IsMetal(before[y*w+x])).Select(y=>new{y,temperature=before[y*w+x].Temperature,
+                molten=before[y*w+x].MaterialIndex==molten,phaseProgress=before[y*w+x].PhaseProgress}).ToArray()}).ToArray();
+        reports.Add(new{test="saved-state",moltenCount,displacedIntoFormerlyEmpty=displaced,
+            moltenBelowOriginalFloor=new{cells=belowMolten.Length,
+                maxTemperature=belowMolten.Length>0?belowMolten.Max(i=>before[i].Temperature):0},profiles,
+            outer=Region(before,outer),inner=Region(before,inner)});
+        foreach(string pass in new[]{"contact","air-0","air-1","air-2","air-3"})
+        {
+            serializer.ApplyWorldSnapshot(r,world);coordinator.RestoreWorldActivity(r,true,true,false,true);
+            // Isolate exchange: no motion, combustion, advection, reservoir,
+            // or phase conversion. Each probe starts from the same bad save.
+            r.Context.ClearUnorderedAccessView(r.AirFlowLinks.UnorderedView,new SharpDX.Mathematics.Interop.RawInt4());
+            r.Context.ClearUnorderedAccessView(r.ThermalEnergyLedger!.UnorderedView,new SharpDX.Mathematics.Interop.RawInt4());
+            double e0=BodyEnergy(before)+AirEnergy();
+            if(pass=="contact")coordinator.DispatchThermalDiffusion(r,false,0,false);
+            else SimulationDispatchCoordinator.DispatchAirHeat(r,false,uint.Parse(pass.AsSpan(4)));
+            var after=Read();
+            double externalQ=MemoryMarshal.Cast<byte,ThermalEnergyLedgerCell>(AirInventoryRegressionVerifier.Read(r,r.ThermalEnergyLedger.Buffer))
+                .ToArray().Sum(v=>(double)v.DeviceHeat+v.AmbientHeat);
+            double error=BodyEnergy(after)+AirEnergy()-e0-externalQ;
+            var row=new{test=pass,outer=Region(after,outer),inner=Region(after,inner),externalQ,energyError=error,relativeError=Math.Abs(error)/Math.Max(1,Math.Abs(e0))};
+            reports.Add(row);Console.WriteLine("PHYXEL_DRAFT_HEAT "+JsonSerializer.Serialize(row));
+            if(row.relativeError>1e-5)throw new InvalidDataException("Saved furnace heat trace lost energy.");
+        }
+        File.WriteAllText(Path.Combine(dir,"heat-trace.json"),JsonSerializer.Serialize(reports,new JsonSerializerOptions{WriteIndented=true}));
     }
 
     private static void VerifyVolumeLoss(GpuSimulationResources r,MaterialRegistry registry)

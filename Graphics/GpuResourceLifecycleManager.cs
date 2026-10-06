@@ -269,8 +269,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         Device.ImmediateContext.ClearUnorderedAccessView(contactSummary.UnorderedView,
             new SharpDX.Mathematics.Interop.RawInt4());
         string? thermalTestMode = Environment.GetEnvironmentVariable("PHYXEL_ACCEPTANCE_MODE");
-        GpuStructuredBuffer<ThermalEnergyLedgerCell>? thermalLedger = thermalTestMode is "thermal_devices" or "steam_apparatus" or
-            "water_convection" or "water_convection_pause" or "water_convection_heated"
+        GpuStructuredBuffer<ThermalEnergyLedgerCell>? thermalLedger = (thermalTestMode is "thermal_devices" or "steam_apparatus" or
+            "water_convection" or "water_convection_pause" or "water_convection_heated") ||
+            Environment.GetEnvironmentVariable("PHYXEL_DRAFT_HEAT_TRACE") == "1"
             ? new(Device, width * height) : null;
         Buffer? thermalEnergyStaging = thermalLedger is null ? null : CreateReadStagingBuffer(width * height * 8);
         if (thermalLedger is not null)
