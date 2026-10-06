@@ -19,7 +19,8 @@ public readonly record struct UiFrameActions(
     bool GravityChanged,
     bool HydraulicsChanged,
     bool ModeChanged,
-    bool SaveAsRequested = false);
+    bool SaveAsRequested = false,
+    bool ExitRequested = false);
 
 public sealed class SandboxUiCoordinator : IDisposable
 {
@@ -63,6 +64,8 @@ public sealed class SandboxUiCoordinator : IDisposable
     private readonly UiPropertiesPanel propertiesPanel = new();
     private readonly UiCategoryPalette categoryPalette;
     private readonly UiStatusBar statusBar = new();
+    internal UiPauseMenu PauseMenu { get; } = new();
+    public bool PauseMenuOpen => PauseMenu.IsOpen;
 
     private ushort selectedMaterial;
     private UiLayoutBounds currentLayout;
@@ -128,12 +131,19 @@ public sealed class SandboxUiCoordinator : IDisposable
         RawInputSnapshot input,
         Viewport viewport,
         float dpiScale,
-        SimulationSettings settings)
+        SimulationSettings settings,
+        bool fileOperationPending = false)
     {
         currentLayout = UiLayoutCalculator.Calculate(viewport, dpiScale);
         font = fonts.Select(dpiScale, currentLayout.Scale);
         topBar.Font = font;
         categoryPalette.Font = font;
+
+        if (PauseMenu.Update(input, viewport.Bounds, font, fileOperationPending, out UiFrameActions menuActions))
+        {
+            PointerConsumed = true;
+            return menuActions;
+        }
 
         // 1. Top bar update
         bool paused = settings.Paused;
@@ -290,9 +300,11 @@ public sealed class SandboxUiCoordinator : IDisposable
             statistics,
             framesPerSecond,
             settings.Scale,
-            settings.Paused,
+            settings.Paused || PauseMenuOpen,
             categoryPalette.HoveredFilter is { } hovered ? UiFilterCardRenderer.Description(hovered) : transientStatus,
             FilterToolActive ? FilterRules.Label(settings.FilterSelection, currentMatDef.Name) : null);
+        PauseMenu.Draw(spriteBatch, font, panelRenderer, pixel, iconTextures,
+            pixel.GraphicsDevice.Viewport.Bounds, transientStatus);
     }
 
     public void DrawBrushIndicator(
@@ -300,8 +312,23 @@ public sealed class SandboxUiCoordinator : IDisposable
         Point pointer,
         Rectangle worldBounds,
         SimulationSettings settings,
-        bool eraseOverride)
+        bool eraseOverride,
+        BrushDrawCommand? linePreview = null)
     {
+        if (linePreview is { } line && !PointerConsumed && !PanToolActive)
+        {
+            Vector2 start = GridToScreen(line.X, line.Y, worldBounds, settings);
+            Vector2 end = GridToScreen(line.EndX, line.EndY, worldBounds, settings);
+            float thickness = (line.Radius * 2 + 1) * worldBounds.Width / Math.Max(1f, settings.Width);
+            Color color = line.Mode == BrushCommandMode.Erase ? new Color(255, 150, 150) : UiTheme.CardSelectedBorder;
+            DrawPreviewSegment(spriteBatch, start, end, Math.Max(3, thickness), color * 0.25f);
+            DrawPreviewSegment(spriteBatch, start, end, 3, new Color(8, 10, 14, 220));
+            DrawPreviewSegment(spriteBatch, start, end, 1, color);
+            int previewDiameter = Math.Max(3, (int)MathF.Round(thickness));
+            spriteBatch.Draw(brushOutline, new Rectangle((int)start.X - previewDiameter / 2,
+                (int)start.Y - previewDiameter / 2, previewDiameter, previewDiameter), color);
+            pointer = new Point((int)end.X, (int)end.Y);
+        }
         if (!worldBounds.Contains(pointer) || PointerConsumed)
         {
             return;
@@ -313,7 +340,7 @@ public sealed class SandboxUiCoordinator : IDisposable
         }
 
         float pixelScale = worldBounds.Width / (float)Math.Max(1, settings.Width);
-        int diameter = Math.Max(3, (int)MathF.Round((settings.BrushRadius * 2 + 1) * pixelScale));
+        int diameter = Math.Max(3, (int)MathF.Round(((linePreview?.Radius ?? settings.BrushRadius) * 2 + 1) * pixelScale));
         Rectangle bounds = new(pointer.X - diameter / 2, pointer.Y - diameter / 2, diameter, diameter);
 
         bool erasing = eraseOverride ||
@@ -337,6 +364,17 @@ public sealed class SandboxUiCoordinator : IDisposable
         Rectangle halo = new(bounds.X - 1, bounds.Y - 1, bounds.Width + 2, bounds.Height + 2);
         spriteBatch.Draw(brushOutline, halo, outer);
         spriteBatch.Draw(brushOutline, bounds, inner);
+    }
+
+    internal static Vector2 GridToScreen(float x, float y, Rectangle worldBounds, SimulationSettings settings)
+        => new(worldBounds.X + (x + 0.5f) * worldBounds.Width / settings.Width,
+            worldBounds.Y + (y + 0.5f) * worldBounds.Height / settings.Height);
+
+    private void DrawPreviewSegment(SpriteBatch batch, Vector2 start, Vector2 end, float thickness, Color color)
+    {
+        Vector2 edge = end - start;
+        batch.Draw(pixel, start, null, color, MathF.Atan2(edge.Y, edge.X), new Vector2(0, 0.5f),
+            new Vector2(Math.Max(1, edge.Length()), thickness), SpriteEffects.None, 0);
     }
 
     public void Dispose()

@@ -11,12 +11,23 @@ public sealed class CanvasBrushController
 {
     private readonly List<BrushDrawCommand> frameCommands = new(SimulationSettings.MaximumBrushCommands);
     private Point previousGridPosition;
-    private Point strokeOrigin;
     private bool strokeActive;
     private uint commandSeed;
     private uint activeBodyId;
     private uint nextBodyId = 1;
     private Rectangle previousCanvasBounds;
+    private BrushDrawCommand? pendingLine;
+    private bool lineUsesRightButton;
+    private bool suppressUntilRelease;
+
+    public BrushDrawCommand? LinePreview => pendingLine;
+
+    public void CancelStroke()
+    {
+        suppressUntilRelease |= strokeActive;
+        strokeActive = false;
+        pendingLine = null;
+    }
 
     public IReadOnlyList<BrushDrawCommand> CreateCommands(
         RawInputSnapshot input,
@@ -35,11 +46,44 @@ public sealed class CanvasBrushController
         frameCommands.Clear();
         if (canvasBounds != previousCanvasBounds)
         {
-            strokeActive = false;
+            CancelStroke();
             previousCanvasBounds = canvasBounds;
         }
 
         bool drawing = input.LeftDown || input.RightDown;
+        if (suppressUntilRelease)
+        {
+            if (!drawing) suppressUntilRelease = false;
+            return frameCommands;
+        }
+        if (pendingLine is { } line)
+        {
+            if (pointerConsumedByUi || !canvasBounds.Contains(input.MousePosition))
+            {
+                CancelStroke();
+                suppressUntilRelease &= drawing;
+                return frameCommands;
+            }
+            Point end = MapToGrid(input.MousePosition, canvasBounds, settings);
+            line.EndX = end.X;
+            line.EndY = end.Y;
+            pendingLine = line;
+            bool released = lineUsesRightButton ? input.RightReleased : input.LeftReleased;
+            bool held = lineUsesRightButton ? input.RightDown : input.LeftDown;
+            if (released)
+            {
+                frameCommands.Add(line);
+                pendingLine = null;
+                strokeActive = false;
+                suppressUntilRelease = drawing;
+            }
+            else if (!held)
+            {
+                CancelStroke();
+                suppressUntilRelease &= drawing;
+            }
+            return frameCommands;
+        }
         if (!drawing || pointerConsumedByUi || !canvasBounds.Contains(input.MousePosition))
         {
             strokeActive = false;
@@ -47,18 +91,15 @@ public sealed class CanvasBrushController
         }
 
         Point gridPosition = MapToGrid(input.MousePosition, canvasBounds, settings);
+        bool startingStroke = !strokeActive;
+        if (startingStroke && input.ShiftDown && !input.LeftPressed && !input.RightPressed)
+            return frameCommands;
         if (!strokeActive)
         {
             previousGridPosition = gridPosition;
-            strokeOrigin = gridPosition;
             activeBodyId = nextBodyId;
             nextBodyId = nextBodyId == uint.MaxValue ? 1 : nextBodyId + 1;
             strokeActive = true;
-        }
-
-        if (input.ShiftDown)
-        {
-            gridPosition = SnapOrthogonally(strokeOrigin, gridPosition);
         }
 
         bool erasing = input.RightDown || !temperatureToolActive && selectedMaterialIsTool;
@@ -75,6 +116,12 @@ public sealed class CanvasBrushController
             thermalDevice && !temperatureToolActive ? deviceTargetTemperature : targetTemperature,
             settings, deviceMaximumPower);
         if(mode == BrushCommandMode.Filter){var command=frameCommands[^1];command.Reserved=filterRule;frameCommands[^1]=command;}
+        if (startingStroke && input.ShiftDown)
+        {
+            pendingLine = frameCommands[0];
+            lineUsesRightButton = input.RightDown;
+            frameCommands.Clear();
+        }
         previousGridPosition = gridPosition;
         return frameCommands;
     }
@@ -119,14 +166,5 @@ public sealed class CanvasBrushController
         return new Point(
             Math.Clamp((int)(horizontal * settings.Width), 0, settings.Width - 1),
             Math.Clamp((int)(vertical * settings.Height), 0, settings.Height - 1));
-    }
-
-    private static Point SnapOrthogonally(Point origin, Point current)
-    {
-        int horizontalDistance = Math.Abs(current.X - origin.X);
-        int verticalDistance = Math.Abs(current.Y - origin.Y);
-        return horizontalDistance >= verticalDistance
-            ? new Point(current.X, origin.Y)
-            : new Point(origin.X, current.Y);
     }
 }

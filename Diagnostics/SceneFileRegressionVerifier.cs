@@ -223,6 +223,72 @@ internal static class SceneFileRegressionVerifier
         Check(Get<string>("transientStatus").StartsWith("Сохранено:"),"Hot-air quick save failed.");
         Check(System.Threading.Tasks.Task.Run(()=>serializer.LoadAsync(next,registry)).GetAwaiter().GetResult()!.World!.AirThermal!.AsSpan().SequenceEqual(transported),
             "Repeated hot-air save changed state.");
+        // New menu actions use actual GPU capture/save/load while leaving
+        // the user's runtime pause state independent of the modal overlay.
+        var ui = Get<SandboxUiCoordinator>("userInterface");
+        var viewport = game.GraphicsDevice.Viewport;
+        var idle = default(Phyxel.Input.RawInputSnapshot);
+        settings.Paused = false;
+        ui.Update(idle, viewport, 1, settings);
+        ui.Update(idle with { EscapePressed = true }, viewport, 1, settings);
+        Check(ui.PauseMenuOpen && !settings.Paused, "Menu changed underlying pause state.");
+        ulong ticks = coordinator.ThermalTicks;
+        byte[] frozenGrid = AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer);
+        r = game.DispatchInteractiveFrame([], .05f); Set("currentResources", r);
+        Check(coordinator.ThermalTicks == ticks && !settings.Paused, "Menu advanced physics or leaked temporary pause.");
+        Check(AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer).AsSpan().SequenceEqual(frozenGrid),
+            "Menu changed GPU particles.");
+        next = Path.Combine(dir, "Сцена из меню.json");
+        var menuSave = ui.Update(idle with { MousePosition = ui.PauseMenu.SaveBounds.Center, LeftPressed = true },
+            viewport, 1, settings);
+        typeof(PhyxelGame).GetMethod("ProcessUiActions", flags)!.Invoke(game, [menuSave]); Complete();
+        Check(Get<string>("transientStatus").StartsWith("Сохранено:") && ui.PauseMenuOpen,
+            "Menu failed to save while staying open.");
+        var menuScene = System.Threading.Tasks.Task.Run(() => serializer.LoadAsync(next, registry)).GetAwaiter().GetResult()!;
+        Check(!settings.Paused && menuScene.World!.Grid.AsSpan().SequenceEqual(frozenGrid),
+            "Menu save changed pause state or GPU world.");
+        var menuLoad = ui.Update(idle with { MousePosition = ui.PauseMenu.LoadBounds.Center, LeftPressed = true },
+            viewport, 1, settings);
+        typeof(PhyxelGame).GetMethod("ProcessUiActions", flags)!.Invoke(game, [menuLoad]); Complete();
+        Check(ui.PauseMenuOpen && !settings.Paused, "Menu load closed menu or forced pause.");
+        r = Get<GpuSimulationResources>("currentResources");
+        Check(AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer).AsSpan().SequenceEqual(frozenGrid),
+            "Menu load missed GPU particles.");
+        ui.Update(idle with { EscapePressed = true }, viewport, 1, settings);
+        Check(!ui.PauseMenuOpen && !settings.Paused, "Menu did not resume its original running state.");
+        // Commit real Shift gestures through the same encoder and GPU brush
+        // path; verify diagonal coverage, occupied-cell protection and erase.
+        settings.Paused = true; settings.BrushRadius = 1; settings.SpawnDensity = 1;
+        coordinator.ClearCurrentWorld(settings);
+        ushort metal = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal);
+        ushort stone = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Stone);
+        r = game.DispatchInteractiveFrame([new BrushDrawCommand { X = 60, Y = 50, EndX = 60, EndY = 50,
+            Shape = BrushCommandShape.Segment, Radius = 1, Density = 1, MaterialIndex = stone }], 0);
+        var lineCanvas = new Microsoft.Xna.Framework.Rectangle(0, 0, r.Width, r.Height);
+        var lineBrush = new Phyxel.Input.CanvasBrushController();
+        var encoder = new Phyxel.Input.GpuCommandEncoder();
+        void Line(bool filter, bool erase, int startX, int startY, int endX, int endY)
+        {
+            var press = idle with { MousePosition = new(startX, startY), ShiftDown = true,
+                LeftDown = !erase, LeftPressed = !erase, RightDown = erase, RightPressed = erase };
+            Check(lineBrush.CreateCommands(press, lineCanvas, settings, metal, false, false, 20, false,
+                filterTool: filter, filterRule: FilterRules.Closed).Count == 0, "GPU line painted before release.");
+            var release = idle with { MousePosition = new(endX, endY), LeftReleased = !erase, RightReleased = erase };
+            var commands = lineBrush.CreateCommands(release, lineCanvas, settings, metal, false, false, 20, false);
+            r = game.DispatchInteractiveFrame(encoder.Encode(commands), 0);
+        }
+        Line(false, false, 40, 40, 80, 60);
+        var lineCells = MemoryMarshal.Cast<byte, GridCell>(AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer));
+        Check(lineCells[40 * r.Width + 40].MaterialIndex == metal && lineCells[60 * r.Width + 80].MaterialIndex == metal &&
+            lineCells[50 * r.Width + 60].MaterialIndex == stone, "GPU diagonal missing endpoints or replaced occupied stone.");
+        Line(true, false, 20, 30, 100, 70);
+        Check(r.FilterMap[30 * r.Width + 20] == FilterRules.Closed && r.FilterMap[40 * r.Width + 40] == 0,
+            "GPU filter line missed empty cells or painted over metal.");
+        Line(false, true, 20, 30, 100, 70);
+        lineCells = MemoryMarshal.Cast<byte, GridCell>(AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer));
+        Check(r.FilterCount == 0 && lineCells[40 * r.Width + 40].IsActive == 0 && lineCells[50 * r.Width + 60].IsActive == 0,
+            "GPU Shift right erase failed to remove particles and filters.");
+        Set("currentResources", r);
         Console.WriteLine($"PHYXEL_SCENE_FILES_SUCCESS checks={checks} choices={choices}");
     }
 }

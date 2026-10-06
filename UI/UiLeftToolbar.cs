@@ -31,7 +31,7 @@ public sealed class UiLeftToolbar
 {
     public static readonly IReadOnlyList<ToolDefinition> Tools =
     [
-        new(PhyxelToolId.Brush, "brush", "Кисть", true, "Обычное рисование материалом"),
+        new(PhyxelToolId.Brush, "brush", "Кисть", true, "ЛКМ — рисовать; Shift + перетаскивание — прямая линия"),
         new(PhyxelToolId.Eraser, "eraser", "Ластик", true, "Стирание элементов"),
         new(PhyxelToolId.Temperature, "temperature", "Температура", true, "Изменение температуры"),
         new(PhyxelToolId.Filter, "settings", "Фильтр", true, "ЛКМ — фильтр, ПКМ — стереть всё под кистью"),

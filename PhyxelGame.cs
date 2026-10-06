@@ -501,9 +501,26 @@ public sealed class PhyxelGame : Game
             diagnosticFrameStart=System.Diagnostics.Stopwatch.GetTimestamp();
         }
         RawInputSnapshot input = inputSampler.Sample(gameTime);
+        // Reproducible screenshots use the same UI/input path as real gestures.
+        if (!string.IsNullOrEmpty(uiScreenshotPath) && frameIndex >= 1 &&
+            Environment.GetEnvironmentVariable("PHYXEL_UI_PREVIEW_INPUT") is { } editorPreview)
+        {
+            Rectangle canvas = userInterface.CanvasBounds;
+            Point start = new(canvas.X + canvas.Width / 4, canvas.Y + canvas.Height / 3);
+            Point end = new(canvas.X + canvas.Width * 3 / 4, canvas.Y + canvas.Height * 2 / 3);
+            input = editorPreview switch
+            {
+                "line" => default(RawInputSnapshot) with { MousePosition = frameIndex == 1 ? start : end,
+                    ShiftDown = true, LeftDown = true, LeftPressed = frameIndex == 1, DeltaSeconds = input.DeltaSeconds },
+                "menu" or "exit" => default(RawInputSnapshot) with { EscapePressed = frameIndex == 1,
+                    MousePosition = editorPreview == "exit" && frameIndex == 2 ? userInterface.PauseMenu.ExitBounds.Center : Point.Zero,
+                    LeftPressed = editorPreview == "exit" && frameIndex == 2, DeltaSeconds = input.DeltaSeconds },
+                _ => input
+            };
+        }
         if (sceneDialogOpen) return;
         latestInput = input;
-        if (input.EscapePressed)
+        if (input.EscapePressed && (oilSmokeVerification is not null || acceptance.Active))
         {
             if (oilSmokeVerification is not null) Environment.ExitCode = 2;
             Exit();
@@ -555,8 +572,10 @@ public sealed class PhyxelGame : Game
             input,
             GraphicsDevice.Viewport,
             uiDpiOverride ?? UiDisplayScale.GetDpiScale(Window.Handle),
-            settings);
+            settings,
+            pendingSave is not null || pendingWorldCapture || pendingLoad is not null);
         ProcessUiActions(actions);
+        if (actions.ExitRequested) return;
         if (!acceptance.Active && EnsureCanvasWorldFits(userInterface.CanvasBounds)) return;
         acceptance.ConfigureSettings(frameIndex, settings);
         acceptance.ApplyRuntimeControls(
@@ -587,7 +606,10 @@ public sealed class PhyxelGame : Game
                     .Properties.SimulationKind == MaterialSimulationKind.Tool,
                 userInterface.TemperatureToolActive,
                 userInterface.TargetTemperature,
-                userInterface.BlocksBrushInput,
+                userInterface.BlocksBrushInput ||
+                !IsActive && (string.IsNullOrEmpty(uiScreenshotPath) ||
+                    Environment.GetEnvironmentVariable("PHYXEL_UI_PREVIEW_INPUT") != "line") ||
+                !userInterface.CanvasBounds.Contains(input.MousePosition),
                 materialRegistry[userInterface.SelectedMaterial].ThermalRegulator is not null,
                 userInterface.DeviceTargetTemperature,
                 userInterface.DeviceMaximumPower,
@@ -596,10 +618,7 @@ public sealed class PhyxelGame : Game
         {
             uint acceptanceFrame = frameIndex;
             float physicalElapsedSeconds = acceptance.AdjustElapsedSeconds(input.DeltaSeconds);
-            currentResources = dispatchCoordinator.DispatchFrame(
-                settings,
-                commandEncoder.Encode(commands),
-                physicalElapsedSeconds);
+            currentResources = DispatchInteractiveFrame(commandEncoder.Encode(commands), physicalElapsedSeconds);
             simulationClockTrace.Observe(physicalElapsedSeconds, settings, dispatchCoordinator);
             if (simulationClockTrace.ExitRequested) Exit();
             acceptance.RecordAirPressureTrace(acceptanceFrame, currentResources);
@@ -643,6 +662,17 @@ public sealed class PhyxelGame : Game
             transientStatus = string.Empty;
         }
         base.Update(gameTime);
+    }
+
+    internal GpuSimulationResources DispatchInteractiveFrame(ReadOnlySpan<BrushDrawCommand> commands, float elapsedSeconds)
+    {
+        bool wasPaused = settings.Paused;
+        try
+        {
+            settings.Paused = wasPaused || userInterface!.PauseMenuOpen;
+            return dispatchCoordinator!.DispatchFrame(settings, commands, elapsedSeconds);
+        }
+        finally { settings.Paused = wasPaused; }
     }
 
     private static int ReadWindowDimension(string variableName, int fallback)
@@ -721,7 +751,8 @@ public sealed class PhyxelGame : Game
             latestInput.MousePosition,
             worldBounds,
             settings,
-            latestInput.RightDown);
+            latestInput.RightDown,
+            brushController.LinePreview);
         userInterface.Draw(
             spriteBatch,
             settings,
@@ -751,6 +782,11 @@ public sealed class PhyxelGame : Game
     {
         if (userInterface is null || dispatchCoordinator is null || materialRegistry is null)
         {
+            return;
+        }
+        if (actions.ExitRequested)
+        {
+            Exit();
             return;
         }
         if (actions.ClearRequested)
@@ -798,6 +834,7 @@ public sealed class PhyxelGame : Game
             SetStatus("Дождитесь завершения сохранения или загрузки");
             return;
         }
+        if (actions.SaveRequested || actions.LoadRequested) brushController.CancelStroke();
         if (actions.SaveRequested && currentResources is not null)
         {
             string? path = actions.SaveAsRequested || !hasChosenScenePath

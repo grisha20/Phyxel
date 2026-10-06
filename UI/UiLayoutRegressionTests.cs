@@ -46,6 +46,7 @@ public static class UiLayoutRegressionTests
         TestToolAndMaterialPersistence(registry, fonts, coordinator);
         TestCategoryFiltering(registry, coordinator);
         TestBrushToolModesAndInputBreaks(registry);
+        UiEditorInputRegressionTests.Run(registry, fonts, coordinator);
         TestCameraPanZoomAndInputIsolation();
         TestCanvasWorldExpansion();
         TestCursorProbeMappingAndText(registry,coordinator);
