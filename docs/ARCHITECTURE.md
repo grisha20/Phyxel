@@ -1,7 +1,7 @@
 # Архитектура Phyxel
 
 AB2026-10-05: GridCell дополнен RetainedLiquidMaterialIndex (Grid56, writer15, probe24). Нулевой ID в историческом префиксе означает configured carrier, новый запас хранит фактический вид через палитру. Legacy FuelMass/FuelCapacity — второй поровый запас, который может быть негорючим. liquidAbsorption.allLiquids разрешает общий путь для зарегистрированных Liquid; отдельная вода хранит оплаченный фазовый резерв. В одной клетке вода+один иной вид, смешение разных иных ID запрещено. Запасы переносятся полным пакетом, теплоёмкость/цвет/probe/реакция используют фактический ID. Масло не блокирует соседний водный перенос; CSMoisture обрабатывает оба запаса.
-[Контракт](materials/ABSORPTION_CONTRACT.md), [результаты](ABSORPTION_RESULTS.md), [правила будущих стенок](SELECTIVE_BARRIERS_DESIGN.md).
+[Контракт](materials/shared/ABSORPTION_CONTRACT.md), [результаты](ABSORPTION_RESULTS.md), [правила будущих стенок](SELECTIVE_BARRIERS_DESIGN.md).
 
 2026-10-05, HF: GasVisual затухает перед вкладом газа и композиции, поэтому промежуточные render-кадры показывают ту же фазу дымки. CellEffectiveCapacity CPU/HLSL использует настоящую положительную массу без пола. Воздушный обмен и энтальпия описывают один пакет, включая продукты1e−22.
 
@@ -9,13 +9,13 @@ Combustion исполняет ReactFuel для сухой основы, зате
 
 Phase58 получает отдельный аккумулятор120Гц и индекс для швов/вязкости; primary исполняет накопленные тики, secondary его не дублирует. Reset/Restore сбрасывают часы. Поддержанный patch16: перенос≤8; на склоне бюджет1, на плоском16. Малые разрывы≤3 внутри доказанно опирающегося столбца закрываются полными вертикальными обменами≤8, максимум8 на столбец. Опора всего участка доказывается до обменов; температурный допуск с напором≤16 применяется к каждому закрытию пустоты. Глубокие сливы/перескок через другую жидкость/density-body исключены. Водные/тепловые/воздушные частоты не уменьшены. SameLiquidColumnsConnected использует кеш только когда текущий нижний узел входит в непрерывный кешированный слой; иначе прежний точный поиск.
 
-Опциональные PHYXEL_TRACE_NONFINITE/PHYXEL_TRACE_SURFACE_FRAMES снимают дорогое состояние только по явному диагностическому запросу. Handoff, LL, LT, WO, OP, OL и LF проходят через Update/Draw с живым message loop; смежные матрицы ускоряют логические шаги пакетами и не служат измерением реального темпа. ABI Material244/Grid52/writer14 прежние. [Критерии](materials/HANDOFF_FIXES_CONTRACT.md), [результаты](HANDOFF_FIXES_RESULTS.md).
+Опциональные PHYXEL_TRACE_NONFINITE/PHYXEL_TRACE_SURFACE_FRAMES снимают дорогое состояние только по явному диагностическому запросу. Handoff, LL, LT, WO, OP, OL и LF проходят через Update/Draw с живым message loop; смежные матрицы ускоряют логические шаги пакетами и не служат измерением реального темпа. ABI Material244/Grid52/writer14 прежние. [Критерии](materials/shared/HANDOFF_FIXES_CONTRACT.md), [результаты](HANDOFF_FIXES_RESULTS.md).
 
 WO2026-10-04: fuelAbsorption разрешён для solid/granular с shared pore
 валидацией; wood same-ID использует существующий FuelMass/контакт/сгорание
 по свойствам oil. Новый AbsorbentColor для solid читает реальные запасы,
 не меняет физику или каталожный цвет. ABI и формат мира прежние.
-[Результаты/ограничения](WOOD_OIL_RESULTS.md).
+[Результаты/ограничения](materials/wood/WOOD_OIL_RESULTS.md).
 
 2026-10-04, WD: ParseMoisture/registry теперь разрешают infinite-lived
 solid или granular без фазовых переходов; dry/wet должны разделять kind,
@@ -23,7 +23,7 @@ moisture и сухую теплоёмкость, dry должен быть го�
 same-ID dry/wet и существующие контактные/тепловые шейдеры, probe/writer;
 новых GPU полей/проходов нет. Влагу подавляет общий combustion guard.
 Wood reaction Q800→3200, расход/остаток/эмиссии прежние; ограничения clamp/
-полного химического баланса не устранены. [Измерения](WOOD_CYCLE_RESULTS.md).
+полного химического баланса не устранены. [Измерения](materials/wood/WOOD_CYCLE_RESULTS.md).
 
 2026-10-04, BB supersedes прежние ограничения FB ниже. Density-body
 активен независимо от SolidGravity; классические тела требуют настройки.
@@ -78,7 +78,7 @@ G09 пороха,2026-10-03: движение гранул с `ReactionPressureP
 проходы после исчезновения зёрен; кисть/загрузка инвалидируют старые
 readback generation. Это производная активность, не сохранённая масса.
 JSON, коэффициенты P/E/C и worldv10 прежние.
-[Измерения/область применимости](GUNPOWDER_FPS_RESULTS.md).
+[Измерения/область применимости](materials/gunpowder/GUNPOWDER_FPS_RESULTS.md).
 
 Оптимизация масштаба 100% (2026-10-02): `GasActiveTiles.hlsl` перед каждым
 газовым тиком строит маску плиток 64×64 с полным соседним halo. Только
@@ -175,7 +175,7 @@ GPU ограничивает сгорание доступным запасом 
 сохранены. Это калибровка игрового зерна, не химические коэффициенты СИ.
 PersistentCoalIgnition требует газовой/пустой грани для нового поджига;
 ранее горевший уголь в Sandbox сохраняет latch при погребении. Simulation
-по-прежнему требует фактического O₂. Источники/сценарии: [паспорт](materials/coal.md).
+по-прежнему требует фактического O₂. Источники/сценарии: [паспорт](materials/coal/PASSPORT.md).
 
 ## JSON-модель
 
@@ -264,7 +264,7 @@ UAV и staging для накопления Q устройства и Q сред�
 Поток рассчитывается симметрично по snapshot, с прежним обменом по граням.
 `TransferLiquidMass` восстанавливает смесь из полной энтальпии, чтобы ниже
 температуры кипения не оставалось скрытого фазового прогресса.
-Проверки: [WATER_CONTACT_RESULTS.md](WATER_CONTACT_RESULTS.md).
+Проверки: [WATER_CONTACT_RESULTS.md](materials/water/WATER_CONTACT_RESULTS.md).
 
 `WaterConvection.hlsl` выполняется перед теплопроводностью на фиксированных
 20 Гц, независимо от FPS, AirSimulation, гидравлики и сна клеток.
@@ -299,7 +299,7 @@ minimumMobility/maximumMobility. Мобильность — bounded exp отно
 использует реальный elapsedSeconds внутри cellular passes; остальные
 решатели сохраняют прежний dt. Свободный вертикальный полёт в воздухе
 не задерживается вязкостью. Нет liquidFlow — старое течение без gate.
-Это игровая мобильность, не вязкостьПа·с. [LT-контракт](materials/LIQUID_TEMPERATURE_CONTRACT.md).
+Это игровая мобильность, не вязкостьПа·с. [LT-контракт](materials/shared/LIQUID_TEMPERATURE_CONTRACT.md).
 
 ## GPU-ресурсы
 
@@ -354,7 +354,7 @@ runtime-флаг `ThermalCarbonDioxide`: его собственный верт�
 
 Пар использует ordinary motion solver и обратимую фазовую энтальпию воды.
 Температуры и ambient cooling задаются в JSON. Подробнее:
-[GAS_SIMULATION.md](GAS_SIMULATION.md), [STEAM_ENERGY_RESULTS.md](STEAM_ENERGY_RESULTS.md).
+[GAS_SIMULATION.md](GAS_SIMULATION.md), [STEAM_ENERGY_RESULTS.md](materials/steam/STEAM_ENERGY_RESULTS.md).
 
 ## Температура, контакты и фазы
 
@@ -456,13 +456,13 @@ painted FIRE по-прежнему расходует O₂. Порции CO₂ �
   Реакционное расширение входит в RHS проекции до Jacobi; отдельная волна добавляется
   после проекции и снимается перед следующим решением обычной тяги. Источник issued
   один раз за реальную потерю топлива; trapped packet ждёт открытого fine-air пути.
-  См. [GUNPOWDER_RESULTS.md](GUNPOWDER_RESULTS.md).
+  См. [GUNPOWDER_RESULTS.md](materials/gunpowder/GUNPOWDER_RESULTS.md).
 
 - v11: предыдущий writer, двоичный layoutv10 прежний. Отрицательный Lifetime означает только прогресс замерзания fusion-enthalpy liquid; старые версии и остальные материалы его отклоняют. Лёд/вода: h_ice=c*T−L+p, h_water=c*T+p. Полная конверсия после оплаты L, частичный переход держит0°C; кипение/конденсация используют прежний контракт. [Проверки](ICE_FUSION_RESULTS.md).
-- Тот же fusion-enthalpy подключён к metal/molten_metal двумя JSON: Tm1000/Tf950°C, L370, c.13/.50. Нуль энергии выбран так, что hsolid=.13*T+p и hliquid=.50*T+p; прогресс solid0..370/liquid−351.5..0. Общие обработчики переноса/сохранения переиспользованы, отдельного шейдера металла нет; прежние ABI40/176 и v11 сохранены. [Проверки пары](METAL_FUSION_RESULTS.md).
+- Тот же fusion-enthalpy подключён к metal/molten_metal двумя JSON: Tm1000/Tf950°C, L370, c.13/.50. Нуль энергии выбран так, что hsolid=.13*T+p и hliquid=.50*T+p; прогресс solid0..370/liquid−351.5..0. Общие обработчики переноса/сохранения переиспользованы, отдельного шейдера металла нет; прежние ABI40/176 и v11 сохранены. [Проверки пары](materials/metal/METAL_FUSION_RESULTS.md).
 
 - v12: grid48 вместо40, остальные секцииv11 прежние. MoistureMass/MoistureEnergy сохраняются явно; v6..v11 префикс40 копируется с нулевой влагой. Legacy wet_charcoal без воды становится dry ID с предупреждением. [Проверки](FUEL_MOISTURE_RESULTS.md).
-- v13: прежний writer; layout48 прежний, MoistureEnergy может хранить тепло сверх полного L, задержанное до выхода пара. Старые горячие мокрые клеткиv12 нормализуются с сохранением энергии. [Контракт](materials/MOISTURE_POUR_CONTRACT.md).
+- v13: прежний writer; layout48 прежний, MoistureEnergy может хранить тепло сверх полного L, задержанное до выхода пара. Старые горячие мокрые клеткиv12 нормализуются с сохранением энергии. [Контракт](materials/shared/MOISTURE_POUR_CONTRACT.md).
 
 Сцена хранит `MaterialPalette` как массив string IDs, где позиция — компактный scene index. При сохранении отдельная копия snapshot преобразуется runtime→scene числовой таблицей. При загрузке palette один раз преобразуется string→runtime, затем grid remap выполняется численно. Живая сетка не перекодируется.
 
@@ -483,7 +483,7 @@ painted FIRE по-прежнему расходует O₂. Порции CO₂ �
 
 ## Conserved moisture
 
-[Контракт](materials/FUEL_MOISTURE_CONTRACT.md): optional JSON moisture, disjoint4-face CSMoisture20Hz, перенос Mass воды/энтальпии, мокрый запрет combustion обоих режимов, плато оплаты сушки и выход пара в свободную клетку. ContactSummary на GPU собирает реальное появление пара, затем PhaseSummary асинхронно будит carrier; холодное зерно не включает газовую модель. Общая теплоёмкость учитывает воду; Pressure/Lifetime топлива сохранили прежние роли.
+[Контракт](materials/shared/FUEL_MOISTURE_CONTRACT.md): optional JSON moisture, disjoint4-face CSMoisture20Hz, перенос Mass воды/энтальпии, мокрый запрет combustion обоих режимов, плато оплаты сушки и выход пара в свободную клетку. ContactSummary на GPU собирает реальное появление пара, затем PhaseSummary асинхронно будит carrier; холодное зерно не включает газовую модель. Общая теплоёмкость учитывает воду; Pressure/Lifetime топлива сохранили прежние роли.
 
 Уточнение2026-10-03: соседние absorbent-зёрна с одинаковым moisture.liquid
 обмениваются сохранённой водой по разности насыщенности. Лимиты: равновесие,
@@ -493,7 +493,7 @@ painted FIRE по-прежнему расходует O₂. Порции CO₂ �
 поэтому мокрый ID не означает немедленное полное утяжеление. Compact cache
 остаётся быстрым путём для невпитывающих материалов; полный Grid читается
 только у absorbent-зёрен. Упаковка кучи по-прежнему ограничивает обмен.
-[Контракт](materials/MOISTURE_WICKING_CONTRACT.md),
+[Контракт](materials/shared/MOISTURE_WICKING_CONTRACT.md),
 [границы и проверки](MOISTURE_WICKING_RESULTS.md). Layout/writer прежние.
 
 ## Поровые запасы — 2026-10-05
@@ -527,7 +527,7 @@ JSON `liquidAbsorption` задаёт liquid/capacity/absorptionRate/saturatedDen
 сохраняется; продукты с твёрдым остатком требуют отдельного механизма,
 поэтому такие поровые реакции сейчас не запускаются. Это не полноценная
 модель продуктов, фазовых переходов и многокомпонентной химии внутри пор.
-[Контракт](materials/ABSORPTION_CONTRACT.md), [измерения](ABSORPTION_RESULTS.md).
+[Контракт](materials/shared/ABSORPTION_CONTRACT.md), [измерения](ABSORPTION_RESULTS.md).
 
 
 ## Избирательные фильтры — 2026-10-05

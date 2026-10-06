@@ -1,9 +1,9 @@
 # MA — сталь и чугун, 2026-10-06
 
 Исходная ветка `codex/gas-motion-and-rendering`, HEAD `a5b683e`, рабочее
-дерево было чистым. [Контракт до реализации](materials/ALLOYS_CONTRACT.md).
+дерево было чистым. [Контракт до реализации](materials/shared/ALLOYS_CONTRACT.md).
 Сначала прочитаны паспорта, TPT METL/IRON/LAVA и общий возврат LAVA через
-ctype; источники и SHA в [паспорте стали](materials/steel.md).
+ctype; источники и SHA в [паспорте стали](materials/steel/PASSPORT.md).
 
 ## Реализация и границы
 

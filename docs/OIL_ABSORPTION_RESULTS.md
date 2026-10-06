@@ -5,7 +5,7 @@
 влагой и подавляет горение до оплаченной сушки. Масло и вода делят поры.
 Падающая струя по-прежнему не поднимает уголь через отверстие в бак.
 
-До правки были прочитаны [контракт](materials/OIL_ABSORPTION_CONTRACT.md),
+До правки были прочитаны [контракт](materials/shared/OIL_ABSORPTION_CONTRACT.md),
 паспорта oil/coal/wet_charcoal/water и локальные TPT OIL/COAL/BCOL/FIRE,
 SimulationData::init_can_move. В этих элементах TPT нет отдельного
 сохраняемого масляного запаса угля. OIL→GAS333K не переносился без паровой

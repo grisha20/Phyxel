@@ -211,7 +211,7 @@ FireGlowDeposit = 0.12, FireGlowDecay = 0.055
 - Перед каждым коммитом — гейт воды:
   `powershell -ExecutionPolicy Bypass -File .\Diagnostics\RunWaterGate.ps1`.
   Норма: 13-14 PASS. Сценарии `hydro` и `granular_barrier_on` мигающие,
-  подробности в `docs/WATER_GATE_BASELINE.md`.
+  подробности в `docs/materials/water/WATER_GATE_BASELINE.md`.
 - `GridCell` (40 байт) и `MaterialProperties` (128 байт) дублируются в C# и
   HLSL, менять строго вместе. Константный буфер обязан быть кратен 16 байтам.
 - HLSL разбирает объявления сверху вниз и **не поддерживает тернарный оператор

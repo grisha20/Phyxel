@@ -1,7 +1,7 @@
 # Цвет пропитки, подъём воды и тепло воздуха —2026-10-04, ME
 
 Порученные три изменения выполнены в выбранной области.
-[Контракт до правки](materials/MATERIAL_ENVIRONMENT_CONTRACT.md),
+[Контракт до правки](materials/shared/MATERIAL_ENVIRONMENT_CONTRACT.md),
 [105 проверок целостности и результатов](../artifacts/material-environment-20261004/validation.json),
 [измерения GPU](../artifacts/material-environment-20261004/final/measurements.json).
 Каталог23 ID/276пар и world writer14/Grid52/Material244 прежние.

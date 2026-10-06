@@ -98,6 +98,6 @@ dotnet run --project Phyxel.csproj -c Debug
 - [Горение](docs/COMBUSTION_DESIGN.md)
 - [Оформление огня и дыма: проверка](docs/FIRE_SMOKE_VISUAL_RESULTS.md)
 - [Яркое свечение и фактическое выгорание угля](docs/FIRE_BRIGHT_COAL_RESULTS.md)
-- [Настройка раннего выгорания угля и связанные проверки](docs/COAL_BURNOUT_RESULTS.md)
-- [Порох: одинаковое давление при разном FPS](docs/GUNPOWDER_FPS_RESULTS.md)
+- [Настройка раннего выгорания угля и связанные проверки](docs/materials/coal/COAL_BURNOUT_RESULTS.md)
+- [Порох: одинаковое давление при разном FPS](docs/materials/gunpowder/GUNPOWDER_FPS_RESULTS.md)
 - [Сборка и разработка](docs/DEVELOPMENT.md)

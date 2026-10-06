@@ -6,7 +6,7 @@
 отношения>1.3, упорядоченности и FPS≤25%. [Текущие измерения и
 сохранённый старый FAIL](WATER_LEVEL_RESULTS.md).
 
-Выбранный этап LT01–LT04. [Контракт до физики](materials/LIQUID_TEMPERATURE_CONTRACT.md),
+Выбранный этап LT01–LT04. [Контракт до физики](materials/shared/LIQUID_TEMPERATURE_CONTRACT.md),
 [GPU verifier](../Diagnostics/LiquidTemperatureRegressionVerifier.cs),
 [runner](../Diagnostics/RunLiquidTemperature.ps1),
 [анализ](../Diagnostics/AnalyzeLiquidTemperature.py).

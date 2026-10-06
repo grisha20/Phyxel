@@ -254,7 +254,7 @@ ASCII-символы и сохранён в UTF-8 с BOM. Windows PowerShell 5.1
 
 **Правило:** гейт обязан быть зелёным перед каждым коммитом, который трогает
 шейдеры физики, layout `GridCell`/`MaterialProperties` или порядок диспатчей.
-Эталонный результат зафиксирован в [WATER_GATE_BASELINE.md](WATER_GATE_BASELINE.md);
+Эталонный результат зафиксирован в [WATER_GATE_BASELINE.md](materials/water/WATER_GATE_BASELINE.md);
 изменение любой диагностической строки относительно эталона — повод остановиться
 и разобраться, даже если сценарий формально `PASS`.
 

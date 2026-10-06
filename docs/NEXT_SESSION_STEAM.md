@@ -11,7 +11,7 @@
 `Исходник The Powder Toy` — справочный, изучать свободно, копировать
 в репозиторий нельзя.
 
-**Прочитай в первую очередь `docs/FIRE_RESULTS.md`.** Там эталонные числа,
+**Прочитай в первую очередь `docs/materials/fire/FIRE_RESULTS.md`.** Там эталонные числа,
 снятые из живой TPT, конечные значения Phyxel, список приборов, которые
 врали, таблица отвергнутых гипотез и рабочие приёмы. Дальше
 `docs/HANDOVER.md` и `docs/ROADMAP_TPT.md`.
@@ -23,7 +23,7 @@
 2. **Гейт воды перед каждым коммитом, меняющим физику:**
    `powershell -ExecutionPolicy Bypass -File .\Diagnostics\RunWaterGate.ps1`
    Норма 13–14 PASS. `hydro` и `granular_barrier_on` мигающие, по ним судить
-   нельзя, см. `docs/WATER_GATE_BASELINE.md`.
+   нельзя, см. `docs/materials/water/WATER_GATE_BASELINE.md`.
 3. **`GridCell` (40 байт) и `MaterialProperties` (160 байт) дублируются**
    в `Physics/PhysicsDataStructures.cs` и `Content/Shaders/PhysicsShared.hlsli`.
    Менять только синхронно и одним коммитом: рассинхрон не даёт ошибки
@@ -79,7 +79,7 @@ Falldown 0       Weight 1        HeatConduct 48
 больше направленной**. Пар в TPT это в первую очередь расплывающееся облако.
 
 **Что уже сделано и работает.** Диффузия переведена с континуумного дробления
-массы на случайный импульс скорости, как в TPT. Подробности — `FIRE_RESULTS.md`,
+массы на случайный импульс скорости, как в TPT. Подробности — `materials/fire/FIRE_RESULTS.md`,
 раздел 7.6. После этого:
 
 | Величина | Было | Стало | TPT |

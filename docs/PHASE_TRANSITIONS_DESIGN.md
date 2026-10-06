@@ -2,7 +2,7 @@
 
 > **Обновление 2026-10-01:** для opt-in пары вода/пар действует баланс
 > энтальпии и накопление скрытой теплоты, описанные в
-> [STEAM_ENERGY_RESULTS.md](STEAM_ENERGY_RESULTS.md). Исторический Model A
+> [STEAM_ENERGY_RESULTS.md](materials/steam/STEAM_ENERGY_RESULTS.md). Исторический Model A
 > ниже сохраняется для остальных фаз. Фактический MaterialProperties —
 > 176 байт, GridCell — 40; текущие ordinary-газы используют GasMotionState,
 > см. [GAS_SIMULATION.md](GAS_SIMULATION.md).

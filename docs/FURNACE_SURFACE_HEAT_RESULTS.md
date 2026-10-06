@@ -1,6 +1,6 @@
 # BH — нагрев дна и сохранённая тяга, 2026-10-06
 
-[Контракт до приёмки](materials/FURNACE_SURFACE_HEAT_CONTRACT.md).
+[Контракт до приёмки](materials/shared/FURNACE_SURFACE_HEAT_CONTRACT.md).
 Baseline `081579a`, текущая ветка `codex/gas-motion-and-rendering`.
 Пользовательская «Не понятное явление.json» из LocalAppData/Phyxel,
 672×394, масштаб.35, открытые края, исходные вода/охладитель сохранены.

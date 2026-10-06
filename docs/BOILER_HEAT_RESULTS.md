@@ -1,6 +1,6 @@
 # BW — проведение тепла через дно котла, 2026-10-06
 
-[Контракт до изменений](materials/BOILER_HEAT_CONTRACT.md).
+[Контракт до изменений](materials/shared/BOILER_HEAT_CONTRACT.md).
 Baseline `dca1b2b`, ветка `codex/gas-motion-and-rendering`, чистая перед этапом.
 Исходная карта: `C:/Users/Степан/AppData/Local/Phyxel/С перегородками.json`,
 v17,672×394,.35, Simulation, открытые края, гидравлика и гравитация построек

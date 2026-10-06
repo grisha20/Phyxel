@@ -25,7 +25,7 @@ Phyxel — двумерная GPU-песочница на C#/.NET 8 и HLSL по
    powershell -ExecutionPolicy Bypass -File .\Diagnostics\RunWaterGate.ps1
    ```
    Норма 13–14 PASS. Сценарии `hydro` и `granular_barrier_on` **мигающие** —
-   судить по ним нельзя, подробности в `docs/WATER_GATE_BASELINE.md`.
+   судить по ним нельзя, подробности в `docs/materials/water/WATER_GATE_BASELINE.md`.
 3. **`GridCell` (40 байт) и `MaterialProperties` (128 байт) дублируются** в
    `Physics/PhysicsDataStructures.cs` и `Content/Shaders/PhysicsShared.hlsli`.
    Менять только синхронно: рассинхрон не даёт ошибки компиляции, он тихо
@@ -79,12 +79,12 @@ Phyxel — двумерная GPU-песочница на C#/.NET 8 и HLSL по
 **или** SMKE.
 
 Ни одна правка физики в этих случаях была ни при чём. Разбор — в
-`FIRE_RESULTS.md`, раздел 5.
+`materials/fire/FIRE_RESULTS.md`, раздел 5.
 
 Следствие: **сверяться надо с живой TPT, а не с реконструкцией её поведения по
 исходникам.** Чтение кода даёт алгоритм, но не даёт чисел. Способ снять
 эталон — режим отображения «Nothing Display», он рисует частицы пикселями без
-свечения. См. `FIRE_RESULTS.md`, раздел 2.
+свечения. См. `materials/fire/FIRE_RESULTS.md`, раздел 2.
 
 ---
 
@@ -112,7 +112,7 @@ Phyxel — двумерная GPU-песочница на C#/.NET 8 и HLSL по
 обе величины мерились до снятия потолка скорости.
 
 Все числа, эталоны из живой TPT и список отвергнутых гипотез — в
-`docs/FIRE_RESULTS.md`. Не проверяй заново то, что уже отвергнуто.
+`docs/materials/fire/FIRE_RESULTS.md`. Не проверяй заново то, что уже отвергнуто.
 
 **Дальше по плану:** этапы 2–9 дорожной карты, начиная с разделения
 `density` и `weight`.

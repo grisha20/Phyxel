@@ -1,6 +1,6 @@
 # Подводные столбы и зависшая смесь угля — 2026-10-03
 
-[Контракт](materials/SUBMERGED_HEAPS_CONTRACT.md),
+[Контракт](materials/shared/SUBMERGED_HEAPS_CONTRACT.md),
 [проверка](../Diagnostics/SubmergedHeapRegressionVerifier.cs),
 [запуск](../Diagnostics/RunSubmergedHeaps.ps1).
 Артефакты: `artifacts/submerged-heaps-20261003/`.

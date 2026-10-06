@@ -1,6 +1,6 @@
 # Открытый огонь и обход пластины — OC, 2026-10-05
 
-[Контракт](materials/OPEN_COMBUSTION_CONTRACT.md),
+[Контракт](materials/shared/OPEN_COMBUSTION_CONTRACT.md),
 [runner](../Diagnostics/RunOpenCombustion.ps1),
 [матрица](../artifacts/open-combustion-20261005/open-accepted/summary.csv).
 

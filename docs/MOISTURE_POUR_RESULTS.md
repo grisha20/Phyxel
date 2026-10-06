@@ -1,7 +1,7 @@
 # Заливка горячего угля — 2026-10-03
 
 Проверены оба видео пользователя и снимок «мокрый уголь326.5°C, влага26%».
-Контракт до правки: [MOISTURE_POUR_CONTRACT.md](materials/MOISTURE_POUR_CONTRACT.md).
+Контракт до правки: [MOISTURE_POUR_CONTRACT.md](materials/shared/MOISTURE_POUR_CONTRACT.md).
 
 ## Причины и исправление
 

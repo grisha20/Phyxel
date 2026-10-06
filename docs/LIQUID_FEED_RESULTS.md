@@ -1,6 +1,6 @@
 # Подача воды/масла на уголь — 2026-10-03
 
-[Контракт до правки](materials/LIQUID_FEED_CONTRACT.md),
+[Контракт до правки](materials/shared/LIQUID_FEED_CONTRACT.md),
 [GPU-проверка](../Diagnostics/LiquidFeedRegressionVerifier.cs),
 [запуск](../Diagnostics/RunLiquidFeed.ps1).
 Артефакты: `artifacts/liquid-feed-20261003/`.
