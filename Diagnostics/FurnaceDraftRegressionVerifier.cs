@@ -73,6 +73,13 @@ internal static class FurnaceDraftRegressionVerifier
             var r=coordinator.DispatchFrame(settings,[new(){X=20,Y=20,Radius=1,Density=1,MaterialIndex=coal}],0);
             if(rows.Count==0)
             {
+                if(Environment.GetEnvironmentVariable("PHYXEL_DRAFT_OXYGEN_TRACE")=="1")
+                {
+                    TraceOxygenGeometry(r,registry,world);
+                    Console.WriteLine("PHYXEL_DRAFT_COMPLETE");
+                    yield return r;
+                    yield break;
+                }
                 if(Environment.GetEnvironmentVariable("PHYXEL_DRAFT_OLD_SHADER") is {Length:>0} oldPath)
                 {
                     using var oldShader=new SharpDX.Direct3D11.ComputeShader(r.Device,File.ReadAllBytes(oldPath));
@@ -338,13 +345,46 @@ internal static class FurnaceDraftRegressionVerifier
         }
     }
 
+    private static void TraceOxygenGeometry(GpuSimulationResources r,MaterialRegistry registry,SimulationWorldSnapshot world)
+    {
+        int w=r.Width,h=r.Height;
+        uint coal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal);
+        var cells=MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray();
+        // No reaction, emission, cooling or moving footprint. Fresh ambient
+        // stock tests whether the saved carrier alone evacuates the fuel face.
+        for(int i=0;i<cells.Length;i++)
+            if(cells[i].IsActive!=0 && registry.Materials[(int)cells[i].MaterialIndex].Properties.SimulationKind==(uint)MaterialSimulationKind.Gas)cells[i]=default;
+        bool Space(int i)=>cells[i].IsActive==0;
+        var surface=Enumerable.Range(w,w*(h-2)).Where(i=>i%w>0&&i%w<w-1&&cells[i].IsActive!=0&&cells[i].MaterialIndex==coal&&
+            (Space(i-1)||Space(i+1)||Space(i-w)||Space(i+w))).ToArray();
+        foreach(bool flow in new[]{false,true})
+        {
+            r.OxidizerCarrierWarm=false;
+            r.Context.UpdateSubresource(cells,r.Grid.ReadBuffer);
+            var stock=Enumerable.Range(0,w*h).Select(i=>Space(i)?1f:0f).ToArray();
+            r.Context.UpdateSubresource(stock,r.Oxidizer.ReadBuffer);
+            r.Context.UpdateSubresource(flow?MemoryMarshal.Cast<byte,AirCell>(world.Air!).ToArray():new AirCell[r.AirWidth*r.AirHeight],r.Air.Buffer);
+            var timer=System.Diagnostics.Stopwatch.StartNew();
+            const int ticks=2400;
+            for(int tick=0;tick<ticks;tick++)SimulationDispatchCoordinator.DispatchOxidizer(r,1f/60,false,false,true);
+            var after=MemoryMarshal.Cast<byte,float>(AirInventoryRegressionVerifier.Read(r,r.Oxidizer.ReadBuffer)).ToArray();
+            timer.Stop();
+            var exposure=surface.Select(i=>new[]{i-1,i+1,i-w,i+w}.Where(Space).Average(j=>(double)after[j])).Order().ToArray();
+            Console.WriteLine("PHYXEL_DRAFT_OXYGEN "+JsonSerializer.Serialize(new{flow,initial=stock.Sum(x=>(double)x),final=after.Sum(x=>(double)x),
+                ticks,faces=surface.Length,starved=exposure.Count(x=>x<=.2),min=exposure.First(),median=exposure[exposure.Length/2],max=exposure.Last(),elapsedMs=timer.Elapsed.TotalMilliseconds}));
+            if(Environment.GetEnvironmentVariable("PHYXEL_DRAFT_BASELINE")!="1"&&
+                (exposure.Any(x=>x<=.2)||Math.Abs(after.Sum(x=>(double)x)-stock.Sum(x=>(double)x))>stock.Sum(x=>(double)x)*1e-5))
+                throw new InvalidDataException("Carrier alone starved fresh fuel faces or lost oxygen.");
+        }
+    }
+
     private static void VerifySparseRoof(GpuSimulationResources r,MaterialRegistry registry,
         SharpDX.Direct3D11.ComputeShader shader,bool old)
     {
         int w=r.Width,h=r.Height,index=100*w+100;
         uint fire=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire),metal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal),
             smoke=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke),water=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
-        foreach(string caseName in new[]{"sparse","dense","closed","liquid"})
+        foreach(string caseName in new[]{"sparse","dense","closed","liquid","pocket"})
         {
             var cells=new GridCell[w*h];var map=new uint[w*h];
             for(int x=80;x<=160;x++)cells[90*w+x]=new(){IsActive=1,MaterialIndex=metal,Mass=7.8f,Temperature=20};
@@ -352,7 +392,15 @@ internal static class FurnaceDraftRegressionVerifier
                 cells[y*w+80]=cells[y*w+160]=new(){IsActive=1,MaterialIndex=metal,Mass=7.8f,Temperature=20};
             if(caseName=="dense")for(int y=91;y<100;y++)cells[y*w+100]=new(){IsActive=1,MaterialIndex=smoke,Mass=1,Temperature=600};
             if(caseName=="liquid")cells[95*w+100]=new(){IsActive=1,MaterialIndex=water,Mass=1,Temperature=20};
-            cells[index]=new(){IsActive=1,MaterialIndex=fire,Mass=1,Temperature=600,Lifetime=2};
+            int sourceIndex=caseName=="pocket"?100*w+130:index;
+            if(caseName=="pocket")
+            {
+                // Right edge looks open at roof height, but it is capped two
+                // pixels higher. The actual open riser is on the left.
+                for(int x=161;x<=164;x++)cells[88*w+x]=new(){IsActive=1,MaterialIndex=metal,Mass=7.8f,Temperature=20};
+                for(int y=89;y<=110;y++)cells[y*w+164]=new(){IsActive=1,MaterialIndex=metal,Mass=7.8f,Temperature=20};
+            }
+            cells[sourceIndex]=new(){IsActive=1,MaterialIndex=fire,Mass=1,Temperature=600,Lifetime=2};
             for(int i=0;i<map.Length;i++)map[i]=cells[i].MaterialIndex;
             var ctx=r.Context;
             ctx.UpdateSubresource(cells,r.Grid.ReadBuffer);ctx.UpdateSubresource(map,r.CellMaterials.Buffer);
@@ -375,8 +423,8 @@ internal static class FurnaceDraftRegressionVerifier
             ctx.Dispatch((w+15)/16,(h+15)/16,1);
             for(int i=0;i<12;i++)ctx.ComputeShader.SetUnorderedAccessView(i,null);
             for(int i=0;i<3;i++)ctx.ComputeShader.SetShaderResource(i,null);
-            var motion=MemoryMarshal.Cast<byte,GasMotionState>(AirInventoryRegressionVerifier.Read(r,r.GasMotion.Buffer))[index];
-            bool open=caseName=="dense"||caseName=="sparse"&&!old;
+            var motion=MemoryMarshal.Cast<byte,GasMotionState>(AirInventoryRegressionVerifier.Read(r,r.GasMotion.Buffer))[sourceIndex];
+            bool open=caseName=="dense"||caseName=="pocket"||caseName=="sparse";
             bool pass=open?motion.VelocityX<-3.5f:Math.Abs(motion.VelocityX)<.001;
             Console.WriteLine($"PHYXEL_DRAFT_ROOF old={old} case={caseName} vx={motion.VelocityX:R} pass={pass}");
             if(!pass&&Environment.GetEnvironmentVariable("PHYXEL_DRAFT_BASELINE")!="1")throw new InvalidDataException("Roof jet: "+caseName);

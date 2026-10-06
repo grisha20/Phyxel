@@ -144,6 +144,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         GpuStructuredBuffer<float> oxidizerDemand = new(Device, cellCount);
         GpuStructuredBuffer<float> oxidizerAvailable = new(Device, cellCount);
         GpuStructuredBuffer<System.Numerics.Vector2> oxidizerFlux = new(Device, cellCount);
+        GpuStructuredBuffer<System.Numerics.Vector4> oxidizerCarrierFaces = new(Device, cellCount);
+        GpuBufferPair<System.Numerics.Vector2> oxidizerCarrierPotential = new(Device, cellCount);
         Buffer oxidizerConstants = CreateConstantBuffer<OxidizerConstants>();
         Buffer oxidizerStaging = CreateStagingBuffer(cellCount * sizeof(float));
         float[] freshAir = new float[cellCount];
@@ -483,6 +485,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             OxidizerDemand = oxidizerDemand,
             OxidizerAvailable = oxidizerAvailable,
             OxidizerFlux = oxidizerFlux,
+            OxidizerCarrierFaces = oxidizerCarrierFaces,
+            OxidizerCarrierPotential = oxidizerCarrierPotential,
             OxidizerConstants = oxidizerConstants,
             OxidizerStaging = oxidizerStaging,
             AirWidth = airWidth,
@@ -630,6 +634,9 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             OxidizerTransportShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSTransport") : null,
             OxidizerFluxShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSFlux") : null,
             OxidizerConsumeShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSConsume") : null,
+            OxidizerCarrierFacesShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSCarrierFaces") : null,
+            OxidizerCarrierDivergenceShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSCarrierDivergence") : null,
+            OxidizerCarrierJacobiShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSCarrierJacobi") : null,
             AirInjectShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSInject") : null,
             AirFineMaterialsShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSFineMaterials") : null,
             AirPressureShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSPressure") : null,

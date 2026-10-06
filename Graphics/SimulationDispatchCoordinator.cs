@@ -454,6 +454,7 @@ public sealed class SimulationDispatchCoordinator
             // Only the correction guess belongs to the old divergence policy.
             resources.Context.ClearUnorderedAccessView(resources.AirProjectionA.UnorderedView, new RawInt4());
             resources.Context.ClearUnorderedAccessView(resources.AirProjectionB.UnorderedView, new RawInt4());
+            resources.OxidizerCarrierWarm = false;
             previousAirMode = settings.Mode;
         }
         resources.Context.ComputeShader.SetShaderResource(15,resources.Filters.View);
@@ -910,6 +911,7 @@ public sealed class SimulationDispatchCoordinator
         // world in an allocation with the same dimensions.
         resources.Context.ClearUnorderedAccessView(resources.AirProjectionA.UnorderedView, new RawInt4());
         resources.Context.ClearUnorderedAccessView(resources.AirProjectionB.UnorderedView, new RawInt4());
+        resources.OxidizerCarrierWarm = false;
         retainOxidizerField = preserveOxidizer;
         thermalActive = containsMatter;
         contactTransitionPotential = containsContactTransitionSource;
@@ -2667,6 +2669,7 @@ public sealed class SimulationDispatchCoordinator
 
     private static void DispatchAirClear(GpuSimulationResources resources)
     {
+        resources.OxidizerCarrierWarm = false;
         if (resources.AirClearShader is null)
         {
             return;
@@ -2848,7 +2851,8 @@ public sealed class SimulationDispatchCoordinator
             Height = (uint)resources.Height,
             DeltaTime = dt,
             OpenEdges = openEdges ? 1u : 0u,
-            UseAir = useAir ? 1u : 0u
+            UseAir = useAir ? 1u : 0u,
+            Reserved0 = resources.OxidizerCarrierWarm ? 1u : 0u
         };
         DeviceContext context = resources.Context;
         context.UpdateSubresource(ref constants, resources.OxidizerConstants);
@@ -2861,6 +2865,33 @@ public sealed class SimulationDispatchCoordinator
             resources.OxidizerFlux.UnorderedView);
         if (!consume)
         {
+            context.ComputeShader.SetUnorderedAccessView(3, resources.OxidizerCarrierFaces.UnorderedView);
+            context.ComputeShader.Set(resources.OxidizerCarrierFacesShader);
+            context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
+            context.ComputeShader.SetUnorderedAccessView(3,null);
+            context.ComputeShader.SetShaderResource(8,resources.OxidizerCarrierFaces.View);
+            context.ComputeShader.SetShaderResource(7,resources.OxidizerCarrierPotential.ReadView);
+            context.ComputeShader.SetUnorderedAccessView(4,resources.OxidizerCarrierPotential.WriteUnorderedView);
+            context.ComputeShader.Set(resources.OxidizerCarrierDivergenceShader);
+            context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
+            context.ComputeShader.SetUnorderedAccessView(4,null);
+            context.ComputeShader.SetShaderResource(7,null);
+            resources.OxidizerCarrierPotential.Swap();
+            context.ComputeShader.Set(resources.OxidizerCarrierJacobiShader);
+            // Reconstruct solver scratch once after loading; then converge the
+            // changing flow with a warm pressure guess, as the coarse air does.
+            int fineCarrierProjectionIterations = resources.OxidizerCarrierWarm ? 64 : 1024;
+            for(int iteration=0;iteration<fineCarrierProjectionIterations;iteration++)
+            {
+                context.ComputeShader.SetShaderResource(7,resources.OxidizerCarrierPotential.ReadView);
+                context.ComputeShader.SetUnorderedAccessView(4,resources.OxidizerCarrierPotential.WriteUnorderedView);
+                context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
+                context.ComputeShader.SetShaderResource(7,null);
+                context.ComputeShader.SetUnorderedAccessView(4,null);
+                resources.OxidizerCarrierPotential.Swap();
+            }
+            context.ComputeShader.SetShaderResource(7,resources.OxidizerCarrierPotential.ReadView);
+            resources.OxidizerCarrierWarm = true;
             context.ComputeShader.Set(resources.OxidizerFluxShader);
             context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
             // The availability output is distinct from its SRV while writing.
@@ -2869,7 +2900,7 @@ public sealed class SimulationDispatchCoordinator
             context.ComputeShader.Set(resources.OxidizerTransportShader);
         }
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-        Unbind(context, 7, 3);
+        Unbind(context, 9, 5);
         resources.Oxidizer.Swap();
     }
 

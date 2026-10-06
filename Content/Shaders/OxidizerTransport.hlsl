@@ -12,10 +12,14 @@ StructuredBuffer<float> Demand : register(t3);
 StructuredBuffer<AirCell> CarrierAir : register(t4);
 StructuredBuffer<GasMotionState> ParticleMotion : register(t5);
 StructuredBuffer<float> AvailableOxygen : register(t6);
+StructuredBuffer<float2> CarrierPotential : register(t7);
+StructuredBuffer<float4> CarrierFaces : register(t8); // velocity faces, immutable neighbour mask
 RWStructuredBuffer<float> DestinationOxygen : register(u0);
 // Canonical right/down fluxes shared by both adjacent cells.
 RWStructuredBuffer<float2> Faces : register(u1);
 RWStructuredBuffer<float> DestinationAvailable : register(u2);
+RWStructuredBuffer<float4> DestinationCarrierFaces : register(u3);
+RWStructuredBuffer<float2> DestinationPotential : register(u4);
 #define FineAirWidth OxygenWidth
 #define FineAirHeight OxygenHeight
 #define FineAirMaterialAt(p) Cells[uint((p).y) * OxygenWidth + uint((p).x)].MaterialIndex
@@ -42,6 +46,54 @@ float2 Velocity(int2 p)
     GasMotionState c = ParticleMotion[i];
     return float2(c.VelocityX,c.VelocityY);
 }
+bool CarrierBoundary(int2 p)
+{
+    return OpenEdges!=0&&(p.x==0||p.y==0||p.x+1==int(OxygenWidth));
+}
+float VolumeFace(int2 a,int2 b)
+{
+    if(!Inside(b)||Space(Index(a))==0||Space(Index(b))==0)return 0;
+    return dot(.5*(Velocity(a)+Velocity(b)),float2(b-a));
+}
+[numthreads(16,16,1)]
+void CSCarrierFaces(uint3 tid:SV_DispatchThreadID)
+{
+    int2 p=int2(tid.xy);if(!Inside(p))return;
+    uint mask=Space(Index(p))>0?16u:0u;
+    int2 ds[4]={int2(1,0),int2(-1,0),int2(0,1),int2(0,-1)};
+    [unroll]for(int k=0;k<4;k++)if(Inside(p+ds[k])&&Space(Index(p+ds[k]))>0)mask|=1u<<k;
+    if(CarrierBoundary(p))mask|=32u;
+    // Store a numeric integer, not denormal float bits: GPU arithmetic may
+    // flush asfloat(1..63) to zero and silently close every projection face.
+    DestinationCarrierFaces[Index(p)]=float4(VolumeFace(p,p+int2(1,0)),VolumeFace(p,p+int2(0,1)),float(mask),0);
+}
+[numthreads(16,16,1)]
+void CSCarrierDivergence(uint3 tid:SV_DispatchThreadID)
+{
+    int2 p=int2(tid.xy);if(!Inside(p))return;uint i=Index(p);
+    float2 f=CarrierFaces[i].xy;
+    float div=f.x+f.y-(p.x>0?CarrierFaces[i-1].x:0)-(p.y>0?CarrierFaces[i-OxygenWidth].y:0);
+    // Continue the pressure guess between ticks, as the coarse carrier does.
+    // Loading/resetting a world starts a new solve; this is solver scratch.
+    bool open=Space(i)>0&&!CarrierBoundary(p);
+    DestinationPotential[i]=float2(open&&OxygenReserved0!=0?CarrierPotential[i].x:0,open?div:0);
+}
+[numthreads(16,16,1)]
+void CSCarrierJacobi(uint3 tid:SV_DispatchThreadID)
+{
+    int2 p=int2(tid.xy);if(!Inside(p))return;uint i=Index(p);
+    // Geometry is immutable during this dispatch sequence. Cache its mask
+    // once instead of reading grid/material/filter tables for every iteration.
+    uint mask=uint(CarrierFaces[i].z);
+    if((mask&16u)==0||(mask&32u)!=0){DestinationPotential[i]=0;return;}
+    float sum=0,count=0;int2 ds[4]={int2(1,0),int2(-1,0),int2(0,1),int2(0,-1)};
+    [unroll]for(int k=0;k<4;k++)
+    {
+        if((mask&(1u<<k))!=0){sum+=CarrierPotential[Index(p+ds[k])].x;count+=1;}
+    }
+    float2 own=CarrierPotential[i];
+    DestinationPotential[i]=float2(count>0?(sum-own.y)/count:0,own.y);
+}
 float RawFace(int2 a, int2 b)
 {
     if (!Inside(b)) return 0;
@@ -60,7 +112,11 @@ float RawFace(int2 a, int2 b)
     float mixed=min(ca,cb)*(concentrationA-concentrationB);
     // Displaced excess remains real inventory and seeks adjacent free space.
     float displaced=max(0,ma-ca)-max(0,mb-cb);
-    float velocity=dot(.5*(Velocity(a)+Velocity(b)),float2(b-a));
+    // A coarse node mapped to both sides of a stair-step fuel face is not a
+    // divergence-free fine carrier. Project the same canonical faces used by
+    // stock transport; uniform fresh air must not develop a vacuum at the wall.
+    float2 face=CarrierFaces[ia].xy;
+    float velocity=(b.x!=a.x?face.x:face.y)-(CarrierPotential[ib].x-CarrierPotential[ia].x);
     float advected=velocity*(velocity>=0 ? ma : mb)*(60*OxygenDeltaTime);
     return diffusion*(mixed+displaced)+advected;
 }

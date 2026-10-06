@@ -1431,7 +1431,20 @@ float CeilingJetTangent(uint2 coordinate, float2 carrier, MaterialProperties mat
             uint path=CellKindAt(uint2(x,roof+1));
             if(path!=SimulationKindNone&&path!=SimulationKindGas) break;
             uint above=CellKindAt(uint2(x,roof));
-            if(above==SimulationKindNone||above==SimulationKindGas){exits[side]=step;break;}
+            if(above==SimulationKindNone||above==SimulationKindGas)
+            {
+                // A one-pixel notch in a rounded wall is not a riser. Keep
+                // searching along the roof until there is actual headroom,
+                // otherwise the nearest notch traps the jet in a blind pocket.
+                bool rises=true;
+                [loop] for(int rise=1;rise<=int(AirCellSize)*2&&rise<=roof+1;rise++)
+                {
+                    uint kind=CellKindAt(uint2(x,roof+1-rise));
+                    if(kind!=SimulationKindNone&&kind!=SimulationKindGas){rises=false;break;}
+                }
+                if(rises){exits[side]=step;break;}
+                continue;
+            }
             if(above!=SimulationKindSolid) break;
         }
     }

@@ -30,6 +30,7 @@ internal static class AirInventoryRegressionVerifier
             Mass=registry[id].Properties.Density,Temperature=200,Lifetime=registry[id].Properties.MaximumLifetime };
         void Upload(GridCell[] grid,float[] oxygen)
         {
+            resources.OxidizerCarrierWarm=false; // This helper installs a new test world.
             resources.Context.UpdateSubresource(grid,resources.Grid.ReadBuffer);
             resources.Context.UpdateSubresource(oxygen,resources.Oxidizer.ReadBuffer);
         }
@@ -118,14 +119,17 @@ internal static class AirInventoryRegressionVerifier
         // exhausted pocket. Reference runs share the same diffusion and walls.
         double Pocket(bool flow)
         {
-            var grid=new GridCell[w*h];var oxygen=new float[w*h];
-            for(int y=50;y<=70;y++)for(int x=30;x<=180;x++)
-                if(x==30||x==180||y==50||y==70) grid[y*w+x]=Cell(CoreMaterialIds.Metal);
-                else oxygen[y*w+x]=(x>=65&&x<80)?0:1;
+            // A through-flow channel has open ends. A constant velocity in a
+            // sealed box is not divergence-free and the fine projection must
+            // cancel it; that old fixture cannot test a sustained wind tracer.
+            var grid=new GridCell[w*h];var oxygen=Enumerable.Repeat(1f,w*h).ToArray();
+            for(int x=0;x<w;x++)
+            {grid[50*w+x]=grid[70*w+x]=Cell(CoreMaterialIds.Metal);oxygen[50*w+x]=oxygen[70*w+x]=0;}
+            for(int y=51;y<70;y++)for(int x=65;x<80;x++)oxygen[y*w+x]=0;
             Upload(grid,oxygen);var air=new AirCell[resources.AirWidth*resources.AirHeight];
             if(flow) for(int i=0;i<air.Length;i++)air[i]=new(){VelocityX=.5f};
             resources.Context.UpdateSubresource(air,resources.Air.Buffer);
-            for(int tick=0;tick<20;tick++)Tick(true);
+            for(int tick=0;tick<20;tick++)Tick(true,true);
             Balance(Sum(oxygen),flow?"advected-pocket":"diffusion-pocket");
             var stock=Oxygen();double deficit=0,weighted=0;
             for(int y=53;y<=67;y++)for(int x=45;x<140;x++)

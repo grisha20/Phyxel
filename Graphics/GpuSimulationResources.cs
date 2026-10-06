@@ -75,6 +75,12 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuStructuredBuffer<float> OxidizerDemand { get; init; }
     public required GpuStructuredBuffer<float> OxidizerAvailable { get; init; }
     public required GpuStructuredBuffer<System.Numerics.Vector2> OxidizerFlux { get; init; }
+    public required GpuStructuredBuffer<System.Numerics.Vector4> OxidizerCarrierFaces { get; init; }
+    public required GpuBufferPair<System.Numerics.Vector2> OxidizerCarrierPotential { get; init; }
+    public bool OxidizerCarrierWarm { get; set; }
+    public ComputeShader? OxidizerCarrierFacesShader { get; init; }
+    public ComputeShader? OxidizerCarrierDivergenceShader { get; init; }
+    public ComputeShader? OxidizerCarrierJacobiShader { get; init; }
     public required Buffer OxidizerConstants { get; init; }
     public required Buffer OxidizerStaging { get; init; }
     public ComputeShader? OxidizerTransportShader { get; init; }
@@ -351,6 +357,11 @@ public sealed class GpuSimulationResources : IDisposable
         OxidizerDemand.Dispose();
         OxidizerAvailable.Dispose();
         OxidizerFlux.Dispose();
+        OxidizerCarrierFaces.Dispose();
+        OxidizerCarrierPotential.Dispose();
+        OxidizerCarrierFacesShader?.Dispose();
+        OxidizerCarrierDivergenceShader?.Dispose();
+        OxidizerCarrierJacobiShader?.Dispose();
         OxidizerConstants.Dispose();
         OxidizerStaging.Dispose();
         FireGlowScratch.Dispose();

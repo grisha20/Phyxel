@@ -250,6 +250,7 @@ public sealed class SimulationStateSerializer
             throw new InvalidDataException("Размер снимка мира не совпадает с размером GPU-ресурсов.");
         }
         ValidateSnapshotSize(world);
+        resources.OxidizerCarrierWarm = false;
         Array.Clear(resources.FilterMap);resources.FilterCount=0;
         if(world.Filters is {Length:>0} filterBytes){
             MemoryMarshal.Cast<byte,uint>(filterBytes).CopyTo(resources.FilterMap);

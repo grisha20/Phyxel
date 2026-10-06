@@ -15,6 +15,9 @@ try {
   # The extra flux entry does nothing; the old physical transport still clips
   # inventory by capacity. Require a physical balance failure, not a compile error.
   $taskOld += "`n[numthreads(16,16,1)] void CSFlux(uint3 tid : SV_DispatchThreadID) { }`n"
+  foreach($taskEntry in @('CSCarrierFaces','CSCarrierDivergence','CSCarrierJacobi')){
+   $taskOld += "`n[numthreads(16,16,1)] void $taskEntry(uint3 tid : SV_DispatchThreadID) { }`n"
+  }
   [IO.File]::WriteAllText((Join-Path $taskRuntime 'Content/Shaders/OxidizerTransport.hlsl'),$taskOld,[Text.UTF8Encoding]::new($false))
   $taskExe=Join-Path $taskRuntime 'Phyxel.exe'
  }

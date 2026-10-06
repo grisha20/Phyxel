@@ -1,5 +1,14 @@
 # Зафиксированные источники паспортов
 
+RO2026-10-06: изучены FIRE.cpp, SMKE.cpp, COAL.cpp, общие Advection/
+Collision в Simulation.cpp и update_air/update_airh в Air.cpp, COOL.cpp.
+SMKE SHA256 `83C79712AFBF1F2FC4E2CFD099671A61C4B21D3DF4E441654F6EFA09FD935D86`;
+FIRE `6C50AAC477913CEFB7AE53138491210DAC93E9CE1FBE1C3A63734E1112F8AD51`,
+COAL/Air совпадают с предыдущими записями. TPT не содержит нашего поиска
+выхода у крыши и расходуемого поля O₂. Новая тонкая проекция — численный
+механизм Phyxel, не заимствованная химия или коэффициент СИ.
+[Контракт](ROOF_OUTLET_CONTRACT.md), [результаты](../ROOF_OUTLET_RESULTS.md).
+
 EL2026-10-06: повторно прочитаны COAL.cpp (создание FIRE каждый update),
 FIRE.cpp305–318 (переход горючего в FIRE), GUNP.cpp и OIL.cpp.
 Air.cpp/Boussinesq — источник температурной подъёмной силы, не нашего

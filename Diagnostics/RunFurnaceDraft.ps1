@@ -3,7 +3,7 @@ param(
  [string]$Scene='',
  [string]$OldShader='',
  [ValidateRange(1,180)][int]$Seconds=40,
- [switch]$Matrix,[switch]$Powder,[switch]$Baseline,[switch]$HeatTrace,[switch]$EmissionTrace
+ [switch]$Matrix,[switch]$Powder,[switch]$Baseline,[switch]$HeatTrace,[switch]$EmissionTrace,[switch]$OxygenTrace
 )
 $ErrorActionPreference='Stop'
 $taskRepo=Split-Path -Parent $PSScriptRoot
@@ -19,6 +19,7 @@ try {
  $env:PHYXEL_DRAFT_BASELINE=([int][bool]$Baseline).ToString()
  $env:PHYXEL_DRAFT_HEAT_TRACE=([int][bool]$HeatTrace).ToString()
  $env:PHYXEL_DRAFT_EMISSION_TRACE=([int][bool]$EmissionTrace).ToString()
+ $env:PHYXEL_DRAFT_OXYGEN_TRACE=([int][bool]$OxygenTrace).ToString()
  if($Scene){$env:PHYXEL_DRAFT_SCENE=[IO.Path]::GetFullPath($Scene,$taskRepo)}
  if($OldShader){$env:PHYXEL_DRAFT_OLD_SHADER=[IO.Path]::GetFullPath($OldShader,$taskRepo)}
  $taskProcess=Start-Process (Join-Path $taskRepo 'bin/Debug/net8.0-windows/Phyxel.exe') -WorkingDirectory $taskRepo -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput "$taskDir/run.log" -RedirectStandardError "$taskDir/error.log"
