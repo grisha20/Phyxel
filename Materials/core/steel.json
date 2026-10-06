@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "core:steel",
+  "name": {
+    "ru": "Сталь",
+    "en": "Steel"
+  },
+  "kind": "solid",
+  "flags": [
+    "movable-solid",
+    "fusion-enthalpy"
+  ],
+  "color": "#ADB8C4",
+  "physics": {
+    "density": 7.8,
+    "friction": 0.35,
+    "flowRate": 0.0
+  },
+  "thermal": {
+    "initialTemperature": 30.0,
+    "conductivity": 1.0,
+    "heatCapacity": 0.13,
+    "transitions": {
+      "above": {
+        "temperature": 1500,
+        "into": "core:molten_steel",
+        "latentHeat": 555.0
+      }
+    }
+  },
+  "ui": {
+    "order": 32,
+    "hidden": false
+  }
+}

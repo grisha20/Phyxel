@@ -204,6 +204,7 @@ public sealed class GpuSimulationResources : IDisposable
     public SharpDX.Direct3D11.Texture2D NativeReadTexture => NativePresentationTextures[1 - PresentationIndex];
     public ComputeShader? BrushShader { get; init; }
     public ComputeShader? CellularAutomataShader { get; init; }
+    public ComputeShader? LiquidSurfaceBalanceShader { get; init; }
     public ComputeShader? GasRedistributionShader { get; init; }
     public ComputeShader? SteamGasStepObserverShader { get; init; }
     public ComputeShader? SteamJetLateralObserverShader { get; init; }
@@ -307,6 +308,7 @@ public sealed class GpuSimulationResources : IDisposable
         ComponentUnionShader?.Dispose();
         ComponentInitializeShader?.Dispose();
         CellularAutomataShader?.Dispose();
+        LiquidSurfaceBalanceShader?.Dispose();
         GasRedistributionShader?.Dispose();
         SteamGasStepObserverShader?.Dispose();
         SteamJetLateralObserverShader?.Dispose();

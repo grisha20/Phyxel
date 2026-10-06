@@ -601,6 +601,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             NativePresentationTextures = nativePresentations,
             BrushShader = allocateSimulation ? CompileShader("BrushApplication.hlsl") : null,
             CellularAutomataShader = allocateSimulation ? CompileShader("CellularAutomataSolver.hlsl") : null,
+            LiquidSurfaceBalanceShader = allocateSimulation ? CompileShader("LiquidSurfaceBalance.hlsl") : null,
             GasRedistributionShader = allocateSimulation ? CompileShader("GasRedistribution.hlsl") : null,
             SteamGasStepObserverShader = allocateSimulation ? CompileShader("SteamGasStepObserver.hlsl") : null,
             SteamJetLateralObserverShader = allocateSimulation && steamJetLateralTrace

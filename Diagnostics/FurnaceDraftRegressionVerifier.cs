@@ -68,6 +68,15 @@ internal static class FurnaceDraftRegressionVerifier
             metal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal),molten=registry.GetRequiredRuntimeIndex("core:molten_metal"),
             water=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
         bool powder=Environment.GetEnvironmentVariable("PHYXEL_DRAFT_POWDER")=="1";
+        if (Environment.GetEnvironmentVariable("PHYXEL_DRAFT_WALL_ID") is { Length: > 0 } wallId)
+        {
+            uint replacement=registry.GetRequiredRuntimeIndex(wallId);
+            var cells=MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray();
+            for(int i=0;i<cells.Length;i++)
+                if(cells[i].IsActive!=0&&cells[i].MaterialIndex==metal)cells[i].MaterialIndex=replacement;
+            world=world with{Grid=MemoryMarshal.AsBytes(cells.AsSpan()).ToArray()};
+            metal=replacement;molten=registry.GetRequiredRuntimeIndex("core:molten_"+wallId.Split(':')[1]);
+        }
         if(powder)
         {
             // A bounded, explicitly edited copy of the saved geometry. This
@@ -79,6 +88,35 @@ internal static class FurnaceDraftRegressionVerifier
             world=world with{Grid=MemoryMarshal.AsBytes(cells.AsSpan()).ToArray()};
         }
         int failures=0;
+        var initialCells=MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray();
+        var poolColumns=new List<int>();
+        for(int x=190;x<510;x++)for(int y=180;y<250;y++)
+            if(initialCells[y*world.Width+x].MaterialIndex==water&&initialCells[(y+1)*world.Width+x].MaterialIndex==water&&
+                initialCells[(y+2)*world.Width+x].MaterialIndex==water){poolColumns.Add(x);break;}
+        int poolLeft=poolColumns.Count>10?poolColumns.Min()+5:230;
+        int poolRight=poolColumns.Count>10?poolColumns.Max()-5:479;
+        bool tiltPool=Environment.GetEnvironmentVariable("PHYXEL_DRAFT_TILT_POOL")=="1";
+        if(tiltPool)
+        {
+            // A controlled copy of the saved hot boiler: preserve complete
+            // water packets and their energy, rather than adding new stock.
+            int left=poolColumns.Min(),right=poolColumns.Max(),half=(right-left+1)/2,moved=0;
+            var cells=initialCells.ToArray();
+            int Top(int x)=>Enumerable.Range(180,70).First(y=>initialCells[y*world.Width+x].MaterialIndex==water&&
+                initialCells[(y+1)*world.Width+x].MaterialIndex==water&&initialCells[(y+2)*world.Width+x].MaterialIndex==water);
+            for(int d=0;d<half;d++)
+            {
+                int targetX=left+d,sourceX=right-d,targetTop=Top(targetX),sourceTop=Top(sourceX);
+                for(int offset=0;offset<10-10*d/half;offset++)
+                {
+                    int source=(sourceTop+offset)*world.Width+sourceX,target=(targetTop-1-offset)*world.Width+targetX;
+                    if(cells[source].MaterialIndex!=water||cells[target].IsActive!=0)continue;
+                    (cells[source],cells[target])=(cells[target],cells[source]);moved++;
+                }
+            }
+            world=world with{Grid=MemoryMarshal.AsBytes(cells.AsSpan()).ToArray()};
+            Console.WriteLine($"PHYXEL_DRAFT_TILT packets={moved}");
+        }
         foreach(var mode in modes)foreach(int fps in rates)
         {
             SimulationStateSerializer.Apply(loaded.State,settings);
@@ -141,14 +179,25 @@ internal static class FurnaceDraftRegressionVerifier
                         if(air[y*r.AirWidth+x].Blocked<.5){chimney-=air[y*r.AirWidth+x].VelocityY;cn++;}
                     for(int y=80;y<87;y++)for(int x=125;x<131;x++)
                         if(air[y*r.AirWidth+x].Blocked<.5){pipe+=air[y*r.AirWidth+x].VelocityX;pn++;}
+                    var surface=new List<int>();
+                    for(int x=poolLeft;x<=poolRight;x++)for(int y=180;y<250;y++)
+                    {
+                        int i=y*r.Width+x;
+                        // Bulk surface excludes one-cell condensate/droplets.
+                        if(grid[i].IsActive!=0&&grid[i].MaterialIndex==water&&grid[i+r.Width].MaterialIndex==water&&grid[i+2*r.Width].MaterialIndex==water)
+                        {surface.Add(y);break;}
+                    }
                     var row=new{mode=mode.ToString(),fps,seconds=frame/fps,mass,burning,flames,escaped,
                         chimney=chimney/Math.Max(1,cn),pipe=pipe/Math.Max(1,pn),roofT=roofT/Math.Max(1,rn),outerT=outerT/Math.Max(1,on),
                         waterMass,waterMean=waterHeat/Math.Max(.00001,waterMass),minWater,maxWater,waterLatent,boilingCells,
+                        surfaceRange=surface.Count>0?surface.Max()-surface.Min():-1,surfaceColumns=surface.Count,
                         maxAirK=heat.Where(s=>s.Y>0).Max(s=>(double)s.X/s.Y),
                         minAirK=heat.Where(s=>s.Y>0).Min(s=>(double)s.X/s.Y)};
                     thermalBounded &= heat.All(s=>float.IsFinite(s.X)&&float.IsFinite(s.Y)&&s.X>=0&&s.Y>=0&&
                         (s.Y==0?s.X==0:float.IsFinite(s.X/s.Y)&&s.X/s.Y<=5273.3f));
                     rows.Add(row);Console.WriteLine("PHYXEL_DRAFT "+JsonSerializer.Serialize(row));
+                    if(tiltPool&&frame==fps*20&&
+                        (row.surfaceRange>1||row.surfaceColumns!=poolRight-poolLeft+1))failures++;
                     if(frame==fps*seconds)
                     {
                         // Original user state is used for draft acceptance.
@@ -158,6 +207,7 @@ internal static class FurnaceDraftRegressionVerifier
                             (row.chimney>=1&&row.pipe<0&&row.roofT>110&&mass<initialMass&&escaped>0));
                         if(Environment.GetEnvironmentVariable("PHYXEL_DRAFT_BOILER")=="1")
                             acceptance &= seconds>=120&&row.waterMean>=95&&row.waterLatent>=2256&&row.waterMass<initialWaterMass;
+                        if(tiltPool)acceptance &= seconds>=20&&row.surfaceRange<=1&&row.surfaceColumns==poolRight-poolLeft+1;
                         if(!acceptance)failures++;
                         Console.WriteLine("PHYXEL_DRAFT_ACCEPTANCE "+JsonSerializer.Serialize(new{mode=mode.ToString(),fps,powder,acceptance,thermalBounded}));
                     }
@@ -217,6 +267,28 @@ internal static class FurnaceDraftRegressionVerifier
             settings.Paused=true;
             coordinator.DispatchFrame(settings,[],1f/fps);
             if(!AirInventoryRegressionVerifier.Read(r,r.AirThermal.Buffer).AsSpan().SequenceEqual(snapshot.AirThermal))throw new InvalidDataException("Pause changed carrier heat.");
+            // Apply the decoded world too; a successful byte round trip alone
+            // does not prove that liquid/air activity resumes after loading.
+            serializer.ApplyWorldSnapshot(r,roundTrip);
+            coordinator.RestoreWorldActivity(r,true,true,settings.HydraulicPressure,true);
+            settings.Paused=false;
+            for(int frame=0;frame<fps*20;frame++)
+            {
+                coordinator.DispatchFrame(settings,[],1f/fps);
+                if(frame%8==0)yield return r;
+            }
+            var resumedAir=MemoryMarshal.Cast<byte,AirCell>(AirInventoryRegressionVerifier.Read(r,r.Air.Buffer)).ToArray();
+            var resumedHeat=MemoryMarshal.Cast<byte,System.Numerics.Vector2>(AirInventoryRegressionVerifier.Read(r,r.AirThermal.Buffer)).ToArray();
+            double resumedUp=0,resumedPipe=0;int resumedCount=0,resumedPipeCount=0;
+            for(int y=20;y<65;y++)for(int x=39;x<46;x++)
+                if(resumedAir[y*r.AirWidth+x].Blocked<.5){resumedUp-=resumedAir[y*r.AirWidth+x].VelocityY;resumedCount++;}
+            for(int y=80;y<87;y++)for(int x=125;x<131;x++)
+                if(resumedAir[y*r.AirWidth+x].Blocked<.5){resumedPipe+=resumedAir[y*r.AirWidth+x].VelocityX;resumedPipeCount++;}
+            resumedUp/=Math.Max(1,resumedCount);resumedPipe/=Math.Max(1,resumedPipeCount);
+            bool resumePass=resumedUp>=1&&resumedPipe<0&&resumedHeat.All(s=>float.IsFinite(s.X)&&float.IsFinite(s.Y)&&s.X>=0&&s.Y>=0&&
+                (s.Y==0?s.X==0:float.IsFinite(s.X/s.Y)&&s.X/s.Y<=5273.3f));
+            Console.WriteLine("PHYXEL_DRAFT_RESUME "+JsonSerializer.Serialize(new{mode=mode.ToString(),fps,seconds=20,chimney=resumedUp,pipe=resumedPipe,pass=resumePass}));
+            if(!resumePass && !powder && seconds>=40)failures++;
         }
         File.WriteAllText(Path.Combine(dir,"measurements.json"),JsonSerializer.Serialize(rows,new JsonSerializerOptions{WriteIndented=true}));
         if(failures>0&&Environment.GetEnvironmentVariable("PHYXEL_DRAFT_BASELINE")!="1")

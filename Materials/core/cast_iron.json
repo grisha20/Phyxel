@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "core:cast_iron",
+  "name": {
+    "ru": "Чугун",
+    "en": "Cast Iron"
+  },
+  "kind": "solid",
+  "flags": [
+    "movable-solid",
+    "fusion-enthalpy"
+  ],
+  "color": "#61666B",
+  "physics": {
+    "density": 7.2,
+    "friction": 0.35,
+    "flowRate": 0.0
+  },
+  "thermal": {
+    "initialTemperature": 30.0,
+    "conductivity": 0.8,
+    "heatCapacity": 0.13,
+    "transitions": {
+      "above": {
+        "temperature": 1200,
+        "into": "core:molten_cast_iron",
+        "latentHeat": 444.0
+      }
+    }
+  },
+  "ui": {
+    "order": 34,
+    "hidden": false
+  }
+}

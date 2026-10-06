@@ -11,6 +11,7 @@ namespace Phyxel.Graphics;
 
 public sealed class SimulationDispatchCoordinator
 {
+    private readonly bool enablePoolSurfaceBalance = Environment.GetEnvironmentVariable("PHYXEL_DISABLE_POOL_BALANCE") != "1";
     public const float FixedThermalStep = 0.05f;
     public const double FixedGasStep = 1d / 120d;
 
@@ -1471,6 +1472,12 @@ public sealed class SimulationDispatchCoordinator
                 }
                 UpdateConstants(context, resources, ref constants);
                 context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
+                if (phase == 58 && enablePoolSurfaceBalance)
+                {
+                    context.ComputeShader.Set(resources.LiquidSurfaceBalanceShader);
+                    context.Dispatch(1, 1, 1);
+                    context.ComputeShader.Set(resources.CellularAutomataShader);
+                }
             }
             constants.FrameIndex=previousFrame;
             constants.DeltaTime=previousDelta;

@@ -3,7 +3,8 @@ param(
  [string]$Scene='',
  [string]$OldShader='',
  [ValidateRange(1,180)][int]$Seconds=40,
- [switch]$Matrix,[switch]$Powder,[switch]$Baseline,[switch]$HeatTrace,[switch]$EmissionTrace,[switch]$OxygenTrace,[switch]$SurfaceTrace,[switch]$BulkTrace,[switch]$Boiler
+ [switch]$Matrix,[switch]$Powder,[switch]$Baseline,[switch]$HeatTrace,[switch]$EmissionTrace,[switch]$OxygenTrace,[switch]$SurfaceTrace,[switch]$BulkTrace,[switch]$Boiler,
+ [string]$WallId='', [switch]$NoPoolBalance, [switch]$TiltPool
 )
 $ErrorActionPreference='Stop'
 $taskRepo=Split-Path -Parent $PSScriptRoot
@@ -23,6 +24,9 @@ try {
  $env:PHYXEL_DRAFT_SURFACE_TRACE=([int][bool]$SurfaceTrace).ToString()
  $env:PHYXEL_DRAFT_BULK_TRACE=([int][bool]$BulkTrace).ToString()
  $env:PHYXEL_DRAFT_BOILER=([int][bool]$Boiler).ToString()
+ if($NoPoolBalance){$env:PHYXEL_DISABLE_POOL_BALANCE='1'}
+ if($TiltPool){$env:PHYXEL_DRAFT_TILT_POOL='1'}
+ if($WallId){$env:PHYXEL_DRAFT_WALL_ID=$WallId}
  if($Scene){$env:PHYXEL_DRAFT_SCENE=[IO.Path]::GetFullPath($Scene,$taskRepo)}
  if($OldShader){$env:PHYXEL_DRAFT_OLD_SHADER=[IO.Path]::GetFullPath($OldShader,$taskRepo)}
  $taskProcess=Start-Process (Join-Path $taskRepo 'bin/Debug/net8.0-windows/Phyxel.exe') -WorkingDirectory $taskRepo -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput "$taskDir/run.log" -RedirectStandardError "$taskDir/error.log"

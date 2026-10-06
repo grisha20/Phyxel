@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "id": "core:molten_cast_iron",
+  "name": {
+    "ru": "Расплавленный чугун",
+    "en": "Molten Cast Iron"
+  },
+  "kind": "liquid",
+  "flags": [
+    "fusion-enthalpy",
+    "non-absorbable-liquid"
+  ],
+  "color": "#EF842F",
+  "physics": {
+    "density": 6.8,
+    "friction": 0.55,
+    "flowRate": 0.34
+  },
+  "thermal": {
+    "initialTemperature": 1250,
+    "conductivity": 0.6,
+    "heatCapacity": 0.5,
+    "transitions": {
+      "below": {
+        "temperature": 1150,
+        "into": "core:cast_iron"
+      }
+    }
+  },
+  "ui": {
+    "order": 35,
+    "hidden": true
+  }
+}

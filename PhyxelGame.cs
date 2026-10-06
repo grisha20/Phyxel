@@ -256,6 +256,18 @@ public sealed class PhyxelGame : Game
             Exit();
             return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_ALLOYS") == "1")
+        {
+            try { AlloyRegressionVerifier.Run(dispatchCoordinator, materialRegistry, GraphicsDevice); }
+            catch (Exception e) { Console.WriteLine($"PHYXEL_ALLOY_FAILED {e}"); Environment.ExitCode=1; }
+            Exit(); return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_POOL_LEVEL") == "1")
+        {
+            try { PoolLevelRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch (Exception e) { Console.WriteLine($"PHYXEL_POOL_FAILED {e}"); Environment.ExitCode=1; }
+            Exit(); return;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_METAL_FUSION") == "1")
         {
             try { MetalFusionRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }
