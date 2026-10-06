@@ -2873,7 +2873,7 @@ public sealed class SimulationDispatchCoordinator
         resources.Oxidizer.Swap();
     }
 
-    private void DispatchCombustion(
+    internal void DispatchCombustion(
         GpuSimulationResources resources,
         float elapsedSeconds,
         bool measure,
@@ -2894,6 +2894,10 @@ public sealed class SimulationDispatchCoordinator
         DeviceContext context = resources.Context;
         context.ClearUnorderedAccessView(resources.CombustionSummary.UnorderedView, new RawInt4(0, 0, 0, 0));
         context.ClearUnorderedAccessView(resources.EmissionClaims.UnorderedView, new RawInt4(-1, -1, -1, -1));
+        // Requests combine dry-host and pore reactions within this tick only.
+        // Keeping them across ticks inflated gas mass and pinned flame births
+        // to an old destination after the exposed surface changed.
+        context.ClearUnorderedAccessView(resources.EmissionRequests.UnorderedView, new RawInt4());
         context.ClearUnorderedAccessView(resources.OxidizerDemand.UnorderedView, new RawInt4());
         if (measure)
         {

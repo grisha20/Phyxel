@@ -1,5 +1,15 @@
 # Зафиксированные источники паспортов
 
+EL2026-10-06: повторно прочитаны COAL.cpp (создание FIRE каждый update),
+FIRE.cpp305–318 (переход горючего в FIRE), GUNP.cpp и OIL.cpp.
+Air.cpp/Boussinesq — источник температурной подъёмной силы, не нашего
+предела.12. SHA256 COAL `2261ABCE0A4BBA035CEE73C5672AFC04E58494C6AF76BDE7B418B253B9342027`,
+OIL `6BE34A5EADCE7B9C6F6261DF91D1A7C82C76B1D60A6590E95B7C8627F5BA064E`;
+FIRE/GUNP/Air совпадают с предыдущими записями. TPT не имеет нашего буфера
+EmissionRequests; его очистка и предел тяги — решения Phyxel, не числа СИ.
+`git blame` связывает межшаговое объединение с `5ee53a9b`.
+[Контракт](EMISSION_LIFETIME_CONTRACT.md), [результаты](../FURNACE_EMISSION_RESULTS.md).
+
 FD2026-10-06: Air.cpp/update_airh и Boussinesq повторно прочитаны;
 SHA256 `2CA962692CB266601CB2A862010A0521A039221C3ECFE75795C89A5356A64D1F`.
 FIRE.cpp (`6C50AAC477913CEFB7AE53138491210DAC93E9CE1FBE1C3A63734E1112F8AD51`),

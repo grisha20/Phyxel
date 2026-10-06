@@ -403,7 +403,7 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
     float carrierOverheat = thermal.y > 1e-8 ? max(0, thermal.x / thermal.y - 273.15 - AirAmbientTemperature) : 0;
     // Finite stock carries chimney heat even after the flame has decayed.
     // Calibrate the whole heated circuit, not just the local particle plume.
-    float convection = min(AirSandboxMode != 0 ? AirConvectionMaximum : 0.08,
+    float convection = min(AirSandboxMode != 0 ? AirConvectionMaximum : 0.12,
         (AirSandboxMode != 0 ? meanOverheat : carrierOverheat) / AirConvectionDivisor);
     convection *= transientCount>0 ? AirTransientConvectionGain : 1.0;
     cell.VelocityY = clamp(

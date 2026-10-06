@@ -23,6 +23,15 @@ internal static class FurnaceDraftRegressionVerifier
         Directory.CreateDirectory(dir);
         string path=Environment.GetEnvironmentVariable("PHYXEL_DRAFT_SCENE")??Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Phyxel","Начало паровая печь.json");
+        if(Environment.GetEnvironmentVariable("PHYXEL_DRAFT_EMISSION_TRACE")=="1")
+        {
+            // The isolated production probes do not require the user's files.
+            settings.Width=672;settings.Height=394;settings.Paused=true;
+            var r=coordinator.DispatchFrame(settings,[new(){X=20,Y=20,Radius=1,Density=1,
+                MaterialIndex=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal)}],0);
+            TraceEmissionLifetime(r,coordinator,registry,dir);
+            Console.WriteLine("PHYXEL_DRAFT_COMPLETE");yield return r;yield break;
+        }
         var serializer=new SimulationStateSerializer();
         var loaded=System.Threading.Tasks.Task.Run(()=>serializer.LoadAsync(path,registry)).GetAwaiter().GetResult()!;
         var world=loaded.World!;
@@ -176,6 +185,54 @@ internal static class FurnaceDraftRegressionVerifier
         if(failures>0&&Environment.GetEnvironmentVariable("PHYXEL_DRAFT_BASELINE")!="1")
             throw new InvalidDataException($"Furnace draft acceptance failed: {failures}.");
         Console.WriteLine("PHYXEL_DRAFT_COMPLETE");
+    }
+
+    private static void TraceEmissionLifetime(GpuSimulationResources r,SimulationDispatchCoordinator coordinator,
+        MaterialRegistry registry,string dir)
+    {
+        // Call the production reaction/resolve/lifecycle sequence. Older
+        // shader-only probes cleared requests themselves and hid this bug.
+        int w=r.Width,n=w*r.Height,i=80*w+80;
+        uint coal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal),metal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal),
+            fire=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire),oil=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Oil);
+        var emissions=registry.CreateEmissionGpuTable();var testEmissions=(MaterialEmissionProperties[])emissions.Clone();
+        testEmissions[coal].FlameRate=60; // deterministic births for a moving surface
+        r.Emissions.Upload(r.Context,testEmissions);
+        var rows=new List<object>();int failures=0;
+        void ResetRequests()=>r.Context.ClearUnorderedAccessView(r.EmissionRequests.UnorderedView,new SharpDX.Mathematics.Interop.RawInt4());
+        EmissionRequest[] Step(bool blocker=false,bool absorbed=false,bool cold=false)
+        {
+            var grid=new GridCell[n];
+            grid[i]=new(){IsActive=1,MaterialIndex=coal,Mass=10,Temperature=cold?30:600,Lifetime=cold?0:1,
+                FuelMass=absorbed?.2f:0,RetainedLiquidMaterialIndex=absorbed?oil:0};
+            if(blocker)grid[i-w-1]=new(){IsActive=1,MaterialIndex=metal,Mass=7.8f,Temperature=30};
+            r.Context.UpdateSubresource(grid,r.Grid.ReadBuffer);
+            coordinator.DispatchCombustion(r,1f/60,false,false,false,false);
+            return MemoryMarshal.Cast<byte,EmissionRequest>(AirInventoryRegressionVerifier.Read(r,r.EmissionRequests.Buffer)).ToArray();
+        }
+        void Check(string test,bool pass,object evidence)
+        {if(!pass)failures++;var row=new{test,pass,evidence};rows.Add(row);Console.WriteLine("PHYXEL_DRAFT_EMISSIONS "+JsonSerializer.Serialize(row));}
+        try
+        {
+            ResetRequests();var masses=new List<float>();
+            for(int tick=0;tick<12;tick++)masses.Add(Step()[2*n+i].Mass);
+            float expected=emissions[coal].GasRate/60;
+            Check("repeated-gas-budget",masses.All(m=>Math.Abs(m-expected)<1e-7),new{expected,masses});
+            ResetRequests();uint first=Step()[i].DestinationIndex,second=Step(blocker:true)[i].DestinationIndex;
+            var after=MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer)).ToArray();
+            var actualEmission=MemoryMarshal.Cast<byte,MaterialEmissionProperties>(AirInventoryRegressionVerifier.Read(r,r.Emissions.Buffer)).ToArray()[coal];
+            Check("redirect-after-obstacle",first==(uint)(i-w-1)&&second==(uint)(i-w)&&after[i-w].MaterialIndex==fire,
+                new{first,second,expected=(uint)(i-w),actualMaterial=after[i-w].MaterialIndex,fire,
+                    flameRate=actualEmission.FlameRate,flameInto=actualEmission.FlameIntoMaterialIndex});
+            ResetRequests();var combined=new[]{Step(absorbed:true)[n+i].Mass,Step(absorbed:true)[n+i].Mass};
+            float combinedExpected=(emissions[coal].SmokeRate+emissions[oil].SmokeRate)/60;
+            Check("host-and-pore-same-tick",combined.All(m=>Math.Abs(m-combinedExpected)<1e-7),new{combinedExpected,combined});
+            var cold=Step(cold:true);
+            Check("inactive-source-no-requests",new[]{cold[i],cold[n+i],cold[2*n+i]}.All(q=>q.Mass==0),new{masses=new[]{cold[i].Mass,cold[n+i].Mass,cold[2*n+i].Mass}});
+            File.WriteAllText(Path.Combine(dir,"emission-lifetime.json"),JsonSerializer.Serialize(rows,new JsonSerializerOptions{WriteIndented=true}));
+            if(failures>0&&Environment.GetEnvironmentVariable("PHYXEL_DRAFT_BASELINE")!="1")throw new InvalidDataException($"Emission lifetime failures: {failures}.");
+        }
+        finally{r.Emissions.Upload(r.Context,emissions);}
     }
 
     private static void TraceExteriorHeat(GpuSimulationResources r,SimulationDispatchCoordinator coordinator,
