@@ -144,8 +144,15 @@ float ContactHeatFlow(
     float exchangeFraction = min(
         MaximumExchangeFraction,
         ThermalExchangeRate * ThermalDeltaTime);
+    // For stronger solids, reserve additional budget for interior exchange.
+    // max(kA,kB) makes the contact limit symmetric. Adjacent + interior
+    // budgets still sum to <=1, so a dense plate cannot overshoot its inputs.
+    float boundedExchange = contactConductivity * exchangeFraction;
+    float maximumConductivity = max(conductivityA, conductivityB);
+    if (maximumConductivity > 1)
+        boundedExchange = min(MaximumExchangeFraction - .20 * saturate(maximumConductivity - 1), boundedExchange);
     float edgeCoefficient =
-        min(capacity, neighborCapacity) * contactConductivity * exchangeFraction *
+        min(capacity, neighborCapacity) * boundedExchange *
         contactWeight / (gasSurface ? 6 : 4);
     return edgeCoefficient * (neighbor.Temperature - cell.Temperature);
 }
@@ -229,6 +236,8 @@ float BulkHeatFlow(GridCell cell, uint2 coordinate)
         degree == 0) return 0;
     float conductivity = pow(saturate((material.ThermalConductivity - .5) * 2), 2);
     float fraction = min(.20, 4.0 * ThermalDeltaTime) * conductivity;
+    if (material.ThermalConductivity > 1)
+        fraction = min(.20 * material.ThermalConductivity, 4.0 * ThermalDeltaTime * material.ThermalConductivity);
     float heat = 0;
     [unroll] for (int direction = 0; direction < 4; direction++)
     {
@@ -243,7 +252,7 @@ float BulkHeatFlow(GridCell cell, uint2 coordinate)
             if (other.IsActive == 0 || other.MaterialIndex != cell.MaterialIndex) continue;
             if (otherDegree == 0 || abs(other.Temperature - cell.Temperature) < .000001) continue;
             // max(endpoint degrees) is symmetric, while each endpoint's
-            // incident sum is <= its .20 budget even in a thin painted plate.
+            // incident sum is <= its bounded interior budget.
             if (HasBulkPath(int2(coordinate), p, cell.MaterialIndex)) heat +=
                 fraction / max(degree, otherDegree) * min(EffectiveCapacity(cell), EffectiveCapacity(other)) *
                 (other.Temperature - cell.Temperature);

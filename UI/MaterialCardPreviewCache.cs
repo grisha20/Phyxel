@@ -58,8 +58,9 @@ public sealed class MaterialCardPreviewCache : IDisposable
 
         previews["core:steel"] = CreateAlloyPreview(graphicsDevice, false);
         previews["core:cast_iron"] = CreateAlloyPreview(graphicsDevice, true);
+        previews["core:copper"] = CreateAlloyPreview(graphicsDevice, false, copper: true);
         Console.WriteLine(
-            $"PHYXEL_UI_PREVIEWS loaded={previews.Count} expected={PreviewFileNames.Count + 2} directory={previewDirectory}");
+            $"PHYXEL_UI_PREVIEWS loaded={previews.Count} expected={PreviewFileNames.Count + 3} directory={previewDirectory}");
     }
 
     public Texture2D FallbackTexture { get; }
@@ -93,8 +94,8 @@ public sealed class MaterialCardPreviewCache : IDisposable
         return texture;
     }
 
-    // Native textures: brushed steel and a dark, granular cast surface.
-    private static Texture2D CreateAlloyPreview(GraphicsDevice device, bool castIron)
+    // Native textures: brushed steel/copper and a dark, granular cast surface.
+    private static Texture2D CreateAlloyPreview(GraphicsDevice device, bool castIron, bool copper = false)
     {
         const int width = 256, height = 160;
         var texture = new Texture2D(device, width, height, false, SurfaceFormat.Color);
@@ -108,7 +109,9 @@ public sealed class MaterialCardPreviewCache : IDisposable
             float shine = MathF.Max(0, 1 - MathF.Abs((x + .7f * y) / width - .65f));
             int value = castIron ? 75 + grain + (int)(shine * 15) :
                 125 + grain / 3 + (y % 3 == 0 ? -8 : 0) + (int)(shine * 78);
-            pixels[y * width + x] = new Color(value, value + (castIron ? 2 : 5), value + (castIron ? 4 : 12));
+            pixels[y * width + x] = copper
+                ? new Color(Math.Min(255, value + 40), value * 2 / 3, value / 3)
+                : new Color(value, value + (castIron ? 2 : 5), value + (castIron ? 4 : 12));
         }
         texture.SetData(pixels);
         return texture;

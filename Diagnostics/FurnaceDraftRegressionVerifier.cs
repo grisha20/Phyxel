@@ -142,7 +142,10 @@ internal static class FurnaceDraftRegressionVerifier
             serializer.ApplyWorldSnapshot(r,world);coordinator.RestoreWorldActivity(r,true,true,false,true);
             settings.Paused=false;frameRate(100);
             yield return r;
-            double initialMass=MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray().Where(c=>c.IsActive!=0&&c.MaterialIndex==coal).Sum(c=>(double)c.Mass);
+            uint stoneCoal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.StoneCoal);
+            bool IsCoalFuel(uint material)=>material==coal||material==stoneCoal;
+            double initialMass=MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray().Where(c=>c.IsActive!=0&&IsCoalFuel(c.MaterialIndex)).Sum(c=>(double)c.Mass);
+            Console.WriteLine(FormattableString.Invariant($"PHYXEL_DRAFT_FUEL initialCoalMass={initialMass:F6}"));
             double initialWaterMass=MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray().Where(c=>c.IsActive!=0&&c.MaterialIndex==water).Sum(c=>(double)c.Mass);
             bool thermalBounded=true,acceptance=false;
             for(int frame=0;frame<=fps*seconds;frame++)
@@ -159,7 +162,7 @@ internal static class FurnaceDraftRegressionVerifier
                     for(int y=0;y<r.Height;y++)for(int x=0;x<r.Width;x++)
                     {
                         var c=grid[y*r.Width+x];if(c.IsActive==0)continue;
-                        if(c.MaterialIndex==coal){mass+=c.Mass;if(c.Lifetime>0)burning++;}
+                        if(IsCoalFuel(c.MaterialIndex)){mass+=c.Mass;if(c.Lifetime>0)burning++;}
                         if(c.MaterialIndex==fire)flames++;
                         if(c.MaterialIndex==water)
                         {

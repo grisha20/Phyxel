@@ -18,7 +18,7 @@ public sealed class MaterialRegistry
     public const float MinimumInitialTemperature = -273.15f;
     public const float MaximumInitialTemperature = 5000f;
     public const float MinimumThermalConductivity = 0f;
-    public const float MaximumThermalConductivity = 1f;
+    public const float MaximumThermalConductivity = 2f;
     public const float MinimumHeatCapacity = 0.01f;
     public const float MaximumHeatCapacity = 100f;
     public const float MaximumCombustionBurnRate = 100f;

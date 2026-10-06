@@ -4,7 +4,7 @@
 прежние числа−20/20/100 ниже относятся к опыту до добавления фаз.
 Текущий verifier сравнивает жидкие19/50/100°C при прежних критериях
 отношения>1.3, упорядоченности и FPS≤25%. [Текущие измерения и
-сохранённый старый FAIL](WATER_LEVEL_RESULTS.md).
+сохранённый старый FAIL](materials/water/WATER_LEVEL_RESULTS.md).
 
 Выбранный этап LT01–LT04. [Контракт до физики](materials/shared/LIQUID_TEMPERATURE_CONTRACT.md),
 [GPU verifier](../Diagnostics/LiquidTemperatureRegressionVerifier.cs),

@@ -1,5 +1,7 @@
 # Зафиксированные источники паспортов
 
+CU2026-10-06: NIST ITS-90/JANAF и технический лист C103/CW008A; источники разделены от игровых k/c/L в [паспорте меди](../copper/PASSPORT.md). В локальном TPT отдельный COPR/copper не найден, прочитаны METL/LAVA и общий возврат ctype в Simulation.cpp2520–2680. Реестр29 ID,435 пар; [контракт](COPPER_HEAT_CONTRACT.md), [новые результаты](../copper/RESULTS.md).
+
 MA/PL2026-10-06: прочитаны METL/IRON/LAVA и Simulation.cpp2618–2680 (ctype), WATR/Simulation3129–3240 (жидкостный поиск). Числа новых металлов — игровая модель, пороги ориентируются на SSAB/KOBELCO. Источники/SHA в [паспорте стали](../steel/PASSPORT.md); контракты новых проверок в [MA](ALLOYS_CONTRACT.md) и [PL](POOL_LEVEL_CONTRACT.md); результаты [MA](../../ALLOYS_RESULTS.md)/[PL](../../POOL_LEVEL_RESULTS.md).
 
 BW2026-10-06: METL/WATR/COAL и Simulation.cpp2427–2505 изучены для

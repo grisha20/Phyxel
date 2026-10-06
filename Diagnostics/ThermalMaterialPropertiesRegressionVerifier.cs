@@ -46,8 +46,20 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
             0.03f, 0.005f, 1.20f, "#A0A0FFFF", 122f, 0.04f, 2.08f),
         new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid | MaterialFlags.FusionEnthalpy,
             7.8f, 0.35f, 0f, "#8E9CA6", 30f, 1f, 0.13f),
-        new("core:molten_metal", MaterialSimulationKind.Liquid, MaterialFlags.FusionEnthalpy,
+        new("core:molten_metal", MaterialSimulationKind.Liquid, MaterialFlags.FusionEnthalpy | MaterialFlags.NonAbsorbableLiquid,
             7f, 0.55f, 0.34f, "#FF7A1E", 1050f, 0.60f, 0.50f),
+        new("core:steel", MaterialSimulationKind.Solid, MaterialFlags.MovableSolid | MaterialFlags.FusionEnthalpy,
+            7.8f, .35f, 0f, "#ADB8C4", 30f, 1f, .13f),
+        new("core:molten_steel", MaterialSimulationKind.Liquid, MaterialFlags.FusionEnthalpy | MaterialFlags.NonAbsorbableLiquid,
+            7f, .55f, .34f, "#FFAA46", 1550f, .6f, .5f),
+        new("core:cast_iron", MaterialSimulationKind.Solid, MaterialFlags.MovableSolid | MaterialFlags.FusionEnthalpy,
+            7.2f, .35f, 0f, "#61666B", 30f, .8f, .13f),
+        new("core:molten_cast_iron", MaterialSimulationKind.Liquid, MaterialFlags.FusionEnthalpy | MaterialFlags.NonAbsorbableLiquid,
+            6.8f, .55f, .34f, "#EF842F", 1250f, .6f, .5f),
+        new("core:copper", MaterialSimulationKind.Solid, MaterialFlags.MovableSolid | MaterialFlags.FusionEnthalpy,
+            8.9f, .35f, 0f, "#C98043", 30f, 2f, .1f),
+        new("core:molten_copper", MaterialSimulationKind.Liquid, MaterialFlags.FusionEnthalpy | MaterialFlags.NonAbsorbableLiquid,
+            8f, .55f, .34f, "#FF9740", 1135f, .6f, .5f),
         new(CoreMaterialIds.Stone, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
             9.2f, 0.75f, 0f, "#5C6065", 30f, 0.25f, 0.84f),
         new(CoreMaterialIds.Fixture, MaterialSimulationKind.Solid, MaterialFlags.BlocksAir,
@@ -254,7 +266,9 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
 
     private static void VerifyCoreMaterials(MaterialRegistry registry)
     {
-        Require(ExpectedCoreMaterials.Length == 23, "Expected bundled material count changed.");
+        Require(ExpectedCoreMaterials.Select(m=>m.Id).ToHashSet().SetEquals(
+            registry.Materials.Where(m=>m.Id.StartsWith("core:",StringComparison.Ordinal)).Select(m=>m.Id)),
+            "Bundled material property coverage changed.");
         foreach (ExpectedMaterial expected in ExpectedCoreMaterials)
         {
             MaterialDefinition actual = registry[expected.Id];
@@ -396,6 +410,26 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
                     Same(properties.TransitionAboveTemperature, 1000f) &&
                     properties.TransitionAboveMaterialIndex == registry["core:molten_metal"].RuntimeIndex,
                     "core:metal melting transition changed.");
+                break;
+            case "core:steel":
+            case "core:cast_iron":
+            case "core:copper":
+                float melting=id=="core:steel"?1500f:id=="core:cast_iron"?1200f:1085f;
+                float latent=id=="core:steel"?555f:id=="core:cast_iron"?444f:434f;
+                Require(properties.TransitionBelowMaterialIndex == uint.MaxValue &&
+                    Same(properties.TransitionAboveTemperature, melting) &&
+                    Same(properties.TransitionAboveLatentHeat, latent) &&
+                    properties.TransitionAboveMaterialIndex == registry["core:molten_"+id.Split(':')[1]].RuntimeIndex,
+                    "Metal melting contract changed: "+id);
+                break;
+            case "core:molten_steel":
+            case "core:molten_cast_iron":
+            case "core:molten_copper":
+                float freezing=id=="core:molten_steel"?1450f:id=="core:molten_cast_iron"?1150f:1035f;
+                Require(properties.TransitionAboveMaterialIndex == uint.MaxValue &&
+                    Same(properties.TransitionBelowTemperature, freezing) &&
+                    properties.TransitionBelowMaterialIndex == registry[id.Replace("molten_","")].RuntimeIndex,
+                    "Metal freezing contract changed: "+id);
                 break;
             case "core:molten_metal":
                 Require(properties.TransitionAboveMaterialIndex == uint.MaxValue &&
@@ -556,7 +590,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
                 "{ \"initialTemperature\": -273.15, \"conductivity\": 0.0, \"heatCapacity\": 0.01 }"),
             ["maximums.json"] = CreateMaterialJson(
                 "test:thermal_maximums",
-                "{ \"initialTemperature\": 5000.0, \"conductivity\": 1.0, \"heatCapacity\": 100.0 }"),
+                "{ \"initialTemperature\": 5000.0, \"conductivity\": 2.0, \"heatCapacity\": 100.0 }"),
             ["nan.json"] = CreateMaterialJson(
                 "test:nan",
                 "{ \"initialTemperature\": NaN, \"conductivity\": 0.15, \"heatCapacity\": 1.0 }"),
@@ -574,7 +608,7 @@ internal static class ThermalMaterialPropertiesRegressionVerifier
                 "{ \"initialTemperature\": 20.0, \"conductivity\": -0.01, \"heatCapacity\": 1.0 }"),
             ["conductivity-high.json"] = CreateMaterialJson(
                 "test:conductivity_high",
-                "{ \"initialTemperature\": 20.0, \"conductivity\": 1.01, \"heatCapacity\": 1.0 }"),
+                "{ \"initialTemperature\": 20.0, \"conductivity\": 2.01, \"heatCapacity\": 1.0 }"),
             ["heat-capacity-zero.json"] = CreateMaterialJson(
                 "test:heat_capacity_zero",
                 "{ \"initialTemperature\": 20.0, \"conductivity\": 0.15, \"heatCapacity\": 0.0 }"),
