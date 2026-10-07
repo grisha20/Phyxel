@@ -15,20 +15,6 @@ internal static class UiFilterCardRenderer
         _ => FilterRules.Label(brush, "")
     };
 
-    internal static string CardTitle(FilterSelection brush) => brush switch
-    {
-        FilterSelection.Steam => "Только\nпар",
-        FilterSelection.Water => "Только\nвода",
-        FilterSelection.Oil => "Только\nмасло",
-        FilterSelection.Gases => "Все\nгазы",
-        FilterSelection.Liquids => "Все\nжидкости",
-        FilterSelection.Powders => "Все\nпорошки",
-        FilterSelection.SelectedMaterial => "Выбранный\nвид",
-        FilterSelection.AirOnly => "Только\nвоздух",
-        FilterSelection.NoAir => "Без\nвоздуха",
-        _ => "Стенка"
-    };
-
     internal static string Description(FilterSelection brush) => brush switch
     {
         FilterSelection.Wall => "Блокирует частицы и фоновый воздух",

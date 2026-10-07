@@ -18,6 +18,7 @@ public sealed class UiCategoryPalette
     private readonly MaterialCardPreviewCache previewCache;
     private MaterialCategoryType activeCategory = MaterialCategoryType.Powders;
     private int scrollOffset;
+    private FilterSelection? pendingFilterSelection;
     internal FilterSelection? ClickedFilter { get; private set; }
     private FilterSelection? hoveredFilter;
     internal FilterSelection? HoveredFilter => hoveredFilter;
@@ -26,7 +27,7 @@ public sealed class UiCategoryPalette
     internal void ShowFilters(FilterSelection selection = FilterSelection.Steam)
     {
         if (activeCategory != MaterialCategoryType.Filters)
-            scrollOffset = (int)selection * (FilterCardWidth + FilterCardGap);
+            pendingFilterSelection = selection;
         activeCategory = MaterialCategoryType.Filters;
     }
     private ushort? hoveredMaterial;
@@ -144,6 +145,7 @@ public sealed class UiCategoryPalette
             {
                 activeCategory = cat.Type;
                 scrollOffset = 0;
+                pendingFilterSelection = null;
             }
 
             tabX += tabWidth + tabGap;
@@ -391,36 +393,44 @@ public sealed class UiCategoryPalette
         }
     }
 
-    private const int FilterCardWidth = 112;
     private const int FilterCardGap = 6;
 
     private Rectangle FilterStrip(Rectangle bounds, out int maxScroll)
     {
-        int total = filterBrushes.Length * (FilterCardWidth + FilterCardGap) - FilterCardGap;
-        bool overflow = total > GetCardsStripBounds(bounds, false).Width;
+        Rectangle fullStrip = GetCardsStripBounds(bounds, false);
+        int cardWidth = ComputeCardWidth(fullStrip.Height);
+        int total = filterBrushes.Length * (cardWidth + FilterCardGap) - FilterCardGap;
+        bool overflow = total > fullStrip.Width;
         Rectangle strip = GetCardsStripBounds(bounds, overflow);
         maxScroll = Math.Max(0, total - strip.Width);
+        if (pendingFilterSelection is FilterSelection selection)
+        {
+            scrollOffset = Array.IndexOf(filterBrushes, selection) * (cardWidth + FilterCardGap);
+            pendingFilterSelection = null;
+        }
+        scrollOffset = Math.Clamp(scrollOffset, 0, maxScroll);
         return strip;
     }
 
     internal Rectangle GetFilterCardBounds(Rectangle bounds, int index)
     {
         Rectangle strip = FilterStrip(bounds, out _);
-        return new Rectangle(strip.X - scrollOffset + index * (FilterCardWidth + FilterCardGap),
-            strip.Y, FilterCardWidth, strip.Height);
+        int cardWidth = ComputeCardWidth(strip.Height);
+        return new Rectangle(strip.X - scrollOffset + index * (cardWidth + FilterCardGap),
+            strip.Y, cardWidth, strip.Height);
     }
 
     private void UpdateFilterCards(RawInputSnapshot input, Rectangle bounds)
     {
         Rectangle strip = FilterStrip(bounds, out int maxScroll);
-        scrollOffset = Math.Clamp(scrollOffset, 0, maxScroll);
+        int scrollStep = ComputeCardWidth(strip.Height) + FilterCardGap;
         if (strip.Contains(input.MousePosition) && input.WheelDelta != 0)
-            scrollOffset = Math.Clamp(scrollOffset - Math.Sign(input.WheelDelta) * 120, 0, maxScroll);
+            scrollOffset = Math.Clamp(scrollOffset - Math.Sign(input.WheelDelta) * scrollStep, 0, maxScroll);
         leftArrowButton.Enabled = rightArrowButton.Enabled = maxScroll > 0;
         leftArrowButton.Bounds = new Rectangle(bounds.X + 8, strip.Y, 28, strip.Height);
         rightArrowButton.Bounds = new Rectangle(strip.Right + 4, strip.Y, 28, strip.Height);
-        if (leftArrowButton.Update(input)) scrollOffset = Math.Max(0, scrollOffset - 120);
-        if (rightArrowButton.Update(input)) scrollOffset = Math.Min(maxScroll, scrollOffset + 120);
+        if (leftArrowButton.Update(input)) scrollOffset = Math.Max(0, scrollOffset - scrollStep);
+        if (rightArrowButton.Update(input)) scrollOffset = Math.Min(maxScroll, scrollOffset + scrollStep);
         for (int i = 0; i < filterBrushes.Length; i++)
         {
             // Only fully visible cards are interactive and drawn. Arrow/gap clicks
@@ -451,18 +461,21 @@ public sealed class UiCategoryPalette
             if (card.Left < strip.Left || card.Right > strip.Right) continue;
             FilterSelection brush = filterBrushes[i];
             bool selected = active && brush == selection;
+            bool hovered = hoveredFilter == brush;
             backdrop.DrawRoundedRectangle(batch, card,
-                selected ? UiTheme.CardActive : hoveredFilter == brush ? UiTheme.CardHover : UiTheme.CardBackground, 7);
-            Rectangle picture = new(card.X + 6, card.Y + 5, card.Width - 12,
-                Math.Max(1, card.Height - ComputeMaterialLabelOverlayHeight(font) - 10));
+                selected ? UiTheme.CardActive : hovered ? UiTheme.CardHover : UiTheme.CardBackground, 7);
+            int inset = selected ? 3 : 2;
+            Rectangle picture = new(card.X + inset, card.Y + inset, card.Width - inset * 2,
+                Math.Max(1, card.Height - inset * 2));
             UiFilterCardRenderer.Draw(batch, pixel, picture, brush, previewCache);
-            string title = UiFilterCardRenderer.CardTitle(brush);
-            Vector2 measured = font.MeasureString(title);
-            float titleScale = Math.Min(.9f, Math.Min((card.Width-10)/Math.Max(1,measured.X),
-                ComputeMaterialLabelOverlayHeight(font)/Math.Max(1f,measured.Y)));
-            Vector2 size = measured * titleScale;
+            if (hovered) batch.Draw(pixel, picture, Color.White * (20f / 255f));
+            int labelHeight = ComputeMaterialLabelOverlayHeight(font);
+            Rectangle label = new(picture.X, picture.Bottom - labelHeight, picture.Width, labelHeight);
+            batch.Draw(pixel, label, new Color((byte)13, (byte)16, (byte)21, MaterialLabelOverlayAlpha));
+            (string title, float titleScale) = FitCardTitle(font, UiFilterCardRenderer.Title(brush), card.Width - inset * 2 - 12);
+            Vector2 size = font.MeasureString(title) * titleScale;
             batch.DrawString(font, title,
-                new Vector2(card.Center.X - size.X / 2, card.Bottom - ComputeMaterialLabelOverlayHeight(font) / 2f - size.Y / 2),
+                new Vector2(label.Center.X - size.X / 2, label.Center.Y - size.Y / 2),
                 selected ? UiTheme.CardSelectedBorder : UiTheme.TextSecondary,
                 0, Vector2.Zero, titleScale, SpriteEffects.None, 0);
             UiIconRenderer.DrawStrokedRectangle(batch, pixel, card, selected ? 3 : 1,
