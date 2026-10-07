@@ -42,6 +42,7 @@ internal static partial class MaterialFileLoader
         public float Density { get; set; } = 1f;
         public float Friction { get; set; }
         public float FlowRate { get; set; }
+        public float PressureStrength { get; set; }
         public JsonElement LiquidFlow { get; set; }
     }
 
@@ -264,7 +265,9 @@ internal static partial class MaterialFileLoader
         if (!float.IsFinite(physics.Density) || physics.Density < 0 ||
             physics.Density > MaterialRegistry.MaximumDensity ||
             !float.IsFinite(physics.Friction) || physics.Friction < 0 ||
-            !float.IsFinite(physics.FlowRate) || physics.FlowRate < 0)
+            !float.IsFinite(physics.FlowRate) || physics.FlowRate < 0 ||
+            !float.IsFinite(physics.PressureStrength) || physics.PressureStrength < 0 || physics.PressureStrength > 256 ||
+            (physics.PressureStrength > 0 && kind != MaterialSimulationKind.Solid))
         {
             throw new InvalidDataException(
                 $"Параметры physics должны быть конечными неотрицательными числами; density не должна превышать {MaterialRegistry.MaximumDensity}.");
@@ -443,6 +446,8 @@ internal static partial class MaterialFileLoader
         float gasHazeStrength = kind == MaterialSimulationKind.Gas
             ? gas?.HazeStrength ?? MaterialRegistry.DefaultGasHazeStrength
             : MaterialRegistry.DefaultGasHazeStrength;
+        if (physics.PressureStrength > 0 && (flags & MaterialFlags.MovableSolid) == 0)
+            throw new InvalidDataException("pressureStrength requires movable-solid.");
         MaterialUiDocument ui = document.Ui ?? new MaterialUiDocument();
         return new MaterialDefinition(
             id,
@@ -495,6 +500,7 @@ internal static partial class MaterialFileLoader
                 motion.AirLoss,
                 motion.Loss,
                 motion.Collision),
+            PressureStrength = physics.PressureStrength,
             SourcePath = path
         };
     }

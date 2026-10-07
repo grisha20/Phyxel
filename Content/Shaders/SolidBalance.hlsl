@@ -1,4 +1,5 @@
 #include "PhysicsShared.hlsli"
+static const uint PressureFragmentMarker = 0x40000000u;
 
 // Scratch only: moments and contact span are rebuilt on each body tick.
 struct BodyBalanceData
@@ -31,7 +32,7 @@ RWStructuredBuffer<BodyRotationPlan> Plans : register(u6);
 
 bool BodyCell(GridCell c)
 {
-    return c.IsActive != 0 && c.BodyId != 0 && IsMovableSolidMaterial(Materials[c.MaterialIndex]);
+    return c.IsActive != 0 && c.BodyId != 0 && (c.BodyId & PressureFragmentMarker) == 0 && IsMovableSolidMaterial(Materials[c.MaterialIndex]);
 }
 bool Enabled(GridCell c)
 {

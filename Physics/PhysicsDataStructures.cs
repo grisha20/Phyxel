@@ -398,7 +398,8 @@ public struct MaterialProperties
     public float MoistureDryingRate;
     public float MoistureReserved0;
     public float MoistureCapillaryRate { readonly get => MoistureReserved0; set => MoistureReserved0 = value; }
-    public float MoistureReserved1;
+    public float MoistureReserved1; // ABI slot: game pressure strength for movable solids.
+    public float PressureStrength { readonly get => MoistureReserved1; set => MoistureReserved1 = value; }
     public uint FuelLiquidMaterialIndex;
     public float FuelCapacity;
     public float FuelAbsorptionRate;

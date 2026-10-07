@@ -694,6 +694,7 @@ public sealed class MaterialRegistry
         IReadOnlyDictionary<string, MaterialDefinition> indexedById)
     {
         MaterialProperties properties = source.Properties;
+        properties.PressureStrength = source.PressureStrength;
         if (source.LiquidFlow is { } liquidFlow)
         {
             properties.LiquidFlowReferenceTemperature = liquidFlow.ReferenceTemperature;

@@ -1,4 +1,5 @@
 #include "PhysicsShared.hlsli"
+static const uint PressureFragmentMarker = 0x40000000u;
 
 StructuredBuffer<GridCell> Grid : register(t0);
 StructuredBuffer<MaterialProperties> Materials : register(t1);
@@ -330,8 +331,8 @@ void Collect(GridCell cell)
     if (kind == SimulationKindGranular) InterlockedAdd(Statistics[0].GranularCells, 1, ignored);
     if (kind == SimulationKindGas) InterlockedAdd(Statistics[0].GasCells, 1, ignored);
     bool densityBody = (Materials[cell.MaterialIndex].Flags & MaterialFlagDensityBody) != 0;
-    if (kind == SimulationKindSolid && densityBody) InterlockedAdd(Statistics[0].FreeBodyCells, 1, ignored);
-    bool restingSolid = kind == SimulationKindSolid && ((!densityBody && SolidGravity == 0) || cell.RestFrames >= 2);
+    if (kind == SimulationKindSolid && (densityBody || (cell.BodyId & PressureFragmentMarker) != 0)) InterlockedAdd(Statistics[0].FreeBodyCells, 1, ignored);
+    bool restingSolid = kind == SimulationKindSolid && ((!densityBody && (cell.BodyId & PressureFragmentMarker) == 0 && SolidGravity == 0) || cell.RestFrames >= 2);
     uint cellularRestThreshold = kind == SimulationKindGranular ? 30 : 60;
     bool restingCellular = kind != SimulationKindSolid &&
         (!IsCellularMaterial(kind) || cell.RestFrames >= cellularRestThreshold);

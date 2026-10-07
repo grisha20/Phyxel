@@ -12,6 +12,14 @@ public sealed class GpuSimulationResources : IDisposable
     internal GpuStageTimer? AirTimer { get; init; }
     internal GpuStageTimer? AirHeatTimer { get; init; }
     internal GpuStageTimer? GasMotionTimer { get; init; }
+    public required Buffer PressureFrameConstants { get; init; }
+    public required GpuStructuredBuffer<uint> FragmentPlans { get; init; }
+    public required GpuStructuredBuffer<uint> FragmentClaims { get; init; }
+    public ComputeShader? PowderFrontShader { get; init; }
+    public ComputeShader? FragmentUpdateOnlyShader { get; init; }
+    public ComputeShader? FractureUpdateShader { get; init; }
+    public ComputeShader? FragmentPlanShader { get; init; }
+    public ComputeShader? FragmentApplyShader { get; init; }
     public required GpuStructuredBuffer<uint> GasActiveTiles { get; init; }
     public ComputeShader? GasActiveTilesShader { get; init; }
     public required Device Device { get; init; }
@@ -68,6 +76,7 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuBufferPair<SimulationStatistics> Statistics { get; init; }
     public required GpuUploadBuffer<BrushDrawCommand> Commands { get; init; }
     public required GpuUploadBuffer<MaterialProperties> Materials { get; init; }
+    internal bool PressureMechanicsPotential { get; set; }
     public required GpuUploadBuffer<MaterialEmissionProperties> Emissions { get; init; }
     public required Buffer FrameConstants { get; init; }
     public required Buffer ThermalConstants { get; init; }
@@ -268,6 +277,8 @@ public sealed class GpuSimulationResources : IDisposable
         TemperatureProbeShader?.Dispose();
         PhaseTransitionShader?.Dispose();
         CombustionShader?.Dispose();
+        PressureFrameConstants.Dispose(); FragmentPlans.Dispose(); FragmentClaims.Dispose(); PowderFrontShader?.Dispose();
+        FractureUpdateShader?.Dispose(); FragmentUpdateOnlyShader?.Dispose(); FragmentPlanShader?.Dispose(); FragmentApplyShader?.Dispose();
         EmissionResolveShader?.Dispose();
         TransientLifecycleShader?.Dispose();
         ThermalDiffusionShader?.Dispose();

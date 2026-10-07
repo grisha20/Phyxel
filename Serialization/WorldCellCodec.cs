@@ -67,7 +67,7 @@ internal static class WorldCellCodec
             6 or 7 or 8 or 9 or 10 or 11 => V6CellStride,
             12 or 13 => V12CellStride,
             14 => V14CellStride,
-            15 or 16 or 17 => CurrentCellStride,
+            15 or 16 or 17 or 18 => CurrentCellStride,
             _ => throw new InvalidDataException($"Unsupported world version {version}.")
         };
         if (storedCellStride != expectedStride)
@@ -129,7 +129,7 @@ internal static class WorldCellCodec
         {
             3 or 4 => DecodeLegacy(world),
             5 => DecodeV5(world),
-            6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 => DecodeCurrent(world),
+            6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 => DecodeCurrent(world),
             _ => throw new InvalidDataException($"Unsupported world version {world.Version}.")
         };
     }

@@ -1,5 +1,21 @@
 # Архитектура Phyxel
 
+PF2026-10-07: после реакции на60Гц выполняется консервативный PowderFront,
+затем PressureFracture update→plan→apply с атомарными claims. Отдельный
+PressureFrameConstants не меняет constants существующих проходов. PF
+включается при порошке с давлением/волне/оторванных клетках; обычная печь
+без этих источников сохраняет прежний порядок физических проходов.
+`physics.pressureStrength` (default0, finite0..256, положительное только
+movable-solid) занимает бывший MoistureReserved1, offset204. Material244
+и Grid56 сохранены. Writer18: у Solid bit30 BodyId означает фрагмент,
+lower30 — сохранённый локальный60Гц счётчик движения; RestFrames0.
+Общие тела исключают эти клетки, рендер включает их в FreeBodyCells.
+Газовые маркеры BodyId остаются прежними и интерпретируются по kind.
+Загрузка v3–v17 поддерживается; старые программы не обязаны читать v18.
+[Контракт](materials/shared/PRESSURE_FRACTURE_CONTRACT.md),
+[результаты и пределы](materials/shared/PRESSURE_FRACTURE_RESULTS.md).
+
+
 AB2026-10-05: GridCell дополнен RetainedLiquidMaterialIndex (Grid56, writer15, probe24). Нулевой ID в историческом префиксе означает configured carrier, новый запас хранит фактический вид через палитру. Legacy FuelMass/FuelCapacity — второй поровый запас, который может быть негорючим. liquidAbsorption.allLiquids разрешает общий путь для зарегистрированных Liquid; отдельная вода хранит оплаченный фазовый резерв. В одной клетке вода+один иной вид, смешение разных иных ID запрещено. Запасы переносятся полным пакетом, теплоёмкость/цвет/probe/реакция используют фактический ID. Масло не блокирует соседний водный перенос; CSMoisture обрабатывает оба запаса.
 [Контракт](materials/shared/ABSORPTION_CONTRACT.md), [результаты](ABSORPTION_RESULTS.md), [правила будущих стенок](SELECTIVE_BARRIERS_DESIGN.md).
 

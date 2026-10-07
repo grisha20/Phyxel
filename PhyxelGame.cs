@@ -306,6 +306,12 @@ public sealed class PhyxelGame : Game
             catch(Exception exception) { Console.WriteLine($"PHYXEL_REACTION_PULSE_FAILED {exception}");Environment.ExitCode=1; }
             Exit();return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_PRESSURE_SHELL") == "1")
+        {
+            oilSmokeVerification = PressureShellRegressionVerifier.Run(dispatchCoordinator, materialRegistry, settings).GetEnumerator();
+            IsFixedTimeStep = false;
+            return;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_GUNPOWDER") == "1")
         {
             try { GunpowderRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }

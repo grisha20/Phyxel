@@ -1,4 +1,5 @@
 #include "PhysicsShared.hlsli"
+static const uint PressureFragmentMarker = 0x40000000u;
 
 StructuredBuffer<GridCell> SourceGrid : register(t0);
 StructuredBuffer<uint> SourceBodyFlags : register(t1);
@@ -43,7 +44,7 @@ static const uint DisplacementHullFloorProbe = 64;
 bool IsMovableSolid(GridCell cell)
 {
     return cell.IsActive != 0 &&
-        IsMovableSolidMaterial(Materials[cell.MaterialIndex]) && cell.BodyId != 0;
+        IsMovableSolidMaterial(Materials[cell.MaterialIndex]) && cell.BodyId != 0 && (cell.BodyId & PressureFragmentMarker) == 0;
 }
 
 bool IsSolidMaterial(uint materialId)

@@ -36,3 +36,5 @@
 - [Горизонт воды и плавающий лёд — WL](WATER_LEVEL_CONTRACT.md).
 
 - [CU: ограниченный теплообмен новых проводников](COPPER_HEAT_CONTRACT.md).
+
+- [PF: центральный поджиг и разлёт оболочки](PRESSURE_FRACTURE_CONTRACT.md), [результаты](PRESSURE_FRACTURE_RESULTS.md).

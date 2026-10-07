@@ -31,6 +31,8 @@ public sealed class GpuUploadBuffer<T> : IDisposable where T : struct
     public int Capacity { get; }
     public Buffer Buffer { get; }
     public ShaderResourceView View { get; }
+    internal ReadOnlySpan<T> UploadedValues => uploadArray.AsSpan(0, uploadedCount);
+    private int uploadedCount;
 
     public void Upload(DeviceContext context, ReadOnlySpan<T> values)
     {
@@ -45,6 +47,7 @@ public sealed class GpuUploadBuffer<T> : IDisposable where T : struct
         }
 
         context.UnmapSubresource(Buffer, 0);
+        uploadedCount = count;
     }
 
     public void Dispose()

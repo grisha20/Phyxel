@@ -79,7 +79,7 @@ public sealed class SimulationStateSerializer
     private const uint WorldFileMagic = 0x5058594C;
     private const int LegacyWorldHeaderSize = 20;
     private const int CurrentWorldHeaderSize = 28;
-    private const int CurrentVersion = 17;
+    private const int CurrentVersion = 18;
     private const string RemovedGoldSandId = "core:gold_sand";
     private const string RenamedConcreteId = "core:concrete";
     private const string RenamedGasId = "core:gas";
@@ -238,7 +238,7 @@ public sealed class SimulationStateSerializer
                 warnings,
                 options),
             4 => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, true),
-            5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
+            5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or CurrentVersion => LoadPaletteScene(sceneJson, world, materialRegistry, warnings, false),
             _ => null
         };
     }
@@ -250,6 +250,7 @@ public sealed class SimulationStateSerializer
             throw new InvalidDataException("Размер снимка мира не совпадает с размером GPU-ресурсов.");
         }
         ValidateSnapshotSize(world);
+        resources.PressureMechanicsPotential = ContainsPressureActivity(world, resources.Materials.UploadedValues);
         resources.OxidizerCarrierWarm = false;
         Array.Clear(resources.FilterMap);resources.FilterCount=0;
         if(world.Filters is {Length:>0} filterBytes){
@@ -316,6 +317,32 @@ public sealed class SimulationStateSerializer
                 return true;
             }
         }
+        return false;
+    }
+
+    private static bool ContainsPressureActivity(SimulationWorldSnapshot world, ReadOnlySpan<MaterialProperties> materials)
+    {
+        foreach (GridCell cell in MemoryMarshal.Cast<byte, GridCell>(world.Grid))
+        {
+            if (cell.IsActive == 0 || cell.MaterialIndex >= materials.Length) continue;
+            MaterialProperties material = materials[(int)cell.MaterialIndex];
+            if (material.SimulationKind == (uint)MaterialSimulationKind.Granular && material.ReactionPressurePerMass > 0)
+                return true;
+            if (material.SimulationKind == (uint)MaterialSimulationKind.Solid && (cell.BodyId & 0x40000000u) != 0)
+                return true;
+        }
+        // Waves leave harmless floating-point tails after decaying. Compare
+        // to the weakest supported shell, rather than treating any tail as a blast.
+        float threshold = float.MaxValue;
+        foreach (MaterialProperties material in materials)
+            if (material.PressureStrength > 0) threshold = Math.Min(threshold, material.PressureStrength * 0.01f);
+        if (world.ReactionPending is { Length: > 0 } pending)
+            foreach (System.Numerics.Vector4 source in MemoryMarshal.Cast<byte, System.Numerics.Vector4>(pending))
+                if (source.X > 0) return true;
+        if (world.ReactionPulse is { Length: > 0 } pulse)
+            foreach (System.Numerics.Vector4 wave in MemoryMarshal.Cast<byte, System.Numerics.Vector4>(pulse))
+                if (Math.Abs(wave.X) > threshold || Math.Abs(wave.Y) > threshold || Math.Abs(wave.Z) > threshold)
+                    return true;
         return false;
     }
 
@@ -745,7 +772,7 @@ public sealed class SimulationStateSerializer
 
         uint magic = BinaryPrimitives.ReadUInt32LittleEndian(prefix.AsSpan(0, 4));
         int version = BinaryPrimitives.ReadInt32LittleEndian(prefix.AsSpan(4, 4));
-        if (magic != WorldFileMagic || version is not (3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or CurrentVersion))
+        if (magic != WorldFileMagic || version is not (3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or CurrentVersion))
         {
             throw new InvalidDataException("Формат снимка мира не поддерживается.");
         }

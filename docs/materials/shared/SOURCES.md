@@ -321,3 +321,7 @@ ICEI имеет TYPE_SOLID, Falldown0, Advection/Gravity/Diffusion0; OIL не
 не назначалось. [Хеши до изменений](../../../artifacts/frozen-bodies-20261004/tpt-hashes.json),
 [проверка неизменности](../../../artifacts/frozen-bodies-20261004/validation.json),
 [контракт](FROZEN_BODY_CONTRACT.md), [результаты](../../FROZEN_BODY_RESULTS.md).
+
+## PF —2026-10-07
+
+Локальные GUNP/FIRE/METL/BMTL/BRMT и специальный переход Simulation.cpp2798..2831 прочитаны. Собственная игровая прочность12/24/18/10 не выдаётся за реальные свойства сплавов или числа TPT. Код TPT не копировался. [Контракт](PRESSURE_FRACTURE_CONTRACT.md), [результаты и SHA256 источников](PRESSURE_FRACTURE_RESULTS.md).

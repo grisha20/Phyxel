@@ -503,6 +503,13 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             AirHeatFluxShader = allocateSimulation ? CompileShader("AirThermal.hlsl", "CSFlux") : null,
             AirHeatTransportShader = allocateSimulation ? CompileShader("AirThermal.hlsl", "CSTransport") : null,
             Air = air,
+            PressureFrameConstants = CreateConstantBuffer<SimulationFrameConstants>(),
+            FragmentPlans = new(Device,cellCount), FragmentClaims = new(Device,cellCount),
+            PowderFrontShader = allocateSimulation ? CompileShader("PowderFront.hlsl") : null,
+            FragmentUpdateOnlyShader = allocateSimulation ? CompileShader("PressureFracture.hlsl","CSMoveOnly") : null,
+            FractureUpdateShader = allocateSimulation ? CompileShader("PressureFracture.hlsl","CSUpdate") : null,
+            FragmentPlanShader = allocateSimulation ? CompileShader("PressureFracture.hlsl","CSPlan") : null,
+            FragmentApplyShader = allocateSimulation ? CompileShader("PressureFracture.hlsl","CSApply") : null,
             ReactionPending = reactionPending,ReactionPulse = reactionPulse,
             ReactionPulseScratch = new(Device,airCellCount),
             ReactionPendingStaging = CreateStagingBuffer(cellCount*16),
@@ -726,6 +733,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             TryDeleteShaderCacheEntry(cachePath);
         }
 
+        if (Environment.GetEnvironmentVariable("PHYXEL_SHADER_TRACE") == "1") Console.WriteLine("PHYXEL_SHADER_COMPILE " + fileName + " " + entryPoint);
         using CompilationResult compilation = ShaderBytecode.Compile(
             shaderSource,
             entryPoint,

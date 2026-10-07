@@ -1,4 +1,5 @@
 #include "PhysicsShared.hlsli"
+static const uint PressureFragmentMarker = 0x40000000u;
 
 StructuredBuffer<GridCell> Grid : register(t0);
 StructuredBuffer<uint> SourceParents : register(t1);
@@ -9,7 +10,7 @@ RWStructuredBuffer<uint> WritableOrigins : register(u2);
 
 bool IsComponentCell(GridCell cell)
 {
-    return cell.IsActive != 0 && IsMovableSolidMaterial(Materials[cell.MaterialIndex]);
+    return cell.IsActive != 0 && (cell.BodyId & PressureFragmentMarker) == 0 && IsMovableSolidMaterial(Materials[cell.MaterialIndex]);
 }
 
 bool SameBodyClass(GridCell first, GridCell second)

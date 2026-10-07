@@ -688,7 +688,7 @@ public sealed class SimulationDispatchCoordinator
         // air: FIRE and SMKE are tracers of the just-solved field, as in TPT's
         // BeforeSim -> UpdateParticles order.
         if (resources.IsSimulationAllocated && !settings.Paused &&
-            (gasMatter || settings.AirSimulation || combustionActive))
+            (gasMatter || (freeBodyMatter && resources.PressureMechanicsPotential) || settings.AirSimulation || combustionActive))
         {
             gasMotionAccumulator = Math.Min(
                 gasMotionAccumulator + Math.Clamp(elapsedSeconds, 0, FixedAirStep * MaximumAirTicksPerFrame),
@@ -749,11 +749,18 @@ public sealed class SimulationDispatchCoordinator
                         settings.Mode == SimulationMode.Simulation, settings.AirSimulation);
                     combustionDispatches++;
                     Phyxel.Diagnostics.NonfiniteStateTrace.Observe(resources,frameIndex,"combustion");
+                    if (pressurePowderPotential && resources.PressureMechanicsPotential) DispatchPowderFront(resources, constants);
+                }
+                if (solidMatter && resources.PressureMechanicsPotential)
+                {
+                    DispatchPressureFragments(resources, constants, settings.Mode == SimulationMode.Simulation, settings.AirSimulation);
+                    if (pressurePowderPotential && (lastCombustionSummary & CombustionSummaryFlags.PressurePowderPresent) != 0)
+                        topologyDirty = true;
                 }
             }
             if (gasMotionTicks > 0)
             {
-                cellMaterialsDirty = combustionActive;
+                cellMaterialsDirty = combustionActive || (resources.PressureMechanicsPotential && (freeBodyMatter || pressurePowderPotential));
                 presentationDirty = true;
             }
         }
@@ -1598,6 +1605,7 @@ public sealed class SimulationDispatchCoordinator
 
     private static void Clear(GpuSimulationResources resources)
     {
+        resources.PressureMechanicsPotential = false;
         RawInt4 zero = new(0, 0, 0, 0);
         Array.Clear(resources.FilterMap); resources.FilterCount=0;
         resources.Context.ClearUnorderedAccessView(resources.Filters.UnorderedView,zero);
@@ -1801,6 +1809,7 @@ public sealed class SimulationDispatchCoordinator
                     (uint)MaterialSimulationKind.Granular)
             {
                 pressurePowderPotential = true;
+                if (boundResources is not null) boundResources.PressureMechanicsPotential = true;
                 // An older empty-world readback must not put newly painted
                 // powder to sleep. Future summaries use this generation.
                 combustionReadbackGeneration++;
@@ -2057,8 +2066,48 @@ public sealed class SimulationDispatchCoordinator
         DispatchAirHeat(resources, openBoundaries, tickIndex);
     }
 
-    // Consumes every issued reaction packet once; keeps pressure waves outside
-    // the ordinary incompressible draft projection. No extra simulation tick.
+    // Transfer grain heat and move fragments on the existing reaction clock.
+    internal static void DispatchPowderFront(GpuSimulationResources r, SimulationFrameConstants constants)
+    {
+        constants.DeltaTime = (float)FixedAirStep;
+        var c = r.Context;
+        c.UpdateSubresource(ref constants, r.PressureFrameConstants);
+        c.ComputeShader.SetConstantBuffer(0, r.PressureFrameConstants);
+        c.ComputeShader.SetShaderResources(0, r.Grid.ReadView, r.Materials.View);
+        c.ComputeShader.SetUnorderedAccessView(0, r.Grid.WriteUnorderedView);
+        c.ComputeShader.Set(r.PowderFrontShader);
+        c.Dispatch(DivideRoundUp(r.Width,16),DivideRoundUp(r.Height,16),1);
+        Unbind(c,2,1); r.Grid.Swap();
+    }
+
+    internal static void DispatchPressureFragments(GpuSimulationResources r, SimulationFrameConstants constants,
+        bool finiteAir, bool fracture)
+    {
+        constants.DeltaTime = (float)FixedAirStep;
+        constants.HydraulicPressure = finiteAir ? 1u : 0u;
+        var c = r.Context;
+        c.UpdateSubresource(ref constants,r.PressureFrameConstants);
+        c.ComputeShader.SetConstantBuffer(0,r.PressureFrameConstants);
+        c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View,r.ReactionPulse.ReadView,r.Air.View);
+        c.ComputeShader.SetUnorderedAccessView(0,r.Grid.WriteUnorderedView);
+        c.ComputeShader.Set(fracture ? r.FractureUpdateShader : r.FragmentUpdateOnlyShader);
+        c.Dispatch(DivideRoundUp(r.Width,16),DivideRoundUp(r.Height,16),1);
+        Unbind(c,4,1); r.Grid.Swap();
+        c.ClearUnorderedAccessView(r.FragmentClaims.UnorderedView,new RawInt4(-1,-1,-1,-1));
+        c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View);
+        c.ComputeShader.SetUnorderedAccessViews(1,r.FragmentPlans.UnorderedView,r.FragmentClaims.UnorderedView);
+        c.ComputeShader.Set(r.FragmentPlanShader);
+        c.Dispatch(DivideRoundUp(r.Width,16),DivideRoundUp(r.Height,16),1);
+        Unbind(c,2,3);
+        c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View);
+        c.ComputeShader.SetShaderResources(4,r.FragmentPlans.View,r.FragmentClaims.View);
+        c.ComputeShader.SetUnorderedAccessView(0,r.Grid.WriteUnorderedView);
+        c.ComputeShader.Set(r.FragmentApplyShader);
+        c.Dispatch(DivideRoundUp(r.Width,16),DivideRoundUp(r.Height,16),1);
+        Unbind(c,6,1); r.Grid.Swap();
+    }
+
+    // Consumes each reaction packet once, outside the ordinary draft projection.
     internal static void DispatchReactionPulse(GpuSimulationResources r)
     {
         var c=r.Context;
@@ -3171,6 +3220,7 @@ public sealed class SimulationDispatchCoordinator
             lastCombustionSummary = (CombustionSummaryFlags)rawFlags;
             pressurePowderPotential =
                 (lastCombustionSummary & CombustionSummaryFlags.PressurePowderPresent) != 0;
+            resources.PressureMechanicsPotential |= pressurePowderPotential;
             if ((lastCombustionSummary & CombustionSummaryFlags.CombustionOccurred) != 0)
             {
                 presentationDirty = true;
