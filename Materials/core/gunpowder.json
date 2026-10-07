@@ -24,7 +24,7 @@
     "ignitionTemperature": 250.0,
     "burnRate": 9.0,
     "heatPerMass": 2400.0,
-    "pressurePerMass": 6.0,
+    "pressurePerMass": 2.0,
     "flameLifetimeMultiplier": 1.5,
     "burnedInto": "core:empty",
     "spreadRate": 60.0,

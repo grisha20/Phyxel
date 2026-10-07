@@ -74,13 +74,21 @@ void CSGather(uint3 id:SV_DispatchThreadID)
         if(AirFineNodeFor(q,node) && all(node==p))source.yz+=s.yz;
     }
     float4 packet=Previous[i]+float4(source.x,0,0,source.x*6.0);
-    // Admit the finite newly produced gas volume over ~0.16 s instead of
-    // deleting its divergence in the ordinary draft projection. The W stock
-    // is issued once and consumed, not a permanent HotAir source.
+    // Admit the finite newly produced expansion over ~0.16 s in this wave.
+    // The W stock is issued once and consumed, not a permanent HotAir source.
     float admitted=packet.w*.1;
     packet.w-=admitted;
-    ProjectionSource[i].y+=admitted;
-    AirCell carrier=Air[i];carrier.Pressure=clamp(carrier.Pressure+admitted*.3,-256,256);Air[i]=carrier;
+    // Newly produced gas belongs to the compressible branch. Sending it into
+    // the incompressible draft as well accumulates a second carrier pressure
+    // reservoir which cannot follow the faster wave through an open outlet.
+    if(admitted!=0)packet.x+=admitted*.3;
+    else
+    {
+        // Preserve the ordinary carrier's established normalization exactly
+        // when no reaction expansion is being issued (including old saves).
+        ProjectionSource[i].y+=admitted;
+        AirCell carrier=Air[i];carrier.Pressure=clamp(carrier.Pressure+admitted*.3,-256,256);Air[i]=carrier;
+    }
     Next[i]=packet;
     // Absolute-K energy and capacity are added together: neither clamping the
     // temperature nor capping the pressure silently deletes reaction heat.

@@ -41,13 +41,27 @@ internal static class PressureShellRegressionVerifier
             if(Environment.GetEnvironmentVariable("PHYXEL_SHELL_PROBES_ONLY") == "1") yield break;
         }
         foreach (string name in (Environment.GetEnvironmentVariable("PHYXEL_SHELL_SCENES") ?? "Питарда,Новая печь").Split(','))
-        foreach (var mode in name == "Новая печь" ? new[] { SimulationMode.Simulation } :
+        foreach (var mode in name == "Новая печь" && Environment.GetEnvironmentVariable("PHYXEL_SHELL_VARIANT")!="powder" ? new[] { SimulationMode.Simulation } :
             new[] { SimulationMode.Sandbox, SimulationMode.Simulation })
-        foreach (int fps in name == "Новая печь" || !matrix ? new[] { 60 } : new[] { 30, 60, 100 })
+        foreach (int fps in (name == "Новая печь" && Environment.GetEnvironmentVariable("PHYXEL_SHELL_VARIANT")!="powder") || !matrix ? new[] { 60 } : new[] { 30, 60, 100 })
         {
             var loaded = System.Threading.Tasks.Task.Run(() => serializer.LoadAsync(Path.Combine(root, name + ".json"), registry))
                 .GetAwaiter().GetResult() ?? throw new InvalidDataException("Missing saved scene: " + name);
             var world = loaded.World ?? throw new InvalidDataException("Missing world");
+            // Reproduce reported edits in memory; never overwrite a user's scene.
+            string variant = Environment.GetEnvironmentVariable("PHYXEL_SHELL_VARIANT") ?? "original";
+            var initialCells = MemoryMarshal.Cast<byte, GridCell>(world.Grid).ToArray();
+            if (name == "Питарда" && variant == "vent")
+                for (int y=90;y<125;y++) for (int x=204;x<=244;x++)
+                    if(initialCells[y*world.Width+x].IsActive!=0 &&
+                        registry[initialCells[y*world.Width+x].MaterialIndex].Properties.SimulationKind==2)
+                        initialCells[y*world.Width+x]=default;
+            if (name == "Новая печь" && variant == "powder")
+                for(int y=300;y<320;y++) for(int x=230;x<250;x++)
+                    if(initialCells[y*world.Width+x].IsActive==0)
+                        initialCells[y*world.Width+x]=new(){IsActive=1,
+                            MaterialIndex=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Gunpowder),Mass=1,Temperature=251};
+            world=world with {Grid=MemoryMarshal.AsBytes(initialCells.AsSpan()).ToArray()};
             SimulationStateSerializer.Apply(loaded.State, settings);
             settings.Width = world.Width; settings.Height = world.Height; settings.Mode = mode; settings.Paused = true;
             settings.AirSimulation = true; settings.RenderWithoutEffects = true;
@@ -69,6 +83,8 @@ internal static class PressureShellRegressionVerifier
                 { Type=SharpDX.Direct3D11.QueryType.Event,Flags=SharpDX.Direct3D11.QueryFlags.None });
             File.WriteAllBytes(Path.Combine(dir,"materials.bin"),MemoryMarshal.AsBytes(registry.CreateGpuTable().AsSpan()).ToArray());
             settings.Paused = false;
+            bool ventAcceptance=Environment.GetEnvironmentVariable("PHYXEL_VENT_ACCEPTANCE")=="1";
+            int peakFragments=0;
             int final = (int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_SHELL_SECONDS"),out int seconds) ? seconds : name == "Новая печь" ? 30 : 5) * fps;
             string prefix = (name == "Новая печь" ? "furnace" : "shell") + "-" + mode + "-" + fps;
             for (int frame = 0; frame <= final; frame++)
@@ -81,12 +97,21 @@ internal static class PressureShellRegressionVerifier
                     System.Threading.Thread.Yield();
                 var stats = AirInventoryRegressionVerifier.Read(r,r.Statistics.ReadBuffer);
                 coordinator.ObserveStatistics(MemoryMarshal.Read<SimulationStatistics>(stats));
+                if(ventAcceptance)
+                {
+                    var observed=MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer)).ToArray();
+                    int count=0;foreach(var c in observed)
+                        if(c.IsActive!=0 && registry[c.MaterialIndex].Properties.SimulationKind==2 && (c.BodyId&0x40000000u)!=0)count++;
+                    peakFragments=Math.Max(peakFragments,count);
+                }
                 if (frame == 0 || (Environment.GetEnvironmentVariable("PHYXEL_SHELL_FINE_SAMPLES") == "1" && frame <= 6) || frame == fps / 2 || frame == fps || frame == 2 * fps || frame == final)
                 {
                     var snapshot = Read(r);
                     var cells = MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid).ToArray();
                     uint powder = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Gunpowder);
                     var grains = cells.Where(c => c.IsActive != 0 && c.MaterialIndex == powder).ToArray();
+                    var air = MemoryMarshal.Cast<byte, AirCell>(snapshot.Air!).ToArray();
+                    var pulse = MemoryMarshal.Cast<byte, System.Numerics.Vector4>(snapshot.ReactionPulse!).ToArray();
                     int fragments = cells.Count(c => c.IsActive != 0 && registry[c.MaterialIndex].Properties.SimulationKind == 2 && (c.BodyId & 0x40000000u) != 0);
                     int coolFragments = cells.Count(c => c.IsActive != 0 && registry[c.MaterialIndex].Properties.SimulationKind == 2 &&
                         (c.BodyId & 0x40000000u) != 0 && c.Temperature < registry[c.MaterialIndex].Properties.TransitionAboveTemperature);
@@ -95,8 +120,11 @@ internal static class PressureShellRegressionVerifier
                         (v.i%r.Width<174 || v.i%r.Width>274 || v.i/r.Width<95 || v.i/r.Width>195));
                     double lowerPowder = cells.Select((c,i)=>(c,i)).Where(v=>v.c.IsActive!=0 && v.c.MaterialIndex==powder &&
                         v.i/r.Width>=145).Sum(v=>(double)v.c.Mass);
-                    var row = new { scene = name, mode = mode.ToString(), fps, frame,
+                    var row = new { scene = name, variant, mode = mode.ToString(), fps, frame,
                         powder = grains.Sum(c => (double)c.Mass), lowerPowder, fragments, coolFragments, outside,
+                        carrierMax=air.Max(a=>a.Pressure), waveMax=pulse.Max(a=>a.X),
+                        wallMaxTemperature=cells.Where(c=>c.IsActive!=0 && registry[c.MaterialIndex].Properties.SimulationKind==2)
+                            .Select(c=>c.Temperature).DefaultIfEmpty().Max(),
                         solidMass = cells.Where(c => c.IsActive != 0 && registry[c.MaterialIndex].Properties.SimulationKind == 2)
                             .Sum(c => (double)c.Mass), ticks = coordinator.ThermalTicks };
                     rows.Add(row); Console.WriteLine("PHYXEL_SHELL_SAMPLE " + JsonSerializer.Serialize(row));
@@ -106,7 +134,7 @@ internal static class PressureShellRegressionVerifier
                     File.WriteAllBytes(Path.Combine(dir, stamp + "-motion.bin"), snapshot.GasMotion!);
                     File.WriteAllBytes(Path.Combine(dir, stamp + "-pulse.bin"), snapshot.ReactionPulse!);
                     SimulationScreenshotWriter.Save(r, Path.Combine(dir, stamp + ".png"));
-                    if(!baseline && name=="Питарда" && frame==fps && (coolFragments==0 || outside==0 || lowerPowder>=1650))
+                    if(!baseline && !ventAcceptance && name=="Питарда" && frame==fps && (coolFragments==0 || outside==0 || lowerPowder>=1650))
                     {failures++;Console.WriteLine("PHYXEL_SHELL_SCENE_FAILED cold/outward/lower-front " + prefix);}
                     if(!baseline && name=="Питарда" && frame==2*fps && grains.Sum(c=>(double)c.Mass)>65.12)
                     {failures++;Console.WriteLine("PHYXEL_SHELL_SCENE_FAILED burnout " + prefix);}
@@ -122,6 +150,13 @@ internal static class PressureShellRegressionVerifier
                     }
                 }
                 if (frame % fps == 0) yield return r;
+            }
+            if(ventAcceptance)
+            {
+                bool open=name=="Питарда" && variant=="vent" || name=="Новая печь";
+                bool pass=open?peakFragments==0:peakFragments>0;
+                Console.WriteLine("PHYXEL_VENT_ACCEPTANCE "+JsonSerializer.Serialize(new{scene=name,variant,mode=mode.ToString(),fps,peakFragments,pass}));
+                if(!pass)failures++;
             }
             if(name=="Питарда")
             {
@@ -190,17 +225,23 @@ internal static class PressureShellRegressionVerifier
         {
             var wave=new System.Numerics.Vector4[r.AirWidth*r.AirHeight];var air=new AirCell[wave.Length];
             for(int y=0;y<r.AirHeight;y++)for(int x=0;x<r.AirWidth;x++)
-            {wave[y*r.AirWidth+x].X=x<8?left:right;air[y*r.AirWidth+x].Pressure=x<8?carrier:0;}
+            {wave[y*r.AirWidth+x].X=x<8?left:right;air[y*r.AirWidth+x].Pressure=wave[y*r.AirWidth+x].X+(x<8?carrier:0);}
             r.Context.UpdateSubresource(wave,r.ReactionPulse.ReadBuffer);r.Context.UpdateSubresource(air,r.Air.Buffer);
         }
         int Count(GridCell[] cells)=>cells.Count(c=>c.IsActive!=0 && table[c.MaterialIndex].SimulationKind==2 && (c.BodyId&0x40000000u)!=0);
-        foreach(var load in new[]{(0f,0f,5f),(5f,0f,0f),(100f,100f,0f)})
+        foreach(var load in new[]{(0f,0f,5f),(5f,0f,0f),(10f,0f,0f),(100f,100f,0f)})
         {
             var unchanged=Plate(metal);Upload(unchanged);Wave(load.Item1,load.Item2,load.Item3);
             SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
             Check(Count(Cells())==0,"PF04 normal/subthreshold/uniform pressure "+load);
             Check(MemoryMarshal.AsBytes(unchanged.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(Cells().AsSpan())),"PF07 no-op grid "+load);
         }
+        Upload(Plate(metal));Wave(18,0);
+        var poreAir=MemoryMarshal.Cast<byte,AirCell>(AirInventoryRegressionVerifier.Read(r,r.Air.Buffer)).ToArray();
+        for(int i=0;i<poreAir.Length;i++){poreAir[i].Blocked=1;poreAir[i].Pressure=0;}
+        r.Context.UpdateSubresource(poreAir,r.Air.Buffer);
+        SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,true,true);
+        Check(Count(Cells())>0,"PV01 pore pressure works without a carrier overlay");
         uint fixture=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fixture);
         Upload(Plate(fixture));Wave(100,0);SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
         Check(Count(Cells())==0,"PF04 fixed support");
@@ -259,7 +300,7 @@ internal static class PressureShellRegressionVerifier
         for(int y=0;y<r.AirHeight;y++)for(int x=0;x<r.AirWidth;x++)
             if(Math.Pow(x*4+2-32,2)+Math.Pow(y*4+2-32,2)<144)uniform[y*r.AirWidth+x].X=200;
         r.Context.UpdateSubresource(uniform,r.ReactionPulse.ReadBuffer);
-        r.Context.UpdateSubresource(new AirCell[uniform.Length],r.Air.Buffer);
+        r.Context.UpdateSubresource(uniform.Select(v=>new AirCell{Pressure=v.X}).ToArray(),r.Air.Buffer);
         SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
         var sectors=new List<double>[8];for(int i=0;i<8;i++)sectors[i]=[];
         foreach(var pair in Cells().Select((c,i)=>(c,i)).Where(v=>(v.c.BodyId&0x40000000u)!=0))

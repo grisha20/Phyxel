@@ -68,6 +68,11 @@ internal static class ReactionPulseRegressionVerifier
         serializer.ApplyWorldSnapshot(r,loaded);coordinator.RestoreWorldActivity(r,true,false,false,true);
         coordinator.DispatchAirSimulation(r,1,false,false);
         var next=Capture();
+        var freeAir=MemoryMarshal.Cast<byte,AirCell>(next.Air!).ToArray();
+        var freePulse=MemoryMarshal.Cast<byte,Vector4>(next.ReactionPulse!).ToArray();
+        double pressureDebt=freeAir.Select((a,i)=>a.Blocked<.5?Math.Abs((double)a.Pressure-freePulse[i].X):0).Max();
+        Check(pressureDebt<1e-6,"PV04 finite reaction minted a second carrier pressure reservoir: "+pressureDebt);
+        Console.WriteLine("PHYXEL_VENT_LEDGER pressureDebt="+pressureDebt);
         Check(MemoryMarshal.Cast<byte,Vector4>(next.ReactionPending!).ToArray().All(s=>s==Vector4.Zero),"Mapped source was not consumed");
         Check(MemoryMarshal.Cast<byte,Vector4>(next.ReactionPulse!).ToArray().Any(s=>Math.Abs(s.X)>.01),"Pressure source was erased by normal projection");
         string wavePath=Path.Combine(dir,"during-pulse.json");

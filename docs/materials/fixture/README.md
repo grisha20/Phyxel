@@ -1,5 +1,8 @@
 # Опора — `core:fixture`
 
+- [PV — сброс давления через выход](../shared/PRESSURE_VENT_CONTRACT.md),
+  [проверки](../shared/PRESSURE_VENT_RESULTS.md).
+
 ## PB2026-10-07: прямой разрыв
 
 Опора остаётся неразрушаемой: pressureStrength=0. Проверена как неподвижная преграда для волны и осколков.

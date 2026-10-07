@@ -3,6 +3,9 @@
 Здесь хранятся контракты и планы, относящиеся к нескольким материалам.
 Начните с [каталога](../README.md), [workflow](../WORKFLOW.md) и [шаблона](../TEMPLATE.md).
 
+- [PV — сброс через выход](PRESSURE_VENT_CONTRACT.md),
+  [результаты и границы](PRESSURE_VENT_RESULTS.md).
+
 - [PB — прямой разрыв без деформации](PRESSURE_BURST_CONTRACT.md),
   [результаты и границы](PRESSURE_BURST_RESULTS.md).
 

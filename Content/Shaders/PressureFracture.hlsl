@@ -22,9 +22,9 @@ bool Fragment(GridCell c)
 {return c.IsActive!=0 && IsMovableSolidMaterial(Materials[c.MaterialIndex]) && (c.BodyId&PressureFragmentMarker)!=0;}
 
 // Read visible air on each side, rather than sampling the same coarse node through a wall.
-bool Surface(int2 p,int2 direction,out float pressure,out float wave,out int distance)
+bool Surface(int2 p,int2 direction,out float pressure,out int distance)
 {
-    pressure=0;wave=0;distance=0;
+    pressure=0;distance=0;
     [loop]for(int step=1;step<=24;step++)
     {
         int2 q=p+direction*step;
@@ -35,7 +35,9 @@ bool Surface(int2 p,int2 direction,out float pressure,out float wave,out int dis
         if(AirFineBlocked(q)||!AirFineNodeFor(q,node))return false;
         uint aw=(Width+AirCellSize-1)/AirCellSize;
         uint ni=node.y*aw+node.x;
-        wave=Wave[ni].x;pressure=Air[ni].Pressure+wave;distance=step;
+        // Free carrier nodes already contain the reaction overlay. Pore nodes
+        // have no carrier and receive the compressible wave on its own.
+        pressure=Air[ni].Blocked<.5?Air[ni].Pressure:Wave[ni].x;distance=step;
         return true;
     }
     return false;
@@ -45,8 +47,8 @@ bool Surface(int2 p,int2 direction,out float pressure,out float wave,out int dis
 // paths use their actual length; a circular shell is not an axis-only wall.
 void LoadProjection(int2 p,int2 direction,inout float3 metric,inout float2 load)
 {
-    float l,r,wl,wr;int dl,dr;
-    if(!Surface(p,-direction,l,wl,dl)||!Surface(p,direction,r,wr,dr))return;
+    float l,r;int dl,dr;
+    if(!Surface(p,-direction,l,dl)||!Surface(p,direction,r,dr))return;
     float lengthStep=length(float2(direction));float2 n=float2(direction)/lengthStep;
     float gradient=(l-r)/(max(1,dl+dr-1)*lengthStep);
     metric+=float3(n.x*n.x,n.y*n.y,n.x*n.y);load+=gradient*n;

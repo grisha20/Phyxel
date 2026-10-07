@@ -2038,8 +2038,8 @@ public sealed class SimulationDispatchCoordinator
         int groupsY = DivideRoundUp(resources.AirHeight, 8);
 
         RunAirPass(context, resources.AirInjectShader, groupsX, groupsY);
-        // Fine links are now baked. Reaction volume must enter BEFORE the
-        // projection, while its compressible wave is attached afterwards.
+        // Fine links are now baked. Gather finite reaction stock separately;
+        // its compressible expansion is attached after the draft projection.
         Unbind(context,6,6);
         DispatchReactionGather(resources);
         context.ComputeShader.SetShaderResources(0,resources.Materials.View,resources.Grid.ReadView,
