@@ -52,3 +52,5 @@
 - [SP: холодная крыша котла, давление и падение осколков](STEAM_ROOF_DIAGNOSIS.md).
 
 - [FJ: исправленный выброс и перенос осколков](FRAGMENT_JET_CONTRACT.md), [результаты и ограничения](FRAGMENT_JET_RESULTS.md).
+
+- [FS — печь с датчиками: видимое тепло и проверка FPS](FURNACE_SENSOR_HEAT_CONTRACT.md), [результаты и ограничения](FURNACE_SENSOR_HEAT_RESULTS.md).

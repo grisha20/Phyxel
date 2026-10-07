@@ -15,6 +15,8 @@ cbuffer ThermalConstants : register(b0)
 StructuredBuffer<GridCell> SourceGrid : register(t0);
 StructuredBuffer<MaterialProperties> Materials : register(t1);
 StructuredBuffer<uint> BulkDegrees : register(t2);
+StructuredBuffer<float> RadiantDegrees : register(t3);
+RWStructuredBuffer<float> RadiantDegreeOutput : register(u2);
 RWStructuredBuffer<GridCell> DestinationGrid : register(u0);
 struct ThermalEnergyLedgerCell { float DeviceHeat; float AmbientHeat; };
 RWStructuredBuffer<ThermalEnergyLedgerCell> EnergyLedger : register(u1);
@@ -160,7 +162,7 @@ float ContactHeatFlow(
 // Bounded game approximation of radiant heat across a resolved air gap.
 // Both endpoints gather exactly the same pair from SourceGrid: no atomics,
 // extra heat source, or change to air/gas momentum. Condensed matter occludes.
-static const int RadiantRange = 24;
+static const int RadiantRange = 96;
 
 bool IsRadiantGas(MaterialProperties material)
 {
@@ -168,59 +170,84 @@ bool IsRadiantGas(MaterialProperties material)
         (material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0;
 }
 
-float RadiantPair(GridCell cell, GridCell other, int distance)
+bool IsCondensedAt(int2 p)
+{
+    GridCell c = SourceGrid[p.y * ThermalWidth + p.x];
+    return c.IsActive != 0 && Materials[c.MaterialIndex].SimulationKind != SimulationKindGas;
+}
+
+float RadiantPair(GridCell cell, GridCell other, uint index, uint otherIndex, float weight, bool degreeOnly)
 {
     MaterialProperties a = Materials[cell.MaterialIndex];
     MaterialProperties b = Materials[other.MaterialIndex];
     if (a.ThermalConductivity <= 0 || b.ThermalConductivity <= 0) return 0;
+    if (degreeOnly) return weight;
     bool gasA = IsRadiantGas(a);
     uint gasFlags = gasA ? a.Flags : b.Flags;
     float solidConductivity = gasA ? b.ThermalConductivity : a.ThermalConductivity;
-    // Conductivity is not emissivity. Use explicit game strengths for the
-    // existing luminous-flame/soot roles, bounded by the receiving surface.
+    // Explicit game strengths, not measured emissivity. Each endpoint has
+    // the same visibility graph and coefficient; total incident budget <=.18 C.
     float coupling = saturate(solidConductivity) *
         ((gasFlags & MaterialFlagFlame) != 0 ? 1.0 : 0.25);
-    // Four rays contain at most 46 total weights (distances 2..24).
-    // .18 plus the contact bound .80 stays below unity for either endpoint.
     float fraction = min(0.18, 10.8 * ThermalDeltaTime);
-    float weight = (RadiantRange + 1.0 - distance) / RadiantRange;
+    float degree = max(1.0, max(RadiantDegrees[index], RadiantDegrees[otherIndex]));
     float coefficient = min(EffectiveCapacity(cell), EffectiveCapacity(other)) *
-        coupling * fraction * weight / 48.0;
+        coupling * fraction * weight / degree;
     return coefficient * (other.Temperature - cell.Temperature);
 }
 
-float RadiantHeatFlow(GridCell cell, uint2 coordinate)
+float RadiantExchange(GridCell cell, uint2 coordinate, bool degreeOnly)
 {
     MaterialProperties material = Materials[cell.MaterialIndex];
     bool emitter = IsRadiantGas(material);
     if ((!emitter && material.SimulationKind != SimulationKindSolid) ||
         material.ThermalConductivity <= 0) return 0;
+    uint index = coordinate.y * ThermalWidth + coordinate.x;
     float heat = 0;
     [unroll]
-    for (int direction = 0; direction < 4; direction++)
+    for (int direction = 0; direction < 8; direction++)
     {
         int2 step = direction == 0 ? int2(-1, 0) : direction == 1 ? int2(1, 0) :
-            direction == 2 ? int2(0, -1) : int2(0, 1);
+            direction == 2 ? int2(0, -1) : direction == 3 ? int2(0, 1) :
+            direction == 4 ? int2(-1,-1) : direction == 5 ? int2(1,-1) :
+            direction == 6 ? int2(-1,1) : int2(1,1);
+        bool diagonal = direction >= 4;
         [loop]
         for (int distance = 1; distance <= RadiantRange; distance++)
         {
             int2 p = int2(coordinate) + step * distance;
             if (p.x < 0 || p.y < 0 || p.x >= (int)ThermalWidth || p.y >= (int)ThermalHeight) break;
+            // The two side cells of each crossed corner are identical when
+            // traversed backwards. This excludes diagonal leaks through walls.
+            if (diagonal && (IsCondensedAt(p - int2(step.x,0)) || IsCondensedAt(p - int2(0,step.y)))) break;
             GridCell other = SourceGrid[p.y * ThermalWidth + p.x];
             if (other.IsActive == 0) continue;
             MaterialProperties otherMaterial = Materials[other.MaterialIndex];
+            float d = distance * (diagonal ? 1.41421356237 : 1.0);
+            // Euclidean range and falloff have no discontinuity at old 24-cell cutoff.
+            if (d > RadiantRange) break;
+            float weight = 1.0 / ((1.0 + d / 24.0) * (1.0 + d / 24.0));
             if (otherMaterial.SimulationKind == SimulationKindGas)
             {
                 if (!emitter && distance > 1 && IsRadiantGas(otherMaterial))
-                    heat += RadiantPair(cell, other, distance);
+                    heat += RadiantPair(cell, other, index, p.y * ThermalWidth + p.x, weight, degreeOnly);
                 continue;
             }
             if (emitter && distance > 1 && otherMaterial.SimulationKind == SimulationKindSolid)
-                heat += RadiantPair(cell, other, distance);
+                heat += RadiantPair(cell, other, index, p.y * ThermalWidth + p.x, weight, degreeOnly);
             break;
         }
     }
     return heat;
+}
+
+[numthreads(16, 16, 1)]
+void CSRadiantDegrees(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= ThermalWidth || id.y >= ThermalHeight) return;
+    uint index = id.y * ThermalWidth + id.x;
+    GridCell cell = SourceGrid[index];
+    RadiantDegreeOutput[index] = cell.IsActive == 0 ? 0 : RadiantExchange(cell, id.xy, true);
 }
 
 #include "BulkThermalGeometry.hlsli"
@@ -355,7 +382,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         heatFlow += ContactHeatFlow(cell, capacity, index, index + ThermalWidth + 1,
             DiagonalGasContactWeight, true);
 
-    heatFlow += RadiantHeatFlow(cell, coordinate);
+    heatFlow += RadiantExchange(cell, coordinate, false);
     heatFlow += BulkHeatFlow(cell, coordinate);
     MaterialProperties material = Materials[cell.MaterialIndex];
     float ambientHeat = 0;

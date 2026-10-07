@@ -58,7 +58,7 @@ internal static class FurnaceSurfaceHeatVerifier
         foreach (string control in new[] { "cold", "range", "wall", "water", "insulator" })
         {
             var grid = new GridCell[w * r.Height]; grid[centre] = Cell(metal, 20, 7.8f);
-            grid[centre + (control == "range" ? 25 : 12) * w] = Cell(fire, control == "cold" ? 20 : 1000);
+            grid[centre + (control == "range" ? 97 : 12) * w] = Cell(fire, control == "cold" ? 20 : 1000);
             if (control == "wall" || control == "water") grid[centre + 6 * w] = Cell(control == "wall" ? fixture : water, 20);
             float savedK = table[metal].ThermalConductivity;
             if (control == "insulator") { table[metal].ThermalConductivity = 0; r.Materials.Upload(r.Context, table); }
@@ -66,20 +66,58 @@ internal static class FurnaceSurfaceHeatVerifier
             Check(after[centre].Temperature == 20, control + " recipient must stay cold");
             table[metal].ThermalConductivity = savedK; r.Materials.Upload(r.Context, table);
         }
+        foreach (var (dx, dy) in new[] { (48, 0), (0, 96), (40, 40), (-40, 40), (40, -40), (-40, -40) })
+        {
+            var grid = new GridCell[w * r.Height]; grid[centre] = Cell(metal, 20, 7.8f);
+            int donorIndex = centre + dx + dy * w;
+            grid[donorIndex] = Cell(fire, 1000);
+            var after = Advance(grid, 1, $"extended/{dx},{dy}");
+            Check(after[centre].Temperature > 20 && after[donorIndex].Temperature < 1000, "extended reciprocal visible pair");
+            if (dx != 0 && dy != 0)
+            {
+                grid[centre + Math.Sign(dx)] = Cell(fixture, 20);
+                after = Advance(grid, 1, $"corner/{dx},{dy}");
+                Check(after[centre].Temperature == 20 && after[donorIndex].Temperature == 1000, "corner occludes both endpoints");
+            }
+        }
+        var diagonalRange = new GridCell[w * r.Height];
+        diagonalRange[centre] = Cell(metal, 20, 7.8f);
+        diagonalRange[centre + 68 + 68 * w] = Cell(fire, 1000);
+        Check(Advance(diagonalRange, 1, "euclidean/range")[centre].Temperature == 20, "diagonal exceeds Euclidean 96 range");
         // A surface sees many emitters; the pair sum must remain bounded and
         // conserve heat even when the recipient starts on its melting plateau.
         var many = new GridCell[w * r.Height]; many[centre] = Cell(metal, 1000, 7.8f);
         for (int distance = 2; distance <= 24; distance++)
-            foreach (int direction in new[] { -1, 1, -w, w }) many[centre + direction * distance] = Cell(fire, 1500, .2f);
+            foreach (int direction in new[] { -1, 1, -w, w, -w-1, -w+1, w-1, w+1 }) many[centre + direction * distance] = Cell(fire, 1500, .2f);
         var melted = Advance(many, 120, "many/melting");
         Check(melted[centre].Temperature == 1000 && melted[centre].Lifetime > 1, "metal melting plateau receives Q");
         Advance(many, 600, "many/long");
+        var shells = new GridCell[w * r.Height]; shells[centre] = Cell(fire, 1500, .2f);
+        foreach (int direction in new[] { -1, 1, -w, w, -w-1, -w+1, w-1, w+1 })
+            shells[centre + direction * 48] = Cell(metal, 20, 7.8f);
+        Advance(shells, 120, "eight-surfaces/budget");
+        var serializer = new Phyxel.Serialization.SimulationStateSerializer();
+        var snapshot = new Phyxel.Serialization.SimulationWorldSnapshot(w, r.Height,
+            MemoryMarshal.AsBytes(melted.AsSpan()).ToArray());
+        serializer.ApplyWorldSnapshot(r, snapshot);
+        coordinator.RestoreWorldActivity(r, true, true, false);
+        coordinator.DispatchFrame(settings, [], .05f);
+        Check(Read().AsSpan().SequenceEqual(melted), "paused radiant phase exact");
+        string path = System.IO.Path.Combine(Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")!, "radiant-phase.json");
+        System.Threading.Tasks.Task.Run(() => serializer.SaveAsync(path, settings, (ushort)metal, snapshot, registry)).GetAwaiter().GetResult();
+        var loaded = System.Threading.Tasks.Task.Run(() => serializer.LoadAsync(path, registry)).GetAwaiter().GetResult()!.World!;
+        Check(loaded.Grid.AsSpan().SequenceEqual(snapshot.Grid), "radiant partial phase save exact");
+        serializer.ApplyWorldSnapshot(r, loaded); coordinator.DispatchThermalDiffusion(r, false, 0, false); var next = Read();
+        serializer.ApplyWorldSnapshot(r, loaded); coordinator.DispatchThermalDiffusion(r, false, 0, false);
+        Check(Read().AsSpan().SequenceEqual(next), "radiant degree scratch regenerated after reload");
         // Water receives heat from the visible metal by its existing contact;
         // the new distant transfer must not discard boiling enthalpy.
         var wet = new GridCell[w * r.Height]; wet[centre] = Cell(water, 100);
         wet[centre + w] = Cell(metal, 100, 7.8f); wet[centre + 13 * w] = Cell(fire, 1000, 5);
-        var boiled = Advance(wet, 600, "water/contact");
+        var boiled = Advance(wet, 2, "water/contact/plateau");
         Check(boiled[centre].Temperature == 100 && boiled[centre].Lifetime > .01f, "water boiling plateau receives Q");
+        var spent = Advance(wet, 600, "water/contact/after-latent");
+        Check(spent[centre].Lifetime >= boiled[centre].Lifetime, "long transfer preserves spent boiling enthalpy");
         var porous = new GridCell[w * r.Height]; porous[centre] = Cell(wood, 100);
         porous[centre].MoistureMass = .15f; porous[centre].MoistureEnergy = 20;
         porous[centre + 12 * w] = Cell(fire, 1000, 5);

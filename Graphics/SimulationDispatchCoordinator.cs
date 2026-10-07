@@ -1926,7 +1926,12 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetUnorderedAccessView(0, resources.BulkThermalDegrees.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
         context.ComputeShader.SetUnorderedAccessView(0, null);
+        context.ComputeShader.Set(resources.RadiantDegreesShader);
+        context.ComputeShader.SetUnorderedAccessView(2, resources.RadiantDegrees.UnorderedView);
+        context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+        context.ComputeShader.SetUnorderedAccessView(2, null);
         context.ComputeShader.SetShaderResource(2, resources.BulkThermalDegrees.View);
+        context.ComputeShader.SetShaderResource(3, resources.RadiantDegrees.View);
         context.ComputeShader.Set(resources.ThermalDiffusionShader);
         context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.WriteUnorderedView);
         if (resources.ThermalEnergyLedger is not null)
@@ -1941,7 +1946,7 @@ public sealed class SimulationDispatchCoordinator
             context.End(resources.ThermalTimestampDisjointQuery);
             thermalTimingPending = true;
         }
-        Unbind(context, 3, resources.ThermalEnergyLedger is null ? 1 : 2);
+        Unbind(context, 4, resources.ThermalEnergyLedger is null ? 1 : 2);
         resources.Grid.Swap();
     }
 

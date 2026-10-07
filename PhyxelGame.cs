@@ -385,6 +385,17 @@ public sealed class PhyxelGame : Game
             oilSmokeVerification=AbsorptionRegressionVerifier.Run(dispatchCoordinator,materialRegistry,fps=>diagnosticFramesPerSecond=fps).GetEnumerator();
             IsFixedTimeStep=false; return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FURNACE_SENSORS") == "1")
+        {
+            InactiveSleepTime = TimeSpan.Zero;
+            if (Environment.GetEnvironmentVariable("PHYXEL_SENSOR_REALTIME") == "1")
+                currentResources = FurnaceSensorRegressionVerifier.LoadFixture(dispatchCoordinator, materialRegistry, settings);
+            else
+            {
+                oilSmokeVerification = FurnaceSensorRegressionVerifier.Run(dispatchCoordinator, materialRegistry, settings).GetEnumerator();
+                IsFixedTimeStep = false; return;
+            }
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_HANDOFF") == "1")
         {
             InactiveSleepTime = TimeSpan.Zero;
@@ -668,7 +679,16 @@ public sealed class PhyxelGame : Game
             currentResources = DispatchEditorFrame(commandEncoder.Encode(commands),
                 !acceptance.Active && brushController.CommandsStartStroke, physicalElapsedSeconds);
             simulationClockTrace.Observe(physicalElapsedSeconds, settings, dispatchCoordinator);
-            if (simulationClockTrace.ExitRequested) Exit();
+            if (simulationClockTrace.ExitRequested)
+            {
+                if (Environment.GetEnvironmentVariable("PHYXEL_SENSOR_REALTIME") == "1" &&
+                    Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR") is { Length: > 0 } sensorDir)
+                {
+                    diagnosticUiCapturePath = Path.Combine(sensorDir, "realtime-ui.png");
+                    CaptureUiScreenshotIfRequested();
+                }
+                Exit();
+            }
             acceptance.RecordAirPressureTrace(acceptanceFrame, currentResources);
             acceptance.RecordGasObstacleBypassTrace(acceptanceFrame, currentResources);
             acceptance.RecordGasLateralTransferTrace(acceptanceFrame, currentResources);

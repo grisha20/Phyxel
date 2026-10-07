@@ -37,3 +37,5 @@ CU01–CU06 PASS в выбранном объёме; полный паспорт
 [Контракт](../shared/PRESSURE_FRACTURE_CONTRACT.md), [свежие проверки и ограничения](../shared/PRESSURE_FRACTURE_RESULTS.md). Реализован выбранный этап; крупные жёсткие осколки и полный механический баланс остаются будущими механизмами.
 
 - [FJ: выброс и перенос осколков](../shared/FRAGMENT_JET_CONTRACT.md), [свежие проверки и ограничения](../shared/FRAGMENT_JET_RESULTS.md).
+
+- [FS: тепло сохранённой печи](../shared/FURNACE_SENSOR_HEAT_CONTRACT.md), [новые результаты и ограничения](../shared/FURNACE_SENSOR_HEAT_RESULTS.md).

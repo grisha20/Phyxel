@@ -27,3 +27,5 @@
 храниться у исходного материала. Настройки JSON не являются справочником СИ.
 
 - [FJ: выброс и перенос осколков](../shared/FRAGMENT_JET_CONTRACT.md), [свежие проверки и ограничения](../shared/FRAGMENT_JET_RESULTS.md).
+
+- [FS: тепло сохранённой печи](../shared/FURNACE_SENSOR_HEAT_CONTRACT.md), [новые результаты и ограничения](../shared/FURNACE_SENSOR_HEAT_RESULTS.md).

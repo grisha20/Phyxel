@@ -582,6 +582,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             PhaseEventStaging = phaseEventStaging,
             ThermalEnergyLedger = thermalLedger,
             BulkThermalDegrees = new(Device, width * height),
+            RadiantDegrees = new(Device, width * height),
+            RadiantDegreesShader = allocateSimulation ? CompileShader("ThermalDiffusion.hlsl", "CSRadiantDegrees") : null,
             BulkThermalDegreesShader = allocateSimulation ? CompileShader("BulkHeatDegrees.hlsl", "CSMain") : null,
             ThermalEnergyStaging = thermalEnergyStaging,
             PhaseSummaryReadbackSlots = phaseSummaryReadbackSlots,
