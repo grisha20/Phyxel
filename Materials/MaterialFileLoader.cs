@@ -1172,10 +1172,10 @@ internal static partial class MaterialFileLoader
     private static float ParseEmissionRate(JsonElement value, string field)
     {
         if (value.ValueKind != JsonValueKind.Number || !value.TryGetSingle(out float rate) ||
-            !float.IsFinite(rate) || rate <= 0 || rate > MaterialRegistry.MaximumCombustionBurnRate)
+            !float.IsFinite(rate) || rate < 0 || rate > MaterialRegistry.MaximumCombustionBurnRate)
         {
             throw new InvalidDataException(
-                $"emissions.{field} должна быть конечным числом больше 0 и не больше {MaterialRegistry.MaximumCombustionBurnRate}.");
+                $"emissions.{field} должна быть конечным числом не меньше 0 и не больше {MaterialRegistry.MaximumCombustionBurnRate}.");
         }
         return rate;
     }

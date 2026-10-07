@@ -1811,8 +1811,8 @@ public sealed class SimulationDispatchCoordinator
             }
             thermalActive = true;
             if (materialRegistry[command.MaterialIndex].Properties.ReactionPressurePerMass > 0 &&
-                materialRegistry[command.MaterialIndex].Properties.SimulationKind ==
-                    (uint)MaterialSimulationKind.Granular)
+                materialRegistry[command.MaterialIndex].Properties.SimulationKind is
+                    (uint)MaterialSimulationKind.Granular or (uint)MaterialSimulationKind.Solid)
             {
                 pressurePowderPotential = true;
                 if (boundResources is not null)

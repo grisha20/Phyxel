@@ -353,7 +353,8 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
     }
 
     MaterialProperties source = Materials[cell.MaterialIndex];
-    if (source.SimulationKind == SimulationKindGranular && source.ReactionPressurePerMass > 0)
+    if ((source.SimulationKind == SimulationKindGranular || source.SimulationKind == SimulationKindSolid) &&
+        source.ReactionPressurePerMass > 0)
     {
         uint ignored;
         InterlockedOr(CombustionSummary[0], PressurePowderPresent, ignored);

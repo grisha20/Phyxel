@@ -118,7 +118,8 @@ public sealed class MaterialRegistry
         RegistryHasCombustibleMaterials = definitions.Any(material => material.Combustion is not null);
         RegistryHasTransientMaterials = definitions.Any(material => material.Lifecycle is not null);
         RegistryHasPressurePowders = definitions.Any(material =>
-            material.Properties.SimulationKind == (uint)MaterialSimulationKind.Granular &&
+            (material.Properties.SimulationKind == (uint)MaterialSimulationKind.Granular ||
+             material.Properties.SimulationKind == (uint)MaterialSimulationKind.Solid) &&
             material.Properties.ReactionPressurePerMass > 0);
         RegistryHasContactTransitions = definitions.Any(material => material.LiquidContactTransition is not null || material.Moisture is not null);
         PhaseTransitionGraphFlags = definitions

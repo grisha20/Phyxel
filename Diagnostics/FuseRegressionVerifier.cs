@@ -49,6 +49,19 @@ internal static class FuseRegressionVerifier
         File.Delete(Path.Combine(validation,"invalid.json"));
         Console.WriteLine("PHYXEL_FUSE FI07 loader6=PASS");
 
+        foreach(string channel in new[]{"smokeRate","gasRate","flameRate"})
+        foreach(float invalid in new[]{-1f,101f,float.PositiveInfinity})
+        {
+            var bad=source.DeepClone();
+            bad["emissions"]![channel]=float.IsFinite(invalid)?JsonValue.Create(invalid):JsonValue.Create("Infinity");
+            string path=Path.Combine(validation,"invalid.json");File.WriteAllText(path,bad.ToJsonString());
+            bool rejected=false;try{MaterialFileLoader.LoadCore(validation,100);}catch(InvalidDataException){rejected=true;}
+            Check(rejected,$"FU invalid emission {channel}/{invalid} accepted");File.Delete(path);
+        }
+        string valid=Path.Combine(validation,"zero.json");File.WriteAllText(valid,source.ToJsonString());
+        Check(MaterialFileLoader.LoadCore(validation,100).Count==1,"FU disabled smoke/gas rejected");File.Delete(valid);
+        Console.WriteLine("PHYXEL_FUSE FU loader-zero/rate-bounds9=PASS");
+
         GridCell Cell(uint id,float t=30) => new(){IsActive=1,MaterialIndex=id,Mass=1,Temperature=t,RestFrames=2};
         void Reaction(float dt,int tick,bool finite)
         {
@@ -77,27 +90,27 @@ internal static class FuseRegressionVerifier
         {
             var grid=new GridCell[n];int[] path=Enumerable.Range(0,32).Select(k=>(80+k*direction.Item2)*w+100+k*direction.Item1).ToArray();
             foreach(int i in path)grid[i]=Cell(fuse);grid[path[0]].Temperature=650;Upload(grid);
-            double terminal=-1;int frontAt2=0;
+            double terminal=-1;int frontAtHalfSecond=0;
             for(int tick=1;tick<=900;tick++)
             {
                 Reaction(1f/60,tick,true);
                 if(tick%6!=0)continue;
                 var after=Read(r);
                 int front=Array.FindLastIndex(path,i=>after[i].MaterialIndex!=fuse||after[i].Lifetime>0);
-                if(tick==120)frontAt2=front+1;
+                if(tick==30)frontAtHalfSecond=front+1;
                 if(terminal<0 && (after[path[^1]].MaterialIndex!=fuse||after[path[^1]].Lifetime>0))terminal=tick/60.0;
-                if(terminal>0&&tick>=120)break;
+                if(terminal>0&&tick>=30)break;
             }
-            Check(terminal>=6&&terminal<=15&&frontAt2>1&&frontAt2<16,$"FI02 direction{direction} terminal={terminal} front2={frontAt2}");
-            results.Add(new{test="isolated",direction,terminal,frontAt2});
-            Console.WriteLine($"PHYXEL_FUSE FI02 direction={direction} terminal={terminal:F2}s front2={frontAt2} PASS");
+            Check(terminal>=1&&terminal<=3&&frontAtHalfSecond>1&&frontAtHalfSecond<16,$"FI02 direction{direction} terminal={terminal} frontHalfSecond={frontAtHalfSecond}");
+            results.Add(new{test="isolated",direction,terminal,frontAtHalfSecond});
+            Console.WriteLine($"PHYXEL_FUSE FI02 direction={direction} terminal={terminal:F2}s frontHalfSecond={frontAtHalfSecond} PASS");
         }
         foreach(bool finite in new[]{false,true})
         {
             var grid=new GridCell[n];int a=80*w+100;grid[a]=Cell(fuse,650);
             foreach(int i in new[]{a-1,a+1,a-w,a+w})grid[i]=Cell(metal);
             Upload(grid);Reaction(1f/60,1,finite);var after=Read(r)[a];
-            Check(Math.Abs(after.Mass-(1-.5/60))<1e-6&&after.Lifetime>0,"FI03 sealed no-O2 cord did not burn");
+            Check(Math.Abs(after.Mass-(1-2.0/60))<1e-6&&after.Lifetime>0,"FI03 sealed no-O2 cord did not burn");
             grid[a]=after;grid[a].Lifetime=.5f;grid[a].Temperature=50;Upload(grid);Reaction(1f/60,2,finite);
             Check(Read(r)[a].Lifetime==0&&Read(r)[a].Mass==grid[a].Mass,"FI03 chilled cord kept burning");
         }
@@ -109,11 +122,11 @@ internal static class FuseRegressionVerifier
         {
             Reaction(1f/60,tick,true);var c=Read(r)[ci];
             if(c.Lifetime<=0)continue;
-            Check(c.Temperature<130&&c.Mass<1,"FI03 contact ignition injected threshold heat");lit=true;break;
+            Check(c.Temperature<200&&c.Mass<1,"FI03 contact ignition injected threshold heat");lit=true;break;
         }
         Check(lit,"FI03 adjacent flame failed to ignite");
         var cpu=Cell(fuse,650);var table=registry.CreateGpuTable();
-        Check(CombustionRuntime.TryApply(ref cpu,table,1f/60,out _,out var burn)&&Math.Abs(burn-.5/60)<1e-7&&cpu.Lifetime>0,"FI03 CPU burn timer failed");
+        Check(CombustionRuntime.TryApply(ref cpu,table,1f/60,out _,out var burn)&&Math.Abs(burn-2.0/60)<1e-7&&cpu.Lifetime>0,"FI03 CPU burn timer failed");
         cpu.Lifetime=.5f;cpu.Temperature=50;
         Check(!CombustionRuntime.TryApply(ref cpu,table,1f/60,out _,out _)&&cpu.Lifetime==0,"FI03 CPU quench failed");
         Console.WriteLine("PHYXEL_FUSE FI03 flame-contact/CPU=PASS");
@@ -148,7 +161,7 @@ internal static class FuseRegressionVerifier
                     var after=Read(r);
                     double mass=after.Where(c=>c.IsActive!=0&&c.MaterialIndex==powder).Sum(c=>(double)c.Mass);
                     if(mass<11.9&&powderTime<0)powderTime=frame/(double)fps;
-                    if(frame==fps*2)
+                    if(frame==fps*4/5)
                     {
                         double fuseMass=after.Where(c=>c.MaterialIndex==fuse&&c.IsActive!=0).Sum(c=>(double)c.Mass);
                         Check(fuseMass>10&&fuseMass<32,"FI04 full cord instantaneous or stalled");
@@ -158,7 +171,7 @@ internal static class FuseRegressionVerifier
                         settings.RenderWithoutEffects=false;
                     }
                 }
-                if(frame==fps*3)
+                if(frame==fps*4/5)
                 {
                     settings.Paused=true;var before=Read(r);for(int i=0;i<5;i++)coordinator.DispatchFrame(settings,[],1f/fps);
                     Check(MemoryMarshal.AsBytes(before.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(Read(r).AsSpan())),"FI05 paused grid changed");
@@ -176,11 +189,11 @@ internal static class FuseRegressionVerifier
                     serializer.ApplyWorldSnapshot(r,copy);coordinator.RestoreWorldActivity(r,true,true,false,true);
                     settings.Paused=false;saved=true;
                 }
-                if(frame>3*fps&&powderTime>0)continuation=true;
+                if(frame>fps*4/5&&powderTime>0)continuation=true;
                 if(frame%4==0)yield return r;
                 if(powderTime>0&&frame>=4*fps)break;
             }
-            Check(powderTime>1&&powderTime<=20&&saved&&continuation,$"FI04/05 {mode}/{fps} powder={powderTime}");
+            Check(powderTime>1&&powderTime<=5&&saved&&continuation,$"FI04/05 {mode}/{fps} powder={powderTime}");
             if(!times.ContainsKey(mode))times[mode]=[];times[mode].Add(powderTime);
             results.Add(new{test="full",mode=mode.ToString(),fps,powderTime,saved,continuation});
             Console.WriteLine($"PHYXEL_FUSE FI04/05 mode={mode} fps={fps} powder={powderTime:F2}s save/resume=PASS");
@@ -206,7 +219,7 @@ internal static class FuseRegressionVerifier
             results.Add(new{test="brush",mode=mode.ToString(),ignition});
             Console.WriteLine($"PHYXEL_FUSE FI08 mode={mode} brush-ignition={ignition:F2}s PASS");
         }
-        foreach(var row in times)Check(row.Value.Max()-row.Value.Min()<=1,$"FI04 frame-rate dependence {row.Key}");
+        foreach(var row in times)Check(row.Value.Max()-row.Value.Min()<=.3,$"FI04 frame-rate dependence {row.Key}");
         File.WriteAllText(Path.Combine(dir,"results.json"),JsonSerializer.Serialize(results,new JsonSerializerOptions{WriteIndented=true}));
         Console.WriteLine("PHYXEL_FUSE_COMPLETED");
     }

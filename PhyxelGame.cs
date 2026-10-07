@@ -385,6 +385,12 @@ public sealed class PhyxelGame : Game
             oilSmokeVerification=AbsorptionRegressionVerifier.Run(dispatchCoordinator,materialRegistry,fps=>diagnosticFramesPerSecond=fps).GetEnumerator();
             IsFixedTimeStep=false; return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_EXPLOSIVE_MATERIAL") == "1")
+        {
+            InactiveSleepTime = TimeSpan.Zero;
+            oilSmokeVerification = ExplosiveMaterialRegressionVerifier.Run(dispatchCoordinator, materialRegistry).GetEnumerator();
+            IsFixedTimeStep = false; return;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FUSE") == "1")
         {
             InactiveSleepTime = TimeSpan.Zero;

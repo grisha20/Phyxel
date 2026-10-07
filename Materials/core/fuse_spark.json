@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "id": "core:fuse_spark",
+  "name": {
+    "ru": "Искра фитиля",
+    "en": "Fuse spark"
+  },
+  "kind": "gas",
+  "flags": [
+    "flame"
+  ],
+  "color": "#FF3A08E8",
+  "physics": {
+    "density": 0.05,
+    "friction": 0.0,
+    "flowRate": 1.4
+  },
+  "gas": {
+    "buoyancy": -0.14375,
+    "hotAir": 0.001
+  },
+  "motion": {
+    "advection": 0.9,
+    "airDrag": 0.04,
+    "airLoss": 0.97,
+    "loss": 0.2,
+    "collision": 0.0
+  },
+  "thermal": {
+    "initialTemperature": 420.0,
+    "conductivity": 0.35,
+    "heatCapacity": 1.0
+  },
+  "lifecycle": {
+    "minimum": 2.0,
+    "maximum": 2.8166667,
+    "decayInto": "core:empty",
+    "extinctionTemperature": 100.0
+  },
+  "ui": {
+    "order": 76,
+    "hidden": true
+  }
+}

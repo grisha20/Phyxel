@@ -649,7 +649,7 @@ public static class UiLayoutRegressionTests
             [MaterialCategoryType.Solids] =
                 [CoreMaterialIds.Ice, CoreMaterialIds.Metal, "core:steel", "core:cast_iron", "core:copper",
                     CoreMaterialIds.Stone, CoreMaterialIds.Fixture, CoreMaterialIds.Wood],
-            [MaterialCategoryType.Combustion] = [CoreMaterialIds.Fire, CoreMaterialIds.Fuse],
+            [MaterialCategoryType.Combustion] = [CoreMaterialIds.Fire, CoreMaterialIds.Fuse, "core:tnt"],
             [MaterialCategoryType.Tools] = [CoreMaterialIds.Eraser, CoreMaterialIds.Heater, CoreMaterialIds.Cooler],
             [MaterialCategoryType.Filters] = []
         };
@@ -1028,6 +1028,7 @@ public static class UiLayoutRegressionTests
             [CoreMaterialIds.Wood] = "wood.png",
             [CoreMaterialIds.Fire] = "fire.png",
             [CoreMaterialIds.Fuse] = "fuse.png",
+            ["core:tnt"] = "tnt.png",
             [CoreMaterialIds.Coal] = "charcoal.png",
             [CoreMaterialIds.StoneCoal] = "stone_coal.png"
         };

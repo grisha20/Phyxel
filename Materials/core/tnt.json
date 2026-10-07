@@ -1,46 +1,47 @@
 {
   "schema": 1,
-  "id": "core:fuse",
+  "id": "core:tnt",
   "name": {
-    "ru": "Фитиль",
-    "en": "Fuse"
+    "ru": "Тротил",
+    "en": "TNT"
   },
   "kind": "solid",
   "flags": [
     "self-oxidizing",
     "progressive-ignition"
   ],
-  "color": "#667047",
+  "color": "#D9AC43",
   "physics": {
-    "density": 1,
+    "density": 1.6,
     "friction": 0.8,
     "flowRate": 0
   },
   "thermal": {
     "initialTemperature": 30,
-    "conductivity": 0.02,
+    "conductivity": 0.08,
     "heatCapacity": 1
   },
   "combustion": {
     "ignitionTemperature": 300,
     "contactIgnitionTemperature": 100,
-    "burnRate": 2,
-    "heatPerMass": 2400,
-    "spreadRate": 16,
-    "maximumTemperature": 650,
-    "flameLifetimeMultiplier": 0.15,
+    "burnRate": 15,
+    "heatPerMass": 2600,
+    "pressurePerMass": 12,
+    "spreadRate": 100,
+    "maximumTemperature": 2200,
+    "flameLifetimeMultiplier": 0.5,
     "burnedInto": "core:empty"
   },
   "emissions": {
     "smokeInto": "core:smoke",
-    "smokeRate": 0,
+    "smokeRate": 0.3,
     "gasInto": "core:co2",
-    "gasRate": 0,
-    "flameInto": "core:fuse_spark",
-    "flameRate": 0.5
+    "gasRate": 0.2,
+    "flameInto": "core:fire",
+    "flameRate": 60
   },
   "ui": {
-    "order": 75,
+    "order": 77,
     "hidden": false,
     "category": "combustion"
   }
