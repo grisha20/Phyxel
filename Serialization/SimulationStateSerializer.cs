@@ -251,6 +251,7 @@ public sealed class SimulationStateSerializer
         }
         ValidateSnapshotSize(world);
         resources.PressureMechanicsPotential = ContainsPressureActivity(world, resources.Materials.UploadedValues);
+        resources.ReactionPulsePotential = ContainsPressureActivity(world, resources.Materials.UploadedValues, includeCarrier: false);
         resources.OxidizerCarrierWarm = false;
         Array.Clear(resources.FilterMap);resources.FilterCount=0;
         if(world.Filters is {Length:>0} filterBytes){
@@ -320,7 +321,7 @@ public sealed class SimulationStateSerializer
         return false;
     }
 
-    private static bool ContainsPressureActivity(SimulationWorldSnapshot world, ReadOnlySpan<MaterialProperties> materials)
+    private static bool ContainsPressureActivity(SimulationWorldSnapshot world, ReadOnlySpan<MaterialProperties> materials, bool includeCarrier = true)
     {
         foreach (GridCell cell in MemoryMarshal.Cast<byte, GridCell>(world.Grid))
         {
@@ -331,7 +332,7 @@ public sealed class SimulationStateSerializer
             if (material.SimulationKind == (uint)MaterialSimulationKind.Solid && (cell.BodyId & 0x40000000u) != 0)
                 return true;
             if (material.SimulationKind == (uint)MaterialSimulationKind.Solid &&
-                material.PressureStrength > 0 && material.PressurePlasticity > 0 && cell.Pressure < 0)
+                material.PressureStrength > 0 && cell.Pressure < 0)
                 return true;
         }
         // Waves leave harmless floating-point tails after decaying. Compare
@@ -339,13 +340,20 @@ public sealed class SimulationStateSerializer
         float threshold = float.MaxValue;
         foreach (MaterialProperties material in materials)
             if (material.PressureStrength > 0) threshold = Math.Min(threshold, material.PressureStrength * 0.01f);
+        // Resume the accelerated wave down to its shader activation threshold,
+        // including unissued expansion stock, not just current pressure/velocity.
+        if (!includeCarrier) threshold = Math.Min(threshold, .001f);
         if (world.ReactionPending is { Length: > 0 } pending)
             foreach (System.Numerics.Vector4 source in MemoryMarshal.Cast<byte, System.Numerics.Vector4>(pending))
                 if (source.X > 0) return true;
         if (world.ReactionPulse is { Length: > 0 } pulse)
             foreach (System.Numerics.Vector4 wave in MemoryMarshal.Cast<byte, System.Numerics.Vector4>(pulse))
-                if (Math.Abs(wave.X) > threshold || Math.Abs(wave.Y) > threshold || Math.Abs(wave.Z) > threshold)
+                if (Math.Abs(wave.X) > threshold || Math.Abs(wave.Y) > threshold || Math.Abs(wave.Z) > threshold || Math.Abs(wave.W) > threshold)
                     return true;
+        // A saved pressurized vessel may contain no reactive powder or wave.
+        if (includeCarrier && world.Air is { Length: > 0 } air)
+            foreach (AirCell cell in MemoryMarshal.Cast<byte, AirCell>(air))
+                if (Math.Abs(cell.Pressure) > threshold * 60) return true;
         return false;
     }
 

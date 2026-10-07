@@ -193,7 +193,6 @@ public sealed record MaterialDefinition(
     public MaterialThermalRegulatorDefinition? ThermalRegulator { get; init; }
     public MaterialLiquidFlowDefinition? LiquidFlow { get; init; }
     public float PressureStrength { get; init; }
-    public float PressurePlasticity { get; init; }
     public MaterialMotionDefinition Motion { get; init; } = new(
         MaterialRegistry.DefaultMotionAdvection,
         MaterialRegistry.DefaultMotionAirDrag,

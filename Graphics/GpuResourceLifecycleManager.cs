@@ -518,6 +518,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             ReactionClearMappedShader = allocateSimulation ? CompileShader("ReactionPulse.hlsl","CSClearMapped") : null,
             ReactionFacesShader = allocateSimulation ? CompileShader("ReactionPulse.hlsl","CSFaces") : null,
             ReactionCommitShader = allocateSimulation ? CompileShader("ReactionPulse.hlsl","CSCommit") : null,
+            ReactionFastFacesShader = allocateSimulation ? CompileShader("ReactionPulse.hlsl","CSFastFaces") : null,
+            ReactionFastCommitShader = allocateSimulation ? CompileShader("ReactionPulse.hlsl","CSFastCommit") : null,
             AirScratch = airScratch,
             AirFlowLinks = airFlowLinks,
             AirProjectionA = airProjectionA,

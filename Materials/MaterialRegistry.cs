@@ -695,12 +695,6 @@ public sealed class MaterialRegistry
     {
         MaterialProperties properties = source.Properties;
         properties.PressureStrength = source.PressureStrength;
-        if (source.PressurePlasticity > 0)
-        {
-            if (source.ThermalRegulator is not null)
-                throw new InvalidOperationException("Pressure plasticity cannot share a thermal regulator slot.");
-            properties.PressurePlasticity = source.PressurePlasticity;
-        }
         if (source.LiquidFlow is { } liquidFlow)
         {
             properties.LiquidFlowReferenceTemperature = liquidFlow.ReferenceTemperature;

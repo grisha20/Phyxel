@@ -43,6 +43,8 @@ internal static partial class MaterialFileLoader
         public float Friction { get; set; }
         public float FlowRate { get; set; }
         public float PressureStrength { get; set; }
+        // Deprecated PM field: parsed/validated for external-file compatibility,
+        // but direct pressure bursting has no deformation or damage accumulator.
         public float PressurePlasticity { get; set; }
         public JsonElement LiquidFlow { get; set; }
     }
@@ -504,7 +506,6 @@ internal static partial class MaterialFileLoader
                 motion.Loss,
                 motion.Collision),
             PressureStrength = physics.PressureStrength,
-            PressurePlasticity = physics.PressurePlasticity,
             SourcePath = path
         };
     }

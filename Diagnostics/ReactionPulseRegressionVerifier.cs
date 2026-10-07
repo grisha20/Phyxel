@@ -27,6 +27,7 @@ internal static class ReactionPulseRegressionVerifier
         grid[gi]=new() { IsActive=1,MaterialIndex=powder,Mass=1,Temperature=300 };
         ctx.UpdateSubresource(grid,r.Grid.ReadBuffer);
         ctx.ClearUnorderedAccessView(r.ReactionPending.UnorderedView,new RawInt4());
+        float pressurePerMass=registry[CoreMaterialIds.Gunpowder].Properties.ReactionPressurePerMass;
         double initialEnergy=registry[CoreMaterialIds.Gunpowder].Properties.HeatCapacity*(300+273.15);
         for(uint tick=0;tick<7;tick++)
         {
@@ -45,12 +46,12 @@ internal static class ReactionPulseRegressionVerifier
             double remaining=cell.MaterialIndex==powder?cell.Mass:0;
             double retained=remaining*registry[CoreMaterialIds.Gunpowder].Properties.HeatCapacity*(cell.Temperature+273.15);
             double reacted=1-remaining;
-            Check(Math.Abs(source.X-reacted)<1e-5,"Reaction pressure did not match consumed fuel");
+            Check(Math.Abs(source.X-reacted*pressurePerMass)<1e-5,"Reaction pressure did not match consumed fuel");
             Check(Math.Abs(retained+source.Y-initialEnergy-reacted*2400)<.01,"Reaction heat partition lost energy");
         }
         var pending=Read(r.ReactionPending.Buffer);
         var packet=MemoryMarshal.Cast<byte,Vector4>(pending)[gi];
-        Check(Math.Abs(packet.X-1)<1e-5 && Math.Abs(packet.Z-.9)<1e-5,"One grain did not issue one complete packet");
+        Check(Math.Abs(packet.X-pressurePerMass)<1e-5 && Math.Abs(packet.Z-.9)<1e-5,"One grain did not issue one complete packet");
         var reactionFlame=MemoryMarshal.Cast<byte,GridCell>(Read(r.Grid.ReadBuffer))[gi];
         Check(reactionFlame.MaterialIndex==registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire) &&
             reactionFlame.Lifetime>=3 && reactionFlame.Lifetime<=4.22501f && reactionFlame.BodyId==0x80000000u,
@@ -80,7 +81,16 @@ internal static class ReactionPulseRegressionVerifier
         coordinator.DispatchAirSimulation(r,2,false,false);var waveRepeated=Capture();
         Check(waveNext.ReactionPulse!.AsSpan().SequenceEqual(waveRepeated.ReactionPulse),"Running wave did not continue identically after loading");
         double stock=MemoryMarshal.Cast<byte,Vector4>(waveNext.ReactionPulse!).ToArray().Sum(s=>(double)s.W);
-        Check(Math.Abs(stock-4.86)<1e-5,"Expansion stock was duplicated or did not decay once");
+        Check(Math.Abs(stock-4.86*pressurePerMass)<1e-5,"Expansion stock was duplicated or did not decay once");
+        var latePulse=new Vector4[r.AirWidth*r.AirHeight];latePulse[ai]=new(.005f,0,0,1);
+        var late=waveLoaded with {ReactionPulse=MemoryMarshal.AsBytes(latePulse.AsSpan()).ToArray()};
+        serializer.ApplyWorldSnapshot(r,late);coordinator.RestoreWorldActivity(r,true,false,false,true);
+        Check(r.ReactionPulsePotential,"Reload missed late wave/expansion activity");
+        coordinator.DispatchAirSimulation(r,99,false,false);var lateNext=Capture();
+        serializer.ApplyWorldSnapshot(r,late);coordinator.RestoreWorldActivity(r,true,false,false,true);
+        coordinator.DispatchAirSimulation(r,99,false,false);
+        Check(lateNext.ReactionPulse!.AsSpan().SequenceEqual(Read(r.ReactionPulse.ReadBuffer)),
+            "Late wave did not resume the same accelerated substeps");
         serializer.ApplyWorldSnapshot(r,loaded);coordinator.RestoreWorldActivity(r,true,false,false,true);
         coordinator.DispatchAirSimulation(r,1,false,false);
         var repeated=Capture();
@@ -104,6 +114,26 @@ internal static class ReactionPulseRegressionVerifier
         grid[gi]=default;ctx.UpdateSubresource(grid,r.Grid.ReadBuffer);
         coordinator.DispatchAirSimulation(r,3,false,false);
         Check(MemoryMarshal.Cast<byte,Vector4>(Read(r.ReactionPending.Buffer)).ToArray().All(s=>s==Vector4.Zero),"Opening trapped source did not release it");
+        // A pressure source can leave a porous grain before its heat packet
+        // gets a free carrier node. The two finite stocks are consumed once.
+        grid=new GridCell[n];for(int y=64;y<100;y++)for(int x=64;x<100;x++)
+            grid[y*r.Width+x]=new(){MaterialIndex=powder,IsActive=1,Mass=1,Temperature=30};
+        var porousPending=new Vector4[n];porousPending[gi]=new(1,100,.9f,0);
+        serializer.ApplyWorldSnapshot(r,new(r.Width,r.Height,MemoryMarshal.AsBytes(grid.AsSpan()).ToArray(),
+            ReactionPending:MemoryMarshal.AsBytes(porousPending.AsSpan()).ToArray()));
+        coordinator.RestoreWorldActivity(r,true,false,false,true);
+        coordinator.DispatchAirSimulation(r,1,false,false);
+        var porousPacket=MemoryMarshal.Cast<byte,Vector4>(Read(r.ReactionPending.Buffer))[gi];
+        Check(porousPacket.X==0 && porousPacket.Y==100 && porousPacket.Z==.9f,
+            "Porous pressure was delayed or unmapped heat was consumed");
+        double porousStock=MemoryMarshal.Cast<byte,Vector4>(Read(r.ReactionPulse.ReadBuffer)).ToArray().Sum(v=>(double)v.W);
+        Check(Math.Abs(porousStock-5.4)<1e-5,"Porous expansion stock was lost");
+        coordinator.DispatchAirSimulation(r,2,false,false);
+        porousStock=MemoryMarshal.Cast<byte,Vector4>(Read(r.ReactionPulse.ReadBuffer)).ToArray().Sum(v=>(double)v.W);
+        Check(Math.Abs(porousStock-4.86)<1e-5,"Porous pressure source was duplicated");
+        Check(Read(r.ReactionPending.Buffer).AsSpan().SequenceEqual(
+            MemoryMarshal.AsBytes(porousPending.Select(v=>new Vector4(0,v.Y,v.Z,0)).ToArray().AsSpan())),
+            "Porous heat packet changed while still blocked");
         uint fire=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire),smoke=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke);
         foreach(uint marker in new[]{0u,0x40000000u,0x80000000u})
         foreach(float temperature in new[]{20f,100f,101f})

@@ -9,8 +9,8 @@ public struct GridCell
     public float Mass;
     public float VelocityX;
     public float VelocityY;
-    // Hydraulic pressure; for a plastic movable solid, negative permanent
-    // damage in [-1,0]. Fixed thermal devices use this as their setpoint.
+    // Hydraulic pressure; fixed thermal devices use this as their setpoint.
+    // Negative PM damage in historical movable-solid saves is retired by PB.
     public float Pressure;
     public uint IsActive;
     public uint BodyId;
@@ -392,8 +392,6 @@ public struct MaterialProperties
     public float ThermalDeviceTargetTemperature; // Fixed regulator target; gas oxidizer displacement.
     public float GasOxidizerDisplacement { readonly get => ThermalDeviceTargetTemperature; set => ThermalDeviceTargetTemperature = value; }
     public float ThermalDeviceMaximumPower;
-    // Movable pressure-bearing solids cannot be regulators: reuse their power slot.
-    public float PressurePlasticity { readonly get => ThermalDeviceMaximumPower; set => ThermalDeviceMaximumPower = value; }
     public uint MoistureLiquidMaterialIndex;
     public uint MoistureDryMaterialIndex;
     public uint MoistureWetMaterialIndex;

@@ -754,7 +754,7 @@ public sealed class SimulationDispatchCoordinator
                 if (solidMatter && resources.PressureMechanicsPotential)
                 {
                     DispatchPressureFragments(resources, constants, settings.Mode == SimulationMode.Simulation, settings.AirSimulation);
-                    // A saved wave can bend a solid without any powder or fragment.
+                    // A saved wave can burst a solid without any powder or fragment.
                     topologyDirty = true;
                 }
             }
@@ -1606,6 +1606,7 @@ public sealed class SimulationDispatchCoordinator
     private static void Clear(GpuSimulationResources resources)
     {
         resources.PressureMechanicsPotential = false;
+        resources.ReactionPulsePotential = false;
         RawInt4 zero = new(0, 0, 0, 0);
         Array.Clear(resources.FilterMap); resources.FilterCount=0;
         resources.Context.ClearUnorderedAccessView(resources.Filters.UnorderedView,zero);
@@ -1809,7 +1810,8 @@ public sealed class SimulationDispatchCoordinator
                     (uint)MaterialSimulationKind.Granular)
             {
                 pressurePowderPotential = true;
-                if (boundResources is not null) boundResources.PressureMechanicsPotential = true;
+                if (boundResources is not null)
+                {boundResources.PressureMechanicsPotential = true;boundResources.ReactionPulsePotential = true;}
                 // An older empty-world readback must not put newly painted
                 // powder to sleep. Future summaries use this generation.
                 combustionReadbackGeneration++;
@@ -2101,10 +2103,13 @@ public sealed class SimulationDispatchCoordinator
         Unbind(c,2,3);
         c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View);
         c.ComputeShader.SetShaderResources(4,r.FragmentPlans.View,r.FragmentClaims.View);
+        c.CopyResource(r.GasMotion.Buffer,r.SteamGasStepPreviousMotion.Buffer);
+        c.ComputeShader.SetShaderResources(6,r.SteamGasStepPreviousMotion.View);
         c.ComputeShader.SetUnorderedAccessView(0,r.Grid.WriteUnorderedView);
+        c.ComputeShader.SetUnorderedAccessView(3,r.GasMotion.UnorderedView);
         c.ComputeShader.Set(r.FragmentApplyShader);
         c.Dispatch(DivideRoundUp(r.Width,16),DivideRoundUp(r.Height,16),1);
-        Unbind(c,6,1); r.Grid.Swap();
+        Unbind(c,7,4); r.Grid.Swap();
     }
 
     // Consumes each reaction packet once, outside the ordinary draft projection.
@@ -2115,6 +2120,11 @@ public sealed class SimulationDispatchCoordinator
         c.ComputeShader.SetUnorderedAccessViews(0,r.ReactionPending.UnorderedView,r.ReactionPulse.WriteUnorderedView,
             r.ReactionPulseScratch.UnorderedView,r.Air.UnorderedView,r.AirThermal.UnorderedView);
         int x=DivideRoundUp(r.AirWidth,8),y=DivideRoundUp(r.AirHeight,8);
+        for(int step=0;r.ReactionPulsePotential && step<3;step++)
+        {
+            RunAirPass(c,r.ReactionFastFacesShader,x,y);
+            RunAirPass(c,r.ReactionFastCommitShader,x,y);
+        }
         RunAirPass(c,r.ReactionFacesShader,x,y);
         RunAirPass(c,r.ReactionCommitShader,x,y);
         Unbind(c,4,5);r.ReactionPulse.Swap();
@@ -3221,6 +3231,7 @@ public sealed class SimulationDispatchCoordinator
             pressurePowderPotential =
                 (lastCombustionSummary & CombustionSummaryFlags.PressurePowderPresent) != 0;
             resources.PressureMechanicsPotential |= pressurePowderPotential;
+            resources.ReactionPulsePotential |= pressurePowderPotential;
             if ((lastCombustionSummary & CombustionSummaryFlags.CombustionOccurred) != 0)
             {
                 presentationDirty = true;

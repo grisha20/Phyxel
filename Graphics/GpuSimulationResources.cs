@@ -77,6 +77,7 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuUploadBuffer<BrushDrawCommand> Commands { get; init; }
     public required GpuUploadBuffer<MaterialProperties> Materials { get; init; }
     internal bool PressureMechanicsPotential { get; set; }
+    internal bool ReactionPulsePotential { get; set; }
     public required GpuUploadBuffer<MaterialEmissionProperties> Emissions { get; init; }
     public required Buffer FrameConstants { get; init; }
     public required Buffer ThermalConstants { get; init; }
@@ -116,6 +117,8 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? ReactionClearMappedShader { get; init; }
     public ComputeShader? ReactionFacesShader { get; init; }
     public ComputeShader? ReactionCommitShader { get; init; }
+    public ComputeShader? ReactionFastFacesShader { get; init; }
+    public ComputeShader? ReactionFastCommitShader { get; init; }
     public required GpuStructuredBuffer<AirCell> AirScratch { get; init; }
     // Derived from the current fine grid each air tick, never persisted.
     public required GpuStructuredBuffer<uint> AirFlowLinks { get; init; }
@@ -389,6 +392,7 @@ public sealed class GpuSimulationResources : IDisposable
         ReactionPendingStaging.Dispose();ReactionPulseStaging.Dispose();
         ReactionGatherShader?.Dispose();ReactionClearMappedShader?.Dispose();
         ReactionFacesShader?.Dispose();ReactionCommitShader?.Dispose();
+        ReactionFastFacesShader?.Dispose();ReactionFastCommitShader?.Dispose();
         AirFlowLinks.Dispose();
         AirProjectionA.Dispose();
         AirProjectionB.Dispose();

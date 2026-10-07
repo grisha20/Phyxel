@@ -3,7 +3,10 @@
 Здесь хранятся контракты и планы, относящиеся к нескольким материалам.
 Начните с [каталога](../README.md), [workflow](../WORKFLOW.md) и [шаблона](../TEMPLATE.md).
 
-- [PM — пластичность металлов и хрупкое разрушение](PRESSURE_MATERIALS_CONTRACT.md),
+- [PB — прямой разрыв без деформации](PRESSURE_BURST_CONTRACT.md),
+  [результаты и границы](PRESSURE_BURST_RESULTS.md).
+
+- [PM — история: пластичность металлов, отменена PB](PRESSURE_MATERIALS_CONTRACT.md),
   [результаты и границы](PRESSURE_MATERIALS_RESULTS.md).
 
 - [AB — заметная пропитка и каталог жидкостей](ABSORPTION_CONTRACT.md).

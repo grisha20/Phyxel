@@ -20,18 +20,44 @@ RWStructuredBuffer<float2> ProjectionSource : register(u5);
 #define FineAirMaterials Materials
 #define FineAirBlockGranular (Sandbox==0)
 #include "FineAirGeometry.hlsli"
+// The pressure mapping uses the same fine walls/filter geometry, with pores.
+#define FineAirWidth AirGridWidth
+#define FineAirHeight AirGridHeight
+#define FineAirMaterialAt(p) Grid[uint((p).y)*AirGridWidth+uint((p).x)].MaterialIndex
+#define FineAirMaterials Materials
+#define FineAirBlockGranular false
+#define AirFineBlocked PressureFineBlocked
+#define AirFineSegmentOpen PressureFineSegmentOpen
+#define AirFineNodeFor PressureFineNodeFor
+#include "FineAirGeometry.hlsli"
+#undef AirFineBlocked
+#undef AirFineSegmentOpen
+#undef AirFineNodeFor
 
 bool Inside(int2 p) { return all(p>=0) && p.x<int(AirWidth) && p.y<int(AirHeight); }
 uint Index(int2 p) { return uint(p.y)*AirWidth+uint(p.x); }
-bool Open(int2 p,int2 d)
+bool Strong(int2 p,bool scratch)
+{if(!Inside(p))return false;float4 a=scratch?Scratch[Index(p)]:Next[Index(p)];return any(abs(a)>.001);}
+bool StrongNeighborhood(int2 p,bool scratch)
+{return Strong(p,scratch)||Strong(p+int2(-1,0),scratch)||Strong(p+int2(1,0),scratch)||Strong(p+int2(0,-1),scratch)||Strong(p+int2(0,1),scratch);}
+// Mechanical pressure crosses the pores of a powder even when the ordinary
+// finite oxygen carrier cannot occupy its grains. Heat/source mapping above
+// keeps its existing fine geometry. Walls, liquids and filters still seal it.
+bool WaveBlocked(int2 p) {return PressureFineBlocked(p);}
+bool Open(int2 p,int2 d,bool scratch)
 {
-    return Inside(p+d) && (Links[Index(p)]&(1u<<uint((d.y+1)*3+d.x+1)))!=0 &&
+    if(!Inside(p+d))return false;
+    if(!Strong(p,scratch)&&!Strong(p+d,scratch))return
+        (Links[Index(p)]&(1u<<uint((d.y+1)*3+d.x+1)))!=0 &&
         (Links[Index(p+d)]&(1u<<uint((-d.y+1)*3-d.x+1)))!=0;
+    int2 a=p*4+2;
+    [unroll]for(int k=0;k<=4;k++)if(WaveBlocked(a+d*k))return false;
+    return true;
 }
 bool Edge(int2 p) { return p.x==0 || p.y==0 || p.x==int(AirWidth)-1 || p.y==int(AirHeight)-1; }
 
-// Gather one unique mapped receiver. Solid/granular-blocked sources stay
-// pending, including energy, until the grain burns out or that location opens.
+// Gather one unique receiver for each finite stock. Pressure can cross pores;
+// heat stays pending until the original gas mapping opens. Solids block both.
 [numthreads(8,8,1)]
 void CSGather(uint3 id:SV_DispatchThreadID)
 {
@@ -43,7 +69,9 @@ void CSGather(uint3 id:SV_DispatchThreadID)
         if(any(q<0)||q.x>=int(AirGridWidth)||q.y>=int(AirGridHeight)) continue;
         float3 s=Pending[uint(q.y)*AirGridWidth+uint(q.x)].xyz;
         if(all(s==0)) continue;
-        int2 node;if(AirFineNodeFor(q,node) && all(node==p)) source+=s;
+        int2 node;
+        if(PressureFineNodeFor(q,node) && all(node==p))source.x+=s.x;
+        if(AirFineNodeFor(q,node) && all(node==p))source.yz+=s.yz;
     }
     float4 packet=Previous[i]+float4(source.x,0,0,source.x*6.0);
     // Admit the finite newly produced gas volume over ~0.16 s instead of
@@ -65,32 +93,40 @@ void CSClearMapped(uint3 id:SV_DispatchThreadID)
     int2 q=int2(id.xy);if(q.x>=int(AirGridWidth)||q.y>=int(AirGridHeight)) return;
     uint i=uint(q.y)*AirGridWidth+uint(q.x);
     if(all(Pending[i]==0)) return;
-    int2 node;if(AirFineNodeFor(q,node)) Pending[i]=0;
+    int2 node;float4 source=Pending[i];
+    if(PressureFineNodeFor(q,node))source.x=0;
+    if(AirFineNodeFor(q,node))source.yz=0;
+    Pending[i]=source;
 }
 
 // A separate damped, compressible pressure pulse. The normal low-Mach
 // projection remains unchanged; it must not erase the expansion of a rapid
 // reaction. Face velocities reflect off sealed fine links.
-static const float WaveSpeed=.5; // coarse cells per 60-Hz tick; CFL < 1/sqrt(2).
-[numthreads(8,8,1)]
-void CSFaces(uint3 id:SV_DispatchThreadID)
+static const float WaveSpeed=.5; // coarse cells per wave substep; CFL < 1/sqrt(2).
+void Faces(uint3 id,bool fast)
 {
     int2 p=int2(id.xy);if(!Inside(p)) return;uint i=Index(p);
     float4 a=Next[i];float2 v=0;
-    if(Open(p,int2(1,0))) v.x=.97*a.y-WaveSpeed*(Next[i+1].x-a.x);
-    if(Open(p,int2(0,1))) v.y=.97*a.z-WaveSpeed*(Next[i+AirWidth].x-a.x);
+    bool strong=StrongNeighborhood(p,false);
+    if(fast&&!strong){Scratch[i]=a;return;}
+    // Fourth root of the original damping: four substeps retain one tick loss.
+    float damping=strong?.99241412:.97;
+    if(Open(p,int2(1,0),false)) v.x=damping*a.y-WaveSpeed*(Next[i+1].x-a.x);
+    if(Open(p,int2(0,1),false)) v.y=damping*a.z-WaveSpeed*(Next[i+AirWidth].x-a.x);
     Scratch[i]=float4(a.x,clamp(v,-64,64),a.w);
 }
-[numthreads(8,8,1)]
-void CSCommit(uint3 id:SV_DispatchThreadID)
+void Commit(uint3 id,bool fast)
 {
     int2 p=int2(id.xy);if(!Inside(p)) return;uint i=Index(p);
     float4 s=Scratch[i];
-    float l=Open(p,int2(-1,0))?Scratch[i-1].y:0;
-    float u=Open(p,int2(0,-1))?Scratch[i-AirWidth].z:0;
-    s.x=clamp(.995*s.x-WaveSpeed*(s.y-l+s.z-u),-256,256);
-    if(Edge(p) || Air[i].Blocked>.5) s=0;
+    float l=Open(p,int2(-1,0),true)?Scratch[i-1].y:0;
+    float u=Open(p,int2(0,-1),true)?Scratch[i-AirWidth].z:0;
+    bool strong=StrongNeighborhood(p,true)||any(abs(float4(s.y,s.z,l,u))>.001);
+    if(fast&&!strong)return;
+    s.x=clamp((strong?.99874765:.995)*s.x-WaveSpeed*(s.y-l+s.z-u),-256,256);
+    if(Edge(p) || (strong?WaveBlocked(p*4+2):Air[i].Blocked>.5)) s=0;
     Next[i]=s;
+    if(fast)return; // Only the final substep injects momentum into the carrier.
     AirCell a=Air[i];
     if(a.Blocked<.5 && !Edge(p))
     {
@@ -100,3 +136,11 @@ void CSCommit(uint3 id:SV_DispatchThreadID)
         Air[i]=a;
     }
 }
+[numthreads(8,8,1)]
+void CSFaces(uint3 id:SV_DispatchThreadID){Faces(id,false);}
+[numthreads(8,8,1)]
+void CSCommit(uint3 id:SV_DispatchThreadID){Commit(id,false);}
+[numthreads(8,8,1)]
+void CSFastFaces(uint3 id:SV_DispatchThreadID){Faces(id,true);}
+[numthreads(8,8,1)]
+void CSFastCommit(uint3 id:SV_DispatchThreadID){Commit(id,true);}
