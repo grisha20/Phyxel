@@ -35,6 +35,8 @@ public sealed class UiPropertiesPanel
     private readonly UiSimulationModeSelector modeSelector = new();
     private int modeHintY;
     private readonly UiToggleSwitch hydraulicsToggle = new("Гидравлика сосудов");
+    private readonly UiToggleSwitch pressureToggle = new("Разрушение (эксп.)");
+    private int pressureHintY;
     private readonly UiToggleSwitch withoutEffectsToggle = new("Без эффектов");
 
     /// <summary>
@@ -78,6 +80,7 @@ public sealed class UiPropertiesPanel
     internal Rectangle TemperatureSliderBounds => temperatureSlider.Bounds;
     internal Rectangle GravityToggleBounds => solidGravityToggle.Bounds;
     internal Rectangle HydraulicsToggleBounds => hydraulicsToggle.Bounds;
+    internal Rectangle PressureToggleBounds => pressureToggle.Bounds;
     internal Rectangle AirFieldToggleBounds => airFieldToggle.Bounds;
     internal Rectangle BoundariesToggleBounds => boundariesToggle.Bounds;
     internal Rectangle WithoutEffectsToggleBounds => withoutEffectsToggle.Bounds;
@@ -115,8 +118,8 @@ public sealed class UiPropertiesPanel
         int innerX = bounds.X + padding;
         int innerWidth = bounds.Width - padding * 2;
         bool showDevice = activeTool == PhyxelToolId.Brush && selectedMaterial.ThermalRegulator is not null;
-        bool compact = bounds.Height < Math.Max(showDevice ? 1100 : 800,
-            font.LineSpacing * (showDevice ? 25 : 23) + 100);
+        bool compact = bounds.Height < Math.Max(showDevice ? 1160 : 860,
+            font.LineSpacing * (showDevice ? 27 : 25) + 100);
         bool compactDevice = compact && showDevice;
         int cardHeight = compact ? Math.Clamp(font.LineSpacing + 3, 32, 48) : Math.Clamp(font.LineSpacing + 24, 42, 58);
         toolCardBounds = new Rectangle(innerX, bounds.Y + font.LineSpacing + (compact ? 18 : 24), innerWidth, cardHeight);
@@ -142,8 +145,8 @@ public sealed class UiPropertiesPanel
 
         toolParametersHeaderY = cursorY;
         cursorY += Math.Max(16, (int)MathF.Round(font.LineSpacing * (compact ? 0.68f : 0.82f))) + (compact ? 4 : 8);
-        int sliderHeight = font.LineSpacing + (compact ? 22 : 30);
-        int sliderGap = compactDevice ? 2 : compact ? 6 : 10;
+        int sliderHeight = font.LineSpacing + (compactDevice ? 16 : compact ? 18 : 30);
+        int sliderGap = compact ? 2 : 10;
 
         if (ShowsBrushControls(activeTool))
         {
@@ -257,26 +260,30 @@ public sealed class UiPropertiesPanel
             settings.SolidGravity = !settings.SolidGravity;
             GravityToggled = true;
         }
-        cursorY += toggleHeight + (compact ? 2 : 4);
+        cursorY += toggleHeight + (compact ? 0 : 4);
         hydraulicsToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (hydraulicsToggle.Update(input))
         {
             settings.HydraulicPressure = !settings.HydraulicPressure;
             HydraulicsToggled = true;
         }
-        cursorY += toggleHeight + (compact ? 2 : 4);
+        cursorY += toggleHeight + (compact ? 0 : 4);
+        pressureToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
+        if (pressureToggle.Update(input)) settings.PressureDestruction = !settings.PressureDestruction;
+        pressureHintY = compact ? 0 : pressureToggle.Bounds.Bottom;
+        cursorY = pressureToggle.Bounds.Bottom + (compact ? 0 : Math.Max(12,(int)(font.LineSpacing*.6f))+4);
         withoutEffectsToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (withoutEffectsToggle.Update(input))
         {
             settings.RenderWithoutEffects = !settings.RenderWithoutEffects;
         }
-        cursorY += toggleHeight + (compact ? 2 : 4);
+        cursorY += toggleHeight + (compact ? 0 : 4);
         boundariesToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (boundariesToggle.Update(input))
         {
             settings.OpenBoundaries = !settings.OpenBoundaries;
         }
-        cursorY += toggleHeight + (compact ? 2 : 4);
+        cursorY += toggleHeight + (compact ? 0 : 4);
         airFieldToggle.Bounds = new Rectangle(innerX, cursorY, innerWidth, toggleHeight);
         if (airFieldToggle.Update(input))
         {
@@ -375,6 +382,9 @@ public sealed class UiPropertiesPanel
             0, Vector2.Zero, .55f, SpriteEffects.None, 0);
         solidGravityToggle.Draw(spriteBatch, font, backdrop, pixel, settings.SolidGravity);
         hydraulicsToggle.Draw(spriteBatch, font, backdrop, pixel, settings.HydraulicPressure);
+        pressureToggle.Draw(spriteBatch, font, backdrop, pixel, settings.PressureDestruction);
+        if(pressureHintY>0)spriteBatch.DrawString(font,"Давление: отрыв стен и осколки",
+            new Vector2(bounds.X+14,pressureHintY),UiTheme.TextSecondary,0,Vector2.Zero,.6f,SpriteEffects.None,0);
         withoutEffectsToggle.Draw(spriteBatch, font, backdrop, pixel, settings.RenderWithoutEffects);
         // Тумблер показывает «стены есть», поэтому значение инвертировано
         // относительно OpenBoundaries.

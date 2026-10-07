@@ -27,6 +27,7 @@ public sealed class SimulationSettings
     public bool Paused { get; set; }
     public bool SolidGravity { get; set; }
     public bool HydraulicPressure { get; set; }
+    public bool PressureDestruction { get; set; }
     public SimulationMode Mode { get; set; } = SimulationMode.Sandbox;
 
     /// <summary>

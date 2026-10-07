@@ -67,12 +67,43 @@ internal static class FragmentJetRegressionVerifier
             Check(grain.Mass==table[material].Density&&grain.MaterialIndex==material&&grain.Temperature==30&&grain.Lifetime==11,
                 "FJ02 preserved packet "+id+" sign="+sign);
         }
+        Upload(Single(metal),4);
+        for(int tick=0;tick<30;tick++)SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,true,false,advectOnly:true);
+        Check(Cells().Single(c=>c.IsActive!=0).VelocityX>20,
+            "PC03 disabling destruction preserves wind transport of existing fragments");
         sample=Single(metal);uint fixture=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fixture);
         for(int y=0;y<size;y++)sample[y*size+63]=new(){IsActive=1,MaterialIndex=fixture,Mass=10,Temperature=30};
         Upload(sample,-4,true);for(int tick=0;tick<30;tick++)Tick(true);
         grain=Cells().Single(c=>c.IsActive!=0&&c.MaterialIndex==metal);
         Check(grain.VelocityX==0,"FJ02 no wind through rigid wall");
+        var hull=new GridCell[size*size];
+        for(int y=32;y<=96;y++)for(int x=32;x<=96;x++)if(x==32||x==96||y==32||y==96)
+        {hull[y*size+x]=Grain(metal);hull[y*size+x].BodyId=1;}
+        Upload(hull);
+        var uniformAir=Enumerable.Range(0,r.AirWidth*r.AirHeight).Select(_=>new AirCell{Pressure=80}).ToArray();
+        r.Context.UpdateSubresource(uniformAir,r.Air.Buffer);Tick(true);
+        Check(Cells().All(c=>(c.BodyId&0x40000000u)==0),"PC01 uniform inside/outside pressure does not burst a closed hull");
+        Upload(hull);
+        var exteriorDraft=Enumerable.Range(0,r.AirWidth*r.AirHeight).Select(i=>new AirCell{
+            Pressure=i%r.AirWidth>8 && i%r.AirWidth<24 && i/r.AirWidth>8 && i/r.AirWidth<24?0:100}).ToArray();
+        r.Context.UpdateSubresource(exteriorDraft,r.Air.Buffer);Tick(true);
+        Check(Cells().All(c=>(c.BodyId&0x40000000u)==0),"PC01 exterior open draft does not crush a closed cold hull");
+        Upload(hull);
+        var exteriorWave=exteriorDraft.Select(a=>new System.Numerics.Vector4(a.Pressure,0,0,0)).ToArray();
+        r.Context.UpdateSubresource(exteriorDraft,r.Air.Buffer);
+        r.Context.UpdateSubresource(exteriorWave,r.ReactionPulse.ReadBuffer);Tick(true);
+        Check(Cells().Any(c=>(c.BodyId&0x40000000u)!=0),"PC01 exterior reaction wave can crush the hull");
+        Upload(hull);
+        var confinedExcess=exteriorDraft.Select(a=>new AirCell{Pressure=a.Pressure==0?100:50}).ToArray();
+        r.Context.UpdateSubresource(confinedExcess,r.Air.Buffer);Tick(true);
+        Check(Cells().Any(c=>(c.BodyId&0x40000000u)!=0),"PC01 confined excess bursts hull against nonzero exterior counterpressure");
         var plate=new GridCell[size*size];for(int y=0;y<size;y++){plate[y*size+64]=Grain(metal);plate[y*size+64].BodyId=1;}
+        Upload(plate,pressure:100);Tick(true);
+        Check(Cells().All(c=>(c.BodyId&0x40000000u)==0),"PC01 open carrier draft does not fracture a plate");
+        // Unlike the old open half-plane probe, this carrier is actually
+        // confined. Keep the plate's two pockets sealed by an outer fixture.
+        for(int k=0;k<size;k++)foreach(int i in new[]{k,(size-1)*size+k,k*size,k*size+size-1})
+            plate[i]=new(){IsActive=1,MaterialIndex=fixture,Mass=10,Temperature=30};
         Upload(plate,pressure:100);var before=PressureShellRegressionVerifier.Read(r);Tick(true);
         var released=PressureShellRegressionVerifier.Read(r);
         var pulse=MemoryMarshal.Cast<byte,System.Numerics.Vector4>(released.ReactionPulse!).ToArray();
@@ -104,9 +135,17 @@ internal static class FragmentJetRegressionVerifier
             Check(ticks==60&&reference.AsSpan().SequenceEqual(bytes),"FJ03 fixed wind clock FPS="+fps);
         }
         Upload(plate,pressure:100);Tick(true);var snapshot=PressureShellRegressionVerifier.Read(r);
+        settings.PressureDestruction=true;
         var serializer=new SimulationStateSerializer();string path=Path.Combine(dir,"jet-roundtrip.json");
         System.Threading.Tasks.Task.Run(()=>serializer.SaveAsync(path,settings,(ushort)metal,snapshot,registry)).GetAwaiter().GetResult();
         var loaded=System.Threading.Tasks.Task.Run(()=>serializer.LoadAsync(path,registry)).GetAwaiter().GetResult()!;
+        var applied=new SimulationSettings();SimulationStateSerializer.Apply(loaded.State,applied);
+        Check(applied.PressureDestruction,"PC03 save/load retains experimental switch");
+        settings.PressureDestruction=false;
+        string offPath=Path.Combine(dir,"jet-off.json");
+        System.Threading.Tasks.Task.Run(()=>serializer.SaveAsync(offPath,settings,(ushort)metal,snapshot,registry)).GetAwaiter().GetResult();
+        var offLoaded=System.Threading.Tasks.Task.Run(()=>serializer.LoadAsync(offPath,registry)).GetAwaiter().GetResult()!;
+        Check(!offLoaded.State.PressureDestruction,"PC03 save/load retains disabled switch");
         Check(loaded.World!.Grid.AsSpan().SequenceEqual(snapshot.Grid)&&loaded.World.ReactionPulse!.AsSpan().SequenceEqual(snapshot.ReactionPulse),
             "FJ03 fragment/released stock save-load bytes");
         Tick(true);var next=PressureShellRegressionVerifier.Read(r);

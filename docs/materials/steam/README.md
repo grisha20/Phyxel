@@ -1,5 +1,7 @@
 # Пар — `core:steam`
 
+- [PC: замкнутый напор и отдельное включение разрушения](../shared/PRESSURE_CONFINEMENT_CONTRACT.md), [новые проверки](../shared/PRESSURE_CONFINEMENT_RESULTS.md).
+
 - [Паспорт](PASSPORT.md): источники, поведение, критерии, статусы и ограничения.
 - [Настройки игры](../../../Materials/core/steam.json): JSON, загружаемый движком.
 - [Общая регистрация материалов](../../../Materials/MaterialRegistry.cs).

@@ -61,6 +61,9 @@ internal static class PressureEditRegressionVerifier
             for(int i=0;i<air.Length;i++){air[i].Pressure=air[i].Blocked>.5f?0:i/r.AirWidth*4+2>=62+thickness?128:0;
                 air[i].VelocityX=air[i].VelocityY=0;}
             r.Context.UpdateSubresource(air,r.Air.Buffer);
+            // An unconfined carrier gradient is now deliberately a negative
+            // control. A true transient wave remains a positive load here.
+            r.Context.UpdateSubresource(air.Select(a=>new System.Numerics.Vector4(a.Pressure,0,0,0)).ToArray(),r.ReactionPulse.ReadBuffer);
             SimulationDispatchCoordinator.DispatchPressureFragments(r,new(){Width=size,Height=size,Gravity=980},true,true);
             int loaded=Count();
             var row=new{mode=mode.ToString(),edited,thickness,initial,peak,loaded,pass=initial==0&&peak==0&&loaded>0};rows.Add(row);

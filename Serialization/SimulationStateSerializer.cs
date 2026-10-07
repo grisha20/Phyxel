@@ -29,7 +29,8 @@ public sealed record SimulationSceneState(
     bool HydraulicPressure = false,
     bool OpenBoundaries = true,
     SimulationMode Mode = SimulationMode.Simulation,
-    FilterSelection FilterSelection = FilterSelection.Steam);
+    FilterSelection FilterSelection = FilterSelection.Steam,
+    bool PressureDestruction = false);
 
 // World v11 extends v10 auxiliary validation for negative fusion progress.
 // v10 persists pending reaction packets, pressure waves and their finite
@@ -69,6 +70,7 @@ public sealed class SimulationStateSerializer
         public string SelectedMaterialId { get; set; } = CoreMaterialIds.Sand;
         public DateTimeOffset SavedAt { get; set; }
         public bool HydraulicPressure { get; set; }
+        public bool PressureDestruction { get; set; }
         public FilterSelection FilterSelection { get; set; }
         public bool OpenBoundaries { get; set; } = true;
         // Existing scenes used finite oxidizer before modes were introduced.
@@ -182,6 +184,7 @@ public sealed class SimulationStateSerializer
             SelectedMaterialId = selectedDefinition.Id,
             SavedAt = DateTimeOffset.UtcNow,
             HydraulicPressure = settings.HydraulicPressure,
+            PressureDestruction = settings.PressureDestruction,
             FilterSelection = settings.FilterSelection,
             OpenBoundaries = settings.OpenBoundaries,
             Mode = settings.Mode,
@@ -302,6 +305,7 @@ public sealed class SimulationStateSerializer
         settings.SpawnDensity = Math.Clamp(state.SpawnDensity, 0.05f, 1);
         settings.SolidGravity = state.SolidGravity;
         settings.HydraulicPressure = state.HydraulicPressure;
+        settings.PressureDestruction = state.PressureDestruction;
         settings.FilterSelection = Enum.IsDefined(state.FilterSelection) ? state.FilterSelection : FilterSelection.Steam;
         settings.OpenBoundaries = state.OpenBoundaries;
         if (!Enum.IsDefined(state.Mode)) throw new InvalidDataException("Неизвестный режим симуляции.");
@@ -428,7 +432,7 @@ public sealed class SimulationStateSerializer
                 state.SavedAt,
                 state.HydraulicPressure,
                 state.OpenBoundaries,
-                state.Mode, state.FilterSelection),
+                state.Mode, state.FilterSelection, state.PressureDestruction),
             world,
             warnings);
     }

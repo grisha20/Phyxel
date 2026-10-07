@@ -1002,6 +1002,7 @@ public sealed class PhyxelGame : Game
         Width = source.Width, Height = source.Height, Scale = source.Scale,
         Gravity = source.Gravity, BrushRadius = source.BrushRadius, SpawnDensity = source.SpawnDensity,
         Paused = source.Paused, FilterSelection = source.FilterSelection, SolidGravity = source.SolidGravity, HydraulicPressure = source.HydraulicPressure,
+        PressureDestruction = source.PressureDestruction,
         OpenBoundaries = source.OpenBoundaries, Mode = source.Mode,
         AirSimulation = source.AirSimulation, ShowAirField = source.ShowAirField,
         RenderWithoutEffects = source.RenderWithoutEffects

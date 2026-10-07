@@ -1,5 +1,7 @@
 # Вода — `core:water`
 
+- [PC: замкнутый напор и отдельное включение разрушения](../shared/PRESSURE_CONFINEMENT_CONTRACT.md), [новые проверки](../shared/PRESSURE_CONFINEMENT_RESULTS.md).
+
 - [SP: проверка сохранённого кипящего котла](../shared/STEAM_ROOF_DIAGNOSIS.md).
 
 - [Паспорт](PASSPORT.md): источники, поведение, критерии, статусы и ограничения.

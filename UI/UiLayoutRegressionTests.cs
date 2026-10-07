@@ -229,7 +229,7 @@ public static class UiLayoutRegressionTests
             Require(panel.DeviceTargetTemperature == 240 && panel.DeviceMaximumPower == 600, "Wrong heater brush defaults.");
             Rectangle[] controls = [panel.BrushSliderBounds, panel.DeviceTemperatureBounds, panel.DevicePowerBounds,
                 panel.ScaleSliderBounds, panel.SandboxModeBounds, panel.SimulationModeBounds,
-                panel.GravityToggleBounds, panel.HydraulicsToggleBounds,
+                panel.GravityToggleBounds, panel.HydraulicsToggleBounds, panel.PressureToggleBounds,
                 panel.WithoutEffectsToggleBounds, panel.BoundariesToggleBounds, panel.AirFieldToggleBounds,
                 panel.ResetButtonBounds, panel.ClearButtonBounds];
             for (int i = 0; i < controls.Length; i++)
@@ -270,6 +270,7 @@ public static class UiLayoutRegressionTests
                     panel.SimulationModeBounds,
                     panel.GravityToggleBounds,
                     panel.HydraulicsToggleBounds,
+                    panel.PressureToggleBounds,
                     panel.WithoutEffectsToggleBounds,
                     panel.BoundariesToggleBounds,
                     panel.AirFieldToggleBounds,
@@ -337,7 +338,7 @@ public static class UiLayoutRegressionTests
             var font=fonts.Select(dpi,layout.Scale);var panel=new UiPropertiesPanel();var settings=new SimulationSettings();
             panel.Update(Input(new Point(-1,-1)),layout.RightPanel,font,settings,PhyxelToolId.Filter,registry[CoreMaterialIds.Sand],out _);
             Rectangle[] controls=[panel.FilterSelectorBounds,panel.BrushSliderBounds,panel.ScaleSliderBounds,panel.ClearButtonBounds,panel.ResetButtonBounds,
-                panel.SandboxModeBounds,panel.SimulationModeBounds,panel.GravityToggleBounds,panel.HydraulicsToggleBounds,
+                panel.SandboxModeBounds,panel.SimulationModeBounds,panel.GravityToggleBounds,panel.HydraulicsToggleBounds,panel.PressureToggleBounds,
                 panel.WithoutEffectsToggleBounds,panel.BoundariesToggleBounds,panel.AirFieldToggleBounds];
             foreach(var bounds in controls)Require(IsInside(bounds,layout.RightPanel),$"Filter control escaped {width}/{height}/{dpi}: {bounds}");
             for(int a=0;a<controls.Length;a++)for(int b=a+1;b<controls.Length;b++)Require(!controls[a].Intersects(controls[b]),"Filter controls overlap");
@@ -479,6 +480,11 @@ public static class UiLayoutRegressionTests
             layout.RightPanel, font, settings, PhyxelToolId.Brush, sand, out _);
         Require(settings.HydraulicPressure && panel.HydraulicsToggled,
             "Hydraulics switch did not change the setting.");
+        Require(!settings.PressureDestruction,"Pressure destruction must default to off.");
+        panel.Update(Input(panel.PressureToggleBounds.Center,leftDown:true,leftPressed:true),
+            layout.RightPanel,font,settings,PhyxelToolId.Brush,sand,out _);
+        Require(settings.PressureDestruction && settings.HydraulicPressure && settings.SolidGravity,
+            "Pressure switch must change only pressure destruction.");
         Require(settings.Mode == SimulationMode.Sandbox, "New scenes must default to Sandbox.");
         panel.Update(Input(panel.SimulationModeBounds.Center, leftDown: true, leftPressed: true),
             layout.RightPanel, font, settings, PhyxelToolId.Brush, sand, out _);

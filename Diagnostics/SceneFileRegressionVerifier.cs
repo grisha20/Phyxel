@@ -70,6 +70,7 @@ internal static class SceneFileRegressionVerifier
         catch (InvalidDataException e) when (e.Message.Contains(".json")) { checks++; }
         var settings = Get<SimulationSettings>("settings");
         settings.Paused = false; settings.AirSimulation = false; settings.Mode = SimulationMode.Sandbox;
+        settings.PressureDestruction=true;
         uint oil = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Oil);
         var r = coordinator.DispatchFrame(settings, [new BrushDrawCommand { X = 100, Y = 100,
             EndX = 100, EndY = 100, Radius = 1, Density = 1,
@@ -113,6 +114,8 @@ internal static class SceneFileRegressionVerifier
         Check(choices == 1 && Get<bool>("pendingWorldCapture"), "Load interrupted pending save.");
         settings.Mode = SimulationMode.Simulation;
         Complete();
+        var savedSwitch=System.Threading.Tasks.Task.Run(()=>serializer.LoadAsync(first,registry)).GetAwaiter().GetResult()!;
+        Check(savedSwitch.State.PressureDestruction,"Real save action lost experimental pressure setting.");
         Check(Loaded(first).Mass == .42f, "Save missed GPU world.");
         var retainedWorld = System.Threading.Tasks.Task.Run(() => serializer.LoadAsync(first, registry))
             .GetAwaiter().GetResult()!.World!;

@@ -1,5 +1,7 @@
 # Медь
 
+- [PC: замкнутый напор и отдельное включение разрушения](../shared/PRESSURE_CONFINEMENT_CONTRACT.md), [новые проверки](../shared/PRESSURE_CONFINEMENT_RESULTS.md).
+
 - [PV — сброс давления через выход](../shared/PRESSURE_VENT_CONTRACT.md),
   [проверки](../shared/PRESSURE_VENT_RESULTS.md).
 

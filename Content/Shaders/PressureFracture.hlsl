@@ -9,6 +9,7 @@ StructuredBuffer<uint> SourcePlans : register(t4);
 StructuredBuffer<uint> SourceClaims : register(t5);
 StructuredBuffer<GasMotionState> SourceMotion : register(t6);
 StructuredBuffer<uint> SourceRelease : register(t7);
+StructuredBuffer<uint> PressureRoots : register(t8);
 RWStructuredBuffer<GridCell> DestinationGrid : register(u0);
 RWStructuredBuffer<uint> Plans : register(u1);
 RWStructuredBuffer<uint> Claims : register(u2);
@@ -54,15 +55,26 @@ void LoadProjection(int2 p,int2 direction,inout float3 metric,inout float2 load,
     source=0;release=0;
     float l,r;int dl,dr;uint ln,rn;
     if(!Surface(p,-direction,l,dl,ln)||!Surface(p,direction,r,dr,rn))return;
+    uint lr=PressureRoots[ln+1],rr=PressureRoots[rn+1];
+    // Low-Mach draft potential is not confined gas pressure. Its gradient
+    // within a connected pocket cannot tear an internal baffle apart.
+    // An open carrier value is counterpressure, never an inward crushing
+    // source: it is a draft potential, not dynamic pressure or an EOS.
+    // Preserve uniform counterpressure and full closed-to-closed loading.
+    float lc=lr!=rr && Air[ln].Blocked<.5 ? Air[ln].Pressure-Wave[ln].x:0;
+    float rc=lr!=rr && Air[rn].Blocked<.5 ? Air[rn].Pressure-Wave[rn].x:0;
+    float carrierDifference=lc-rc;
+    if(lr==0)carrierDifference=min(0,carrierDifference);
+    if(rr==0)carrierDifference=max(0,carrierDifference);
+    l=Wave[ln].x+max(0,carrierDifference);
+    r=Wave[rn].x+max(0,-carrierDifference);
     float lengthStep=length(float2(direction));float2 n=float2(direction)/lengthStep;
     float gradient=(l-r)/(max(1,dl+dr-1)*lengthStep);
     metric+=float3(n.x*n.x,n.y*n.y,n.x*n.y);load+=gradient*n;
     // Transfer only the accumulated carrier reservoir. The reactive overlay
     // is already compressible and must never be issued a second time.
-    float lc=Air[ln].Blocked<.5?Air[ln].Pressure-Wave[ln].x:0;
-    float rc=Air[rn].Blocked<.5?Air[rn].Pressure-Wave[rn].x:0;
-    source=lc>rc?ln:rn;
-    release=(lc-rc)*(l-r)>0?abs(lc-rc):0;
+    source=carrierDifference>0?ln:rn;
+    release=carrierDifference*(l-r)>0?abs(carrierDifference):0;
 }
 
 float2 FragmentCarrier(int2 p)
@@ -81,7 +93,7 @@ float2 FragmentCarrier(int2 p)
     return count>0?clamp(velocity/count*60,-180,180):0;
 }
 
-void Update(uint3 p,bool fracture)
+void Update(uint3 p,bool fracture,bool advect)
 {
     if(p.x>=Width||p.y>=Height)return;
     uint i=p.y*Width+p.x;GridCell c=SourceGrid[i];
@@ -120,7 +132,7 @@ void Update(uint3 p,bool fracture)
     }
     if(Fragment(c))
     {
-        if(fracture)
+        if(advect)
         {
             float2 wind=FragmentCarrier(int2(p.xy));
             float response=min(4,2.4/max(.25,c.Mass))*DeltaTime;
@@ -136,9 +148,11 @@ void Update(uint3 p,bool fracture)
     DestinationGrid[i]=c;
 }
 [numthreads(16,16,1)]
-void CSUpdate(uint3 p:SV_DispatchThreadID){Update(p,true);}
+void CSUpdate(uint3 p:SV_DispatchThreadID){Update(p,true,true);}
 [numthreads(16,16,1)]
-void CSMoveOnly(uint3 p:SV_DispatchThreadID){Update(p,false);}
+void CSMoveOnly(uint3 p:SV_DispatchThreadID){Update(p,false,false);}
+[numthreads(16,16,1)]
+void CSAdvectOnly(uint3 p:SV_DispatchThreadID){Update(p,false,true);}
 
 // One owner per coarse node. Air.P total is unchanged; increasing Wave.X
 // withdraws exactly this stock from the carrier on the next CSInject.

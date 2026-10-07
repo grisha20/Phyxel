@@ -16,10 +16,16 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuStructuredBuffer<uint> FragmentPlans { get; init; }
     public required GpuStructuredBuffer<uint> FragmentClaims { get; init; }
     public required GpuStructuredBuffer<uint> FragmentRelease { get; init; }
+    public required GpuStructuredBuffer<uint> PressureRoots { get; init; }
+    public required GpuStructuredBuffer<uint> PressureLinks { get; init; }
+    public ComputeShader? PressureInitializeShader { get; init; }
+    public ComputeShader? PressureUnionShader { get; init; }
+    public ComputeShader? PressureCompressShader { get; init; }
     internal bool LegacyFragmentDiagnostics { get; init; }
     public ComputeShader? FragmentReleaseShader { get; init; }
     public ComputeShader? PowderFrontShader { get; init; }
     public ComputeShader? FragmentUpdateOnlyShader { get; init; }
+    public ComputeShader? FragmentAdvectOnlyShader { get; init; }
     public ComputeShader? FractureUpdateShader { get; init; }
     public ComputeShader? FragmentPlanShader { get; init; }
     public ComputeShader? FragmentApplyShader { get; init; }
@@ -284,8 +290,11 @@ public sealed class GpuSimulationResources : IDisposable
         PhaseTransitionShader?.Dispose();
         CombustionShader?.Dispose();
         PressureFrameConstants.Dispose(); FragmentPlans.Dispose(); FragmentClaims.Dispose(); FragmentRelease.Dispose();
+        PressureRoots.Dispose();PressureLinks.Dispose();
+        PressureInitializeShader?.Dispose();PressureUnionShader?.Dispose();PressureCompressShader?.Dispose();
         FragmentReleaseShader?.Dispose(); PowderFrontShader?.Dispose();
         FractureUpdateShader?.Dispose(); FragmentUpdateOnlyShader?.Dispose(); FragmentPlanShader?.Dispose(); FragmentApplyShader?.Dispose();
+        FragmentAdvectOnlyShader?.Dispose();
         EmissionResolveShader?.Dispose();
         TransientLifecycleShader?.Dispose();
         ThermalDiffusionShader?.Dispose();

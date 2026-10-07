@@ -37,6 +37,11 @@ internal static class PressureShellRegressionVerifier
         var serializer = new SimulationStateSerializer();
         var rows = new List<object>();
         int failures = 0;
+        if(Environment.GetEnvironmentVariable("PHYXEL_SHELL_CONFINEMENT_PROBES")=="1")
+        {
+            foreach(var resource in PressureConfinementRegressionVerifier.Run(coordinator,registry,settings,dir))yield return resource;
+            yield break;
+        }
         if(Environment.GetEnvironmentVariable("PHYXEL_SHELL_JET_PROBES")=="1")
         {
             foreach(var resource in FragmentJetRegressionVerifier.Run(coordinator,registry,settings,dir))yield return resource;
@@ -78,6 +83,8 @@ internal static class PressureShellRegressionVerifier
                             MaterialIndex=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Gunpowder),Mass=1,Temperature=251};
             world=world with {Grid=MemoryMarshal.AsBytes(initialCells.AsSpan()).ToArray()};
             SimulationStateSerializer.Apply(loaded.State, settings);
+            Console.WriteLine("PHYXEL_SCENE_PRESSURE "+JsonSerializer.Serialize(new{saved=settings.PressureDestruction,scene=name}));
+            settings.PressureDestruction=Environment.GetEnvironmentVariable("PHYXEL_SHELL_DESTRUCTION_OFF")!="1";
             settings.Width = world.Width; settings.Height = world.Height; settings.Mode = mode; settings.Paused = true;
             settings.AirSimulation = true; settings.RenderWithoutEffects = true;
             coordinator.ClearCurrentWorld(settings);
@@ -104,7 +111,22 @@ internal static class PressureShellRegressionVerifier
             string prefix = (name == "Новая печь" ? "furnace" : "shell") + "-" + mode + "-" + fps;
             for (int frame = 0; frame <= final; frame++)
             {
-                if (frame > 0) r = coordinator.DispatchFrame(settings, [], 1f / fps);
+                if (frame > 0)
+                {
+                    BrushDrawCommand[] sprinkle=[];
+                    if(variant=="sprinkle" && frame%(5*fps)==0 && frame<=60*fps)
+                    {
+                        var current=MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer)).ToArray();
+                        var selected=new List<BrushDrawCommand>();
+                        for(int y=300;y<340 && selected.Count<13;y++)
+                        for(int x=330;x<430 && selected.Count<13;x++)
+                            if(current[y*r.Width+x].IsActive==0)selected.Add(new(){X=x,Y=y,Radius=0,Density=1,
+                                MaterialIndex=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Gunpowder)});
+                        sprinkle=selected.ToArray();
+                        Console.WriteLine("PHYXEL_SHELL_SPRINKLE "+JsonSerializer.Serialize(new{frame,requested=sprinkle.Length}));
+                    }
+                    r = coordinator.DispatchFrame(settings, sprinkle, 1f / fps);
+                }
                 // An event fences every GPU command. Mapping an unrelated
                 // statistics staging buffer alone does not fence the grid.
                 r.Context.End(fence);r.Context.Flush();
@@ -120,7 +142,8 @@ internal static class PressureShellRegressionVerifier
                     peakFragments=Math.Max(peakFragments,count);
                 }
                 if (frame == 0 || (Environment.GetEnvironmentVariable("PHYXEL_SHELL_FINE_SAMPLES") == "1" && frame <= 6) ||
-                    frame == fps / 2 || frame == fps || frame == 2 * fps || frame == final)
+                    frame == fps / 2 || frame == fps || frame == 2 * fps || frame == final ||
+                    (Environment.GetEnvironmentVariable("PHYXEL_SHELL_LONG_SAMPLES")=="1" && frame%(10*fps)==0))
                 {
                     var snapshot = Read(r);
                     var cells = MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid).ToArray();
@@ -141,6 +164,10 @@ internal static class PressureShellRegressionVerifier
                         carrierMax=air.Max(a=>a.Pressure), waveMax=pulse.Max(a=>a.X),
                         wallMaxTemperature=cells.Where(c=>c.IsActive!=0 && registry[c.MaterialIndex].Properties.SimulationKind==2)
                             .Select(c=>c.Temperature).DefaultIfEmpty().Max(),
+                        furnaceFragments=cells.Select((c,i)=>(c,i)).Count(v=>v.c.IsActive!=0 && v.i/r.Width>=270 &&
+                            registry[v.c.MaterialIndex].Properties.SimulationKind==2 && (v.c.BodyId&0x40000000u)!=0),
+                        furnaceIntact=cells.Select((c,i)=>(c,i)).Count(v=>v.c.IsActive!=0 && v.i/r.Width>=270 &&
+                            registry[v.c.MaterialIndex].Properties.SimulationKind==2 && (v.c.BodyId&0x40000000u)==0),
                         solidMass = cells.Where(c => c.IsActive != 0 && registry[c.MaterialIndex].Properties.SimulationKind == 2)
                             .Sum(c => (double)c.Mass), ticks = coordinator.ThermalTicks };
                     rows.Add(row); Console.WriteLine("PHYXEL_SHELL_SAMPLE " + JsonSerializer.Serialize(row));
@@ -155,13 +182,15 @@ internal static class PressureShellRegressionVerifier
                         string save=Path.Combine(dir,stamp+"-roundtrip.json");
                         System.Threading.Tasks.Task.Run(()=>serializer.SaveAsync(save,settings,
                             (ushort)registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal),snapshot,registry)).GetAwaiter().GetResult();
-                        var resumed=System.Threading.Tasks.Task.Run(()=>serializer.LoadAsync(save,registry)).GetAwaiter().GetResult()!.World!;
+                        var reloaded=System.Threading.Tasks.Task.Run(()=>serializer.LoadAsync(save,registry)).GetAwaiter().GetResult()!;
+                        var resumed=reloaded.World!;
                         bool equal=snapshot.Grid.AsSpan().SequenceEqual(resumed.Grid) &&
                             snapshot.Air!.AsSpan().SequenceEqual(resumed.Air) && snapshot.GasMotion!.AsSpan().SequenceEqual(resumed.GasMotion) &&
                             snapshot.AirThermal!.AsSpan().SequenceEqual(resumed.AirThermal) &&
                             snapshot.ReactionPending!.AsSpan().SequenceEqual(resumed.ReactionPending) &&
                             snapshot.ReactionPulse!.AsSpan().SequenceEqual(resumed.ReactionPulse) &&
-                            snapshot.Oxidizer!.AsSpan().SequenceEqual(resumed.Oxidizer);
+                            snapshot.Oxidizer!.AsSpan().SequenceEqual(resumed.Oxidizer) &&
+                            reloaded.State.PressureDestruction==settings.PressureDestruction;
                         Console.WriteLine("PHYXEL_SHELL_ROUNDTRIP equal="+equal);
                         if(!equal)failures++;
                     }
@@ -185,7 +214,7 @@ internal static class PressureShellRegressionVerifier
             if(ventAcceptance)
             {
                 bool open=name=="Питарда" && variant=="vent" || name=="Новая печь";
-                bool pass=open?peakFragments==0:peakFragments>0;
+                bool pass=open || !settings.PressureDestruction ? peakFragments==0:peakFragments>0;
                 Console.WriteLine("PHYXEL_VENT_ACCEPTANCE "+JsonSerializer.Serialize(new{scene=name,variant,mode=mode.ToString(),fps,peakFragments,pass}));
                 if(!pass)failures++;
             }
@@ -206,6 +235,7 @@ internal static class PressureShellRegressionVerifier
         MaterialRegistry registry,SimulationSettings settings,string dir)
     {
         settings.Width=64;settings.Height=64;settings.Paused=true;settings.OpenBoundaries=false;
+        settings.PressureDestruction=true;
         coordinator.ClearCurrentWorld(settings);
         var r=coordinator.DispatchFrame(settings,[new(){X=1,Y=1,Radius=0,Density=1,
             MaterialIndex=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal)}],0);
@@ -319,7 +349,7 @@ internal static class PressureShellRegressionVerifier
         var serializerProbe=new SimulationStateSerializer();serializerProbe.ApplyWorldSnapshot(r,pressured);
         Check(r.PressureMechanicsPotential,"PB02 saved carrier pressure activates mechanics without powder/wave");
         SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
-        Check(Count(Cells())>0,"PB02 carrier pressure alone bursts plate");
+        Check(Count(Cells())==0,"PC01 unconfined carrier pressure does not burst plate (replaces PB02)");
         // Uniformly pressurized raster ring, not a chemistry-dependent shape.
         var ring=new GridCell[4096];
         for(int y=0;y<64;y++)for(int x=0;x<64;x++)

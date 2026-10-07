@@ -447,6 +447,9 @@ public sealed class SimulationDispatchCoordinator
             ApplyHydraulicMode(resources, settings.HydraulicPressure);
             previousHydraulicPressure = settings.HydraulicPressure;
         }
+        // A steam-only new construction must not need gunpowder or a reload
+        // to activate the experimental mechanics.
+        if(settings.PressureDestruction)resources.PressureMechanicsPotential=true;
 
         if (previousAirMode != settings.Mode)
         {
@@ -753,7 +756,9 @@ public sealed class SimulationDispatchCoordinator
                 }
                 if (solidMatter && resources.PressureMechanicsPotential)
                 {
-                    DispatchPressureFragments(resources, constants, settings.Mode == SimulationMode.Simulation, settings.AirSimulation);
+                    DispatchPressureFragments(resources, constants, settings.Mode == SimulationMode.Simulation,
+                        settings.AirSimulation && settings.PressureDestruction,
+                        advectOnly:settings.AirSimulation);
                     // A saved wave can burst a solid without any powder or fragment.
                     topologyDirty = true;
                 }
@@ -2083,7 +2088,7 @@ public sealed class SimulationDispatchCoordinator
     }
 
     internal static void DispatchPressureFragments(GpuSimulationResources r, SimulationFrameConstants constants,
-        bool finiteAir, bool fracture)
+        bool finiteAir, bool fracture, bool advectOnly=false)
     {
         Phyxel.Diagnostics.PressureFractureTrace.Before(r);
         constants.DeltaTime = (float)FixedAirStep;
@@ -2091,13 +2096,32 @@ public sealed class SimulationDispatchCoordinator
         var c = r.Context;
         c.UpdateSubresource(ref constants,r.PressureFrameConstants);
         c.ComputeShader.SetConstantBuffer(0,r.PressureFrameConstants);
+        if(fracture && !r.LegacyFragmentDiagnostics)
+        {
+            c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View);
+            c.ComputeShader.SetUnorderedAccessViews(0,r.PressureRoots.UnorderedView,r.PressureLinks.UnorderedView);
+            c.ComputeShader.Set(r.PressureInitializeShader);
+            c.Dispatch(DivideRoundUp(r.AirWidth,8),DivideRoundUp(r.AirHeight,8),1);
+            // Repeated root hooking/compression also resolves bounded retries
+            // under contention. Connectivity is rebuilt after editing/breaks.
+            for(int pass=0;pass<8;pass++)
+            {
+                c.ComputeShader.Set(r.PressureUnionShader);
+                c.Dispatch(DivideRoundUp(r.AirWidth,8),DivideRoundUp(r.AirHeight,8),1);
+                c.ComputeShader.Set(r.PressureCompressShader);
+                c.Dispatch(DivideRoundUp(r.AirWidth*r.AirHeight+1,256),1,1);
+            }
+            Unbind(c,2,2);
+            c.ComputeShader.SetShaderResource(8,r.PressureRoots.View);
+        }
         c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View,r.ReactionPulse.ReadView,r.Air.View);
         if(!r.LegacyFragmentDiagnostics)c.ClearUnorderedAccessView(r.FragmentRelease.UnorderedView,new RawInt4(0,0,0,0));
         c.ComputeShader.SetUnorderedAccessView(0,r.Grid.WriteUnorderedView);
         if(!r.LegacyFragmentDiagnostics)c.ComputeShader.SetUnorderedAccessView(4,r.FragmentRelease.UnorderedView);
-        c.ComputeShader.Set(fracture ? r.FractureUpdateShader : r.FragmentUpdateOnlyShader);
+        c.ComputeShader.Set(fracture ? r.FractureUpdateShader :
+            advectOnly ? r.FragmentAdvectOnlyShader : r.FragmentUpdateOnlyShader);
         c.Dispatch(DivideRoundUp(r.Width,16),DivideRoundUp(r.Height,16),1);
-        Unbind(c,4,r.LegacyFragmentDiagnostics?1:5); r.Grid.Swap();
+        Unbind(c,9,r.LegacyFragmentDiagnostics?1:5); r.Grid.Swap();
         Phyxel.Diagnostics.PressureFractureTrace.After(r);
         if(fracture && !r.LegacyFragmentDiagnostics)
         {

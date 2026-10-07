@@ -18,6 +18,8 @@ internal static class PressureFractureTrace
     {
         if (!Enabled) return;
         tick++;
+        if(int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_TRACE_LIMIT_TICKS"),out int limit) && tick>limit)
+        {before=null;return;}
         before = AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer);
     }
     internal static void After(GpuSimulationResources r)
