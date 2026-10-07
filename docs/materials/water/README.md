@@ -9,6 +9,8 @@
 
 ## Документы этого материала или семейства
 
+- [FJ: выброс и перенос осколков](../shared/FRAGMENT_JET_CONTRACT.md), [проверки и пределы](../shared/FRAGMENT_JET_RESULTS.md).
+
 - [Контакт воды с нагретым металлом — 2026-10-02](WATER_CONTACT_RESULTS.md).
 - [Конвекция воды — 2026-10-01](WATER_CONVECTION_RESULTS.md).
 - [Эталон гейта воды](WATER_GATE_BASELINE.md).

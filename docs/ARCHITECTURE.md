@@ -1,5 +1,7 @@
 # Архитектура Phyxel
 
+FJ2026-10-07: PressureFracture update→release→plan→apply. Coarse uint FragmentRelease (max положительных carrier-заявок) обнуляется каждый tick; CSRelease переводит существующий carrier-напор в Wave.X, сохраняя total Air.P/W/YZ/тепло. Scratch не сериализуется, Wave сохраняется writer19. Первоначальный бросок от carrier учитывает Mass; свободный fragment читает только видимый соседний carrier и сохраняет Mass/ID/T/энтальпию. BlockedFragmentPlan отделяет столкновение от нулевого стохастического шага; осыпание вокруг опоры требует настоящего перекрытого падения. AirSimulation и параметры тяги прежние. Флаг ReactionPulsePotential теперь консервативно включает быстрые подшаги также после возможного carrier-выпуска; нулевые области пропускаются самими wave kernels. [Контракт](materials/shared/FRAGMENT_JET_CONTRACT.md), [свежие проверки/ограничения](materials/shared/FRAGMENT_JET_RESULTS.md).
+
 PB2026-10-07 заменяет пластическую деформацию PM прямым разрывом.
 `physics.pressureStrength` прежний; четыре пары лучей (оси/диагонали) определяют
 перепад давления/толщину, порог зависит от температуры плавящегося металла.

@@ -99,6 +99,10 @@ public sealed class GpuResourceLifecycleManager : IDisposable
 
     private GpuSimulationResources CreateResources(int width, int height, bool allocateSimulation)
     {
+        string fragmentShader = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_PRESSURE_SHELL")=="1"
+            ? Environment.GetEnvironmentVariable("PHYXEL_FRAGMENT_BASELINE_SHADER")??"PressureFracture.hlsl"
+            : "PressureFracture.hlsl";
+        if(string.IsNullOrWhiteSpace(fragmentShader))fragmentShader="PressureFracture.hlsl";
         int cellCount = allocateSimulation ? checked(width * height) : 1;
         GpuBufferPair<GridCell> grid = new(Device, cellCount);
         GpuStructuredBuffer<uint> componentParents = new(Device, cellCount);
@@ -505,11 +509,14 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             Air = air,
             PressureFrameConstants = CreateConstantBuffer<SimulationFrameConstants>(),
             FragmentPlans = new(Device,cellCount), FragmentClaims = new(Device,cellCount),
+            FragmentRelease = new(Device,airCellCount),
+            LegacyFragmentDiagnostics = fragmentShader!="PressureFracture.hlsl",
+            FragmentReleaseShader = allocateSimulation ? CompileShader("PressureFracture.hlsl","CSRelease") : null,
             PowderFrontShader = allocateSimulation ? CompileShader("PowderFront.hlsl") : null,
-            FragmentUpdateOnlyShader = allocateSimulation ? CompileShader("PressureFracture.hlsl","CSMoveOnly") : null,
-            FractureUpdateShader = allocateSimulation ? CompileShader("PressureFracture.hlsl","CSUpdate") : null,
-            FragmentPlanShader = allocateSimulation ? CompileShader("PressureFracture.hlsl","CSPlan") : null,
-            FragmentApplyShader = allocateSimulation ? CompileShader("PressureFracture.hlsl","CSApply") : null,
+            FragmentUpdateOnlyShader = allocateSimulation ? CompileShader(fragmentShader,"CSMoveOnly") : null,
+            FractureUpdateShader = allocateSimulation ? CompileShader(fragmentShader,"CSUpdate") : null,
+            FragmentPlanShader = allocateSimulation ? CompileShader(fragmentShader,"CSPlan") : null,
+            FragmentApplyShader = allocateSimulation ? CompileShader(fragmentShader,"CSApply") : null,
             ReactionPending = reactionPending,ReactionPulse = reactionPulse,
             ReactionPulseScratch = new(Device,airCellCount),
             ReactionPendingStaging = CreateStagingBuffer(cellCount*16),

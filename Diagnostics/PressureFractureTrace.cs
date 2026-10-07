@@ -34,21 +34,34 @@ internal static class PressureFractureTrace
             if (c.IsActive == 0 || table[(int)c.MaterialIndex].SimulationKind != 2 ||
                 (c.BodyId & 0x40000000u) == 0 || (o.BodyId & 0x40000000u) != 0) continue;
             count++;
-            if(firstBirth==0)firstBirth=tick;
+            bool selected=Environment.GetEnvironmentVariable("PHYXEL_TRACE_ROOF")=="1"
+                ? i%r.Width>280 && i%r.Width<365 && i/r.Width>95 && i/r.Width<126 : true;
+            if(firstBirth==0 && selected)firstBirth=tick;
             Console.WriteLine("PHYXEL_FRACTURE_ORIGIN " + JsonSerializer.Serialize(new {
                 tick, x=i%r.Width, y=i/r.Width, material=c.MaterialIndex,
                 temperature=c.Temperature, vx=c.VelocityX, vy=c.VelocityY, mass=c.Mass }));
         }
         int age=tick-firstBirth+1;
         if(firstBirth>0 && age is 1 or 4 or 7 or 13 or 31 or 61 or 121 or 181)
+        {
+            int tracked=0;
             for(int i=0;i<cells.Length;i++)
             {
                 var c=cells[i];
                 if(c.IsActive!=0 && table[(int)c.MaterialIndex].SimulationKind==2 &&
                     (c.BodyId&0x40000000u)!=0 && (c.BodyId&0x3fffffffu)==age)
+                {
+                    tracked++;
                     Console.WriteLine("PHYXEL_FRAGMENT_FLIGHT "+JsonSerializer.Serialize(new{
                         tick,age,x=i%r.Width,y=i/r.Width,vx=c.VelocityX,vy=c.VelocityY,temperature=c.Temperature}));
+                }
             }
+            Console.WriteLine("PHYXEL_FRAGMENT_COHORT "+JsonSerializer.Serialize(new{tick,age,tracked}));
+            string flightDir=Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")??"artifacts/fracture-trace";
+            File.WriteAllBytes(Path.Combine(flightDir,$"flight-{age}-grid.bin"),bytes);
+            File.WriteAllBytes(Path.Combine(flightDir,$"flight-{age}-air.bin"),AirInventoryRegressionVerifier.Read(r,r.Air.Buffer));
+            File.WriteAllBytes(Path.Combine(flightDir,$"flight-{age}-pulse.bin"),AirInventoryRegressionVerifier.Read(r,r.ReactionPulse.ReadBuffer));
+        }
         if (count == 0 || events >= 12) return;
         string dir = Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR") ?? "artifacts/fracture-trace";
         string stamp = Path.Combine(dir, $"fracture-{++events}-{tick}");

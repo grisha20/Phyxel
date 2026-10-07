@@ -29,12 +29,19 @@ internal static class PressureShellRegressionVerifier
     {
         string dir = Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR") ?? "artifacts/pressure-shell";
         Directory.CreateDirectory(dir);
+        if(Environment.GetEnvironmentVariable("PHYXEL_SHELL_SYNC_ACTIVITY")=="1")
+            coordinator.ConfigurePhaseAcceptanceDiagnostics(suppressReadbackPolling:true);
         bool baseline = Environment.GetEnvironmentVariable("PHYXEL_SHELL_BASELINE") == "1";
         bool matrix = Environment.GetEnvironmentVariable("PHYXEL_SHELL_MATRIX") == "1";
         string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Phyxel");
         var serializer = new SimulationStateSerializer();
         var rows = new List<object>();
         int failures = 0;
+        if(Environment.GetEnvironmentVariable("PHYXEL_SHELL_JET_PROBES")=="1")
+        {
+            foreach(var resource in FragmentJetRegressionVerifier.Run(coordinator,registry,settings,dir))yield return resource;
+            yield break;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_SHELL_EDIT_PROBES") == "1")
         {
             foreach (var resource in PressureEditRegressionVerifier.Run(coordinator, registry, settings, dir))
@@ -143,6 +150,21 @@ internal static class PressureShellRegressionVerifier
                     File.WriteAllBytes(Path.Combine(dir, stamp + "-motion.bin"), snapshot.GasMotion!);
                     File.WriteAllBytes(Path.Combine(dir, stamp + "-pulse.bin"), snapshot.ReactionPulse!);
                     SimulationScreenshotWriter.Save(r, Path.Combine(dir, stamp + ".png"));
+                    if(frame==final && Environment.GetEnvironmentVariable("PHYXEL_SHELL_ROUNDTRIP")=="1")
+                    {
+                        string save=Path.Combine(dir,stamp+"-roundtrip.json");
+                        System.Threading.Tasks.Task.Run(()=>serializer.SaveAsync(save,settings,
+                            (ushort)registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal),snapshot,registry)).GetAwaiter().GetResult();
+                        var resumed=System.Threading.Tasks.Task.Run(()=>serializer.LoadAsync(save,registry)).GetAwaiter().GetResult()!.World!;
+                        bool equal=snapshot.Grid.AsSpan().SequenceEqual(resumed.Grid) &&
+                            snapshot.Air!.AsSpan().SequenceEqual(resumed.Air) && snapshot.GasMotion!.AsSpan().SequenceEqual(resumed.GasMotion) &&
+                            snapshot.AirThermal!.AsSpan().SequenceEqual(resumed.AirThermal) &&
+                            snapshot.ReactionPending!.AsSpan().SequenceEqual(resumed.ReactionPending) &&
+                            snapshot.ReactionPulse!.AsSpan().SequenceEqual(resumed.ReactionPulse) &&
+                            snapshot.Oxidizer!.AsSpan().SequenceEqual(resumed.Oxidizer);
+                        Console.WriteLine("PHYXEL_SHELL_ROUNDTRIP equal="+equal);
+                        if(!equal)failures++;
+                    }
                     if(!baseline && !ventAcceptance && name=="Питарда" && frame==fps && (coolFragments==0 || outside==0 || lowerPowder>=1650))
                     {failures++;Console.WriteLine("PHYXEL_SHELL_SCENE_FAILED cold/outward/lower-front " + prefix);}
                     if(!baseline && name=="Питарда" && frame==2*fps && grains.Sum(c=>(double)c.Mass)>65.12)
@@ -341,7 +363,7 @@ internal static class PressureShellRegressionVerifier
         Check(Cells().Count(c=>c.IsActive!=0 && c.MaterialIndex==metal)==2 && Cells().Count(c=>c.IsActive!=0 && c.MaterialIndex==smoke)==1 &&
             Math.Abs(Cells().Sum(c=>(double)c.Mass)-swap.Sum(c=>(double)c.Mass))<.0001,"PB04 competing fragments preserve gas and mass");
         var heap=new GridCell[4096];heap[32*64+32]=new(){MaterialIndex=metal,IsActive=1,Mass=7.8f,
-            Temperature=600,Lifetime=11,BodyId=0x40000000u};
+            Temperature=600,Lifetime=11,BodyId=0x40000000u,VelocityY=60};
         heap[33*64+32]=new(){MaterialIndex=fixture,IsActive=1,Mass=1,Temperature=30};
         Upload(heap);Wave(0,0);constants.Gravity=980;
         SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,false);

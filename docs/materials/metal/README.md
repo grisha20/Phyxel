@@ -21,6 +21,8 @@
 
 ## Документы этого материала или семейства
 
+- [FJ: выброс и перенос осколков](../shared/FRAGMENT_JET_CONTRACT.md), [проверки и пределы](../shared/FRAGMENT_JET_RESULTS.md).
+
 - [Металл ↔ расплав: энергетический переход](METAL_FUSION_RESULTS.md).
 - [SP: давление на крышу котла и полёт металлических осколков](../shared/STEAM_ROOF_DIAGNOSIS.md).
 

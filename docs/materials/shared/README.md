@@ -48,3 +48,5 @@
 
 - [PF: центральный поджиг и разлёт оболочки](PRESSURE_FRACTURE_CONTRACT.md), [результаты](PRESSURE_FRACTURE_RESULTS.md).
 - [SP: холодная крыша котла, давление и падение осколков](STEAM_ROOF_DIAGNOSIS.md).
+
+- [FJ: исправленный выброс и перенос осколков](FRAGMENT_JET_CONTRACT.md), [результаты и ограничения](FRAGMENT_JET_RESULTS.md).

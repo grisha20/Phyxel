@@ -2092,11 +2092,25 @@ public sealed class SimulationDispatchCoordinator
         c.UpdateSubresource(ref constants,r.PressureFrameConstants);
         c.ComputeShader.SetConstantBuffer(0,r.PressureFrameConstants);
         c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View,r.ReactionPulse.ReadView,r.Air.View);
+        if(!r.LegacyFragmentDiagnostics)c.ClearUnorderedAccessView(r.FragmentRelease.UnorderedView,new RawInt4(0,0,0,0));
         c.ComputeShader.SetUnorderedAccessView(0,r.Grid.WriteUnorderedView);
+        if(!r.LegacyFragmentDiagnostics)c.ComputeShader.SetUnorderedAccessView(4,r.FragmentRelease.UnorderedView);
         c.ComputeShader.Set(fracture ? r.FractureUpdateShader : r.FragmentUpdateOnlyShader);
         c.Dispatch(DivideRoundUp(r.Width,16),DivideRoundUp(r.Height,16),1);
-        Unbind(c,4,1); r.Grid.Swap();
+        Unbind(c,4,r.LegacyFragmentDiagnostics?1:5); r.Grid.Swap();
         Phyxel.Diagnostics.PressureFractureTrace.After(r);
+        if(fracture && !r.LegacyFragmentDiagnostics)
+        {
+            c.ComputeShader.SetShaderResources(2,r.ReactionPulse.ReadView,r.Air.View);
+            c.ComputeShader.SetShaderResources(7,r.FragmentRelease.View);
+            c.ComputeShader.SetUnorderedAccessView(5,r.ReactionPulse.WriteUnorderedView);
+            c.ComputeShader.Set(r.FragmentReleaseShader);
+            c.Dispatch(DivideRoundUp(r.AirWidth,8),DivideRoundUp(r.AirHeight,8),1);
+            Unbind(c,8,6);r.ReactionPulse.Swap();
+            // Conservative activity hint: zero packets are skipped by the fast
+            // wave kernels; a newly released stock can use all fixed substeps.
+            r.ReactionPulsePotential=true;
+        }
         c.ClearUnorderedAccessView(r.FragmentClaims.UnorderedView,new RawInt4(-1,-1,-1,-1));
         c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View);
         c.ComputeShader.SetUnorderedAccessViews(1,r.FragmentPlans.UnorderedView,r.FragmentClaims.UnorderedView);

@@ -1,5 +1,6 @@
 #include "PhysicsShared.hlsli"
 static const uint PressureFragmentMarker = 0x40000000u;
+static const uint BlockedFragmentPlan = 0x80000000u;
 StructuredBuffer<GridCell> SourceGrid : register(t0);
 StructuredBuffer<MaterialProperties> Materials : register(t1);
 StructuredBuffer<float4> Wave : register(t2);
@@ -7,10 +8,13 @@ StructuredBuffer<AirCell> Air : register(t3);
 StructuredBuffer<uint> SourcePlans : register(t4);
 StructuredBuffer<uint> SourceClaims : register(t5);
 StructuredBuffer<GasMotionState> SourceMotion : register(t6);
+StructuredBuffer<uint> SourceRelease : register(t7);
 RWStructuredBuffer<GridCell> DestinationGrid : register(u0);
 RWStructuredBuffer<uint> Plans : register(u1);
 RWStructuredBuffer<uint> Claims : register(u2);
 RWStructuredBuffer<GasMotionState> DestinationMotion : register(u3);
+RWStructuredBuffer<uint> ReleaseAmounts : register(u4);
+RWStructuredBuffer<float4> DestinationWave : register(u5);
 #define FineAirWidth Width
 #define FineAirHeight Height
 #define FineAirMaterialAt(p) SourceGrid[(p).y*Width+(p).x].MaterialIndex
@@ -22,9 +26,9 @@ bool Fragment(GridCell c)
 {return c.IsActive!=0 && IsMovableSolidMaterial(Materials[c.MaterialIndex]) && (c.BodyId&PressureFragmentMarker)!=0;}
 
 // Read visible air on each side, rather than sampling the same coarse node through a wall.
-bool Surface(int2 p,int2 direction,out float pressure,out int distance)
+bool Surface(int2 p,int2 direction,out float pressure,out int distance,out uint nodeIndex)
 {
-    pressure=0;distance=0;
+    pressure=0;distance=0;nodeIndex=0;
     [loop]for(int step=1;step<=24;step++)
     {
         int2 q=p+direction*step;
@@ -37,7 +41,7 @@ bool Surface(int2 p,int2 direction,out float pressure,out int distance)
         uint ni=node.y*aw+node.x;
         // Free carrier nodes already contain the reaction overlay. Pore nodes
         // have no carrier and receive the compressible wave on its own.
-        pressure=Air[ni].Blocked<.5?Air[ni].Pressure:Wave[ni].x;distance=step;
+        pressure=Air[ni].Blocked<.5?Air[ni].Pressure:Wave[ni].x;distance=step;nodeIndex=ni;
         return true;
     }
     return false;
@@ -45,13 +49,36 @@ bool Surface(int2 p,int2 direction,out float pressure,out int distance)
 
 // Solve the normal load from four directional pressure projections. Diagonal
 // paths use their actual length; a circular shell is not an axis-only wall.
-void LoadProjection(int2 p,int2 direction,inout float3 metric,inout float2 load)
+void LoadProjection(int2 p,int2 direction,inout float3 metric,inout float2 load,out uint source,out float release)
 {
-    float l,r;int dl,dr;
-    if(!Surface(p,-direction,l,dl)||!Surface(p,direction,r,dr))return;
+    source=0;release=0;
+    float l,r;int dl,dr;uint ln,rn;
+    if(!Surface(p,-direction,l,dl,ln)||!Surface(p,direction,r,dr,rn))return;
     float lengthStep=length(float2(direction));float2 n=float2(direction)/lengthStep;
     float gradient=(l-r)/(max(1,dl+dr-1)*lengthStep);
     metric+=float3(n.x*n.x,n.y*n.y,n.x*n.y);load+=gradient*n;
+    // Transfer only the accumulated carrier reservoir. The reactive overlay
+    // is already compressible and must never be issued a second time.
+    float lc=Air[ln].Blocked<.5?Air[ln].Pressure-Wave[ln].x:0;
+    float rc=Air[rn].Blocked<.5?Air[rn].Pressure-Wave[rn].x:0;
+    source=lc>rc?ln:rn;
+    release=(lc-rc)*(l-r)>0?abs(lc-rc):0;
+}
+
+float2 FragmentCarrier(int2 p)
+{
+    float2 velocity=0;float count=0;
+    [unroll]for(int k=0;k<4;k++)
+    {
+        int2 d=k==0?int2(-1,0):k==1?int2(1,0):k==2?int2(0,-1):int2(0,1);
+        int2 q=p+d,node;
+        if(!AirFineBlocked(q) && AirFineNodeFor(q,node))
+        {
+            uint aw=(Width+AirCellSize-1)/AirCellSize;AirCell a=Air[node.y*aw+node.x];
+            if(a.Blocked<.5){velocity+=float2(a.VelocityX,a.VelocityY);count++;}
+        }
+    }
+    return count>0?clamp(velocity/count*60,-180,180):0;
 }
 
 void Update(uint3 p,bool fracture)
@@ -68,11 +95,11 @@ void Update(uint3 p,bool fracture)
     float strength=m.MoistureReserved1*lerp(1,.6,softness);
     if(c.IsActive!=0 && IsMovableSolidMaterial(m) && m.MoistureReserved1>0 && !Fragment(c) && fracture)
     {
-        float3 metric=0;float2 load=0;
-        LoadProjection(int2(p.xy),int2(1,0),metric,load);
-        LoadProjection(int2(p.xy),int2(0,1),metric,load);
-        LoadProjection(int2(p.xy),int2(1,1),metric,load);
-        LoadProjection(int2(p.xy),int2(1,-1),metric,load);
+        float3 metric=0;float2 load=0;uint4 source;float4 release;
+        LoadProjection(int2(p.xy),int2(1,0),metric,load,source.x,release.x);
+        LoadProjection(int2(p.xy),int2(0,1),metric,load,source.y,release.y);
+        LoadProjection(int2(p.xy),int2(1,1),metric,load,source.z,release.z);
+        LoadProjection(int2(p.xy),int2(1,-1),metric,load,source.w,release.w);
         float determinant=metric.x*metric.y-metric.z*metric.z;
         float2 force=determinant>.0001
             ?float2(metric.y*load.x-metric.z*load.y,metric.x*load.y-metric.z*load.x)/determinant
@@ -81,12 +108,25 @@ void Update(uint3 p,bool fracture)
         if(stress>strength)
         {
             c.BodyId=PressureFragmentMarker;c.RestFrames=0;c.Pressure=0;
-            float2 v=force/stress*clamp(stress/strength*75,60,180);
+            float carrierLoad=max(max(release.x,release.y),max(release.z,release.w));
+            // Game-unit pressure work / packet mass, bounded by the existing
+            // transport cap. No extra reactive source or heat is generated.
+            float launch=max(stress/strength*75,48*sqrt(2*carrierLoad/max(.25,c.Mass)));
+            float2 v=force/stress*clamp(launch,60,180);
             c.VelocityX=v.x;c.VelocityY=v.y;
+            [unroll]for(int k=0;k<4;k++)if(release[k]>0)
+            {uint ignored;InterlockedMax(ReleaseAmounts[source[k]],asuint(release[k]),ignored);}
         }
     }
     if(Fragment(c))
     {
+        if(fracture)
+        {
+            float2 wind=FragmentCarrier(int2(p.xy));
+            float response=min(4,2.4/max(.25,c.Mass))*DeltaTime;
+            c.VelocityX=lerp(c.VelocityX,wind.x,response);
+            c.VelocityY=lerp(c.VelocityY,wind.y,response);
+        }
         c.VelocityY=clamp(c.VelocityY+Gravity*.1*DeltaTime,-180,180);
         c.VelocityX=clamp(c.VelocityX,-180,180);
         c.RestFrames=0;
@@ -99,6 +139,20 @@ void Update(uint3 p,bool fracture)
 void CSUpdate(uint3 p:SV_DispatchThreadID){Update(p,true);}
 [numthreads(16,16,1)]
 void CSMoveOnly(uint3 p:SV_DispatchThreadID){Update(p,false);}
+
+// One owner per coarse node. Air.P total is unchanged; increasing Wave.X
+// withdraws exactly this stock from the carrier on the next CSInject.
+// Max merging prevents one plate's pixels from issuing the reservoir repeatedly.
+[numthreads(8,8,1)]
+void CSRelease(uint3 p:SV_DispatchThreadID)
+{
+    uint aw=(Width+AirCellSize-1)/AirCellSize,ah=(Height+AirCellSize-1)/AirCellSize;
+    if(p.x>=aw||p.y>=ah)return;uint i=p.y*aw+p.x;float4 packet=Wave[i];
+    float amount=asfloat(SourceRelease[i]);
+    if(amount>0 && Air[i].Blocked<.5)
+        packet.x+=min(amount,max(0,Air[i].Pressure-packet.x));
+    DestinationWave[i]=packet;
+}
 
 bool FreeTarget(int2 q,uint source,uint material)
 {
@@ -130,7 +184,8 @@ void CSPlan(uint3 p:SV_DispatchThreadID)
         q=next;previous=next;
     }
     // Slow debris settles as loose grains instead of retaining rigid shape.
-    if(all(q==int2(p.xy)) && v.y>=0 && abs(v.x)<24 && Gravity>0)
+    if(all(q==int2(p.xy)) && step.y>0 && v.y>=0 && abs(v.x)<24 && Gravity>0 &&
+        !FreeTarget(int2(p.x,p.y+1),i,c.MaterialIndex))
     {
         int side=HashUnitFloat(i^(c.BodyId&0x3fffffffu))<.5?-1:1;
         [unroll]for(int attempt=0;attempt<2;attempt++)
@@ -140,7 +195,7 @@ void CSPlan(uint3 p:SV_DispatchThreadID)
             side=-side;
         }
     }
-    if(all(q==int2(p.xy)))return;
+    if(all(q==int2(p.xy))){if(steps>0)Plans[i]=BlockedFragmentPlan;return;}
     uint target=q.y*Width+q.x,ignored;
     Plans[i]=target+1;InterlockedMin(Claims[target],i+1,ignored);
 }
@@ -151,8 +206,8 @@ void CSApply(uint3 p:SV_DispatchThreadID)
     uint i=p.y*Width+p.x;GridCell c=SourceGrid[i];GasMotionState motion=SourceMotion[i];
     uint incoming=SourceClaims[i];
     if(incoming!=0xffffffffu){c=SourceGrid[incoming-1];motion=(GasMotionState)0;}
-    else if(SourcePlans[i]!=0 && SourceClaims[SourcePlans[i]-1]==i+1)
+    else if(SourcePlans[i]!=0 && SourcePlans[i]!=BlockedFragmentPlan && SourceClaims[SourcePlans[i]-1]==i+1)
     {uint target=SourcePlans[i]-1;c=SourceGrid[target];motion=SourceMotion[target];}
-    else if(Fragment(c) && SourcePlans[i]==0){c.VelocityX*=.85;c.VelocityY*=.85;}
+    else if(Fragment(c) && SourcePlans[i]==BlockedFragmentPlan){c.VelocityX*=.85;c.VelocityY*=.85;}
     DestinationGrid[i]=c;DestinationMotion[i]=motion;
 }

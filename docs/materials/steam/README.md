@@ -7,6 +7,8 @@
 
 ## Документы этого материала или семейства
 
+- [FJ: выброс и перенос осколков](../shared/FRAGMENT_JET_CONTRACT.md), [проверки и пределы](../shared/FRAGMENT_JET_RESULTS.md).
+
 - [Баланс энергии воды и пара — 2026-10-01](STEAM_ENERGY_RESULTS.md).
 - [Пар: эталоны TPT, итоговый baseline и границы применимости](STEAM_RESULTS.md).
 - [SP: разрыв крыши котла и падение осколков](../shared/STEAM_ROOF_DIAGNOSIS.md).
