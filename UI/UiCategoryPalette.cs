@@ -350,7 +350,7 @@ public sealed class UiCategoryPalette
                 {
                     Color hoverOverlay = hoveredMaterialPressed
                         ? new Color(0, 0, 0, 48)
-                        : new Color(255, 255, 255, 20);
+                        : Color.White * (20f / 255f);
                     spriteBatch.Draw(pixel, previewBounds, hoverOverlay);
                 }
 
@@ -455,7 +455,7 @@ public sealed class UiCategoryPalette
                 selected ? UiTheme.CardActive : hoveredFilter == brush ? UiTheme.CardHover : UiTheme.CardBackground, 7);
             Rectangle picture = new(card.X + 6, card.Y + 5, card.Width - 12,
                 Math.Max(1, card.Height - ComputeMaterialLabelOverlayHeight(font) - 10));
-            UiFilterCardRenderer.Draw(batch, pixel, picture, brush);
+            UiFilterCardRenderer.Draw(batch, pixel, picture, brush, previewCache);
             string title = UiFilterCardRenderer.CardTitle(brush);
             Vector2 measured = font.MeasureString(title);
             float titleScale = Math.Min(.9f, Math.Min((card.Width-10)/Math.Max(1,measured.X),

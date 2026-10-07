@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Phyxel.Core;
 
 namespace Phyxel.UI;
 
@@ -35,6 +36,23 @@ public sealed class MaterialCardPreviewCache : IDisposable
     private readonly Dictionary<string, Texture2D> previews =
         new(StringComparer.OrdinalIgnoreCase);
     private bool disposed;
+    private readonly Dictionary<FilterSelection, Texture2D> filterPreviews = new();
+    internal static string GetFilterPreviewFileName(FilterSelection brush) => brush switch
+    {
+        FilterSelection.Steam => "steam.png",
+        FilterSelection.Water => "water.png",
+        FilterSelection.Oil => "oil.png",
+        FilterSelection.Gases => "gases.png",
+        FilterSelection.Liquids => "liquids.png",
+        FilterSelection.Powders => "powders.png",
+        FilterSelection.SelectedMaterial => "selected_material.png",
+        FilterSelection.Wall => "wall.png",
+        FilterSelection.AirOnly => "air_only.png",
+        FilterSelection.NoAir => "no_air.png",
+        _ => throw new ArgumentOutOfRangeException(nameof(brush))
+    };
+    internal bool TryGetFilterPreview(FilterSelection brush, out Texture2D preview) =>
+        filterPreviews.TryGetValue(brush, out preview!);
 
     public MaterialCardPreviewCache(GraphicsDevice graphicsDevice, string previewDirectory)
     {
@@ -62,6 +80,22 @@ public sealed class MaterialCardPreviewCache : IDisposable
 
         Console.WriteLine(
             $"PHYXEL_UI_PREVIEWS loaded={previews.Count} expected={PreviewFileNames.Count} directory={previewDirectory}");
+        string filterDirectory = Path.Combine(Path.GetDirectoryName(previewDirectory)!, "FilterCards");
+        foreach (FilterSelection brush in Enum.GetValues<FilterSelection>())
+        {
+            string path = Path.Combine(filterDirectory, GetFilterPreviewFileName(brush));
+            if (!File.Exists(path)) continue;
+            try
+            {
+                using FileStream stream = File.OpenRead(path);
+                filterPreviews[brush] = Texture2D.FromStream(graphicsDevice, stream);
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"PHYXEL_UI_FILTER_PREVIEW_FAILED brush={brush} file={path} error={exception.Message}");
+            }
+        }
+        Console.WriteLine($"PHYXEL_UI_FILTER_PREVIEWS loaded={filterPreviews.Count} expected={Enum.GetValues<FilterSelection>().Length}");
     }
 
     public Texture2D FallbackTexture { get; }
@@ -108,6 +142,8 @@ public sealed class MaterialCardPreviewCache : IDisposable
             preview.Dispose();
         }
         previews.Clear();
+        foreach (Texture2D preview in filterPreviews.Values) preview.Dispose();
+        filterPreviews.Clear();
         FallbackTexture.Dispose();
     }
 }

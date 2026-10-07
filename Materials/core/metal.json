@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "id": "core:metal",
-  "name": { "ru": "РњРµС‚Р°Р»Р»", "en": "Metal" },
+  "name": { "ru": "Металл", "en": "Metal" },
   "kind": "solid",
   "flags": ["movable-solid", "fusion-enthalpy"],
   "color": "#8E9CA6",

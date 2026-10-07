@@ -5,8 +5,7 @@ using Phyxel.Core;
 
 namespace Phyxel.UI;
 
-// Native pixel drawings scale with the existing material-card palette.
-// Each brush has its own pictogram, without introducing raster dependencies.
+// Raster inventory art with the original pictograms as a missing-asset fallback.
 internal static class UiFilterCardRenderer
 {
     internal static string Title(FilterSelection brush) => brush switch
@@ -40,8 +39,17 @@ internal static class UiFilterCardRenderer
         _ => "Пропускает указанное вещество или класс; блокирует фоновый воздух"
     };
 
-    internal static void Draw(SpriteBatch batch, Texture2D pixel, Rectangle bounds, FilterSelection brush)
+    internal static void Draw(SpriteBatch batch, Texture2D pixel, Rectangle bounds, FilterSelection brush,
+        MaterialCardPreviewCache previews)
     {
+        if (previews.TryGetFilterPreview(brush, out Texture2D preview))
+        {
+            float scale = Math.Max(bounds.Width / (float)preview.Width, bounds.Height / (float)preview.Height);
+            int width = Math.Min(preview.Width, (int)MathF.Ceiling(bounds.Width / scale));
+            int height = Math.Min(preview.Height, (int)MathF.Ceiling(bounds.Height / scale));
+            batch.Draw(preview, bounds, new Rectangle((preview.Width-width)/2, (preview.Height-height)/2, width, height), Color.White);
+            return;
+        }
         Color tint = brush switch
         {
             FilterSelection.Water => new(65, 150, 255),

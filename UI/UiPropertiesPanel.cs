@@ -329,7 +329,7 @@ public sealed class UiPropertiesPanel
                 backdrop.DrawRoundedRectangle(spriteBatch, materialCardBounds, UiTheme.CardBackground, 7);
                 UiFilterCardRenderer.Draw(spriteBatch,pixel,
                     new Rectangle(materialCardBounds.X+5,materialCardBounds.Y+5,materialCardBounds.Width-10,materialCardBounds.Height-10),
-                    settings.FilterSelection);
+                    settings.FilterSelection, previewCache);
             }
             else DrawMaterialCard(spriteBatch, font, backdrop, pixel, selectedMaterial, previewCache);
         }

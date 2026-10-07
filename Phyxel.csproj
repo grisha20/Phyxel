@@ -32,6 +32,7 @@
     <KniContentReference Include="Content\PhyxelContent.mgcb" />
     <None Update="Content\Shaders\**\*.*" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Content\UI\MaterialCards\*.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Content\UI\FilterCards\*.png" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Content\UI\Icons\**\*.*" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Materials\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
