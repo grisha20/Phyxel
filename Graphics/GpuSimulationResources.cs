@@ -279,6 +279,7 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? EmissionResolveShader { get; init; }
     public ComputeShader? TransientLifecycleShader { get; init; }
     public ComputeShader? TemperatureProbeShader { get; init; }
+    public ComputeShader? TemperatureSensorsShader { get; init; }
 
     public void Dispose()
     {
@@ -287,6 +288,7 @@ public sealed class GpuSimulationResources : IDisposable
         Context.ComputeShader.SetUnorderedAccessViews(0, null, null, null, null, null, null);
         CompositionShader?.Dispose();
         TemperatureProbeShader?.Dispose();
+        TemperatureSensorsShader?.Dispose();
         PhaseTransitionShader?.Dispose();
         CombustionShader?.Dispose();
         PressureFrameConstants.Dispose(); FragmentPlans.Dispose(); FragmentClaims.Dispose(); FragmentRelease.Dispose();

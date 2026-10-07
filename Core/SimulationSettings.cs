@@ -4,6 +4,8 @@ namespace Phyxel.Core;
 
 public sealed class SimulationSettings
 {
+    public System.Collections.Generic.List<TemperatureSensorPosition> TemperatureSensors { get; set; } = [];
+
     public FilterSelection FilterSelection { get; set; } = FilterSelection.Steam;
 
     public const int NativeWidth = 1920;

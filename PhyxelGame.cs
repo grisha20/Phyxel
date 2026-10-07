@@ -30,6 +30,7 @@ public sealed class PhyxelGame : Game
     private readonly SimulationStateSerializer stateSerializer = new();
     private readonly GpuDebugProbe debugProbe = new();
     private readonly GpuTemperatureProbe temperatureProbe = new();
+    private readonly GpuTemperatureSensors temperatureSensors = new();
     private readonly AcceptanceRegressionHarness acceptance = new();
     private readonly SimulationClockTrace simulationClockTrace = new();
     private string scenePath;
@@ -459,6 +460,16 @@ public sealed class PhyxelGame : Game
             userInterface.ActiveTool=PhyxelToolId.Filter;settings.FilterSelection=previewFilter;
             userInterface.CategoryPalette.ShowFilters(previewFilter);
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_TEMPERATURE_SENSORS") == "1")
+        {
+            try
+            {
+                currentResources = TemperatureSensorsRegressionVerifier.Run(dispatchCoordinator, materialRegistry, settings);
+                userInterface.ActiveTool = PhyxelToolId.Sensor;
+            }
+            catch (Exception e) { Console.WriteLine($"PHYXEL_TEMPERATURE_SENSORS_FAILED {e}"); Environment.ExitCode = 1; Exit(); return; }
+            if (string.IsNullOrEmpty(uiScreenshotPath)) { Exit(); return; }
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_UI") == "1")
         {
             UiLayoutRegressionTests.RunAllTests(materialRegistry, fonts, userInterface);
@@ -627,6 +638,9 @@ public sealed class PhyxelGame : Game
                 fittedWorldBounds,
                 userInterface.PanToolActive,
                 userInterface.PointerConsumed);
+        if (!acceptance.Active && userInterface.SensorToolActive && !userInterface.PointerConsumed &&
+            !FileOperationPending && IsActive && userInterface.CanvasBounds.Contains(input.MousePosition))
+            if (TemperatureSensorOverlay.Edit(input, worldBounds, settings)) temperatureSensors.Reset();
         IReadOnlyList<BrushDrawCommand> commands = acceptance.Active
             ? acceptance.CreateCommands(frameIndex)
             : brushController.CreateCommands(
@@ -678,6 +692,7 @@ public sealed class PhyxelGame : Game
                         currentResources.Width,
                         currentResources.Height);
             temperatureProbe.Update(currentResources, probeCoordinate, input.DeltaSeconds);
+            temperatureSensors.Update(currentResources, settings.TemperatureSensors, settings.AirSimulation, input.DeltaSeconds);
             acceptance.ObserveTemperatureProbe(acceptanceFrame, temperatureProbe.Latest);
             dispatchCoordinator.ObserveStatistics(debugProbe.Latest);
             BeginAcceptanceCheckpoint();
@@ -689,7 +704,7 @@ public sealed class PhyxelGame : Game
             settings.ApplyScale(settings.Scale - 0.25f);
             editHistory.Clear();
             brushController.CancelStroke();
-            temperatureProbe.Reset();
+            temperatureProbe.Reset(); temperatureSensors.Reset();
             SetStatus("Видеопамять ограничена: масштаб снижен");
         }
         transientStatusRemaining = Math.Max(0, transientStatusRemaining - input.DeltaSeconds);
@@ -778,7 +793,7 @@ public sealed class PhyxelGame : Game
             SimulationStateSerializer.ContainsContactTransitionSource(restored, materialRegistry!),
             settings.HydraulicPressure, fields);
         settings.Paused = true;
-        temperatureProbe.Reset();
+        temperatureProbe.Reset(); temperatureSensors.Reset();
         currentResources = DispatchInteractiveFrame([], 0);
         ResetElapsedTime();
         SetStatus(forward ? "Действие восстановлено · пауза" : "Действие отменено · пауза");
@@ -856,6 +871,7 @@ public sealed class PhyxelGame : Game
             SamplerState.LinearClamp,
             DepthStencilState.None,
             RasterizerState.CullNone);
+        userInterface.DrawTemperatureSensors(spriteBatch, worldBounds, settings, temperatureSensors.Readings);
         userInterface.DrawBrushIndicator(
             spriteBatch,
             latestInput.MousePosition,
@@ -882,6 +898,7 @@ public sealed class PhyxelGame : Game
         oilSmokeVerification?.Dispose();
         simulationClockTrace.Dispose();
         userInterface?.Dispose();
+        temperatureSensors.Dispose();
         resourceManager?.Dispose();
         canvasRasterizerState?.Dispose();
         spriteBatch?.Dispose();
@@ -903,13 +920,14 @@ public sealed class PhyxelGame : Game
         if (actions.ClearRequested)
         {
             dispatchCoordinator.ClearCurrentWorld(settings);
-            temperatureProbe.Reset();
+            settings.TemperatureSensors.Clear();
+            temperatureProbe.Reset(); temperatureSensors.Reset();
             SetStatus("Сцена очищена");
         }
         if (actions.ResetRequested)
         {
             dispatchCoordinator.ResetCurrentSimulation(settings);
-            temperatureProbe.Reset();
+            temperatureProbe.Reset(); temperatureSensors.Reset();
             SetStatus("Симуляция перезапущена");
         }
         if (actions.ResetViewRequested)
@@ -925,9 +943,10 @@ public sealed class PhyxelGame : Game
         }
         if (actions.ScaleChanged)
         {
+            settings.TemperatureSensors.Clear();
             editHistory.Clear();
             brushController.CancelStroke();
-            temperatureProbe.Reset();
+            temperatureProbe.Reset(); temperatureSensors.Reset();
         }
         if (actions.HydraulicsChanged)
         {
@@ -966,7 +985,7 @@ public sealed class PhyxelGame : Game
             string? path = SelectScenePath(false);
             if (path is null) return;
             pendingLoadPath = path;
-            temperatureProbe.Reset();
+            temperatureProbe.Reset(); temperatureSensors.Reset();
             pendingLoad = stateSerializer.LoadAsync(path, materialRegistry);
             SetStatus("Загрузка…");
         }
@@ -1003,6 +1022,7 @@ public sealed class PhyxelGame : Game
         Gravity = source.Gravity, BrushRadius = source.BrushRadius, SpawnDensity = source.SpawnDensity,
         Paused = source.Paused, FilterSelection = source.FilterSelection, SolidGravity = source.SolidGravity, HydraulicPressure = source.HydraulicPressure,
         PressureDestruction = source.PressureDestruction,
+        TemperatureSensors = new(source.TemperatureSensors),
         OpenBoundaries = source.OpenBoundaries, Mode = source.Mode,
         AirSimulation = source.AirSimulation, ShowAirField = source.ShowAirField,
         RenderWithoutEffects = source.RenderWithoutEffects
@@ -1129,7 +1149,8 @@ public sealed class PhyxelGame : Game
                 }
                 acceptance.MarkPhaseRoundTripLoading(dispatchCoordinator);
                 dispatchCoordinator.ClearCurrentWorld(settings);
-                temperatureProbe.Reset();
+                settings.TemperatureSensors.Clear();
+                temperatureProbe.Reset(); temperatureSensors.Reset();
                 pendingLoad = stateSerializer.LoadAsync(scenePath, materialRegistry);
                 pendingSave = null;
                 return;
@@ -1161,7 +1182,7 @@ public sealed class PhyxelGame : Game
         {
             editHistory.Clear();
             brushController.CancelStroke();
-            temperatureProbe.Reset();
+            temperatureProbe.Reset(); temperatureSensors.Reset();
             SimulationStateSerializer.Apply(loaded.State, settings);
             userInterface.SelectedMaterial = loaded.State.SelectedMaterial;
             if (loaded.World is not null && resourceManager is not null && materialRegistry is not null)
@@ -1280,6 +1301,8 @@ public sealed class PhyxelGame : Game
         if(currentResources is not {IsSimulationAllocated:true} ||
             currentResources.Width!=settings.Width || currentResources.Height!=settings.Height)
         {
+            for (int i = 0; i < settings.TemperatureSensors.Count; i++)
+                settings.TemperatureSensors[i] = settings.TemperatureSensors[i] with { Y = settings.TemperatureSensors[i].Y + size.Y - settings.Height };
             settings.Width=size.X;settings.Height=size.Y;
             cameraController.Reset();return false;
         }
@@ -1294,6 +1317,8 @@ public sealed class PhyxelGame : Game
         if(currentResources is null||resourceManager is null||dispatchCoordinator is null||materialRegistry is null)return;
         if(!canvasCaptureSerializer.TryCompleteWorldCapture(currentResources,out SimulationWorldSnapshot? captured)||captured is null)return;
         SimulationWorldSnapshot expanded=CanvasWorldExpansion.Expand(captured,canvasExpansionSize);
+        for (int i = 0; i < settings.TemperatureSensors.Count; i++)
+            settings.TemperatureSensors[i] = settings.TemperatureSensors[i] with { Y = settings.TemperatureSensors[i].Y + expanded.Height - captured.Height };
         settings.Width=expanded.Width;settings.Height=expanded.Height;
         bool matter=SimulationStateSerializer.ContainsMatter(expanded);
         bool fields=expanded.Oxidizer is {Length:>0}||expanded.AirThermal is {Length:>0};
@@ -1302,7 +1327,7 @@ public sealed class PhyxelGame : Game
         dispatchCoordinator.RestoreWorldActivity(currentResources,matter,
             SimulationStateSerializer.ContainsContactTransitionSource(expanded,materialRegistry),settings.HydraulicPressure,fields);
         canvasExpansionPending=false;
-        cameraController.Reset();temperatureProbe.Reset();
+        cameraController.Reset();temperatureProbe.Reset(); temperatureSensors.Reset();
         inputSampler.ResetAfterDialog();ResetElapsedTime();
     }
 

@@ -108,6 +108,7 @@ public sealed class SandboxUiCoordinator : IDisposable
 
     public bool FilterToolActive => leftToolbar.ActiveTool == PhyxelToolId.Filter;
     public bool TemperatureToolActive => leftToolbar.ActiveTool == PhyxelToolId.Temperature;
+    public bool SensorToolActive => leftToolbar.ActiveTool == PhyxelToolId.Sensor;
     public bool PanToolActive => leftToolbar.ActiveTool == PhyxelToolId.Pan;
     public float TargetTemperature => propertiesPanel.TargetTemperature;
     public float DeviceTargetTemperature => propertiesPanel.DeviceTargetTemperature;
@@ -125,7 +126,7 @@ public sealed class SandboxUiCoordinator : IDisposable
     public Rectangle SidePanelBounds => currentLayout.RightPanel;
     public Rectangle InfoPanelBounds => currentLayout.StatusBar;
     public bool PointerConsumed { get; private set; }
-    public bool BlocksBrushInput => PointerConsumed || PanToolActive;
+    public bool BlocksBrushInput => PointerConsumed || PanToolActive || SensorToolActive;
 
     public UiFrameActions Update(
         RawInputSnapshot input,
@@ -203,7 +204,7 @@ public sealed class SandboxUiCoordinator : IDisposable
 
         // Mouse Wheel brush size inside Canvas
         if (input.WheelDelta != 0 && CanvasBounds.Contains(input.MousePosition) &&
-            !PointerConsumed && !PanToolActive)
+            !PointerConsumed && !PanToolActive && !SensorToolActive)
         {
             settings.BrushRadius = Math.Clamp(settings.BrushRadius + Math.Sign(input.WheelDelta) * 2, 1, 96);
         }
@@ -315,7 +316,7 @@ public sealed class SandboxUiCoordinator : IDisposable
         bool eraseOverride,
         BrushDrawCommand? linePreview = null)
     {
-        if (linePreview is { } line && !PointerConsumed && !PanToolActive)
+        if (linePreview is { } line && !PointerConsumed && !PanToolActive && !SensorToolActive)
         {
             Vector2 start = GridToScreen(line.X, line.Y, worldBounds, settings);
             Vector2 end = GridToScreen(line.EndX, line.EndY, worldBounds, settings);
@@ -340,7 +341,7 @@ public sealed class SandboxUiCoordinator : IDisposable
         }
 
         float pixelScale = worldBounds.Width / (float)Math.Max(1, settings.Width);
-        int diameter = Math.Max(3, (int)MathF.Round(((linePreview?.Radius ?? settings.BrushRadius) * 2 + 1) * pixelScale));
+        int diameter = SensorToolActive ? 12 : Math.Max(3, (int)MathF.Round(((linePreview?.Radius ?? settings.BrushRadius) * 2 + 1) * pixelScale));
         Rectangle bounds = new(pointer.X - diameter / 2, pointer.Y - diameter / 2, diameter, diameter);
 
         bool erasing = eraseOverride ||
@@ -365,6 +366,10 @@ public sealed class SandboxUiCoordinator : IDisposable
         spriteBatch.Draw(brushOutline, halo, outer);
         spriteBatch.Draw(brushOutline, bounds, inner);
     }
+
+    public void DrawTemperatureSensors(SpriteBatch spriteBatch, Rectangle worldBounds, SimulationSettings settings,
+        System.Collections.Generic.IReadOnlyDictionary<TemperatureSensorPosition, TemperatureProbeResult> readings)
+        => TemperatureSensorOverlay.Draw(spriteBatch, font, pixel, CanvasBounds, worldBounds, settings, materialRegistry, readings);
 
     internal static Vector2 GridToScreen(float x, float y, Rectangle worldBounds, SimulationSettings settings)
         => new(worldBounds.X + (x + 0.5f) * worldBounds.Width / settings.Width,

@@ -50,6 +50,7 @@ public static class UiLayoutRegressionTests
         TestCameraPanZoomAndInputIsolation();
         TestCanvasWorldExpansion();
         TestCursorProbeMappingAndText(registry,coordinator);
+        TestTemperatureSensorTool(registry, fonts, coordinator);
         TestButtonVisualStates();
         TestMaterialCards(fonts.Regular);
         TestMaterialCategorization(registry);
@@ -59,6 +60,33 @@ public static class UiLayoutRegressionTests
         TestPauseContinueLogic();
 
         Console.WriteLine("=== All UI Layout & Input Regression Tests Passed Successfully ===");
+    }
+
+    private static void TestTemperatureSensorTool(MaterialRegistry registry, UiFontSet fonts, SandboxUiCoordinator coordinator)
+    {
+        foreach (var (width, height) in Resolutions)
+        foreach (float dpi in DpiScales)
+        {
+            var viewport = new Viewport(0, 0, width, height);
+            var settings = new SimulationSettings();
+            coordinator.Update(Input(new Point(-1, -1)), viewport, dpi, settings);
+            var layout = coordinator.CurrentLayout;
+            SpriteFont font = fonts.Select(dpi, layout.Scale);
+            var toolbar = new UiLeftToolbar();
+            Rectangle sensor = toolbar.GetToolBounds(layout.LeftToolbar, font, PhyxelToolId.Sensor);
+            coordinator.Update(Input(sensor.Center, leftDown: true, leftPressed: true), viewport, dpi, settings);
+            Require(coordinator.SensorToolActive, "Sensor toolbar click did not select sensors.");
+            int radius = settings.BrushRadius;
+            coordinator.Update(Input(layout.SimulationCanvas.Center) with { WheelDelta = 120 }, viewport, dpi, settings);
+            Require(coordinator.BlocksBrushInput && settings.BrushRadius == radius, "Sensor tool leaked into painting/brush size.");
+            var panel = new UiPropertiesPanel();
+            panel.Update(Input(new Point(-1, -1)), layout.RightPanel, font, settings, PhyxelToolId.Sensor,
+                registry[CoreMaterialIds.Sand], out _);
+            Require(IsInside(panel.ScaleSliderBounds, layout.RightPanel) && IsInside(panel.AirFieldToggleBounds, layout.RightPanel),
+                "Sensor panel pushed controls out of view.");
+            coordinator.ActiveTool = PhyxelToolId.Brush;
+        }
+        Console.WriteLine("[PASS] Sensor selection/input isolation and panel: 4 resolutions x 3 DPI scales.");
     }
 
     private static void TestSceneSaveActions(SandboxUiCoordinator coordinator)

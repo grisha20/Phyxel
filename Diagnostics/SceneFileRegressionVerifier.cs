@@ -109,7 +109,9 @@ internal static class SceneFileRegressionVerifier
             .GetAwaiter().GetResult()!.World!.Grid)[100 * r.Width + 100];
         int choices = 0; string? next = first;
         Set("scenePathPicker", new Func<string, bool, IntPtr, string?>((_, _, _) => { choices++; return next; }));
+        settings.TemperatureSensors = [new(100, 100), new(140, 160)];
         World(.42f); Action(true, load: true, saveAs: true);
+        settings.TemperatureSensors.Clear();
         Action(false, load: true);
         Check(choices == 1 && Get<bool>("pendingWorldCapture"), "Load interrupted pending save.");
         settings.Mode = SimulationMode.Simulation;
@@ -136,11 +138,14 @@ internal static class SceneFileRegressionVerifier
             "Save lost air, motion or deferred reaction state.");
         Check(System.Threading.Tasks.Task.Run(() => serializer.LoadAsync(first, registry))
             .GetAwaiter().GetResult()!.State.Mode == SimulationMode.Sandbox, "Save mixed later settings into earlier snapshot.");
+        var savedSensors = System.Threading.Tasks.Task.Run(() => serializer.LoadAsync(first, registry)).GetAwaiter().GetResult()!.State.TemperatureSensors;
+        Check(savedSensors is { Length: 2 } && savedSensors[0] == new TemperatureSensorPosition(100, 100) && savedSensors[1] == new TemperatureSensorPosition(140, 160), "Save did not snapshot sensor coordinates.");
         Check(Get<string>("scenePath") == first && Get<bool>("hasChosenScenePath"), "Successful path not retained.");
         Check(!settings.Paused, "Dialog changed pause.");
         byte[] original = File.ReadAllBytes(Path.ChangeExtension(first, ".world"));
         next = null; World(.7f); Action(true, saveAs: true); Complete();
         Check(File.ReadAllBytes(Path.ChangeExtension(first, ".world")).AsSpan().SequenceEqual(original), "Cancel overwrote scene.");
+        settings.TemperatureSensors = [new(100, 100), new(140, 160)];
         int beforeQuick = choices; Action(true); Complete();
         Check(choices == beforeQuick && Loaded(first).Mass == .7f, "Quick save chose another file or wrong state.");
         original = File.ReadAllBytes(Path.ChangeExtension(first, ".world"));
@@ -153,6 +158,7 @@ internal static class SceneFileRegressionVerifier
         var cells = MemoryMarshal.Cast<byte, GridCell>(AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer));
         Check(cells[100 * r.Width + 100].Mass == .7f && cells[100 * r.Width + 100].Temperature == 330, "Load missed GPU state.");
         Check(Get<string>("scenePath") == first, "Load missed quick-save path.");
+        Check(settings.TemperatureSensors.Count == 2 && settings.TemperatureSensors[1] == new TemperatureSensorPosition(140, 160), "Load missed sensors.");
         Check(r.FilterCount==1 && r.FilterMap[120*r.Width+100]==(uint)registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam)+1,"Load lost the filter overlay.");
         Check(MemoryMarshal.Cast<byte, float>(AirInventoryRegressionVerifier.Read(r, r.Oxidizer.ReadBuffer))[0] == 2.5f &&
             MemoryMarshal.Cast<byte, System.Numerics.Vector4>(AirInventoryRegressionVerifier.Read(r, r.ReactionPending.Buffer))[0].Y == 300,

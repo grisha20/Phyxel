@@ -17,6 +17,7 @@ public sealed class UiPropertiesPanel
     private readonly System.Collections.Generic.Dictionary<string, (float Temperature, float Power)> devicePreferences = new();
     private string? selectedDeviceId;
     private int deviceHintY;
+    private int sensorHintY;
     private readonly UiIconButton filterSelector = new("Только пар");
     private int filterHintY;
     internal Rectangle FilterSelectorBounds => filterSelector.Bounds;
@@ -126,7 +127,7 @@ public sealed class UiPropertiesPanel
         if (compact) toolCardBounds = Rectangle.Empty;
         int cursorY = compact ? bounds.Y + font.LineSpacing + 14 : toolCardBounds.Bottom + 8;
 
-        if (activeTool == PhyxelToolId.Pan)
+        if (activeTool is PhyxelToolId.Pan or PhyxelToolId.Sensor)
         {
             materialCardBounds = Rectangle.Empty;
         }
@@ -222,6 +223,8 @@ public sealed class UiPropertiesPanel
             temperatureSlider.CancelDrag();
         }
 
+        sensorHintY = cursorY;
+        if (activeTool == PhyxelToolId.Sensor) cursorY += (int)(font.LineSpacing * 2.1f) + 12;
         if (activeTool == PhyxelToolId.Pan)
         {
             int cameraRowHeight = Math.Clamp(font.LineSpacing + 18, 40, 52);
@@ -373,6 +376,9 @@ public sealed class UiPropertiesPanel
             resetViewButton.Draw(spriteBatch, font, backdrop, pixel, iconCache);
         }
 
+        if (activeTool == PhyxelToolId.Sensor)
+            spriteBatch.DrawString(font, "ЛКМ: поставить · ПКМ: убрать\nShift+ПКМ: убрать все\nВещество / воздух, до 32 точек",
+                new Vector2(bounds.X + 14, sensorHintY), UiTheme.TextSecondary, 0, Vector2.Zero, .6f, SpriteEffects.None, 0);
         DrawSectionLabel(spriteBatch, font, "СИМУЛЯЦИЯ", bounds.X + 14, simulationHeaderY, 0.68f);
         scaleSlider.Draw(spriteBatch, font, backdrop, pixel);
         modeSelector.Draw(spriteBatch, font, backdrop, pixel, settings.Mode);
@@ -411,6 +417,7 @@ public sealed class UiPropertiesPanel
             PhyxelToolId.Brush => "Кисть",
             PhyxelToolId.Eraser => "Ластик",
             PhyxelToolId.Temperature => "Температура",
+            PhyxelToolId.Sensor => "Датчики температуры",
             PhyxelToolId.Filter => "Фильтр",
             PhyxelToolId.Pan => "Камера / панорама",
             _ => "Инструмент"
@@ -420,6 +427,7 @@ public sealed class UiPropertiesPanel
             PhyxelToolId.Brush => "brush",
             PhyxelToolId.Eraser => "eraser",
             PhyxelToolId.Temperature => "temperature",
+            PhyxelToolId.Sensor => "temperature",
             PhyxelToolId.Filter => "settings",
             _ => "pan"
         };

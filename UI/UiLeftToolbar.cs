@@ -17,7 +17,8 @@ public enum PhyxelToolId
     Circle,
     Fill,
     Eyedropper,
-    Filter
+    Filter,
+    Sensor
 }
 
 public sealed record ToolDefinition(
@@ -34,6 +35,7 @@ public sealed class UiLeftToolbar
         new(PhyxelToolId.Brush, "brush", "Кисть", true, "ЛКМ — рисовать; Shift + перетаскивание — прямая линия"),
         new(PhyxelToolId.Eraser, "eraser", "Ластик", true, "Стирание элементов"),
         new(PhyxelToolId.Temperature, "temperature", "Температура", true, "Изменение температуры"),
+        new(PhyxelToolId.Sensor, "temperature", "Датчики", true, "ЛКМ — поставить; ПКМ — убрать; Shift+ПКМ — убрать все"),
         new(PhyxelToolId.Filter, "settings", "Фильтр", true, "ЛКМ — фильтр, ПКМ — стереть всё под кистью"),
         new(PhyxelToolId.Line, "line", "Линия", false, "Скоро"),
         new(PhyxelToolId.Rectangle, "rectangle", "Прямоугольник", false, "Скоро"),
@@ -82,7 +84,7 @@ public sealed class UiLeftToolbar
                 }
             }
 
-            itemY += itemHeight + 6;
+            itemY += itemHeight + GetItemGap(font, bounds);
         }
 
         if (hoveredTool == previousHoveredTool && hoveredTool is not null)
@@ -227,7 +229,7 @@ public sealed class UiLeftToolbar
                     0);
             }
 
-            itemY += itemHeight + 6;
+            itemY += itemHeight + GetItemGap(font, bounds);
         }
 
         int footerHeight = font.LineSpacing * 3 + 18;
@@ -235,9 +237,9 @@ public sealed class UiLeftToolbar
         {
             Rectangle footer = new(bounds.X + 10, itemY + 4, bounds.Width - 20, footerHeight);
             backdrop.DrawRoundedRectangle(spriteBatch, footer, UiTheme.FieldBackground, 5);
-            spriteBatch.DrawString(font, "ЛКМ  Рисовать", new Vector2(footer.X + 10, footer.Y + 6), UiTheme.TextMuted);
-            spriteBatch.DrawString(font, "ПКМ  Стирать", new Vector2(footer.X + 10, footer.Y + 7 + font.LineSpacing), UiTheme.TextMuted);
-            spriteBatch.DrawString(font, "Ctrl+Z  Отмена", new Vector2(footer.X + 10, footer.Y + 8 + font.LineSpacing * 2), UiTheme.TextMuted);
+            spriteBatch.DrawString(font, activeTool == PhyxelToolId.Sensor ? "ЛКМ  Датчик" : "ЛКМ  Рисовать", new Vector2(footer.X + 10, footer.Y + 6), UiTheme.TextMuted);
+            spriteBatch.DrawString(font, activeTool == PhyxelToolId.Sensor ? "ПКМ  Убрать" : "ПКМ  Стирать", new Vector2(footer.X + 10, footer.Y + 7 + font.LineSpacing), UiTheme.TextMuted);
+            spriteBatch.DrawString(font, activeTool == PhyxelToolId.Sensor ? "Shift+ПКМ  Все" : "Ctrl+Z  Отмена", new Vector2(footer.X + 10, footer.Y + 8 + font.LineSpacing * 2), UiTheme.TextMuted);
         }
 
         // Draw Tooltip if hovered
@@ -267,7 +269,7 @@ public sealed class UiLeftToolbar
             {
                 return itemBounds;
             }
-            itemY += itemHeight + 6;
+            itemY += itemHeight + GetItemGap(font, bounds);
         }
         return Rectangle.Empty;
     }
@@ -313,10 +315,14 @@ public sealed class UiLeftToolbar
     private static int GetItemHeight(SpriteFont font, Rectangle bounds)
     {
         int desired = Math.Clamp(font.LineSpacing + 22, 40, 54);
-        int fixedSpacing = (Tools.Count - 1) * 6 + GetGroupGap(PhyxelToolId.Line) + GetGroupGap(PhyxelToolId.Pan);
+        int fixedSpacing = (Tools.Count - 1) * GetItemGap(font, bounds) + GetGroupGap(PhyxelToolId.Line) + GetGroupGap(PhyxelToolId.Pan);
         int available = Math.Max(Tools.Count * 34, bounds.Height - GetHeaderHeight(font) - fixedSpacing);
         return Math.Clamp(Math.Min(desired, available / Tools.Count), 34, 54);
     }
+
+    private static int GetItemGap(SpriteFont font, Rectangle bounds) => Math.Clamp(
+        (bounds.Height - GetHeaderHeight(font) - GetGroupGap(PhyxelToolId.Line) - GetGroupGap(PhyxelToolId.Pan)
+            - Tools.Count * 34 - 8) / Math.Max(1, Tools.Count - 1), 0, 6);
 
     private static int GetGroupGap(PhyxelToolId toolId) => toolId switch
     {

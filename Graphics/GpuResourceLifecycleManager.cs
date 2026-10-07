@@ -686,7 +686,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             CombustionShader = allocateSimulation ? CompileShader("Combustion.hlsl") : null,
             EmissionResolveShader = allocateSimulation ? CompileShader("EmissionResolve.hlsl") : null,
             TransientLifecycleShader = allocateSimulation ? CompileShader("TransientLifecycle.hlsl") : null,
-            TemperatureProbeShader = allocateSimulation ? CompileShader("TemperatureProbe.hlsl") : null
+            TemperatureProbeShader = allocateSimulation ? CompileShader("TemperatureProbe.hlsl") : null,
+            TemperatureSensorsShader = allocateSimulation ? CompileShader("TemperatureSensors.hlsl") : null
         };
     }
 
