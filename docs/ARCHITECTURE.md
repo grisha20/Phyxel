@@ -1,5 +1,19 @@
 # Архитектура Phyxel
 
+PM2026-10-07: metal/steel/copper накапливают повреждение и допускают локальные
+растровые смещения перед разрывом; cast_iron/stone отрываются сразу.
+`physics.pressurePlasticity` (default0, finite0..1, положительное только
+при pressureStrength>0 у movable-solid) использует offset172
+ThermalDeviceMaximumPower. Регулятор и пластичный материал несовместимы.
+GridCell.Pressure<0 у пластичного solid — постоянное повреждение0..1;
+скорость запрошенного пластического шага сбрасывается на следующем тике.
+Writer19 сохраняет это состояние; v3–v18 читаются, Grid56/Material244 прежние.
+Сохранённое повреждение включает PF; setpoint охладителя его не включает.
+После пластического смещения геометрия и компоненты перестраиваются, в том
+числе когда в сцене уже нет пороха. Воздух/тяга/нагрев не менялись.
+[Контракт](materials/shared/PRESSURE_MATERIALS_CONTRACT.md),
+[свежие проверки и границы](materials/shared/PRESSURE_MATERIALS_RESULTS.md).
+
 PF2026-10-07: после реакции на60Гц выполняется консервативный PowderFront,
 затем PressureFracture update→plan→apply с атомарными claims. Отдельный
 PressureFrameConstants не меняет constants существующих проходов. PF
@@ -149,7 +163,7 @@ groupshared-плитках, без дополнительных постоянн
 | 4 | `Mass` | `float` | Масса/заполнение. |
 | 8 | `VelocityX` | `float` | Горизонтальный импульс. |
 | 12 | `VelocityY` | `float` | Вертикальный импульс. |
-| 16 | `Pressure` | `float` | Гидравлика; у fixed thermal regulator — уставка. |
+| 16 | `Pressure` | `float` | Гидравлика; fixed thermal regulator — уставка; пластичный solid — отрицательное повреждение. |
 | 20 | `IsActive` | `uint` | Нулевая клетка является empty. |
 | 24 | `BodyId` | `uint` | Movable-solid body; FIRE markers0x80000000/0x40000000; свободное жидкое/газовое топливо с отдельным контактным порогом — ignition bit0x20000000. |
 | 28 | `RestFrames` | `uint` | Состояние покоя. |

@@ -754,13 +754,13 @@ public sealed class SimulationDispatchCoordinator
                 if (solidMatter && resources.PressureMechanicsPotential)
                 {
                     DispatchPressureFragments(resources, constants, settings.Mode == SimulationMode.Simulation, settings.AirSimulation);
-                    if (pressurePowderPotential && (lastCombustionSummary & CombustionSummaryFlags.PressurePowderPresent) != 0)
-                        topologyDirty = true;
+                    // A saved wave can bend a solid without any powder or fragment.
+                    topologyDirty = true;
                 }
             }
             if (gasMotionTicks > 0)
             {
-                cellMaterialsDirty = combustionActive || (resources.PressureMechanicsPotential && (freeBodyMatter || pressurePowderPotential));
+                cellMaterialsDirty = combustionActive || (resources.PressureMechanicsPotential && solidMatter);
                 presentationDirty = true;
             }
         }

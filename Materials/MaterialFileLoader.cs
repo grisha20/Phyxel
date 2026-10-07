@@ -43,6 +43,7 @@ internal static partial class MaterialFileLoader
         public float Friction { get; set; }
         public float FlowRate { get; set; }
         public float PressureStrength { get; set; }
+        public float PressurePlasticity { get; set; }
         public JsonElement LiquidFlow { get; set; }
     }
 
@@ -267,6 +268,8 @@ internal static partial class MaterialFileLoader
             !float.IsFinite(physics.Friction) || physics.Friction < 0 ||
             !float.IsFinite(physics.FlowRate) || physics.FlowRate < 0 ||
             !float.IsFinite(physics.PressureStrength) || physics.PressureStrength < 0 || physics.PressureStrength > 256 ||
+            !float.IsFinite(physics.PressurePlasticity) || physics.PressurePlasticity < 0 || physics.PressurePlasticity > 1 ||
+            (physics.PressurePlasticity > 0 && physics.PressureStrength <= 0) ||
             (physics.PressureStrength > 0 && kind != MaterialSimulationKind.Solid))
         {
             throw new InvalidDataException(
@@ -501,6 +504,7 @@ internal static partial class MaterialFileLoader
                 motion.Loss,
                 motion.Collision),
             PressureStrength = physics.PressureStrength,
+            PressurePlasticity = physics.PressurePlasticity,
             SourcePath = path
         };
     }

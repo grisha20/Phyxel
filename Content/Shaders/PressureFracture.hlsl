@@ -19,6 +19,12 @@ RWStructuredBuffer<uint> Claims : register(u2);
 bool Fragment(GridCell c)
 {return c.IsActive!=0 && IsMovableSolidMaterial(Materials[c.MaterialIndex]) && (c.BodyId&PressureFragmentMarker)!=0;}
 
+bool PlasticSolid(GridCell c)
+{
+    MaterialProperties m=Materials[c.MaterialIndex];
+    return c.IsActive!=0 && IsMovableSolidMaterial(m) && m.MoistureReserved1>0 && m.ThermalDeviceMaximumPower>0 && !Fragment(c);
+}
+
 // Read visible air on each side, rather than sampling the same coarse node through a wall.
 bool Surface(int2 p,int2 direction,out float pressure,out float wave,out int distance)
 {
@@ -43,7 +49,13 @@ void Update(uint3 p,bool fracture)
     if(p.x>=Width||p.y>=Height)return;
     uint i=p.y*Width+p.x;GridCell c=SourceGrid[i];
     MaterialProperties m=Materials[c.MaterialIndex];
-    float strength=m.MoistureReserved1*lerp(1,.6,saturate(c.Temperature/max(1,m.TransitionAboveTemperature)));
+    // Plastic steps are requested only while this tick applies a wave load.
+    // The negative pressure slot keeps permanent damage; velocity is transient.
+    if(PlasticSolid(c) && c.Pressure<0){c.VelocityX=0;c.VelocityY=0;}
+    // A solid with no melting transition (stone) has no melting-based softening.
+    float softness=m.TransitionAboveMaterialIndex!=0xffffffffu
+        ?saturate(c.Temperature/max(1,m.TransitionAboveTemperature)):0;
+    float strength=m.MoistureReserved1*lerp(1,.6,softness);
     if(c.IsActive!=0 && IsMovableSolidMaterial(m) && m.MoistureReserved1>0 && !Fragment(c) && fracture)
     {
         float l,r,u,d,wl,wr,wu,wd;int dl,dr,du,dd;
@@ -52,7 +64,21 @@ void Update(uint3 p,bool fracture)
         float2 force=float2(horizontal?(l-r)/max(1,dl+dr-1):0,vertical?(u-d)/max(1,du+dd-1):0);
         float2 impulse=float2(horizontal?(wl-wr)/max(1,dl+dr-1):0,vertical?(wu-wd)/max(1,du+dd-1):0);
         float stress=length(force);
-        if(stress>strength && length(impulse)>strength*.25)
+        bool waveLoad=length(impulse)>strength*.25;
+        float plasticity=m.ThermalDeviceMaximumPower;
+        if(plasticity>0 && stress>strength*.65 && waveLoad)
+        {
+            float oldDamage=saturate(-c.Pressure);
+            float damage=saturate(oldDamage+(stress/(strength*.65)-1)*DeltaTime/plasticity);
+            c.Pressure=-damage;
+            // At most four one-cell steps before tearing. No force means no creep.
+            if(damage<1 && floor(damage*5)>floor(oldDamage*5))
+            {
+                float2 axis=abs(force.x)>=abs(force.y)?float2(sign(force.x),0):float2(0,sign(force.y));
+                c.VelocityX=axis.x/DeltaTime;c.VelocityY=axis.y/DeltaTime;c.RestFrames=0;
+            }
+        }
+        if(stress>strength && waveLoad && (plasticity==0 || c.Pressure<=-1))
         {
             c.BodyId=PressureFragmentMarker;c.RestFrames=0;
             float2 v=force/stress*clamp(stress/strength*24,12,48);
@@ -85,10 +111,11 @@ void CSPlan(uint3 p:SV_DispatchThreadID)
 {
     if(p.x>=Width||p.y>=Height)return;
     uint i=p.y*Width+p.x;Plans[i]=0;GridCell c=SourceGrid[i];
-    if(!Fragment(c))return;
+    bool fragment=Fragment(c);
+    if(!fragment && !(PlasticSolid(c) && c.Pressure<0 && (c.VelocityX!=0 || c.VelocityY!=0)))return;
     float2 v=float2(c.VelocityX,c.VelocityY);
-    int2 step=int2(HashUnitFloat(i^(c.BodyId&0x3fffffffu)*1664525u)<abs(v.x)*DeltaTime?sign(v.x):0,
-                   HashUnitFloat(i^(c.BodyId&0x3fffffffu)*22695477u^17u)<abs(v.y)*DeltaTime?sign(v.y):0);
+    int2 step=fragment?int2(HashUnitFloat(i^(c.BodyId&0x3fffffffu)*1664525u)<abs(v.x)*DeltaTime?sign(v.x):0,
+                   HashUnitFloat(i^(c.BodyId&0x3fffffffu)*22695477u^17u)<abs(v.y)*DeltaTime?sign(v.y):0):int2(sign(v));
     if(all(step==0))return;
     int2 q=int2(p.xy)+step;
     if(!EmptyTarget(q,c.MaterialIndex))return;

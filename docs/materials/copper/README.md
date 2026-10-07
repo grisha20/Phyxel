@@ -1,5 +1,10 @@
 # Медь
 
+## PM2026-10-07: механический ответ
+
+Игровая прочность10, пластичность .045: повреждение и местное смещение перед отрывом.
+[Контракт](../shared/PRESSURE_MATERIALS_CONTRACT.md), [новые проверки](../shared/PRESSURE_MATERIALS_RESULTS.md).
+
 - [Паспорт и критерии](PASSPORT.md).
 - [Настройка материала](../../../Materials/core/copper.json).
 - [Собственная жидкая фаза](../molten_copper/PASSPORT.md).

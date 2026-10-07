@@ -5,7 +5,7 @@
   "kind": "solid",
   "flags": ["movable-solid", "fusion-enthalpy"],
   "color": "#C98043",
-  "physics": { "pressureStrength": 10, "density": 8.9, "friction": 0.35, "flowRate": 0.0 },
+  "physics": { "pressureStrength": 10, "pressurePlasticity": 0.045, "density": 8.9, "friction": 0.35, "flowRate": 0.0 },
   "thermal": {
     "initialTemperature": 30.0,
     "conductivity": 2.0,

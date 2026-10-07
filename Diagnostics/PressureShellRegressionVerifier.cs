@@ -209,10 +209,116 @@ internal static class PressureShellRegressionVerifier
         SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
         Check(Count(Cells())==0,"PF04 closed filter blocks pressure probe");
         Array.Clear(r.FilterMap);r.FilterCount=0;r.UploadFilters();
+        // Fresh material-response probes: production shader, not a CPU formula.
+        uint steel=registry.GetRequiredRuntimeIndex("core:steel");
+        uint copper=registry.GetRequiredRuntimeIndex("core:copper");
+        uint castIron=registry.GetRequiredRuntimeIndex("core:cast_iron");
+        uint stone=registry.GetRequiredRuntimeIndex("core:stone");
+        Check(table[metal].PressurePlasticity>0 && table[steel].PressurePlasticity>0 &&
+            table[copper].PressurePlasticity>table[metal].PressurePlasticity &&
+            table[castIron].PressurePlasticity==0 && table[stone].PressureStrength>0,"PM01 catalog plastic/brittle responses");
+        foreach(uint material in new[]{metal,steel,copper})
+        {
+            var plate=Plate(material);Upload(plate);
+            Wave(table[material].PressureStrength*1.1f,0);
+            SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
+            var damaged=Cells();
+            Check(Count(damaged)==0 && damaged.Any(c=>c.IsActive!=0 && c.Pressure<0),"PM01 damage before rupture "+registry[material].Id);
+            var savedDamage=damaged.Where(c=>c.IsActive!=0).Sum(c=>(double)c.Pressure);
+            Wave(0,0);SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
+            var unloaded=Cells();
+            Check(unloaded.Where(c=>c.IsActive!=0).Sum(c=>(double)c.Pressure)==savedDamage &&
+                unloaded.Where(c=>c.IsActive!=0).All(c=>c.VelocityX==0 && c.VelocityY==0),"PM02 unloading stops plastic motion, retains damage "+registry[material].Id);
+            Upload(plate);Wave(table[material].PressureStrength*1.1f,0);
+            bool displacedBeforeRupture=false;
+            for(int tick=0;tick<8;tick++)
+            {
+                SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
+                displacedBeforeRupture|=Cells().Select((c,i)=>(c,i)).Any(v=>v.c.IsActive!=0 && v.i%64>32 && (v.c.BodyId&0x40000000u)==0);
+            }
+            var bent=Cells();
+            Check(displacedBeforeRupture,"PM01 visible plastic displacement before rupture "+registry[material].Id);
+            Check(bent.Where(c=>c.IsActive!=0).All(c=>c.MaterialIndex==material && c.Temperature==30 && c.Lifetime==7) &&
+                Math.Abs(bent.Sum(c=>(double)c.Mass)-plate.Sum(c=>(double)c.Mass))<.0001,"PM03 plastic mass/ID/heat preserved "+registry[material].Id);
+            // A high wave reaches the fracture threshold within this fixed step.
+            Upload(plate);Wave(100,0);SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
+            if(Count(Cells())==0)SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
+            Check(Count(Cells())>0,"PM01 plastic rupture under strong wave "+registry[material].Id);
+        }
+        foreach(uint material in new[]{castIron,stone})
+        {
+            Upload(Plate(material));Wave(100,0);SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
+            Check(Count(Cells())>0 && Cells().Where(c=>c.IsActive!=0).All(c=>c.Pressure==0 && c.MaterialIndex==material),"PM01 immediate brittle fracture "+registry[material].Id);
+        }
+        Upload(Plate(stone));Wave(19,0);SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
+        Check(Count(Cells())==0,"PM02 stone without melting transition retains its strength");
+        for(int y=0;y<64;y++)r.FilterMap[y*64+33]=FilterRules.AmbientAir;
+        r.FilterCount=64;r.UploadFilters();Upload(Plate(steel));Wave(26.4f,0);
+        for(int tick=0;tick<8;tick++)SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
+        Check(!Cells().Select((c,i)=>(c,i)).Any(v=>v.c.IsActive!=0 && v.i%64>=33) &&
+            Math.Abs(Cells().Sum(c=>(double)c.Mass)-32*(double)table[steel].Density)<.0001,"PM03 plastic steps and fragments cannot cross air-only filter");
+        Array.Clear(r.FilterMap);r.FilterCount=0;r.UploadFilters();
+        byte[]? plasticReference=null;
+        foreach(bool finite in new[]{false,true})foreach(int fps in new[]{30,60,100})
+        {
+            Upload(Plate(steel));Wave(26.4f,0);
+            double accumulated=0;uint tick=0;
+            for(int frame=0;frame<fps;frame++)
+            {
+                accumulated+=1d/fps;
+                while(accumulated+1e-6>=SimulationDispatchCoordinator.FixedAirStep)
+                {
+                    accumulated-=SimulationDispatchCoordinator.FixedAirStep;constants.DebugReserved2=++tick;
+                    SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,finite,true);
+                }
+            }
+            byte[] bytes=MemoryMarshal.AsBytes(Cells().AsSpan()).ToArray();plasticReference??=bytes;
+            Check(tick==60 && plasticReference.AsSpan().SequenceEqual(bytes),"PM03 plastic fixed ticks mode="+finite+" FPS="+fps);
+        }
+        Upload(Plate(steel));Wave(26.4f,0);SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
+        var plasticSave=Read(r);var plasticSerializer=new SimulationStateSerializer();
+        string plasticPath=Path.Combine(dir,"plastic-roundtrip.json");
+        System.Threading.Tasks.Task.Run(()=>plasticSerializer.SaveAsync(plasticPath,settings,(ushort)steel,plasticSave,registry)).GetAwaiter().GetResult();
+        var plasticLoaded=System.Threading.Tasks.Task.Run(()=>plasticSerializer.LoadAsync(plasticPath,registry)).GetAwaiter().GetResult()!;
+        Check(plasticLoaded.World!.Grid.AsSpan().SequenceEqual(plasticSave.Grid),"PM04 damage save/load bytes");
+        SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);var plasticNext=Cells();
+        plasticSerializer.ApplyWorldSnapshot(r,plasticLoaded.World);
+        SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
+        Check(MemoryMarshal.AsBytes(Cells().AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(plasticNext.AsSpan())),"PM04 same damage continuation");
+        settings.Paused=true;coordinator.RestoreWorldActivity(r,true,false,false,true);
+        var plasticPaused=Read(r);coordinator.DispatchFrame(settings,[],.2f);
+        Check(Read(r).Grid.AsSpan().SequenceEqual(plasticPaused.Grid),"PM04 damaged plate pause unchanged");
+        Wave(0,0);var unloadedSave=Read(r);plasticSerializer.ApplyWorldSnapshot(r,unloadedSave);
+        Check(r.PressureMechanicsPotential,"PM04 saved damage enables mechanics without powder or wave");
+        SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
+        Check(Cells().Where(c=>c.IsActive!=0).All(c=>c.VelocityX==0 && c.VelocityY==0),"PM04 loaded unloaded plate clears transient motion");
+        foreach(var mode in new[]{SimulationMode.Sandbox,SimulationMode.Simulation})
+        foreach(bool gravity in new[]{false,true})
+        {
+            var plate=Plate(steel);
+            for(int i=0;i<plate.Length;i++)plate[i].Lifetime=0;
+            Upload(plate);Wave(26.4f,0);var livePlate=Read(r);
+            settings.Mode=mode;settings.SolidGravity=gravity;settings.Gravity=0;
+            settings.AirSimulation=true;settings.Paused=false;
+            plasticSerializer.ApplyWorldSnapshot(r,livePlate);
+            coordinator.RestoreWorldActivity(r,true,false,false,true);
+            for(int frame=0;frame<3;frame++)r=coordinator.DispatchFrame(settings,[],1f/60);
+            var liveCells=Cells();
+            Check(liveCells.Count(c=>c.IsActive!=0)==32 &&
+                Math.Abs(liveCells.Sum(c=>(double)c.Mass)-plate.Sum(c=>(double)c.Mass))<.0001 &&
+                liveCells.Where(c=>c.IsActive!=0).All(c=>c.MaterialIndex==steel && float.IsFinite(c.Temperature) && float.IsFinite(c.Pressure)),
+                "PM03 production topology/packet preserved mode="+mode+" gravity="+gravity);
+            Check(liveCells.Any(c=>c.IsActive!=0 && c.Pressure<0),"PM03 production wave reaches plastic damage mode="+mode+" gravity="+gravity);
+        }
+        settings.SolidGravity=false;settings.AirSimulation=false;settings.Paused=true;
         foreach(uint alloy in new[]{metal,(uint)registry.GetRequiredRuntimeIndex("core:steel")})
         {
             Upload(Plate(alloy));Wave(18,0);SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
-            Check((Count(Cells())>0)==(alloy==metal),"PF04 stronger steel "+registry[alloy].Id);
+            // Plastic metals retain an intermediate damage stage; test strength
+            // after it has been exhausted, independently of the bending geometry.
+            var damaged=Cells();for(int i=0;i<damaged.Length;i++)if(damaged[i].IsActive!=0)damaged[i].Pressure=-1;
+            Upload(damaged);Wave(18,0);SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);
+            Check((Count(Cells())>0)==(alloy==metal),"PF04 stronger steel after plastic capacity "+registry[alloy].Id);
         }
         grid=Plate(metal);Upload(grid);Wave(100,0);
         SimulationDispatchCoordinator.DispatchPressureFragments(r,constants,false,true);after=Cells();
@@ -269,8 +375,10 @@ internal static class PressureShellRegressionVerifier
         serializer.ApplyWorldSnapshot(r,liveSave);coordinator.RestoreWorldActivity(r,true,false,false,true);
         r=coordinator.DispatchFrame(settings,[],1f/60);
         Check(MemoryMarshal.AsBytes(liveNext.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(Cells().AsSpan())),"PF05 production continuation with restored clock");
+        foreach(bool fragment in new[]{true,false})
+        {
         grid=new GridCell[4096];grid[32*64+32]=new(){MaterialIndex=metal,IsActive=1,Mass=7.8f,
-            BodyId=0x40000040u,Temperature=5000};Upload(grid);
+            Pressure=-.5f,BodyId=fragment?0x40000040u:1u,Temperature=5000};Upload(grid);
         var phase=new PhaseTransitionConstants{Width=64,Height=64,MaterialCount=(uint)table.Length,TickCount=1};
         r.Context.UpdateSubresource(ref phase,r.PhaseConstants);
         r.Context.ComputeShader.SetConstantBuffer(0,r.PhaseConstants);r.Context.ComputeShader.SetShaderResources(0,r.Materials.View,r.ContactSummary.View);
@@ -279,8 +387,9 @@ internal static class PressureShellRegressionVerifier
         r.Context.ComputeShader.SetUnorderedAccessViews(0,new SharpDX.Direct3D11.UnorderedAccessView[2]);
         r.Context.ComputeShader.SetShaderResources(0,new SharpDX.Direct3D11.ShaderResourceView[2]);r.Context.ComputeShader.Set(null);
         var melted=Cells()[32*64+32];
-        Check(melted.MaterialIndex==registry.GetRequiredRuntimeIndex("core:molten_metal") && melted.BodyId==0 && melted.Mass==7.8f,
-            "PF05 fragment melts into original metal phase");
+        Check(melted.MaterialIndex==registry.GetRequiredRuntimeIndex("core:molten_metal") && melted.BodyId==0 && melted.Mass==7.8f && melted.Pressure==0,
+            "PM04 damage cleared on melting fragment="+fragment);
+        }
         Console.WriteLine($"PHYXEL_SHELL_PROBES_PASS checks={checks}");yield return r;
     }
 }

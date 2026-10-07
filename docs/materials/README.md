@@ -1,5 +1,10 @@
 # Паспорта материалов
 
+PM2026-10-07: metal/steel/copper деформируются перед разрывом; cast_iron/stone
+разрушаются без пластического этапа; fixture неподвижна. Новых ID нет.
+[Контракт](shared/PRESSURE_MATERIALS_CONTRACT.md),
+[выбранные проверки и ограничения](shared/PRESSURE_MATERIALS_RESULTS.md).
+
 PF2026-10-07: симметричная передача тепла сухого пороха и отрыв клеток metal/steel/cast_iron/copper от реакционной волны. Каталог29 ID/435 пар прежний. [Контракт](shared/PRESSURE_FRACTURE_CONTRACT.md), [проверки и ограничения](shared/PRESSURE_FRACTURE_RESULTS.md).
 
 Каждый материал имеет свою папку. Начните с этой таблицы или откройте
