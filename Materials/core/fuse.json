@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "id": "core:fuse",
+  "name": {
+    "ru": "Фитиль",
+    "en": "Fuse"
+  },
+  "kind": "solid",
+  "flags": [
+    "self-oxidizing",
+    "progressive-ignition"
+  ],
+  "color": "#667047",
+  "physics": {
+    "density": 1,
+    "friction": 0.8,
+    "flowRate": 0
+  },
+  "thermal": {
+    "initialTemperature": 30,
+    "conductivity": 0.02,
+    "heatCapacity": 1
+  },
+  "combustion": {
+    "ignitionTemperature": 300,
+    "contactIgnitionTemperature": 100,
+    "burnRate": 0.5,
+    "heatPerMass": 2400,
+    "spreadRate": 4,
+    "maximumTemperature": 650,
+    "flameLifetimeMultiplier": 0.15,
+    "burnedInto": "core:empty"
+  },
+  "emissions": {
+    "smokeInto": "core:smoke",
+    "smokeRate": 0.03,
+    "gasInto": "core:co2",
+    "gasRate": 0.02,
+    "flameInto": "core:fire",
+    "flameRate": 2
+  },
+  "ui": {
+    "order": 75,
+    "hidden": false,
+    "category": "combustion"
+  }
+}

@@ -58,7 +58,9 @@ public enum MaterialFlags : uint
     DensityBody = 1u << 12,
     UniversalPores = 1u << 13,
     // Molten metals and other excluded liquids cannot enter or diffuse through pores.
-    NonAbsorbableLiquid = 1u << 14
+    NonAbsorbableLiquid = 1u << 14,
+    // Elapsed burning time in Lifetime; opt-in contact front along fixed fuel.
+    ProgressiveIgnition = 1u << 15
 }
 
 public static class CoreMaterialIds
@@ -75,6 +77,7 @@ public static class CoreMaterialIds
     public const string Stone = "core:stone";
     public const string Eraser = "core:eraser";
     public const string Fixture = "core:fixture";
+    public const string Fuse = "core:fuse";
     public const string Wood = "core:wood";
     public const string Coal = "core:coal";
     public const string WetCharcoal = "core:wet_charcoal";

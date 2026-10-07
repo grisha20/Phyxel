@@ -381,6 +381,12 @@ internal static partial class MaterialFileLoader
         MaterialEmissionDefinition? emissions = ParseEmissions(document.Emissions, id, combustion);
         MaterialLifecycleDefinition? lifecycle = ParseLifecycle(document.Lifecycle, id, kind);
         MaterialThermalRegulatorDefinition? regulator = ParseRegulator(thermal.Regulator);
+        if ((flags & MaterialFlags.ProgressiveIgnition) != 0 &&
+            (kind != MaterialSimulationKind.Solid || (flags & MaterialFlags.MovableSolid) != 0 ||
+             (flags & MaterialFlags.SelfOxidizing) == 0 || lifecycle is not null || transitions is not null ||
+             combustion is null || combustion.FlameSpreadRate <= 0 || combustion.ContactIgnitionTemperature <= -273.15f))
+            throw new InvalidDataException("progressive-ignition requires a fixed self-oxidizing solid with contact combustion/spreadRate, without lifecycle or phases.");
+
         if (regulator is not null)
         {
             if (kind != MaterialSimulationKind.Solid || (flags & MaterialFlags.MovableSolid) != 0 ||
@@ -1334,6 +1340,7 @@ internal static partial class MaterialFileLoader
                 "density-body" => MaterialFlags.DensityBody,
                 "flame" => MaterialFlags.Flame,
                 "self-oxidizing" => MaterialFlags.SelfOxidizing,
+                "progressive-ignition" => MaterialFlags.ProgressiveIgnition,
                 "blocks-air" => MaterialFlags.BlocksAir,
                 "smoke" => MaterialFlags.Smoke,
                 "phase-enthalpy" => MaterialFlags.PhaseEnthalpy,

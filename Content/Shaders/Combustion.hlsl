@@ -283,7 +283,9 @@ float2 AvailableOxidizer(uint2 p)
     return sum;
 }
 
-uint LiveFlameCount(uint2 coordinate)
+static const uint MaterialFlagProgressiveIgnition = 1u << 15;
+
+uint LiveFlameCount(uint2 coordinate, bool immediateOnly)
 {
     uint count = 0;
     [unroll]
@@ -292,7 +294,8 @@ uint LiveFlameCount(uint2 coordinate)
         [unroll]
         for (int offsetX = -2; offsetX <= 2; offsetX++)
         {
-            if (offsetX == 0 && offsetY == 0)
+            if ((offsetX == 0 && offsetY == 0) ||
+                (immediateOnly && (abs(offsetX) > 1 || abs(offsetY) > 1)))
             {
                 continue;
             }
@@ -313,6 +316,26 @@ uint LiveFlameCount(uint2 coordinate)
         }
     }
     return count;
+}
+
+// A newly lit cell has elapsed time dt, below the source delay: parallel
+// threads cannot ignite an entire connected cord during the same dispatch.
+bool HasMatureIgnitionNeighbor(uint2 coordinate)
+{
+    [unroll] for (int dy = -1; dy <= 1; dy++)
+    [unroll] for (int dx = -1; dx <= 1; dx++)
+    {
+        if (dx == 0 && dy == 0) continue;
+        int2 p = int2(coordinate) + int2(dx,dy);
+        if (p.x < 0 || p.y < 0 || p.x >= int(CombustionWidth) || p.y >= int(CombustionHeight)) continue;
+        GridCell c = Grid[uint(p.y) * CombustionWidth + uint(p.x)];
+        if (c.IsActive == 0 || c.MaterialIndex >= CombustionMaterialCount || c.MoistureMass > 0) continue;
+        MaterialProperties m = Materials[c.MaterialIndex];
+        if ((m.Flags & MaterialFlagProgressiveIgnition) != 0 &&
+            c.Lifetime >= max(1 / max(m.FlameSpreadRate,.0001),2 * CombustionDeltaTime) && c.Temperature > m.ContactIgnitionTemperature)
+            return true;
+    }
+    return false;
 }
 
 void ReactFuel(uint2 coordinate, bool absorbedFuel)
@@ -407,10 +430,18 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
         return;
     }
 
-    bool contactIgnited = false;
+    bool progressiveIgnition = !absorbedFuel && (source.Flags & MaterialFlagProgressiveIgnition) != 0;
+    if (progressiveIgnition && cell.Lifetime >= 1 / source.FlameSpreadRate &&
+        cell.Temperature <= source.ContactIgnitionTemperature)
+    {
+        cell.Lifetime = 0;
+        Grid[index] = cell;
+    }
+    bool contactIgnited = progressiveIgnition &&
+        (cell.Lifetime > 0 || HasMatureIgnitionNeighbor(coordinate));
     uint flameContacts = cell.Temperature <= source.IgnitionTemperature && source.FlameSpreadRate > 0 &&
         (!separateContact || cell.Temperature >= source.ContactIgnitionTemperature)
-        ? LiveFlameCount(coordinate) : 0;
+        ? LiveFlameCount(coordinate, progressiveIgnition) : 0;
     if (flameContacts > 0)
     {
         // TPT checks coal ignition from every nearby FIRE particle, rather
@@ -453,6 +484,7 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
         OxidizerDemand[index] = reserved + burnedMass * oxidizerPerMass;
     }
     if (burnedMass <= 0) return;
+    if (progressiveIgnition) cell.Lifetime += CombustionDeltaTime;
 
     if(absorbedFuel)
     {

@@ -59,7 +59,9 @@ public static class CombustionRuntime
             (cell.Temperature > source.IgnitionTemperature ||
              (RetainsFuelIgnition(source) && (cell.BodyId & FuelBurningMarker) != 0 &&
               cell.Temperature >= source.ContactIgnitionTemperature) ||
-             ((source.Flags & (uint)MaterialFlags.PersistentCoalIgnition) != 0 && cell.Lifetime > 0));
+             ((source.Flags & (uint)MaterialFlags.PersistentCoalIgnition) != 0 && cell.Lifetime > 0) ||
+             ((source.Flags & (uint)MaterialFlags.ProgressiveIgnition) != 0 && cell.Lifetime > 0 &&
+              (cell.Lifetime < 1 / source.FlameSpreadRate || cell.Temperature > source.ContactIgnitionTemperature)));
     }
 
     public static bool TryApply(
@@ -71,6 +73,12 @@ public static class CombustionRuntime
     {
         summary = CombustionSummaryFlags.None;
         burnedMass = 0;
+        if (cell.MaterialIndex < materials.Length &&
+            (materials[(int)cell.MaterialIndex].Flags & (uint)MaterialFlags.ProgressiveIgnition) != 0 &&
+            cell.Lifetime >= 1 / materials[(int)cell.MaterialIndex].FlameSpreadRate &&
+            cell.Temperature <= materials[(int)cell.MaterialIndex].ContactIgnitionTemperature)
+            cell.Lifetime = 0;
+
         if (cell.MaterialIndex < materials.Length && RetainsFuelIgnition(materials[(int)cell.MaterialIndex]) &&
             cell.Temperature < materials[(int)cell.MaterialIndex].ContactIgnitionTemperature)
             cell.BodyId &= ~FuelBurningMarker;
@@ -92,6 +100,8 @@ public static class CombustionRuntime
         {
             return false;
         }
+
+        if ((source.Flags & (uint)MaterialFlags.ProgressiveIgnition) != 0) cell.Lifetime += elapsedSeconds;
 
         float capacityMass = Math.Max(cell.Mass, source.Density);
         float capacity = Math.Max(MaterialRegistry.MinimumHeatCapacity,
