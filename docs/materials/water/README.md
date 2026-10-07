@@ -1,5 +1,7 @@
 # Вода — `core:water`
 
+- [SP: проверка сохранённого кипящего котла](../shared/STEAM_ROOF_DIAGNOSIS.md).
+
 - [Паспорт](PASSPORT.md): источники, поведение, критерии, статусы и ограничения.
 - [Настройки игры](../../../Materials/core/water.json): JSON, загружаемый движком.
 - [Общая регистрация материалов](../../../Materials/MaterialRegistry.cs).

@@ -47,3 +47,4 @@
 - [CU: ограниченный теплообмен новых проводников](COPPER_HEAT_CONTRACT.md).
 
 - [PF: центральный поджиг и разлёт оболочки](PRESSURE_FRACTURE_CONTRACT.md), [результаты](PRESSURE_FRACTURE_RESULTS.md).
+- [SP: холодная крыша котла, давление и падение осколков](STEAM_ROOF_DIAGNOSIS.md).

@@ -2085,6 +2085,7 @@ public sealed class SimulationDispatchCoordinator
     internal static void DispatchPressureFragments(GpuSimulationResources r, SimulationFrameConstants constants,
         bool finiteAir, bool fracture)
     {
+        Phyxel.Diagnostics.PressureFractureTrace.Before(r);
         constants.DeltaTime = (float)FixedAirStep;
         constants.HydraulicPressure = finiteAir ? 1u : 0u;
         var c = r.Context;
@@ -2095,6 +2096,7 @@ public sealed class SimulationDispatchCoordinator
         c.ComputeShader.Set(fracture ? r.FractureUpdateShader : r.FragmentUpdateOnlyShader);
         c.Dispatch(DivideRoundUp(r.Width,16),DivideRoundUp(r.Height,16),1);
         Unbind(c,4,1); r.Grid.Swap();
+        Phyxel.Diagnostics.PressureFractureTrace.After(r);
         c.ClearUnorderedAccessView(r.FragmentClaims.UnorderedView,new RawInt4(-1,-1,-1,-1));
         c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View);
         c.ComputeShader.SetUnorderedAccessViews(1,r.FragmentPlans.UnorderedView,r.FragmentClaims.UnorderedView);

@@ -35,6 +35,12 @@ internal static class PressureShellRegressionVerifier
         var serializer = new SimulationStateSerializer();
         var rows = new List<object>();
         int failures = 0;
+        if (Environment.GetEnvironmentVariable("PHYXEL_SHELL_EDIT_PROBES") == "1")
+        {
+            foreach (var resource in PressureEditRegressionVerifier.Run(coordinator, registry, settings, dir))
+                yield return resource;
+            yield break;
+        }
         if (!baseline && Environment.GetEnvironmentVariable("PHYXEL_SHELL_SKIP_PROBES") != "1")
         {
             foreach(var resource in VerifyMechanisms(coordinator,registry,settings,dir)) yield return resource;
@@ -45,6 +51,8 @@ internal static class PressureShellRegressionVerifier
             new[] { SimulationMode.Sandbox, SimulationMode.Simulation })
         foreach (int fps in (name == "Новая печь" && Environment.GetEnvironmentVariable("PHYXEL_SHELL_VARIANT")!="powder") || !matrix ? new[] { 60 } : new[] { 30, 60, 100 })
         {
+            if (Environment.GetEnvironmentVariable("PHYXEL_SHELL_MODE") is { Length: > 0 } requestedMode &&
+                mode.ToString() != requestedMode) continue;
             var loaded = System.Threading.Tasks.Task.Run(() => serializer.LoadAsync(Path.Combine(root, name + ".json"), registry))
                 .GetAwaiter().GetResult() ?? throw new InvalidDataException("Missing saved scene: " + name);
             var world = loaded.World ?? throw new InvalidDataException("Missing world");
@@ -104,7 +112,8 @@ internal static class PressureShellRegressionVerifier
                         if(c.IsActive!=0 && registry[c.MaterialIndex].Properties.SimulationKind==2 && (c.BodyId&0x40000000u)!=0)count++;
                     peakFragments=Math.Max(peakFragments,count);
                 }
-                if (frame == 0 || (Environment.GetEnvironmentVariable("PHYXEL_SHELL_FINE_SAMPLES") == "1" && frame <= 6) || frame == fps / 2 || frame == fps || frame == 2 * fps || frame == final)
+                if (frame == 0 || (Environment.GetEnvironmentVariable("PHYXEL_SHELL_FINE_SAMPLES") == "1" && frame <= 6) ||
+                    frame == fps / 2 || frame == fps || frame == 2 * fps || frame == final)
                 {
                     var snapshot = Read(r);
                     var cells = MemoryMarshal.Cast<byte, GridCell>(snapshot.Grid).ToArray();
