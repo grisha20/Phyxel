@@ -184,6 +184,7 @@ public sealed class SimulationDispatchCoordinator
     private bool finalizeCellularRest;
     private bool waterPressureRoutesDirty = true;
     private bool solidMotionNeedsCellular = true;
+    private bool pressureGeometryMoving;
     private bool cellMaterialsDirty;
     private bool thermalActive;
     private readonly FixedStepThermalScheduler thermalScheduler = new();
@@ -758,7 +759,8 @@ public sealed class SimulationDispatchCoordinator
                 {
                     DispatchPressureFragments(resources, constants, settings.Mode == SimulationMode.Simulation,
                         settings.AirSimulation && settings.PressureDestruction,
-                        advectOnly:settings.AirSimulation);
+                        advectOnly:settings.AirSimulation,
+                        preferFullRebuild:pressureGeometryMoving);
                     // A saved wave can burst a solid without any powder or fragment.
                     topologyDirty = true;
                 }
@@ -880,6 +882,7 @@ public sealed class SimulationDispatchCoordinator
         GpuSimulationResources resources = lifecycleManager.CreateOrResize(settings, false);
         Clear(resources);
         boundResources = resources;
+        resources.PressureGraphValid = false;
         foreach(var view in resources.SolidOrigins.UnorderedAccessViews)
             resources.Context.ClearUnorderedAccessView(view,new RawInt4(0,0,0,0));
         ResetActivity(resources.IsSimulationAllocated);
@@ -926,6 +929,7 @@ public sealed class SimulationDispatchCoordinator
         resources.Context.ClearUnorderedAccessView(resources.AirProjectionB.UnorderedView, new RawInt4());
         resources.OxidizerCarrierWarm = false;
         retainOxidizerField = preserveOxidizer;
+        resources.PressureGraphValid = false;
         // Input queues and display accumulation belong to the previous timeline.
         gasBrushQueue.Reset();
         gasVisualNeedsRebuild = true;
@@ -984,6 +988,7 @@ public sealed class SimulationDispatchCoordinator
             return;
         }
         lastObservedStatisticsFrame = statistics.FrameIndex;
+        pressureGeometryMoving = statistics.MovingSolidCells > 0;
         uint cellularCells = statistics.LiquidCells + statistics.GranularCells + statistics.GasCells;
         fluidMatter = statistics.LiquidCells > 0 || statistics.GasCells > 0;
         liquidMatter = statistics.LiquidCells > 0;
@@ -1610,6 +1615,7 @@ public sealed class SimulationDispatchCoordinator
 
     private static void Clear(GpuSimulationResources resources)
     {
+        resources.PressureGraphValid = false;
         resources.PressureMechanicsPotential = false;
         resources.ReactionPulsePotential = false;
         RawInt4 zero = new(0, 0, 0, 0);
@@ -1849,6 +1855,7 @@ public sealed class SimulationDispatchCoordinator
 
     private void ResetActivity(bool dirtyPresentation, bool resetThermal = true)
     {
+        pressureGeometryMoving = false;
         worldHasMatter = false;
         retainOxidizerField = false;
         cellularMatter = false;
@@ -2065,10 +2072,11 @@ public sealed class SimulationDispatchCoordinator
         // volume source, allowing outlet flow without a required lower inlet.
         RunAirPass(context, resources.AirFacesShader, groupsX, groupsY);
         RunAirPass(context, resources.AirDivergenceShader, groupsX, groupsY);
-        for (int iteration = 0; iteration < 64; iteration++)
+        bool reference = UseReferenceGpuWorkload;
+        for (int iteration = 0; iteration < (reference ? 64 : 16); iteration++)
         {
-            RunAirPass(context, resources.AirJacobiABShader, groupsX, groupsY);
-            RunAirPass(context, resources.AirJacobiBAShader, groupsX, groupsY);
+            RunAirPass(context, reference ? resources.AirJacobiABShader : resources.AirJacobiFourABShader, groupsX, groupsY);
+            RunAirPass(context, reference ? resources.AirJacobiBAShader : resources.AirJacobiFourBAShader, groupsX, groupsY);
         }
         RunAirPass(context, resources.AirProjectShader, groupsX, groupsY);
         resources.AirTimer?.End(context);
@@ -2093,7 +2101,7 @@ public sealed class SimulationDispatchCoordinator
     }
 
     internal static void DispatchPressureFragments(GpuSimulationResources r, SimulationFrameConstants constants,
-        bool finiteAir, bool fracture, bool advectOnly=false)
+        bool finiteAir, bool fracture, bool advectOnly=false, bool preferFullRebuild=false)
     {
         Phyxel.Diagnostics.PressureFractureTrace.Before(r);
         constants.DeltaTime = (float)FixedAirStep;
@@ -2109,20 +2117,7 @@ public sealed class SimulationDispatchCoordinator
         if(fracture && !r.LegacyFragmentDiagnostics)
         {
             r.ConfinementTimer?.Begin(c);
-            c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View);
-            c.ComputeShader.SetUnorderedAccessViews(0,r.PressureRoots.UnorderedView,r.PressureLinks.UnorderedView);
-            c.ComputeShader.Set(r.PressureInitializeShader);
-            c.Dispatch(DivideRoundUp(r.AirWidth,8),DivideRoundUp(r.AirHeight,8),1);
-            // Repeated root hooking/compression also resolves bounded retries
-            // under contention. Connectivity is rebuilt after editing/breaks.
-            for(int pass=0;pass<8;pass++)
-            {
-                c.ComputeShader.Set(r.PressureUnionShader);
-                c.Dispatch(DivideRoundUp(r.AirWidth,8),DivideRoundUp(r.AirHeight,8),1);
-                c.ComputeShader.Set(r.PressureCompressShader);
-                c.Dispatch(DivideRoundUp(r.AirWidth*r.AirHeight+1,256),1,1);
-            }
-            Unbind(c,2,2);
+            DispatchPressureConfinement(r, preferFullRebuild);
             c.ComputeShader.SetShaderResource(8,r.PressureRoots.View);
             r.ConfinementTimer?.End(c);
         }
@@ -2164,6 +2159,53 @@ public sealed class SimulationDispatchCoordinator
         Unbind(c,7,4); r.Grid.Swap();
         r.FragmentTimer?.End(c);
     }
+
+    internal static void DispatchPressureConfinement(GpuSimulationResources r, bool preferFullRebuild=false)
+    {
+        var c=r.Context;
+        c.ComputeShader.SetConstantBuffer(0,r.PressureFrameConstants);
+        c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View);
+        c.ComputeShader.SetShaderResource(15,r.Filters.View);
+        // Moving solids usually change this mask every tick. A conservative CPU
+        // hint selects the original complete rebuild to avoid an extra scan.
+        // It never authorizes reuse: the cached path still checks every fine cell.
+        if(UseReferenceGpuWorkload || preferFullRebuild)
+        {
+            c.ComputeShader.SetUnorderedAccessViews(0,r.PressureRoots.UnorderedView,r.PressureLinks.UnorderedView);
+            c.ComputeShader.Set(r.PressureInitializeShader);
+            c.Dispatch(DivideRoundUp(r.AirWidth,8),DivideRoundUp(r.AirHeight,8),1);
+            for(int pass=0;pass<8;pass++)
+            {
+                c.ComputeShader.Set(r.PressureUnionShader);c.Dispatch(DivideRoundUp(r.AirWidth,8),DivideRoundUp(r.AirHeight,8),1);
+                c.ComputeShader.Set(r.PressureCompressShader);c.Dispatch(DivideRoundUp(r.AirWidth*r.AirHeight+1,256),1,1);
+            }
+            Unbind(c,2,2);r.PressureGraphValid=false;return;
+        }
+        c.ClearUnorderedAccessView(r.PressureGraphSchedule.UnorderedView,
+            r.PressureGraphValid ? new RawInt4() : new RawInt4(1,1,1,1));
+        c.ComputeShader.SetUnorderedAccessViews(0,r.PressureRoots.UnorderedView,r.PressureLinks.UnorderedView,
+            r.PressureGraphSchedule.UnorderedView,r.PressureGeometry.UnorderedView);
+        c.ComputeShader.Set(r.PressureGeometryShader);
+        c.Dispatch(DivideRoundUp(r.Width,16),DivideRoundUp(r.Height,16),1);
+        c.ComputeShader.Set(r.PressureScheduleShader);c.Dispatch(1,1,1);
+        // An indirect argument buffer cannot remain bound as UAV while dispatching.
+        c.ComputeShader.SetUnorderedAccessView(2,null);
+        c.ComputeShader.SetUnorderedAccessView(3,null);
+        c.CopyResource(r.PressureGraphSchedule.Buffer,r.PressureGraphArguments);
+        c.ComputeShader.Set(r.PressureInitializeShader);c.DispatchIndirect(r.PressureGraphArguments,4);
+        for(int pass=0;pass<8;pass++)
+        {
+            c.ComputeShader.Set(r.PressureUnionShader);c.DispatchIndirect(r.PressureGraphArguments,4);
+            c.ComputeShader.Set(r.PressureCompressShader);c.DispatchIndirect(r.PressureGraphArguments,16);
+        }
+        Unbind(c,2,2);r.PressureGraphValid=true;
+    }
+
+    private static readonly bool UseReferenceGpuWorkload =
+        Environment.GetEnvironmentVariable("PHYXEL_GPU_WORKLOAD_REFERENCE")=="1" &&
+        (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FURNACE_SENSORS")=="1" ||
+         Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SAVED_BLAST")=="1" ||
+         Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SAVED_FLAME")=="1");
 
     // Consumes each reaction packet once, outside the ordinary draft projection.
     internal static void DispatchReactionPulse(GpuSimulationResources r)

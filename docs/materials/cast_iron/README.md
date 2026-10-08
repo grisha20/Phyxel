@@ -38,3 +38,5 @@
 - [FJ: выброс и перенос осколков](../shared/FRAGMENT_JET_CONTRACT.md), [свежие проверки и ограничения](../shared/FRAGMENT_JET_RESULTS.md).
 
 - [FS: тепло сохранённой печи](../shared/FURNACE_SENSOR_HEAT_CONTRACT.md), [новые результаты и ограничения](../shared/FURNACE_SENSOR_HEAT_RESULTS.md).
+
+- [GW: регрессии при оптимизации GPU нагрузки](../shared/GPU_WORKLOAD_RESULTS.md).

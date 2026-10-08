@@ -45,3 +45,5 @@
 [Контракт](../shared/PRESSURE_FRACTURE_CONTRACT.md), [свежие проверки и ограничения](../shared/PRESSURE_FRACTURE_RESULTS.md). Реализован выбранный этап; крупные жёсткие осколки и полный механический баланс остаются будущими механизмами.
 
 - [FS: тепло сохранённой печи](../shared/FURNACE_SENSOR_HEAT_CONTRACT.md), [новые результаты и ограничения](../shared/FURNACE_SENSOR_HEAT_RESULTS.md).
+
+- [GW: регрессии при оптимизации GPU нагрузки](../shared/GPU_WORKLOAD_RESULTS.md).

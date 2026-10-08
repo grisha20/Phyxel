@@ -770,6 +770,66 @@ void CSJacobiBA(uint3 id : SV_DispatchThreadID)
     if (id.x >= AirWidth || id.y >= AirHeight) return;
     ProjectionA[AirIndex(id.xy)] = Jacobi(int2(id.xy), false);
 }
+
+// Four exact Jacobi iterations over an 8x8 output tile and a four-cell halo.
+// Separate global input/output buffers prevent races between neighbouring groups.
+groupshared float TilePsi0[256];
+groupshared float TilePsi1[256];
+groupshared float TileDivergence[256];
+groupshared uint TileFaces[256];
+void JacobiFour(uint2 group, uint thread, bool readA)
+{
+    int2 origin=int2(group)*8-4;
+    [unroll] for(uint j=thread;j<256;j+=64)
+    {
+        int2 p=origin+int2(j%16,j/16);
+        float2 v=0;uint mask=16;
+        if(AirInside(p))
+        {
+            uint i=uint(p.y)*AirWidth+uint(p.x);
+            v=readA?ProjectionA[i]:ProjectionB[i];
+            if(Air[i].Blocked<=.5 && !ProjectionBoundary(p))
+            {
+                mask=0;
+                if(AirLinkOpen(p,int2(-1,0)))mask|=1;
+                if(AirLinkOpen(p,int2(1,0)))mask|=2;
+                if(AirLinkOpen(p,int2(0,-1)))mask|=4;
+                if(AirLinkOpen(p,int2(0,1)))mask|=8;
+            }
+        }
+        TilePsi0[j]=v.x;TileDivergence[j]=v.y;TileFaces[j]=mask;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    [unroll] for(uint step=1;step<=4;step++)
+    {
+        [unroll] for(uint j=thread;j<256;j+=64)
+        {
+            uint x=j%16,y=j/16;
+            if(x<step||y<step||x>=16-step||y>=16-step)continue;
+            uint mask=TileFaces[j];float sum=0,faces=0,value=0;
+            if((mask&16)==0)
+            {
+                if(mask&1){sum+=step%2?TilePsi0[j-1]:TilePsi1[j-1];faces+=1;}
+                if(mask&2){sum+=step%2?TilePsi0[j+1]:TilePsi1[j+1];faces+=1;}
+                if(mask&4){sum+=step%2?TilePsi0[j-16]:TilePsi1[j-16];faces+=1;}
+                if(mask&8){sum+=step%2?TilePsi0[j+16]:TilePsi1[j+16];faces+=1;}
+                value=faces>0?clamp((sum-TileDivergence[j])/faces,-AirMaximumPressure,AirMaximumPressure):0;
+            }
+            if(step%2)TilePsi1[j]=value;else TilePsi0[j]=value;
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    uint2 p=group*8+uint2(thread%8,thread/8);
+    if(p.x>=AirWidth||p.y>=AirHeight)return;
+    uint outputIndex=(thread/8+4)*16+thread%8+4;
+    float2 result=(TileFaces[outputIndex]&16)?0:float2(TilePsi0[outputIndex],TileDivergence[outputIndex]);
+    if(readA)ProjectionB[AirIndex(p)]=result;else ProjectionA[AirIndex(p)]=result;
+}
+[numthreads(8,8,1)]
+void CSJacobiFourAB(uint3 group:SV_GroupID,uint thread:SV_GroupIndex){JacobiFour(group.xy,thread,true);}
+[numthreads(8,8,1)]
+void CSJacobiFourBA(uint3 group:SV_GroupID,uint thread:SV_GroupIndex){JacobiFour(group.xy,thread,false);}
+
 [numthreads(8, 8, 1)]
 void CSProject(uint3 id : SV_DispatchThreadID)
 {

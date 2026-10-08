@@ -9,3 +9,5 @@
 Радиальный фронт: [контракт](RADIAL_FRONT_CONTRACT.md),
 [результаты](RADIAL_FRONT_RESULTS.md),
 [GPU-проверки](../../../Diagnostics/TntFrontRegressionVerifier.cs).
+
+- [GW: регрессии при оптимизации GPU нагрузки](../shared/GPU_WORKLOAD_RESULTS.md).

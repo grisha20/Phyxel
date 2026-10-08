@@ -1,5 +1,7 @@
 # Общие документы материалов
 
+- [GW: уменьшение нагрузки GPU после отзывов RTX 3050](GPU_WORKLOAD_CONTRACT.md), [проверки и оставшиеся просадки](GPU_WORKLOAD_RESULTS.md).
+
 - [RS: локальный прорыв, измерение давления и FPS](PRESSURE_RELIABILITY_CONTRACT.md), [новые результаты и исключения](PRESSURE_RELIABILITY_RESULTS.md).
 
 - [PC: замкнутый напор и экспериментальное включение](PRESSURE_CONFINEMENT_CONTRACT.md), [новые проверки](PRESSURE_CONFINEMENT_RESULTS.md).

@@ -24,6 +24,7 @@ internal static class PressureConfinementRegressionVerifier
         int checks=0,failures=0;
         void Check(bool pass,string name){checks++;if(!pass)failures++;Console.WriteLine($"PHYXEL_CONFINEMENT pass={pass} {name}");}
         GridCell Cell(uint material)=>new(){MaterialIndex=material,IsActive=1,Mass=table[material].Density,Temperature=30};
+        uint[]? previousLinks=null;
         foreach(string variant in new[]{"closed","vent","powder","closed-filter","air-filter","maze"})
         {
             var grid=new GridCell[size*size];var filters=new uint[grid.Length+1];
@@ -52,6 +53,21 @@ internal static class PressureConfinementRegressionVerifier
             SimulationDispatchCoordinator.DispatchPressureFragments(r,new(){Width=size,Height=size},true,true);
             uint[] roots=MemoryMarshal.Cast<byte,uint>(AirInventoryRegressionVerifier.Read(r,r.PressureRoots.Buffer)).ToArray();
             uint[] links=MemoryMarshal.Cast<byte,uint>(AirInventoryRegressionVerifier.Read(r,r.PressureLinks.Buffer)).ToArray();
+            var schedule=MemoryMarshal.Cast<byte,uint>(AirInventoryRegressionVerifier.Read(r,r.PressureGraphSchedule.Buffer)).ToArray();
+            Check(schedule[1]>0 || previousLinks is not null && previousLinks.AsSpan().SequenceEqual(links),
+                "PC cache rebuilds changed edges "+variant);
+            previousLinks=links;
+            SimulationDispatchCoordinator.DispatchPressureConfinement(r);
+            schedule=MemoryMarshal.Cast<byte,uint>(AirInventoryRegressionVerifier.Read(r,r.PressureGraphSchedule.Buffer)).ToArray();
+            Check(schedule[1]==0 && roots.AsSpan().SequenceEqual(MemoryMarshal.Cast<byte,uint>(
+                AirInventoryRegressionVerifier.Read(r,r.PressureRoots.Buffer))),"PC cache reuse exact "+variant);
+            SimulationDispatchCoordinator.DispatchPressureConfinement(r, preferFullRebuild:true);
+            Check(!r.PressureGraphValid && roots.AsSpan().SequenceEqual(MemoryMarshal.Cast<byte,uint>(
+                AirInventoryRegressionVerifier.Read(r,r.PressureRoots.Buffer))),"PC moving hint full rebuild exact "+variant);
+            SimulationDispatchCoordinator.DispatchPressureConfinement(r);
+            schedule=MemoryMarshal.Cast<byte,uint>(AirInventoryRegressionVerifier.Read(r,r.PressureGraphSchedule.Buffer)).ToArray();
+            Check(schedule[1]>0 && roots.AsSpan().SequenceEqual(MemoryMarshal.Cast<byte,uint>(
+                AirInventoryRegressionVerifier.Read(r,r.PressureRoots.Buffer))),"PC cache rebuild after moving hint "+variant);
             // Independent CPU graph traversal validates GPU atomic union and
             // compression, including all pairwise component equivalences.
             var adjacent=Enumerable.Range(0,roots.Length).Select(_=>new List<int>()).ToArray();

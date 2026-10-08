@@ -20,3 +20,5 @@ TN2026-10-08: при добавлении TNT повторно проверен�
 храниться у исходного материала. Настройки JSON не являются справочником СИ.
 
 - [FS: тепло сохранённой печи](../shared/FURNACE_SENSOR_HEAT_CONTRACT.md), [новые результаты и ограничения](../shared/FURNACE_SENSOR_HEAT_RESULTS.md).
+
+- [GW: регрессии при оптимизации GPU нагрузки](../shared/GPU_WORKLOAD_RESULTS.md).

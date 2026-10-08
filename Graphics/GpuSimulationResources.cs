@@ -18,6 +18,12 @@ public sealed class GpuSimulationResources : IDisposable
     public required GpuStructuredBuffer<uint> FragmentRelease { get; init; }
     public required GpuStructuredBuffer<uint> PressureRoots { get; init; }
     public required GpuStructuredBuffer<uint> PressureLinks { get; init; }
+    public required GpuStructuredBuffer<uint> PressureGraphSchedule { get; init; }
+    public required Buffer PressureGraphArguments { get; init; }
+    public required GpuStructuredBuffer<uint> PressureGeometry { get; init; }
+    internal bool PressureGraphValid { get; set; }
+    public ComputeShader? PressureGeometryShader { get; init; }
+    public ComputeShader? PressureScheduleShader { get; init; }
     public ComputeShader? PressureInitializeShader { get; init; }
     public ComputeShader? PressureUnionShader { get; init; }
     public ComputeShader? PressureCompressShader { get; init; }
@@ -258,6 +264,8 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? AirInjectShader { get; init; }
     public ComputeShader? AirFineMaterialsShader { get; init; }
     public ComputeShader? AirPressureShader { get; init; }
+    public ComputeShader? AirJacobiFourABShader { get; init; }
+    public ComputeShader? AirJacobiFourBAShader { get; init; }
     public ComputeShader? AirVelocityShader { get; init; }
     public ComputeShader? AirAdvectShader { get; init; }
     public ComputeShader? AirCommitShader { get; init; }
@@ -298,6 +306,10 @@ public sealed class GpuSimulationResources : IDisposable
         CombustionShader?.Dispose();
         PressureFrameConstants.Dispose(); FragmentPlans.Dispose(); FragmentClaims.Dispose(); FragmentRelease.Dispose();
         PressureRoots.Dispose();PressureLinks.Dispose();
+        PressureGraphSchedule.Dispose();
+        PressureGraphArguments.Dispose();
+        PressureGeometry.Dispose();
+        PressureGeometryShader?.Dispose();PressureScheduleShader?.Dispose();
         PressureInitializeShader?.Dispose();PressureUnionShader?.Dispose();PressureCompressShader?.Dispose();
         FragmentReleaseShader?.Dispose(); PowderFrontShader?.Dispose();
         FractureUpdateShader?.Dispose(); FragmentUpdateOnlyShader?.Dispose(); FragmentPlanShader?.Dispose(); FragmentApplyShader?.Dispose();
@@ -309,6 +321,7 @@ public sealed class GpuSimulationResources : IDisposable
         AirInjectShader?.Dispose();
         AirFineMaterialsShader?.Dispose();
         AirPressureShader?.Dispose();
+        AirJacobiFourABShader?.Dispose();AirJacobiFourBAShader?.Dispose();
         AirVelocityShader?.Dispose();
         AirAdvectShader?.Dispose();
         AirCommitShader?.Dispose();
