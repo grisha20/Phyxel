@@ -44,6 +44,7 @@ public sealed class PhyxelGame : Game
     private Func<string, bool, IntPtr, string?> scenePathPicker =
         (path, save, owner) => SceneFileDialog.Select(path, save, owner);
     private readonly string? uiScreenshotPath;
+    private bool startupFrameLogged;
     private readonly float? uiDpiOverride;
     private SpriteBatch? spriteBatch;
     private RasterizerState? canvasRasterizerState;
@@ -169,6 +170,7 @@ public sealed class PhyxelGame : Game
 
     protected override void LoadContent()
     {
+        StartupLog.Write("loading fonts, materials and GPU resources");
         spriteBatch = new SpriteBatch(GraphicsDevice);
         canvasRasterizerState = new RasterizerState
         {
@@ -566,6 +568,7 @@ public sealed class PhyxelGame : Game
         {
             pendingLoad = stateSerializer.LoadAsync(scenePath, materialRegistry);
         }
+        StartupLog.Write("game content ready");
         base.LoadContent();
     }
 
@@ -918,6 +921,11 @@ public sealed class PhyxelGame : Game
 
     protected override void Draw(GameTime gameTime)
     {
+        if (!startupFrameLogged)
+        {
+            StartupLog.Write("first game frame");
+            startupFrameLogged = true;
+        }
         framePerformanceTrace.BeginDraw(currentResources);
         GraphicsDevice.Clear(new Color(9, 11, 14));
         if (spriteBatch is null || userInterface is null || currentResources is null)

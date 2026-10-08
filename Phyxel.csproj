@@ -36,4 +36,24 @@
     <None Update="Content\UI\Icons\**\*.*" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Materials\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <PropertyGroup>
+    <ShaderDotNetHost Condition="'$(DotNetHostPath)' != ''">$(DotNetHostPath)</ShaderDotNetHost>
+    <ShaderDotNetHost Condition="'$(ShaderDotNetHost)' == ''">dotnet</ShaderDotNetHost>
+  </PropertyGroup>
+  <!-- Runtime compilation is a fallback, not a first-launch requirement.
+       Use this exact assembly/compiler/flags to generate portable DXBC. -->
+  <Target Name="PrepareComputeShaders" AfterTargets="Build"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(SkipShaderPackaging)' != 'true'">
+    <Exec Command="&quot;$(ShaderDotNetHost)&quot; &quot;$(TargetPath)&quot; --prepare-shaders &quot;$(MSBuildProjectDirectory)/Graphics/GpuResourceLifecycleManager.cs&quot; &quot;$(TargetDir)Content/CompiledShaders&quot;" />
+  </Target>
+  <Target Name="PublishComputeShaders" AfterTargets="ComputeFilesToPublish" DependsOnTargets="PrepareComputeShaders"
+          Condition="'$(SkipShaderPackaging)' != 'true'">
+    <ItemGroup>
+      <_CompiledShaderFile Include="$(TargetDir)Content/CompiledShaders/*.cso*" />
+      <ResolvedFileToPublish Include="@(_CompiledShaderFile)">
+        <RelativePath>Content/CompiledShaders/%(_CompiledShaderFile.Filename)%(_CompiledShaderFile.Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
 </Project>

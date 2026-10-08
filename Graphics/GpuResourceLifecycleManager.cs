@@ -1,8 +1,5 @@
 using System;
-using System.IO;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Core;
@@ -32,6 +29,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         {
             SharpDX.DXGI.AdapterDescription description = adapter.Description;
             Console.WriteLine($"PHYXEL_GPU name={description.Description.Trim()} vendor=0x{description.VendorId:X4} device=0x{description.DeviceId:X4}");
+            StartupLog.Write($"gpu name={description.Description.Trim()} feature={Device.FeatureLevel} vendor=0x{description.VendorId:X4} device=0x{description.DeviceId:X4}");
         }
         PixelTexture = CreatePixelTexture();
         CircleTexture = CreateCircleTexture(64);
@@ -720,87 +718,10 @@ public sealed class GpuResourceLifecycleManager : IDisposable
 
     private ComputeShader CompileShader(string fileName, string entryPoint = "CSMain")
     {
-        string shaderDirectory = Path.Combine(AppContext.BaseDirectory, "Content", "Shaders");
-        string path = Path.Combine(shaderDirectory, fileName);
-        string sharedStructures = File.ReadAllText(Path.Combine(shaderDirectory, "PhysicsShared.hlsli"));
-        string phaseEnthalpy = File.ReadAllText(Path.Combine(shaderDirectory, "PhaseEnthalpy.hlsli"));
-        string shaderSource = File.ReadAllText(path).Replace(
-            "#include \"PhysicsShared.hlsli\"",
-            sharedStructures,
-            StringComparison.Ordinal).Replace("#include \"PhaseEnthalpy.hlsli\"", phaseEnthalpy,
-                StringComparison.Ordinal).Replace("#include \"OxidizerShared.hlsli\"",
-                    File.ReadAllText(Path.Combine(shaderDirectory, "OxidizerShared.hlsli")), StringComparison.Ordinal)
-            .Replace("#include \"FineAirGeometry.hlsli\"",
-                File.ReadAllText(Path.Combine(shaderDirectory, "FineAirGeometry.hlsli")), StringComparison.Ordinal)
-            .Replace("#include \"BulkThermalGeometry.hlsli\"",
-                File.ReadAllText(Path.Combine(shaderDirectory, "BulkThermalGeometry.hlsli")), StringComparison.Ordinal);
-        string cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            $"phyxel-compute-shader-v1\0{entryPoint}\0{shaderSource}")));
-        string cachePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Phyxel",
-            "ShaderCache",
-            cacheKey + ".cso");
-
-        try
-        {
-            if (File.Exists(cachePath))
-            {
-                using ShaderBytecode cachedBytecode = new(File.ReadAllBytes(cachePath));
-                return new ComputeShader(Device, cachedBytecode);
-            }
-        }
-        catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or SharpDX.SharpDXException)
-        {
-            // A stale or partially written cache entry must never prevent startup.
-            TryDeleteShaderCacheEntry(cachePath);
-        }
-
-        if (Environment.GetEnvironmentVariable("PHYXEL_SHADER_TRACE") == "1") Console.WriteLine("PHYXEL_SHADER_COMPILE " + fileName + " " + entryPoint);
-        using CompilationResult compilation = ShaderBytecode.Compile(
-            shaderSource,
-            entryPoint,
-            "cs_5_0",
-            ShaderFlags.OptimizationLevel3,
-            EffectFlags.None,
-            null,
-            null,
-            path);
-        TryWriteShaderCacheEntry(cachePath, compilation.Bytecode.Data);
-        return new ComputeShader(Device, compilation.Bytecode);
+        byte[] bytes = ShaderBytecodeStore.Default.Get(new ShaderProgram(fileName, entryPoint));
+        using ShaderBytecode bytecode = new(bytes);
+        return new ComputeShader(Device, bytecode);
     }
-
-    private static void TryWriteShaderCacheEntry(string cachePath, byte[] bytecode)
-    {
-        try
-        {
-            string? cacheDirectory = Path.GetDirectoryName(cachePath);
-            if (cacheDirectory is null)
-            {
-                return;
-            }
-
-            Directory.CreateDirectory(cacheDirectory);
-            File.WriteAllBytes(cachePath, bytecode);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            // Caching is an optimization; compiled bytecode remains usable this run.
-        }
-    }
-
-    private static void TryDeleteShaderCacheEntry(string cachePath)
-    {
-        try
-        {
-            File.Delete(cachePath);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
-
     private Buffer CreateStagingBuffer(int sizeInBytes)
     {
         return new Buffer(Device, new BufferDescription
