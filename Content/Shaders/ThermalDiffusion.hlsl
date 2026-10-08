@@ -363,6 +363,40 @@ float FilmGapHeatFlow(GridCell cell, uint2 p)
     return coefficient*(other.Temperature-cell.Temperature);
 }
 
+// Near a broad hot face, a bouncing drop still receives heat through its
+// unresolved vapour cushion. QR's one-pixel gap stopped supplying this heat
+// during the accepted flight. A reciprocal, finite surface link owns the
+// transfer; it must not depend on retaining an artificial hot steam cloud.
+float FlyingFilmHeatFlow(GridCell cell,uint2 p)
+{
+    MaterialProperties m=Materials[cell.MaterialIndex];
+    bool liquid=(m.Flags & MaterialFlagSurfaceBoiling)!=0;
+    if(liquid && (cell.BodyId & 0x40000000u)==0)return 0;
+    if(!liquid && (m.SimulationKind!=SimulationKindSolid || m.ThermalConductivity<=.5))return 0;
+    if(FilterCells[0]!=0 && (FilterCells[p.y*ThermalWidth+p.x+1]&FilterClosed)!=0)return 0;
+    int step=liquid?1:-1;
+    [loop]for(int distance=1;distance<=16;distance++)
+    {
+        int y=int(p.y)+distance*step;
+        if(y<0 || y>=int(ThermalHeight))break;
+        uint otherIndex=uint(y)*ThermalWidth+p.x;
+        if(FilterCells[0]!=0 && (FilterCells[otherIndex+1]&FilterClosed)!=0)return 0;
+        GridCell other=SourceGrid[otherIndex];
+        if(other.IsActive==0 || Materials[other.MaterialIndex].SimulationKind==SimulationKindGas)continue;
+        GridCell water=cell,wall=other;
+        if(!liquid){water=other;wall=cell;}
+        uint waterIndex=liquid?p.y*ThermalWidth+p.x:otherIndex;
+        if(distance==1 || (water.BodyId & 0x40000000u)==0 ||
+            !FilmSurface(water,waterIndex,wall))return 0;
+        // Calibrated near-face heat link, not SI radiation or a free boiling
+        // rate. A settled pool is excluded. Both endpoints compute equal Q.
+        float fraction=.10*saturate(min(Materials[water.MaterialIndex].ThermalConductivity,
+            Materials[wall.MaterialIndex].ThermalConductivity));
+        return fraction*min(EffectiveCapacity(cell),EffectiveCapacity(other))*(other.Temperature-cell.Temperature);
+    }
+    return 0;
+}
+
 bool IsEmptyAt(int2 coordinate)
 {
     if (coordinate.x < 0 || coordinate.y < 0 ||
@@ -460,6 +494,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     heatFlow += RadiantExchange(cell, coordinate, false);
     heatFlow += BulkHeatFlow(cell, coordinate);
     heatFlow += FilmGapHeatFlow(cell, coordinate);
+    heatFlow += FlyingFilmHeatFlow(cell,coordinate);
     MaterialProperties material = Materials[cell.MaterialIndex];
     float ambientHeat = 0;
     float deviceHeat = 0;

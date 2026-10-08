@@ -123,6 +123,10 @@ internal static class FurnaceSensorRegressionVerifier
                     gasGpu = coordinator.GasMotionGpuTiming, thermalGpu = coordinator.ThermalGpuTiming,
                     combustionGpu = coordinator.CombustionGpuTiming,
                     water = Inventory(waterIndex), steam = Inventory(steamIndex),
+                    // Fixed observation region in these user furnace saves;
+                    // distinguish trapped bubbles from an escaped plume.
+                    steamInPool = grid.Where((c,i)=>c.IsActive!=0 && c.MaterialIndex==steamIndex &&
+                        i%r.Width>=340 && i%r.Width<599 && i/r.Width>=272 && i/r.Width<=307).Count(),
                     impactPlate = PlateInventory(),
                     coalMass = grid.Where(c => c.IsActive != 0 && registry[(ushort)c.MaterialIndex].Id is "core:coal" or "core:stone_coal").Sum(c => (double)c.Mass) };
                 object Inventory(uint material)
@@ -135,6 +139,9 @@ internal static class FurnaceSensorRegressionVerifier
                         minY=cells.Length>0?grid.Select((c,i)=>(c,i)).Where(p=>p.c.IsActive!=0 && p.c.MaterialIndex==material).Min(p=>p.i/r.Width):-1,
                         maxY=cells.Length>0?grid.Select((c,i)=>(c,i)).Where(p=>p.c.IsActive!=0 && p.c.MaterialIndex==material).Max(p=>p.i/r.Width):-1,
                         flying=cells.Count(c=>(c.BodyId & 0x40000000u)!=0),
+                        meanY=mass>0 ? (double?)grid.Select((c,i)=>(c,i)).Where(p=>p.c.IsActive!=0 && p.c.MaterialIndex==material)
+                            .Sum(p=>(double)p.c.Mass*(p.i/r.Width))/mass : null,
+                        massAbove100=grid.Where((c,i)=>c.IsActive!=0 && c.MaterialIndex==material && i/r.Width<100).Sum(c=>(double)c.Mass),
                         temperature = mass > 0 ? (double?)cells.Sum(c => (double)c.Mass * c.Temperature) / mass : null,
                         energy = cells.Sum(c => (double)c.Mass * PhaseEnthalpy.SpecificEnergy(c, thermalMaterials)),
                         latent = cells.Sum(c => (double)c.Mass * c.PhaseProgress) };
@@ -156,6 +163,16 @@ internal static class FurnaceSensorRegressionVerifier
                     settings.ShowAirField = true; coordinator.DispatchFrame(settings, [], 0);
                     SimulationScreenshotWriter.Save(r, Path.Combine(dir, $"air-{frame / fps}.png"));
                     settings.ShowAirField = false;
+                    var plainGrid=AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer);
+                    bool withoutEffects=settings.RenderWithoutEffects;
+                    settings.RenderWithoutEffects=true;
+                    coordinator.RenderDiagnosticSnapshot(r,settings);
+                    SimulationScreenshotWriter.Save(r,Path.Combine(dir,$"plain-{frame/fps}.png"));
+                    settings.RenderWithoutEffects=withoutEffects;
+                    coordinator.RenderDiagnosticSnapshot(r,settings);
+                    if(!plainGrid.AsSpan().SequenceEqual(
+                        AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer)))
+                        throw new InvalidOperationException("Effect comparison changed physical grid.");
                     if (observationOnly)
                     {
                         Console.WriteLine("PHYXEL_SENSOR_OBSERVATION_ONLY save/load assertions not run");

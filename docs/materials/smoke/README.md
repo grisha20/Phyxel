@@ -1,5 +1,7 @@
 # Smoke — `core:smoke`
 
+- [SE: контроль сухой тяги при изменении выхода пара](../shared/STEAM_ESCAPE_RESULTS.md).
+
 - [Паспорт](PASSPORT.md): источники, поведение, критерии, статусы и ограничения.
 - [Настройки игры](../../../Materials/core/smoke.json): JSON, загружаемый движком.
 - [Общая регистрация материалов](../../../Materials/MaterialRegistry.cs).

@@ -1410,7 +1410,10 @@ float CeilingJetTangent(uint2 coordinate, float2 carrier, MaterialProperties mat
     // other and jam forever. This bounded wall-jet closure shares a direction
     // across the connected near-wall layer, without moving/deleting mass here.
     // Preserve a faster resolved tangent and the direction of strong opposing wind.
-    if ((material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0 ||
+    bool boilingVapour=(material.Flags & MaterialFlagPhaseEnthalpy)!=0 &&
+        material.TransitionBelowMaterialIndex!=0xffffffffu &&
+        (Materials[material.TransitionBelowMaterialIndex].Flags & MaterialFlagSurfaceBoiling)!=0;
+    if (((material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0 && !boilingVapour) ||
         material.GasBuoyancy >= 0) return 0;
     int roof = -1;
     [loop] for (int dy=1; dy<=32 && dy<=int(coordinate.y); dy++)

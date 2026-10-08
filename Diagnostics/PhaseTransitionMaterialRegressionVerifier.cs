@@ -33,7 +33,7 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             1.5f, 0.75f, 0.18f, "#DAB85C", 30, 0.15f, 0.83f),
         new("core:gunpowder", MaterialSimulationKind.Granular, MaterialFlags.SelfOxidizing,
             1.4f, 0.80f, 0.15f, "#505358", 30f, 0.25f, 0.90f),
-        new(CoreMaterialIds.Water, MaterialSimulationKind.Liquid, MaterialFlags.PhaseEnthalpy | MaterialFlags.FusionEnthalpy | MaterialFlags.LiquidConvection,
+        new(CoreMaterialIds.Water, MaterialSimulationKind.Liquid, MaterialFlags.PhaseEnthalpy | MaterialFlags.FusionEnthalpy | MaterialFlags.LiquidConvection | MaterialFlags.SurfaceBoiling,
             1, 0.025f, 0.92f, "#2B84CF", 30, 0.60f, 4.18f),
         new(CoreMaterialIds.Oil, MaterialSimulationKind.Liquid, MaterialFlags.LiquidConvection | MaterialFlags.FusionEnthalpy | MaterialFlags.PhaseEnthalpy,
             0.8f, 0.08f, 0.65f, "#B87929", 30f, 0.12f, 2f),
@@ -47,7 +47,7 @@ internal static class PhaseTransitionMaterialRegressionVerifier
             0.03f, 0.005f, 1.20f, "#A0A0FFFF", 122, 0.04f, 2.08f),
         new(CoreMaterialIds.Metal, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid | MaterialFlags.FusionEnthalpy,
             7.8f, 0.35f, 0, "#8E9CA6", 30, 1, 0.13f),
-        new("core:molten_metal", MaterialSimulationKind.Liquid, MaterialFlags.FusionEnthalpy,
+        new("core:molten_metal", MaterialSimulationKind.Liquid, MaterialFlags.FusionEnthalpy | MaterialFlags.NonAbsorbableLiquid,
             7f, 0.55f, 0.34f, "#FF7A1E", 1050f, 0.60f, 0.50f),
         new(CoreMaterialIds.Stone, MaterialSimulationKind.Solid, MaterialFlags.MovableSolid,
             9.2f, 0.75f, 0, "#5C6065", 30, 0.25f, 0.84f),
@@ -382,7 +382,7 @@ internal static class PhaseTransitionMaterialRegressionVerifier
         }
         Require(CountOccurrences(errors, "PHYXEL_MATERIAL_ERROR") == invalid.Count,
             "Invalid documents did not produce exactly one error each.");
-        Require(registry.Count == ExpectedCoreMaterials.Length + 1,
+        Require(registry.Count == MaterialFileLoader.LoadCore(coreDirectory,MaterialRegistry.MaximumMaterials).Count + 1,
             "An invalid transition document entered the registry.");
         Require(registry.RegistryHasPhaseTransitions,
             "Invalid external documents disabled bundled core transitions.");

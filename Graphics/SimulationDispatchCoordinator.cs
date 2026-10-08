@@ -1554,6 +1554,14 @@ public sealed class SimulationDispatchCoordinator
         constants.SimulationPhase = 0;
     }
 
+    // Diagnostic render comparison must not advance cellular bookkeeping,
+    // logical clocks or pending phase work through another DispatchFrame.
+    internal void RenderDiagnosticSnapshot(GpuSimulationResources resources,SimulationSettings settings)
+    {
+        var constants=CreateConstants(settings,[]);
+        DispatchComposition(resources,ref constants,0);
+    }
+
     private void DispatchComposition(
         GpuSimulationResources resources,
         ref SimulationFrameConstants constants,
@@ -1969,6 +1977,7 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetShaderResource(2, resources.BulkThermalDegrees.View);
         context.ComputeShader.SetShaderResource(3, resources.RadiantDegrees.View);
         context.ComputeShader.Set(resources.ThermalDiffusionShader);
+        context.ComputeShader.SetShaderResource(15, resources.Filters.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.WriteUnorderedView);
         if (resources.ThermalEnergyLedger is not null)
             context.ComputeShader.SetUnorderedAccessView(1, resources.ThermalEnergyLedger.UnorderedView);

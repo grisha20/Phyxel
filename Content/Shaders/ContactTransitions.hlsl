@@ -207,6 +207,22 @@ bool EmitSurfaceVapour(inout GridCell first, inout GridCell second, uint a, uint
 // A paid bubble can nucleate inside a full pool. The neighbour receives all
 // displaced liquid and its energy; the bubble stays at its origin and must
 // travel/condense through the existing gas-liquid transport, never teleport.
+bool HasHotBoilingSurface(uint index,float boiling)
+{
+    int2 p=int2(index%ContactWidth,index/ContactWidth);
+    int2 offsets[4]={int2(-1,0),int2(1,0),int2(0,-1),int2(0,1)};
+    [unroll] for(uint side=0;side<4;side++)
+    {
+        int2 q=p+offsets[side];
+        if(q.x<0 || q.y<0 || q.x>=int(ContactWidth) || q.y>=int(ContactHeight))continue;
+        GridCell wall=Grid[uint(q.y)*ContactWidth+uint(q.x)];
+        MaterialProperties surface=Materials[wall.MaterialIndex];
+        if(wall.IsActive!=0 && surface.SimulationKind==SimulationKindSolid &&
+            surface.ThermalConductivity>.5 && wall.Temperature>boiling+100)return true;
+    }
+    return false;
+}
+
 bool NucleateVapour(inout GridCell first,inout GridCell second,uint a,uint b)
 {
     if(first.IsActive==0 || second.IsActive==0 || first.MaterialIndex!=second.MaterialIndex)return false;
@@ -219,6 +235,14 @@ bool NucleateVapour(inout GridCell first,inout GridCell second,uint a,uint b)
     GridCell source=first, receiver=second;
     if(!sourceFirst){source=second;receiver=first;}
     if(source.Temperature<m.TransitionAboveTemperature-.001 || source.Lifetime<=0)return false;
+    // Local boiling starts at a hot surface. Paid heat left by a collapsing
+    // bubble in the bulk must mix into the liquid instead of renucleating
+    // everywhere and flickering the whole cold pool indefinitely.
+    // A detached hot film can still release heat it paid for at contact.
+    // Preserve the accepted small-drop path; an untagged bulk pool requires
+    // a currently hot wall and cannot use this exception.
+    if((source.BodyId & 0x40000000u)==0 &&
+        !HasHotBoilingSurface(sourceFirst?a:b,m.TransitionAboveTemperature))return false;
     float amount=min(.25*source.Mass,source.Mass*source.Lifetime/m.TransitionAboveLatentHeat);
     if(amount<.02 || source.Mass-amount<.0005)return false;
     uint sourceIndex=sourceFirst?a:b,receiverIndex=sourceFirst?b:a;

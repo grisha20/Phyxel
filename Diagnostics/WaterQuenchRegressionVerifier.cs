@@ -63,6 +63,7 @@ internal static class WaterQuenchRegressionVerifier
         {
             var submerged=new GridCell[n];int site=80*w+80;
             submerged[site]=Cell(water,20);submerged[site+w]=Cell(water,100,1,paid);
+            submerged[site+2*w]=Cell(iron,220,7.2f);
             Upload(submerged);Evaporate(1);var nucleated=Read();Balanced(submerged,nucleated,"submerged bubble "+paid);
             double vapour=nucleated.Where(c=>c.IsActive!=0 && c.MaterialIndex==steam).Sum(c=>(double)c.Mass);
             Console.WriteLine($"PHYXEL_QR_NUCLEATION paid={paid} vapour={vapour} Qerror={Q(nucleated)-Q(submerged)}");
@@ -70,6 +71,7 @@ internal static class WaterQuenchRegressionVerifier
         }
         var submergedFiltered=new GridCell[n];int blockedBubble=80*w+80;
         submergedFiltered[blockedBubble]=Cell(water,20);submergedFiltered[blockedBubble+w]=Cell(water,100,1,1128);
+        submergedFiltered[blockedBubble+2*w]=Cell(iron,220,7.2f);
         r.FilterMap[blockedBubble+w]=FilterRules.Closed;r.FilterCount=1;r.UploadFilters();
         Upload(submergedFiltered);Evaporate(1);
         Check(Read().AsSpan().SequenceEqual(submergedFiltered),"filter allowed submerged nucleation");
@@ -77,6 +79,22 @@ internal static class WaterQuenchRegressionVerifier
         var coldLiquid=new GridCell[n];coldLiquid[80*w+80]=Cell(water,20);coldLiquid[81*w+80]=Cell(water,20);
         Upload(coldLiquid);Evaporate(1);
         Check(Read().AsSpan().SequenceEqual(coldLiquid),"cold liquid nucleated a bubble");
+        foreach(float wallTemperature in new[]{20f,101f,199f})
+        {
+            var bulk=new GridCell[n];int site=80*w+80;
+            bulk[site]=Cell(water,20);bulk[site+w]=Cell(water,100,1,1128);
+            bulk[site+2*w]=Cell(iron,wallTemperature,7.2f);
+            Upload(bulk);Evaporate(1);
+            Check(Read().AsSpan().SequenceEqual(bulk),"bulk latent heat renucleated away from hot wall");
+        }
+        var unsupportedBubble=new GridCell[n];unsupportedBubble[80*w+80]=Cell(water,20);
+        unsupportedBubble[81*w+80]=Cell(water,100,1,1128);
+        Upload(unsupportedBubble);Evaporate(1);
+        Check(Read().AsSpan().SequenceEqual(unsupportedBubble),"unsupported interior nucleation");
+        unsupportedBubble[81*w+80].BodyId=0x40000000u;
+        Upload(unsupportedBubble);Evaporate(1);var filmBubble=Read();
+        Balanced(unsupportedBubble,filmBubble,"detached paid film");
+        Check(filmBubble[81*w+80].MaterialIndex==steam,"detached hot film cannot release paid vapour");
         var overfill=new GridCell[n];
         for(int y=78;y<=80;y++)overfill[y*w+80]=Cell(water,20,y==80?1.75f:1);
         Upload(overfill);coordinator.DispatchThermalDiffusion(r,false,0,true);var relieved=Read();
@@ -143,6 +161,22 @@ internal static class WaterQuenchRegressionVerifier
         Check(wall<200,"thin full plate did not cool below200C");
         Check(cooled[87*w+100].IsActive!=0,"deep pool lifted");
         Console.WriteLine($"PHYXEL_QH_POOL seconds=60 wall={wall} surface={surface} Qerror={Q(cooled)-initial}");
+        // A flying paid film must receive a reciprocal heat budget even above
+        // the old one-cell gap; a closed overlay or solid breaks that path.
+        foreach(int barrier in new[]{-1,85,87,90})
+        {
+            bool blocked=barrier>=0;
+            var filmGap=new GridCell[n];int drop=85*w+80,hot=90*w+80;
+            filmGap[drop]=Cell(water,100,1,10);filmGap[drop].BodyId=0x40000000u;
+            filmGap[hot]=Cell(iron,1000,7.2f);
+            if(blocked){r.FilterMap[barrier*w+80]=FilterRules.Closed;r.FilterCount=1;r.UploadFilters();}
+            Upload(filmGap);coordinator.DispatchThermalDiffusion(r,false,0,false);var heatedFilm=Read();
+            Balanced(filmGap,heatedFilm,"flying film heat "+barrier);
+            Console.WriteLine($"PHYXEL_SE_FILM barrier={barrier} paid={heatedFilm[drop].Lifetime} wall={heatedFilm[hot].Temperature} Qerror={Q(heatedFilm)-Q(filmGap)}");
+            Check(blocked?Math.Abs(heatedFilm[drop].Lifetime-10)<.0001:heatedFilm[drop].Lifetime>10,
+                "flying film heat source/path");
+            Array.Clear(r.FilterMap);r.FilterCount=0;r.UploadFilters();
+        }
         // A small film-supported column must make a finite flight and return.
         GridCell[]? filmSnapshot=null;
         foreach(float wallT in new[]{200f,1000f})
@@ -229,6 +263,7 @@ internal static class WaterQuenchRegressionVerifier
         serializer.ApplyWorldSnapshot(r,loaded);coordinator.RestoreWorldActivity(r,true,true,false);
         coordinator.DispatchFrame(settings,[],.05f);
         Check(Read().AsSpan().SequenceEqual(filmSnapshot),"paused film moved");
+        SteamPlumeRegressionVerifier.Run(coordinator,registry,r);
         WaterContactRegressionVerifier.Run(coordinator,registry);
         BulkHeatRegressionVerifier.Run(coordinator,registry);
         Console.WriteLine($"PHYXEL_QH_SUCCESS checks={checks}");
