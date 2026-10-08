@@ -1,5 +1,7 @@
 # Чугун — `core:cast_iron`
 
+- [QH: мокрая горячая поверхность, капля и конечная энергия](../shared/WATER_QUENCH_CONTRACT.md), [новые проверки](../shared/WATER_QUENCH_RESULTS.md).
+
 - [QW: охлаждение водой и цвет накала](../shared/HOT_SURFACE_WATER_OBSERVATION.md): наблюдение, физика прежняя.
 - [PA: профиль портрета и свежие регрессии](../shared/PORTRAIT_GPU_RESULTS.md).
 

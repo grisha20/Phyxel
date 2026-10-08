@@ -2,6 +2,8 @@
 
 RWStructuredBuffer<GridCell> WaterGrid : register(u0);
 StructuredBuffer<MaterialProperties> Materials : register(t0);
+RWStructuredBuffer<uint> BoilingSummary : register(u1);
+RWStructuredBuffer<uint> BoilingCellMaterials : register(u2);
 
 // Closed, disjoint 2x2 rotations provide a local upward path and an equal
 // downward return. No empty cell, surface, wall or other material can move.
@@ -52,6 +54,55 @@ void MixLiquidRow(uint2 p, uint span)
 [numthreads(16, 16, 1)]
 void CSMain(uint3 thread : SV_DispatchThreadID)
 {
+    if(GasSubStep==2)
+    {
+        // One owner per entire column: lift a resolved small drop without
+        // racing a neighbour or overwriting the parcels above it.
+        uint x=thread.x;
+        if(thread.y!=0 || x>=Width) return;
+        [loop] for(uint y=2;y+1<Height;y++)
+        {
+            uint bottom=y*Width+x;
+            GridCell liquid=WaterGrid[bottom],wall=WaterGrid[bottom+Width];
+            MaterialProperties m=Materials[liquid.MaterialIndex],s=Materials[wall.MaterialIndex];
+            if(liquid.IsActive!=0 && (liquid.BodyId & VapourCushionMarker)!=0 && y+2<Height)
+            {
+                GridCell support=WaterGrid[bottom+2*Width];
+                if(wall.IsActive!=0 || support.IsActive==0 || Materials[support.MaterialIndex].SimulationKind!=SimulationKindSolid ||
+                    support.Temperature<=m.TransitionAboveTemperature+SurfaceFilmTemperatureOffset)
+                {liquid.BodyId &= ~VapourCushionMarker;WaterGrid[bottom]=liquid;}
+            }
+            if(liquid.IsActive==0 || (m.Flags & MaterialFlagSurfaceBoiling)==0 || wall.IsActive==0 ||
+                s.SimulationKind!=SimulationKindSolid || s.ThermalConductivity<=.5 ||
+                wall.Temperature<=m.TransitionAboveTemperature+SurfaceFilmTemperatureOffset ||
+                liquid.Temperature<m.TransitionAboveTemperature-.001 || liquid.Lifetime<=0) continue;
+            uint top=y,depth=1;
+            [loop] while(top>0 && depth<=SurfaceFilmMaximumDepth)
+            {
+                GridCell above=WaterGrid[(top-1)*Width+x];
+                if(above.IsActive==0) break;
+                if(above.MaterialIndex!=liquid.MaterialIndex) {depth=SurfaceFilmMaximumDepth+1;break;}
+                top--;depth++;
+            }
+            if(top==0 || depth>SurfaceFilmMaximumDepth) continue;
+            bool allowed=true;
+            [loop] for(uint row=top;row<=y;row++)
+                if(!FilterAllows(row*Width+x,liquid.MaterialIndex,SimulationKindLiquid) ||
+                   !FilterAllows((row-1)*Width+x,liquid.MaterialIndex,SimulationKindLiquid))allowed=false;
+            if(!allowed)continue;
+            [loop] for(uint row=top;row<=y;row++)
+            {
+                GridCell lifted=WaterGrid[row*Width+x];
+                lifted.VelocityY=-20;lifted.RestFrames=0;lifted.Pressure=0;lifted.BodyId|=VapourCushionMarker;
+                WaterGrid[(row-1)*Width+x]=lifted;
+                BoilingCellMaterials[(row-1)*Width+x]=lifted.MaterialIndex;
+            }
+            WaterGrid[bottom]=CreateEmptyCell();
+            BoilingCellMaterials[bottom]=0;
+            InterlockedOr(BoilingSummary[0],PhaseSummaryPhaseOccurred | PhaseSummaryTargetCellular | PhaseSummaryTouchesLiquid);
+        }
+        return;
+    }
     if (GasSubStep > 2)
     {
         uint span = GasSubStep * 2;

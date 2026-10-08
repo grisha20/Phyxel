@@ -711,8 +711,16 @@ internal static class PhaseAcceptanceVerifier
             PhaseTransitionSummaryFlags.TargetGas |
             PhaseTransitionSummaryFlags.TouchesSolid,
         AcceptanceScenarioMode.WaterIceSteam or
-        AcceptanceScenarioMode.WaterIceSteamMotion or
         AcceptanceScenarioMode.WaterIceSteamV5RoundTrip =>
+            PhaseTransitionSummaryFlags.PhaseOccurred |
+            PhaseTransitionSummaryFlags.TargetCellular |
+            PhaseTransitionSummaryFlags.TargetLiquid |
+            PhaseTransitionSummaryFlags.TargetGas |
+            PhaseTransitionSummaryFlags.TouchesLiquid |
+            PhaseTransitionSummaryFlags.TouchesSolid |
+            // Freezing targets core:ice, which is a movable density body.
+            PhaseTransitionSummaryFlags.TargetMovableSolid,
+        AcceptanceScenarioMode.WaterIceSteamMotion =>
             PhaseTransitionSummaryFlags.PhaseOccurred |
             PhaseTransitionSummaryFlags.TargetCellular |
             PhaseTransitionSummaryFlags.TargetLiquid |
@@ -724,7 +732,8 @@ internal static class PhaseAcceptanceVerifier
             PhaseTransitionSummaryFlags.TargetCellular |
             PhaseTransitionSummaryFlags.TargetGas |
             PhaseTransitionSummaryFlags.TouchesLiquid |
-            PhaseTransitionSummaryFlags.TouchesSolid,
+            PhaseTransitionSummaryFlags.TouchesSolid |
+            PhaseTransitionSummaryFlags.TargetMovableSolid,
         _ => PhaseTransitionSummaryFlags.None
     };
 

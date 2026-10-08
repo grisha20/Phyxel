@@ -19,6 +19,9 @@ struct GridCell
 // Free liquid/gas fuel only; distinct from rigid-body IDs and FIRE markers.
 // Phase progress stays entirely in Lifetime. Clear this bit on phase changes.
 static const uint FuelBurningMarker = 0x20000000u;
+// Water owns this tag only while a resolved vapour gap supports its column.
+// Phase conversion clears BodyId; solids never consult this liquid tag.
+static const uint VapourCushionMarker = 0x40000000u;
 
 // One cell of the coarse air field. Blocked is a float rather than a bool or a
 // uint so the struct stays 16 bytes with natural alignment in both HLSL and C#.
@@ -243,6 +246,11 @@ static const uint MaterialFlagThermalCooler = 1u << 7;
 static const uint MaterialFlagThermalCarbonDioxide = 1u << 8;
 static const uint MaterialFlagFusionEnthalpy = 1u << 10;
 static const uint MaterialFlagLiquidConvection = 1u << 11;
+static const uint MaterialFlagSurfaceBoiling = 1u << 17;
+// Resolved-grid closures, not universal Leidenfrost constants or SI lengths.
+static const float SurfaceFilmTemperatureOffset = 200.0;
+static const float SurfaceFilmHeatFraction = 0.12;
+static const uint SurfaceFilmMaximumDepth = 12;
 static const uint MaterialFlagDensityBody = 1u << 12;
 static const uint MaterialFlagPersistentCoalIgnition = 1u << 9;
 static const uint PhaseSummaryPhaseOccurred = 1u << 0;

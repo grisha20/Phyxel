@@ -157,6 +157,53 @@ bool TransferAbsorbedFuel(inout GridCell first, inout GridCell second,uint first
 // Disjoint adjacent pairs: horizontal-even, vertical-even, horizontal-odd,
 // vertical-odd. No cell is written by two invocations, so shared water cannot
 // be spent twice. Each face is visited every four fixed thermal ticks.
+bool EmitSurfaceVapour(inout GridCell first, inout GridCell second, uint a, uint b)
+{
+    bool firstLiquid=first.IsActive!=0 && (Materials[first.MaterialIndex].Flags & MaterialFlagSurfaceBoiling)!=0;
+    bool secondLiquid=second.IsActive!=0 && (Materials[second.MaterialIndex].Flags & MaterialFlagSurfaceBoiling)!=0;
+    if(firstLiquid==secondLiquid) return false;
+    GridCell liquid=first, outlet=second;
+    if(!firstLiquid) {liquid=second;outlet=first;}
+    MaterialProperties m=Materials[liquid.MaterialIndex];
+    uint source=firstLiquid?a:b, target=firstLiquid?b:a;
+    if(!FilterPathAllows(source,target,m.TransitionAboveMaterialIndex,SimulationKindGas,ContactWidth))return false;
+    if(liquid.Lifetime<=0 || liquid.Mass<=0 ||
+        (outlet.IsActive!=0 && outlet.MaterialIndex!=m.TransitionAboveMaterialIndex)) return false;
+    float energy=liquid.Mass*CellSpecificEnthalpy(liquid);
+    float releasedSpecific=m.HeatCapacity*m.TransitionAboveTemperature+m.TransitionAboveLatentHeat;
+    // The ordinary phase pass owns a completely paid parcel, including any
+    // sensible superheat. Splitting it here would discard the residual heat
+    // when no liquid mass remains and bypass normal phase normalization.
+    if(energy>=liquid.Mass*releasedSpecific) return false;
+    float amount=min(liquid.Mass,liquid.Mass*liquid.Lifetime/m.TransitionAboveLatentHeat);
+    // Match the gas transport resolution, and never create a liquid remainder
+    // below the transport resolution. Keep its paid heat until a
+    // resolvable portion or the complete phase transition can be emitted.
+    if(amount<liquid.Mass) amount=min(amount,max(0,liquid.Mass-.0005));
+    if(amount<=0 || (amount<.0005 && outlet.IsActive==0)) return false;
+    GridCell vapour=CreateEmptyCell();
+    vapour.MaterialIndex=m.TransitionAboveMaterialIndex;vapour.IsActive=1;
+    vapour.Mass=amount;
+    vapour=SetCellSpecificEnthalpy(vapour,releasedSpecific);
+    if(outlet.IsActive!=0)
+    {
+        float total=outlet.Mass*CellSpecificEnthalpy(outlet)+amount*releasedSpecific;
+        outlet.Mass+=amount;
+        outlet=SetCellSpecificEnthalpy(outlet,total/outlet.Mass);
+        outlet.RestFrames=0;
+    }
+    else outlet=vapour;
+    liquid.Mass-=amount;
+    if(liquid.Mass>0) liquid=SetCellSpecificEnthalpy(liquid,(energy-amount*releasedSpecific)/liquid.Mass);
+    else liquid=CreateEmptyCell();
+    liquid.RestFrames=0;
+    first=liquid;second=outlet;
+    if(!firstLiquid) {first=outlet;second=liquid;}
+    InterlockedOr(ContactSummary[0],PhaseSummaryPhaseOccurred | PhaseSummaryTargetGas |
+        PhaseSummaryTargetCellular | PhaseSummaryTouchesLiquid);
+    return true;
+}
+
 [numthreads(16, 16, 1)]
 void CSMoisture(uint3 id : SV_DispatchThreadID)
 {
@@ -170,6 +217,19 @@ void CSMoisture(uint3 id : SV_DispatchThreadID)
     if(q.x>=ContactWidth || q.y>=ContactHeight) return;
     uint a=p.y*ContactWidth+p.x, b=q.y*ContactWidth+q.x;
     GridCell first=Grid[a], second=Grid[b];
+    if(!capillary)
+    {
+        bool emptyA=first.IsActive==0,emptyB=second.IsActive==0;
+        if(EmitSurfaceVapour(first,second,a,b))
+        {
+            Grid[a]=first; Grid[b]=second;
+            CellMaterials[a]=first.IsActive!=0?first.MaterialIndex:0;
+            CellMaterials[b]=second.IsActive!=0?second.MaterialIndex:0;
+            if(emptyA) GasMotion[a]=(GasMotionState)0;
+            if(emptyB) GasMotion[b]=(GasMotionState)0;
+            return;
+        }
+    }
     if(capillary)
     {
         // Fast longitudinal redistribution only inside a continuous porous

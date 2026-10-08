@@ -374,7 +374,8 @@ public sealed class SimulationStateSerializer
         foreach (GridCell cell in grid)
         {
             if (cell.IsActive != 0 && cell.MaterialIndex < materialRegistry.Count &&
-                (materialRegistry[cell.MaterialIndex].LiquidContactTransition is not null || materialRegistry[cell.MaterialIndex].Moisture is not null))
+                (materialRegistry[cell.MaterialIndex].LiquidContactTransition is not null || materialRegistry[cell.MaterialIndex].Moisture is not null ||
+                 (materialRegistry[cell.MaterialIndex].Properties.Flags & (uint)MaterialFlags.SurfaceBoiling) != 0))
             {
                 return true;
             }

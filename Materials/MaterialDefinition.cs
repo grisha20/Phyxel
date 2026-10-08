@@ -62,7 +62,9 @@ public enum MaterialFlags : uint
     // Elapsed burning time in Lifetime; opt-in contact front along fixed fuel.
     ProgressiveIgnition = 1u << 15,
     // Euclidean fast front; spreadRate is fine cells/s for this opt-in model.
-    RadialIgnition = 1u << 16
+    RadialIgnition = 1u << 16,
+    // Paid partial surface evaporation and resolved vapour-cushion contact.
+    SurfaceBoiling = 1u << 17
 }
 
 public static class CoreMaterialIds

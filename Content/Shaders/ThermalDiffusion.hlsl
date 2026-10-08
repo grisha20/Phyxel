@@ -42,6 +42,31 @@ float EffectiveCapacity(GridCell cell)
     return CellEffectiveCapacity(cell);
 }
 
+#include "BulkThermalGeometry.hlsli"
+
+bool ThinOpenBoilingLiquid(uint index, GridCell cell)
+{
+    if ((Materials[cell.MaterialIndex].Flags & MaterialFlagSurfaceBoiling) == 0) return false;
+    uint y=index/ThermalWidth;
+    [loop] for(uint depth=1;depth<=SurfaceFilmMaximumDepth;depth++)
+    {
+        if(y<depth) return false;
+        GridCell above=SourceGrid[index-depth*ThermalWidth];
+        if(above.IsActive==0 || Materials[above.MaterialIndex].SimulationKind==SimulationKindGas) return true;
+        if(above.MaterialIndex!=cell.MaterialIndex) return false;
+    }
+    return false;
+}
+
+bool FilmSurface(GridCell liquid, uint liquidIndex, GridCell solid)
+{
+    MaterialProperties m=Materials[liquid.MaterialIndex], s=Materials[solid.MaterialIndex];
+    return s.SimulationKind==SimulationKindSolid && s.ThermalConductivity>.5 &&
+        solid.Temperature>m.TransitionAboveTemperature+SurfaceFilmTemperatureOffset &&
+        liquid.Temperature>=m.TransitionAboveTemperature-.001 &&
+        ThinOpenBoilingLiquid(liquidIndex,liquid);
+}
+
 bool IsSameGas(GridCell cell, GridCell neighbor)
 {
     MaterialProperties material = Materials[cell.MaterialIndex];
@@ -150,9 +175,18 @@ float ContactHeatFlow(
     // max(kA,kB) makes the contact limit symmetric. Adjacent + interior
     // budgets still sum to <=1, so a dense plate cannot overshoot its inputs.
     float boundedExchange = contactConductivity * exchangeFraction;
+    if (wetSurface &&
+        ((Materials[cell.MaterialIndex].SimulationKind == SimulationKindLiquid && FilmSurface(cell,index,neighbor)) ||
+         (Materials[neighbor.MaterialIndex].SimulationKind == SimulationKindLiquid && FilmSurface(neighbor,neighborIndex,cell))))
+        boundedExchange *= SurfaceFilmHeatFraction;
     float maximumConductivity = max(conductivityA, conductivityB);
     if (maximumConductivity > 1)
         boundedExchange = min(MaximumExchangeFraction - .20 * saturate(maximumConductivity - 1), boundedExchange);
+    // A newly connected wet surface shares its budget with bulk and radiation.
+    bool surfaceA = (BulkDegrees[index] & BulkSurfaceDegreeFlag)!=0;
+    bool surfaceB = (BulkDegrees[neighborIndex] & BulkSurfaceDegreeFlag)!=0;
+    if((surfaceA || surfaceB) && (!wetSurface || maximumConductivity>.8))
+        boundedExchange=min(boundedExchange,.48);
     float edgeCoefficient =
         min(capacity, neighborCapacity) * boundedExchange *
         contactWeight / (gasSurface ? 6 : 4);
@@ -250,7 +284,6 @@ void CSRadiantDegrees(uint3 id : SV_DispatchThreadID)
     RadiantDegreeOutput[index] = cell.IsActive == 0 ? 0 : RadiantExchange(cell, id.xy, true);
 }
 
-#include "BulkThermalGeometry.hlsli"
 
 // Accelerate heat resolution inside thick high-conductivity painted walls.
 // The homogeneous interior guard excludes wet/gas surface diagonals and
@@ -258,7 +291,8 @@ void CSRadiantDegrees(uint3 id : SV_DispatchThreadID)
 float BulkHeatFlow(GridCell cell, uint2 coordinate)
 {
     MaterialProperties material = Materials[cell.MaterialIndex];
-    uint degree = BulkDegrees[coordinate.y * ThermalWidth + coordinate.x];
+    uint taggedDegree = BulkDegrees[coordinate.y * ThermalWidth + coordinate.x];
+    uint degree=taggedDegree & BulkDegreeMask;
     if (material.SimulationKind != SimulationKindSolid || material.ThermalConductivity <= .5 ||
         degree == 0) return 0;
     float conductivity = pow(saturate((material.ThermalConductivity - .5) * 2), 2);
@@ -275,17 +309,48 @@ float BulkHeatFlow(GridCell cell, uint2 coordinate)
             int2 p = int2(coordinate) + step * distance;
             if (p.x < 1 || p.y < 1 || p.x + 1 >= (int)ThermalWidth || p.y + 1 >= (int)ThermalHeight) break;
             GridCell other = SourceGrid[p.y * ThermalWidth + p.x];
-            uint otherDegree = BulkDegrees[p.y * ThermalWidth + p.x];
+            uint taggedOtherDegree = BulkDegrees[p.y * ThermalWidth + p.x];
+            uint otherDegree=taggedOtherDegree & BulkDegreeMask;
             if (other.IsActive == 0 || other.MaterialIndex != cell.MaterialIndex) continue;
             if (otherDegree == 0 || abs(other.Temperature - cell.Temperature) < .000001) continue;
             // max(endpoint degrees) is symmetric, while each endpoint's
             // incident sum is <= its bounded interior budget.
+            float pairFraction=fraction;
+            if(((taggedDegree | taggedOtherDegree) & BulkSurfaceDegreeFlag)!=0)
+                // Wet boundary connects directly to the metal's interior.
+                // Preserve k ordering without applying the dry interior's
+                // additional squared mobility reduction to this boundary.
+                // Local <=.80, wet bulk <=.20 and surface radiation are
+                // bounded separately at the high-k interface above.
+                pairFraction=.20*saturate(material.ThermalConductivity);
             if (HasBulkPath(int2(coordinate), p, cell.MaterialIndex)) heat +=
-                fraction / max(degree, otherDegree) * min(EffectiveCapacity(cell), EffectiveCapacity(other)) *
+                pairFraction / max(degree, otherDegree) * min(EffectiveCapacity(cell), EffectiveCapacity(other)) *
                 (other.Temperature - cell.Temperature);
         }
     }
     return heat;
+}
+
+float FilmGapHeatFlow(GridCell cell, uint2 p)
+{
+    bool liquid=(Materials[cell.MaterialIndex].Flags & MaterialFlagSurfaceBoiling)!=0;
+    bool solid=Materials[cell.MaterialIndex].SimulationKind==SimulationKindSolid;
+    if(!liquid && !solid) return 0;
+    int step=liquid?1:-1;
+    int y=int(p.y)+2*step;
+    if(y<0 || y>=(int)ThermalHeight) return 0;
+    uint otherIndex=y*ThermalWidth+p.x, gapIndex=(int(p.y)+step)*ThermalWidth+p.x;
+    GridCell gap=SourceGrid[gapIndex], other=SourceGrid[otherIndex];
+    if(gap.IsActive!=0 || other.IsActive==0) return 0;
+    GridCell water=cell, wall=other;
+    if(!liquid) {water=other;wall=cell;}
+    uint waterIndex=liquid?p.y*ThermalWidth+p.x:otherIndex;
+    if(!FilmSurface(water,waterIndex,wall)) return 0;
+    float ka=Materials[cell.MaterialIndex].ThermalConductivity,kb=Materials[other.MaterialIndex].ThermalConductivity;
+    if(ka<=0 || kb<=0) return 0;
+    float coefficient=min(EffectiveCapacity(cell),EffectiveCapacity(other))*
+        (2*ka*kb/(ka+kb))*min(MaximumExchangeFraction,ThermalExchangeRate*ThermalDeltaTime)*SurfaceFilmHeatFraction/4;
+    return coefficient*(other.Temperature-cell.Temperature);
 }
 
 bool IsEmptyAt(int2 coordinate)
@@ -384,6 +449,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     heatFlow += RadiantExchange(cell, coordinate, false);
     heatFlow += BulkHeatFlow(cell, coordinate);
+    heatFlow += FilmGapHeatFlow(cell, coordinate);
     MaterialProperties material = Materials[cell.MaterialIndex];
     float ambientHeat = 0;
     float deviceHeat = 0;

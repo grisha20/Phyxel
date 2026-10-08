@@ -1,5 +1,7 @@
 # Вода — `core:water`
 
+- [QH: мокрая горячая поверхность, капля и конечная энергия](../shared/WATER_QUENCH_CONTRACT.md), [новые проверки](../shared/WATER_QUENCH_RESULTS.md).
+
 - [QW: капля и большая порция на горячем чугуне](../shared/HOT_SURFACE_WATER_OBSERVATION.md): новые наблюдения, физика прежняя.
 
 - [PC: замкнутый напор и отдельное включение разрушения](../shared/PRESSURE_CONFINEMENT_CONTRACT.md), [новые проверки](../shared/PRESSURE_CONFINEMENT_RESULTS.md).

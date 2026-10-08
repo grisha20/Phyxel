@@ -374,6 +374,10 @@ internal static partial class MaterialFileLoader
         MaterialFlags flags = ParseFlags(document.Flags, kind);
         if ((flags & MaterialFlags.LiquidConvection) != 0 && kind != MaterialSimulationKind.Liquid)
             throw new InvalidDataException("liquid-convection requires a liquid.");
+        if ((flags & MaterialFlags.SurfaceBoiling) != 0 &&
+            (kind != MaterialSimulationKind.Liquid || (flags & MaterialFlags.PhaseEnthalpy) == 0 ||
+             transitions?.Above is not { LatentHeat: > 0 }))
+            throw new InvalidDataException("surface-boiling requires an enthalpy liquid with positive vaporization heat.");
         MaterialCombustionDefinition? combustion = ParseCombustion(
             document.Combustion,
             id,
@@ -1356,6 +1360,7 @@ internal static partial class MaterialFileLoader
                     ? MaterialFlags.NonAbsorbableLiquid
                     : throw new InvalidDataException("non-absorbable-liquid requires a liquid."),
                 "liquid-convection" => MaterialFlags.LiquidConvection,
+                "surface-boiling" => MaterialFlags.SurfaceBoiling,
                 _ => throw new InvalidDataException($"Неизвестный flag '{value}'.")
             };
             if ((flags & flag) != 0)

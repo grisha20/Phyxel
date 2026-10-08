@@ -18,7 +18,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     GridCell cell = SourceGrid[index];
     uint degree = 0;
     if (cell.IsActive != 0 && Materials[cell.MaterialIndex].SimulationKind == SimulationKindSolid &&
-        Materials[cell.MaterialIndex].ThermalConductivity > .5 && IsBulkInterior(int2(id.xy), cell.MaterialIndex))
+        Materials[cell.MaterialIndex].ThermalConductivity > .5 && IsBulkParticipant(int2(id.xy), cell.MaterialIndex))
     {
         [unroll] for (int direction = 0; direction < 4; direction++)
         {
@@ -28,9 +28,10 @@ void CSMain(uint3 id : SV_DispatchThreadID)
             {
                 int2 p = int2(id.xy) + step * distance;
                 if (p.x < 1 || p.y < 1 || p.x+1 >= (int)ThermalWidth || p.y+1 >= (int)ThermalHeight) break;
-                if (IsBulkInterior(p, cell.MaterialIndex) && HasBulkPath(int2(id.xy), p, cell.MaterialIndex)) degree++;
+                if (IsBulkParticipant(p, cell.MaterialIndex) && HasBulkPath(int2(id.xy), p, cell.MaterialIndex)) degree++;
             }
         }
     }
+    if(degree!=0 && !IsBulkInterior(int2(id.xy),cell.MaterialIndex))degree|=BulkSurfaceDegreeFlag;
     Degrees[index] = degree;
 }

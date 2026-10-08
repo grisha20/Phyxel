@@ -145,13 +145,13 @@ internal static class FurnaceSensorRegressionVerifier
                 rows.Add(row); Console.WriteLine("PHYXEL_SENSOR_ROW " + JsonSerializer.Serialize(row));
                 if (frame % (fps * 10) == 0)
                 {
+                    File.WriteAllBytes(Path.Combine(dir, $"grid-{frame / fps}.bin"), MemoryMarshal.AsBytes(grid.AsSpan()).ToArray());
                     SimulationScreenshotWriter.Save(r, Path.Combine(dir, $"world-{frame / fps}.png"));
                     settings.ShowAirField = true; coordinator.DispatchFrame(settings, [], 0);
                     SimulationScreenshotWriter.Save(r, Path.Combine(dir, $"air-{frame / fps}.png"));
                     settings.ShowAirField = false;
                     if (observationOnly)
                     {
-                        File.WriteAllBytes(Path.Combine(dir, $"grid-{frame / fps}.bin"), MemoryMarshal.AsBytes(grid.AsSpan()).ToArray());
                         Console.WriteLine("PHYXEL_SENSOR_OBSERVATION_ONLY save/load assertions not run");
                         if (frame % 4 == 0) yield return r;
                         continue;
@@ -166,7 +166,23 @@ internal static class FurnaceSensorRegressionVerifier
                         Path.Combine(dir, $"snapshot-{frame / fps}.json"), registry)).GetAwaiter().GetResult()!;
                     var copy = roundTrip.World!;
                     bool Same(byte[]? a, byte[]? b) => (a ?? []).AsSpan().SequenceEqual(b ?? []);
-                    if (!Same(snapshot!.Grid, copy.Grid) || !Same(snapshot.Air, copy.Air) ||
+                    byte[] CanonicalGrid(byte[] bytes)
+                    {
+                        // EncodeSceneSnapshot explicitly clears inactive parcels and
+                        // the unused retained-liquid ID. Compare physical active
+                        // fields exactly, not scratch left in an empty GPU parcel.
+                        byte[] canonical=(byte[])bytes.Clone();
+                        var cells=MemoryMarshal.Cast<byte,GridCell>(canonical);
+                        int cleared=0;
+                        foreach(ref var c in cells)
+                        {
+                            if(c.IsActive==0) {if(!c.Equals(default(GridCell)))cleared++;c=default;}
+                            else if(c.FuelMass<=0)c.RetainedLiquidMaterialIndex=0;
+                        }
+                        Console.WriteLine($"PHYXEL_SENSOR_CANONICAL inactiveScratch={cleared}");
+                        return canonical;
+                    }
+                    if (!Same(CanonicalGrid(snapshot!.Grid), CanonicalGrid(copy.Grid)) || !Same(snapshot.Air, copy.Air) ||
                         !Same(snapshot.GasMotion, copy.GasMotion) || !Same(snapshot.Oxidizer, copy.Oxidizer) ||
                         !Same(snapshot.AirThermal, copy.AirThermal) || !Same(snapshot.ReactionPending, copy.ReactionPending) ||
                         !Same(snapshot.ReactionPulse, copy.ReactionPulse) || !Same(snapshot.Filters, copy.Filters) ||

@@ -1834,7 +1834,8 @@ public sealed class SimulationDispatchCoordinator
                 .Properties.SimulationKind;
             contactTransitionPotential |=
                 materialRegistry[command.MaterialIndex].LiquidContactTransition is not null ||
-                materialRegistry[command.MaterialIndex].Moisture is not null;
+                materialRegistry[command.MaterialIndex].Moisture is not null ||
+                (materialRegistry[command.MaterialIndex].Properties.Flags & (uint)MaterialFlags.SurfaceBoiling) != 0;
             if (kind == MaterialSimulationKind.Solid)
             {
                 solidMatter = true;
@@ -1963,6 +1964,7 @@ public sealed class SimulationDispatchCoordinator
     private void DispatchWaterConvection(GpuSimulationResources resources, uint tickIndex)
     {
         DeviceContext context = resources.Context;
+        context.ComputeShader.SetShaderResource(15, resources.Filters.View);
         SimulationFrameConstants constants = new()
         {
             Width = (uint)resources.Width, Height = (uint)resources.Height,
@@ -1972,6 +1974,13 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
         context.ComputeShader.SetShaderResource(0, resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.ReadUnorderedView);
+        constants.GasSubStep=2;
+        context.ComputeShader.SetUnorderedAccessViews(1,resources.ContactSummary.UnorderedView,resources.CellMaterials.UnorderedView);
+        context.UpdateSubresource(ref constants,resources.FrameConstants);
+        context.Dispatch(DivideRoundUp(resources.Width,16),1,1);
+        context.ComputeShader.SetUnorderedAccessView(1,null);
+        context.ComputeShader.SetUnorderedAccessView(2,null);
+        constants.GasSubStep=0;
         for (uint pass = 0; pass < 4; pass++)
         {
             uint parity = (tickIndex & 1) == 0 ? pass : 3 - pass;

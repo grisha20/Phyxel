@@ -1,5 +1,7 @@
 # Медь
 
+- [QH: мокрая горячая поверхность, капля и конечная энергия](../shared/WATER_QUENCH_CONTRACT.md), [новые проверки](../shared/WATER_QUENCH_RESULTS.md).
+
 - [BD: общий перенос осколков и новые проверки](../shared/BLAST_DEBRIS_RESULTS.md).
 
 - [PC: замкнутый напор и отдельное включение разрушения](../shared/PRESSURE_CONFINEMENT_CONTRACT.md), [новые проверки](../shared/PRESSURE_CONFINEMENT_RESULTS.md).

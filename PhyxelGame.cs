@@ -315,6 +315,12 @@ public sealed class PhyxelGame : Game
             Exit();
             return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_WATER_QUENCH") == "1")
+        {
+            try { WaterQuenchRegressionVerifier.Run(dispatchCoordinator, materialRegistry); }
+            catch(Exception exception){Console.WriteLine($"PHYXEL_QH_FAILED {exception}");Environment.ExitCode=1;}
+            Exit();return;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_REACTION_PULSE") == "1")
         {
             try { ReactionPulseRegressionVerifier.Run(dispatchCoordinator,materialRegistry); }

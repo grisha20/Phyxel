@@ -1,5 +1,7 @@
 # Сталь — `core:steel`
 
+- [QH: мокрая горячая поверхность, капля и конечная энергия](../shared/WATER_QUENCH_CONTRACT.md), [новые проверки](../shared/WATER_QUENCH_RESULTS.md).
+
 - [BD: общий перенос осколков и новые проверки](../shared/BLAST_DEBRIS_RESULTS.md).
 
 - [RS: локальный прорыв, давление и длинные печи](../shared/PRESSURE_RELIABILITY_RESULTS.md).

@@ -1987,6 +1987,16 @@ void ResolveVerticalPair(uint2 upperCoordinate)
     uint lowerMaterial = CellMaterials[lowerIndex];
     uint upperKind = CellKindFromMaterial(upperMaterial);
     uint lowerKind = CellKindFromMaterial(lowerMaterial);
+    [branch] if(upperKind==SimulationKindLiquid && (Grid[upperIndex].BodyId & VapourCushionMarker)!=0 &&
+        lowerKind==SimulationKindNone && lowerIndex+Width<Width*Height &&
+        (Materials[upperMaterial].Flags & MaterialFlagSurfaceBoiling)!=0)
+    {
+        GridCell wall=Grid[lowerIndex+Width];
+        if(wall.IsActive!=0 && Materials[wall.MaterialIndex].SimulationKind==SimulationKindSolid &&
+            Materials[wall.MaterialIndex].ThermalConductivity>.5 &&
+            wall.Temperature>Materials[upperMaterial].TransitionAboveTemperature+SurfaceFilmTemperatureOffset)
+            return;
+    }
     if ((GasSubStep & 0x80000000u) != 0 && !IsPressurePowder(upperMaterial)) return;
     if (upperKind == SimulationKindLiquid && lowerKind == SimulationKindLiquid &&
         upperMaterial == lowerMaterial && ConsolidateLiquidDown(upperIndex, lowerIndex))
