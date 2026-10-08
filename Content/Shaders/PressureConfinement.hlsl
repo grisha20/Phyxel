@@ -14,12 +14,17 @@ uint AH(){return (Height+AirCellSize-1)/AirCellSize;}
 // Root zero is the ambient boundary, node indices are offset by one.
 uint Root(uint i)
 {
+    // Reading an ancestor does not mutate it. A stale ancestor remains in
+    // the same component; Join still validates the actual root with CAS.
     [loop]for(uint step=0;step<32;step++)
-    {uint next;InterlockedOr(Parents[i],0,next);if(next==i)return i;i=next;}
+    {uint next=Parents[i];if(next==i)return i;i=next;}
     return i;
 }
 void Join(uint a,uint b)
 {
+    // Parents only move toward smaller indices; sharing a parent proves the
+    // edge is already connected. Avoid atomic root walks on settled edges.
+    if(Parents[a]==Parents[b])return;
     [loop]for(uint attempt=0;attempt<32;attempt++)
     {
         a=Root(a);b=Root(b);if(a==b)return;
@@ -62,6 +67,8 @@ void CSUnion(uint3 id:SV_DispatchThreadID)
 void CSCompress(uint3 id:SV_DispatchThreadID)
 {
     if(id.x>AW()*AH())return;
+    uint parent=Parents[id.x];
+    if(parent==0 || parent==id.x)return;
     // Atomic min avoids racing with a concurrent compression of an ancestor.
     uint ignored;InterlockedMin(Parents[id.x],Root(id.x),ignored);
 }

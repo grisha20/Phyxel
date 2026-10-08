@@ -1,5 +1,7 @@
 # Металл — `core:metal`
 
+- [BD: перенос многослойной оболочки и FPS](../shared/BLAST_DEBRIS_RESULTS.md), [контракт](../shared/BLAST_DEBRIS_CONTRACT.md).
+
 - [RS: локальный прорыв, давление и длинные печи](../shared/PRESSURE_RELIABILITY_RESULTS.md).
 
 - [PC: замкнутый напор и отдельное включение разрушения](../shared/PRESSURE_CONFINEMENT_CONTRACT.md), [новые проверки](../shared/PRESSURE_CONFINEMENT_RESULTS.md).

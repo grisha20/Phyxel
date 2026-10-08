@@ -177,6 +177,18 @@ bool FreeTarget(int2 q,uint source,uint material)
     return FilterAllows(i,material,SimulationKindSolid) &&
         (target.IsActive==0 || (gas && FilterAllows(source,target.MaterialIndex,SimulationKindGas)));
 }
+bool CoMovingFragment(int2 q,float2 v)
+{
+    if(any(q<0)||q.x>=int(Width)||q.y>=int(Height))return false;
+    GridCell other=SourceGrid[q.y*Width+q.x];
+    return Fragment(other) && FilterAllows(q.y*Width+q.x,other.MaterialIndex,SimulationKindSolid) &&
+        dot(v,float2(other.VelocityX,other.VelocityY))>0;
+}
+bool TravelTarget(int2 q,uint source,uint material,float2 v)
+{
+    return FreeTarget(q,source,material) || (CoMovingFragment(q,v) &&
+        FilterAllows(q.y*Width+q.x,material,SimulationKindSolid));
+}
 [numthreads(16,16,1)]
 void CSPlan(uint3 p:SV_DispatchThreadID)
 {
@@ -192,9 +204,10 @@ void CSPlan(uint3 p:SV_DispatchThreadID)
     [loop]for(int k=1;k<=steps;k++)
     {
         int2 next=int2(p.xy)+int2(round(float2(step)*float(k)/float(steps)));
-        if(!FreeTarget(next,i,c.MaterialIndex))break;
+        if(!TravelTarget(next,i,c.MaterialIndex,v))break;
         if(next.x!=previous.x && next.y!=previous.y &&
-            (!FreeTarget(int2(next.x,previous.y),i,c.MaterialIndex)||!FreeTarget(int2(previous.x,next.y),i,c.MaterialIndex)))break;
+            (!TravelTarget(int2(next.x,previous.y),i,c.MaterialIndex,v)||!TravelTarget(int2(previous.x,next.y),i,c.MaterialIndex,v)))
+            break;
         q=next;previous=next;
     }
     // Slow debris settles as loose grains instead of retaining rigid shape.
@@ -213,15 +226,35 @@ void CSPlan(uint3 p:SV_DispatchThreadID)
     uint target=q.y*Width+q.x,ignored;
     Plans[i]=target+1;InterlockedMin(Claims[target],i+1,ignored);
 }
+// The winning plans form disjoint chains/permutations (one owner per target).
+// A chain moves only if every occupied destination vacates in this same pass.
+// Its single displaced gas/empty packet goes to the unclaimed tail. Never
+// overwrite a stationary wall, failed dependency or losing claimant.
+bool WinningChain(uint source,out uint terminal)
+{
+    uint node=source;terminal=source;
+    [loop]for(uint depth=0;depth<64;depth++)
+    {
+        uint plan=SourcePlans[node];
+        if(plan==0||plan==BlockedFragmentPlan)return false;
+        uint target=plan-1;
+        if(SourceClaims[target]!=node+1)return false;
+        if(!Fragment(SourceGrid[target])){terminal=target;return true;}
+        node=target;
+        if(node==source)return true;
+    }
+    return false;
+}
 [numthreads(16,16,1)]
 void CSApply(uint3 p:SV_DispatchThreadID)
 {
     if(p.x>=Width||p.y>=Height)return;
     uint i=p.y*Width+p.x;GridCell c=SourceGrid[i];GasMotionState motion=SourceMotion[i];
     uint incoming=SourceClaims[i];
-    if(incoming!=0xffffffffu){c=SourceGrid[incoming-1];motion=(GasMotionState)0;}
-    else if(SourcePlans[i]!=0 && SourcePlans[i]!=BlockedFragmentPlan && SourceClaims[SourcePlans[i]-1]==i+1)
-    {uint target=SourcePlans[i]-1;c=SourceGrid[target];motion=SourceMotion[target];}
+    uint terminal;
+    if(incoming!=0xffffffffu && WinningChain(incoming-1,terminal)){c=SourceGrid[incoming-1];motion=(GasMotionState)0;}
+    else if(WinningChain(i,terminal))
+    {c=SourceGrid[terminal];motion=SourceMotion[terminal];}
     else if(Fragment(c) && SourcePlans[i]==BlockedFragmentPlan){c.VelocityX*=.85;c.VelocityY*=.85;}
     DestinationGrid[i]=c;DestinationMotion[i]=motion;
 }

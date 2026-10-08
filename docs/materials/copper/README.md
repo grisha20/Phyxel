@@ -1,5 +1,7 @@
 # Медь
 
+- [BD: общий перенос осколков и новые проверки](../shared/BLAST_DEBRIS_RESULTS.md).
+
 - [PC: замкнутый напор и отдельное включение разрушения](../shared/PRESSURE_CONFINEMENT_CONTRACT.md), [новые проверки](../shared/PRESSURE_CONFINEMENT_RESULTS.md).
 
 - [PV — сброс давления через выход](../shared/PRESSURE_VENT_CONTRACT.md),

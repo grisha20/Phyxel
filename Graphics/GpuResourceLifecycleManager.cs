@@ -102,7 +102,13 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         string fragmentShader = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_PRESSURE_SHELL")=="1"
             ? Environment.GetEnvironmentVariable("PHYXEL_FRAGMENT_BASELINE_SHADER")??"PressureFracture.hlsl"
             : "PressureFracture.hlsl";
+        if(Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SAVED_BLAST")=="1" &&
+           Environment.GetEnvironmentVariable("PHYXEL_BLAST_PROBES")=="1")
+            fragmentShader=Environment.GetEnvironmentVariable("PHYXEL_BLAST_REFERENCE")??"PressureFracture.hlsl";
         if(string.IsNullOrWhiteSpace(fragmentShader))fragmentShader="PressureFracture.hlsl";
+        string transportShader = Environment.GetEnvironmentVariable("PHYXEL_VERIFY_PRESSURE_SHELL")=="1"
+            ? Environment.GetEnvironmentVariable("PHYXEL_FRAGMENT_TRANSPORT_REFERENCE")??fragmentShader
+            : fragmentShader;
         int cellCount = allocateSimulation ? checked(width * height) : 1;
         GpuBufferPair<GridCell> grid = new(Device, cellCount);
         GpuStructuredBuffer<uint> componentParents = new(Device, cellCount);
@@ -521,8 +527,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             FragmentUpdateOnlyShader = allocateSimulation ? CompileShader(fragmentShader,"CSMoveOnly") : null,
             FragmentAdvectOnlyShader = allocateSimulation ? CompileShader("PressureFracture.hlsl","CSAdvectOnly") : null,
             FractureUpdateShader = allocateSimulation ? CompileShader(fragmentShader,"CSUpdate") : null,
-            FragmentPlanShader = allocateSimulation ? CompileShader(fragmentShader,"CSPlan") : null,
-            FragmentApplyShader = allocateSimulation ? CompileShader(fragmentShader,"CSApply") : null,
+            FragmentPlanShader = allocateSimulation ? CompileShader(transportShader,"CSPlan") : null,
+            FragmentApplyShader = allocateSimulation ? CompileShader(transportShader,"CSApply") : null,
             ReactionPending = reactionPending,ReactionPulse = reactionPulse,
             ReactionPulseScratch = new(Device,airCellCount),
             ReactionPendingStaging = CreateStagingBuffer(cellCount*16),

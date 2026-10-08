@@ -2101,8 +2101,14 @@ public sealed class SimulationDispatchCoordinator
         var c = r.Context;
         c.UpdateSubresource(ref constants,r.PressureFrameConstants);
         c.ComputeShader.SetConstantBuffer(0,r.PressureFrameConstants);
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PHYXEL_FRAME_TRACE")))
+        {
+            r.FragmentTimer ??= new(r.Device); r.ConfinementTimer ??= new(r.Device);
+        }
+        r.FragmentTimer?.Begin(c);
         if(fracture && !r.LegacyFragmentDiagnostics)
         {
+            r.ConfinementTimer?.Begin(c);
             c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View);
             c.ComputeShader.SetUnorderedAccessViews(0,r.PressureRoots.UnorderedView,r.PressureLinks.UnorderedView);
             c.ComputeShader.Set(r.PressureInitializeShader);
@@ -2118,6 +2124,7 @@ public sealed class SimulationDispatchCoordinator
             }
             Unbind(c,2,2);
             c.ComputeShader.SetShaderResource(8,r.PressureRoots.View);
+            r.ConfinementTimer?.End(c);
         }
         c.ComputeShader.SetShaderResources(0,r.Grid.ReadView,r.Materials.View,r.ReactionPulse.ReadView,r.Air.View);
         if(!r.LegacyFragmentDiagnostics)c.ClearUnorderedAccessView(r.FragmentRelease.UnorderedView,new RawInt4(0,0,0,0));
@@ -2155,6 +2162,7 @@ public sealed class SimulationDispatchCoordinator
         c.ComputeShader.Set(r.FragmentApplyShader);
         c.Dispatch(DivideRoundUp(r.Width,16),DivideRoundUp(r.Height,16),1);
         Unbind(c,7,4); r.Grid.Swap();
+        r.FragmentTimer?.End(c);
     }
 
     // Consumes each reaction packet once, outside the ordinary draft projection.

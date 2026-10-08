@@ -56,3 +56,5 @@
 - [FJ: исправленный выброс и перенос осколков](FRAGMENT_JET_CONTRACT.md), [результаты и ограничения](FRAGMENT_JET_RESULTS.md).
 
 - [FS — печь с датчиками: видимое тепло и проверка FPS](FURNACE_SENSOR_HEAT_CONTRACT.md), [результаты и ограничения](FURNACE_SENSOR_HEAT_RESULTS.md).
+
+- [BD — разлёт многослойной оболочки и нагрузка разрушения](BLAST_DEBRIS_CONTRACT.md), [результаты, FPS и оставшиеся дефекты](BLAST_DEBRIS_RESULTS.md).

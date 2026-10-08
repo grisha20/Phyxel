@@ -266,6 +266,8 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? AirFacesShader { get; init; }
     public ComputeShader? AirJacobiABShader { get; init; }
     public ComputeShader? AirJacobiBAShader { get; init; }
+    internal GpuStageTimer? FragmentTimer { get; set; }
+    internal GpuStageTimer? ConfinementTimer { get; set; }
     public ComputeShader? AirProjectShader { get; init; }
     public ComputeShader? FireGlowDepositShader { get; init; }
     public ComputeShader? FireGlowDiffuseShader { get; init; }
@@ -285,6 +287,7 @@ public sealed class GpuSimulationResources : IDisposable
 
     public void Dispose()
     {
+        FragmentTimer?.Dispose(); ConfinementTimer?.Dispose();
         Context.ComputeShader.Set(null);
         Context.ComputeShader.SetShaderResources(0, null, null, null, null, null, null, null);
         Context.ComputeShader.SetUnorderedAccessViews(0, null, null, null, null, null, null);
