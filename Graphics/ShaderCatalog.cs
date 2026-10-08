@@ -46,6 +46,7 @@ internal static class ShaderCatalog
         new("AirSimulation.hlsl", "CSDivergence"), new("AirSimulation.hlsl", "CSFaces"),
         new("AirSimulation.hlsl", "CSJacobiAB"), new("AirSimulation.hlsl", "CSJacobiBA"), new("AirSimulation.hlsl", "CSProject"),
         new("AirSimulation.hlsl", "CSJacobiFourAB"), new("AirSimulation.hlsl", "CSJacobiFourBA"),
+        new("AirSimulation.hlsl", "CSMapSources"), new("AirSimulation.hlsl", "CSInjectMapped"),
         new("FireGlow.hlsl", "CSDeposit"), new("FireGlow.hlsl", "CSDiffuse"),
         new("FireGlow.hlsl", "CSCommitGlow"), new("FireGlow.hlsl", "CSClearGlow"),
         new("GasVisual.hlsl", "CSDeposit"), new("GasVisual.hlsl", "CSDiffuse"), new("GasVisual.hlsl", "CSCommit"),

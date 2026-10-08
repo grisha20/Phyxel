@@ -12,6 +12,9 @@ public sealed class GpuSimulationResources : IDisposable
     internal GpuStageTimer? AirTimer { get; init; }
     internal GpuStageTimer? AirHeatTimer { get; init; }
     internal GpuStageTimer? GasMotionTimer { get; init; }
+    internal GpuStageTimer? AirInjectTimer { get; init; }
+    internal GpuStageTimer? ReactionGatherTimer { get; init; }
+    internal GpuStageTimer? AirProjectionTimer { get; init; }
     public required Buffer PressureFrameConstants { get; init; }
     public required GpuStructuredBuffer<uint> FragmentPlans { get; init; }
     public required GpuStructuredBuffer<uint> FragmentClaims { get; init; }
@@ -262,6 +265,9 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? ThermalDiffusionShader { get; init; }
     public ComputeShader? WaterConvectionShader { get; init; }
     public ComputeShader? AirInjectShader { get; init; }
+    public required GpuStructuredBuffer<uint> AirSourceNodes { get; init; }
+    public ComputeShader? AirMapSourcesShader { get; init; }
+    public ComputeShader? AirInjectMappedShader { get; init; }
     public ComputeShader? AirFineMaterialsShader { get; init; }
     public ComputeShader? AirPressureShader { get; init; }
     public ComputeShader? AirJacobiFourABShader { get; init; }
@@ -319,6 +325,9 @@ public sealed class GpuSimulationResources : IDisposable
         ThermalDiffusionShader?.Dispose();
         WaterConvectionShader?.Dispose();
         AirInjectShader?.Dispose();
+        AirSourceNodes.Dispose();
+        AirMapSourcesShader?.Dispose();
+        AirInjectMappedShader?.Dispose();
         AirFineMaterialsShader?.Dispose();
         AirPressureShader?.Dispose();
         AirJacobiFourABShader?.Dispose();AirJacobiFourBAShader?.Dispose();
@@ -465,6 +474,7 @@ public sealed class GpuSimulationResources : IDisposable
         SteamJetAirCouplingStaging?.Dispose();
         AirConstants.Dispose();
         AirTimer?.Dispose(); AirHeatTimer?.Dispose(); GasMotionTimer?.Dispose();
+        AirInjectTimer?.Dispose(); ReactionGatherTimer?.Dispose(); AirProjectionTimer?.Dispose();
         GasActiveTiles.Dispose(); GasActiveTilesShader?.Dispose();
         AirThermalConstants.Dispose(); AirThermal.Dispose(); AirThermalFlux.Dispose(); AirThermalStaging.Dispose();
         AirHeatExchangeShader?.Dispose(); AirHeatFluxShader?.Dispose(); AirHeatTransportShader?.Dispose();

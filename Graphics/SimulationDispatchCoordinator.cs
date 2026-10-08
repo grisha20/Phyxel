@@ -304,6 +304,9 @@ public sealed class SimulationDispatchCoordinator
     public ulong GasMotionTicks => gasMotionTickIndex;
     internal ThermalGpuTimingStatistics AirGpuTiming => boundResources?.AirTimer?.Statistics ?? default;
     internal ThermalGpuTimingStatistics AirHeatGpuTiming => boundResources?.AirHeatTimer?.Statistics ?? default;
+    internal ThermalGpuTimingStatistics AirInjectGpuTiming => boundResources?.AirInjectTimer?.Statistics ?? default;
+    internal ThermalGpuTimingStatistics ReactionGatherGpuTiming => boundResources?.ReactionGatherTimer?.Statistics ?? default;
+    internal ThermalGpuTimingStatistics AirProjectionGpuTiming => boundResources?.AirProjectionTimer?.Statistics ?? default;
     internal ThermalGpuTimingStatistics GasMotionGpuTiming => boundResources?.GasMotionTimer?.Statistics ?? default;
     public ThermalGpuTimingStatistics ThermalGpuTiming => new(
         thermalTimingSamples,
@@ -2054,11 +2057,23 @@ public sealed class SimulationDispatchCoordinator
         int groupsX = DivideRoundUp(resources.AirWidth, 8);
         int groupsY = DivideRoundUp(resources.AirHeight, 8);
 
-        RunAirPass(context, resources.AirInjectShader, groupsX, groupsY);
+        resources.AirInjectTimer?.Begin(context);
+        if(!UseReferenceGpuWorkload)
+        {
+            context.ComputeShader.SetUnorderedAccessView(6,resources.AirSourceNodes.UnorderedView);
+            context.ComputeShader.Set(resources.AirMapSourcesShader);
+            context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
+            context.ComputeShader.SetUnorderedAccessView(6,null);
+            context.ComputeShader.SetShaderResource(6,resources.AirSourceNodes.View);
+        }
+        RunAirPass(context, UseReferenceGpuWorkload ? resources.AirInjectShader : resources.AirInjectMappedShader, groupsX, groupsY);
+        resources.AirInjectTimer?.End(context);
         // Fine links are now baked. Gather finite reaction stock separately;
         // its compressible expansion is attached after the draft projection.
-        Unbind(context,6,6);
+        Unbind(context,7,6);
+        resources.ReactionGatherTimer?.Begin(context);
         DispatchReactionGather(resources);
+        resources.ReactionGatherTimer?.End(context);
         context.ComputeShader.SetShaderResources(0,resources.Materials.View,resources.Grid.ReadView,
             resources.GasMotion.View,resources.AirThermal.View,resources.ReactionPulse.ReadView,
             resources.CellMaterials.View);
@@ -2070,6 +2085,7 @@ public sealed class SimulationDispatchCoordinator
         RunAirPass(context, resources.AirCommitShader, groupsX, groupsY);
         // Simulation closes the air circuit. Sandbox admits a bounded HotAir
         // volume source, allowing outlet flow without a required lower inlet.
+        resources.AirProjectionTimer?.Begin(context);
         RunAirPass(context, resources.AirFacesShader, groupsX, groupsY);
         RunAirPass(context, resources.AirDivergenceShader, groupsX, groupsY);
         bool reference = UseReferenceGpuWorkload;
@@ -2079,9 +2095,10 @@ public sealed class SimulationDispatchCoordinator
             RunAirPass(context, reference ? resources.AirJacobiBAShader : resources.AirJacobiFourBAShader, groupsX, groupsY);
         }
         RunAirPass(context, resources.AirProjectShader, groupsX, groupsY);
+        resources.AirProjectionTimer?.End(context);
         resources.AirTimer?.End(context);
 
-        Unbind(context, 6, 6);
+        Unbind(context, 7, 6);
         DispatchReactionPulse(resources);
         DispatchAirHeat(resources, openBoundaries, tickIndex);
     }

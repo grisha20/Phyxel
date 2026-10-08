@@ -29,14 +29,14 @@ internal sealed class SimulationClockTrace : IDisposable
             string fullPath = Path.GetFullPath(path);
             Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
             writer = new StreamWriter(fullPath);
-            writer.WriteLine("wallSeconds,simulationSeconds,updates,mode,paused,airTicks,gasMotionTicks,thermalTicks,combustionTicks,combustionGpuMs,thermalGpuMs,airGpuMs,airHeatGpuMs,gasMotionGpuMs");
+            writer.WriteLine("wallSeconds,simulationSeconds,updates,mode,paused,airTicks,gasMotionTicks,thermalTicks,combustionTicks,combustionGpuMs,thermalGpuMs,airGpuMs,airHeatGpuMs,gasMotionGpuMs,airInjectGpuMs,reactionGatherGpuMs,airProjectionGpuMs");
             clock.Start();
         }
         seconds += elapsedSeconds;
         updates++;
         double wall = clock.Elapsed.TotalSeconds;
         if (wall < nextSample) return;
-        writer.WriteLine(FormattableString.Invariant($"{wall:F6},{seconds:F6},{updates},{settings.Mode},{settings.Paused},{coordinator.AirTicks},{coordinator.GasMotionTicks},{coordinator.ThermalTicks},{coordinator.CombustionDispatches},{coordinator.CombustionGpuTiming.AverageMilliseconds:F6},{coordinator.ThermalGpuTiming.AverageMilliseconds:F6},{coordinator.AirGpuTiming.AverageMilliseconds:F6},{coordinator.AirHeatGpuTiming.AverageMilliseconds:F6},{coordinator.GasMotionGpuTiming.AverageMilliseconds:F6}"));
+        writer.WriteLine(FormattableString.Invariant($"{wall:F6},{seconds:F6},{updates},{settings.Mode},{settings.Paused},{coordinator.AirTicks},{coordinator.GasMotionTicks},{coordinator.ThermalTicks},{coordinator.CombustionDispatches},{coordinator.CombustionGpuTiming.AverageMilliseconds:F6},{coordinator.ThermalGpuTiming.AverageMilliseconds:F6},{coordinator.AirGpuTiming.AverageMilliseconds:F6},{coordinator.AirHeatGpuTiming.AverageMilliseconds:F6},{coordinator.GasMotionGpuTiming.AverageMilliseconds:F6},{coordinator.AirInjectGpuTiming.AverageMilliseconds:F6},{coordinator.ReactionGatherGpuTiming.AverageMilliseconds:F6},{coordinator.AirProjectionGpuTiming.AverageMilliseconds:F6}"));
         writer.Flush();
         nextSample = wall + 1;
     }

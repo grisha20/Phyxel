@@ -1,4 +1,6 @@
 # Чугун — `core:cast_iron`
+- [PA: профиль портрета и свежие регрессии](../shared/PORTRAIT_GPU_RESULTS.md).
+
 
 - [BD: общий перенос осколков и контроль печной тяги](../shared/BLAST_DEBRIS_RESULTS.md).
 

@@ -38,6 +38,7 @@ StructuredBuffer<GasMotionState> AirGasMotion : register(t2);
 StructuredBuffer<float2> AirThermal : register(t3);
 StructuredBuffer<float4> ReactionPulse : register(t4);
 StructuredBuffer<uint> FineMaterialMap : register(t5);
+StructuredBuffer<uint> AirSourceNodes : register(t6);
 RWStructuredBuffer<uint> FineMaterialMapOutput : register(u6);
 RWStructuredBuffer<AirCell> Air : register(u0);
 RWStructuredBuffer<AirCell> AirScratch : register(u1);
@@ -67,6 +68,27 @@ void CSFineMaterials(uint3 id : SV_DispatchThreadID)
     if (id.x >= AirGridWidth || id.y >= AirGridHeight) return;
     uint index = id.y * AirGridWidth + id.x;
     FineMaterialMapOutput[index] = AirGrid[index].IsActive != 0 ? AirGrid[index].MaterialIndex : 0;
+}
+
+// Reuse the original unique receiver, rebuilt from the current fine geometry.
+// The output binding is separate from FineMaterialMap: no cross-group writes
+// are read before this dispatch has completed. Zero means no receiver.
+[numthreads(16,16,1)]
+void CSMapSources(uint3 id : SV_DispatchThreadID)
+{
+    if(id.x>=AirGridWidth||id.y>=AirGridHeight)return;
+    uint i=id.y*AirGridWidth+id.x;
+    GridCell source=AirGrid[i];uint mapped=0;
+    if(source.IsActive!=0)
+    {
+        uint kind=AirMaterials[source.MaterialIndex].SimulationKind;
+        if(kind!=SimulationKindSolid&&kind!=SimulationKindLiquid)
+        {
+            int2 node;
+            if(AirFineNodeFor(int2(id.xy),node))mapped=uint(node.y)*AirWidth+uint(node.x)+1;
+        }
+    }
+    FineMaterialMapOutput[i]=mapped;
 }
 
 uint AirLinkBit(int2 delta)
@@ -268,8 +290,7 @@ bool AirBlockedAt(int2 coordinate)
 }
 
 // Bake fine geometry and collect connected gas pressure, heat and drag sources.
-[numthreads(8, 8, 1)]
-void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
+void InjectAir(uint3 dispatchThreadId, bool mappedSources)
 {
     uint2 coordinate = dispatchThreadId.xy;
     if (coordinate.x >= AirWidth || coordinate.y >= AirHeight)
@@ -333,8 +354,15 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
             }
             MaterialProperties material = AirMaterials[source.MaterialIndex];
             if (material.SimulationKind == SimulationKindSolid || material.SimulationKind == SimulationKindLiquid) continue;
-            int2 sourceNode;
-            if (!AirFineNodeFor(int2(x, y), sourceNode) || any(sourceNode != int2(coordinate))) continue;
+            if(mappedSources)
+            {
+                if(AirSourceNodes[uint(y)*AirGridWidth+uint(x)]!=index+1)continue;
+            }
+            else
+            {
+                int2 sourceNode;
+                if (!AirFineNodeFor(int2(x, y), sourceNode) || any(sourceNode != int2(coordinate))) continue;
+            }
             if (material.SimulationKind == SimulationKindGas)
             {
                 gasCount++;
@@ -444,6 +472,11 @@ void CSInject(uint3 dispatchThreadId : SV_DispatchThreadID)
     cell.Pressure = clamp(cell.Pressure, -AirMaximumPressure, AirMaximumPressure);
     Air[index] = cell;
 }
+
+[numthreads(8,8,1)]
+void CSInject(uint3 id:SV_DispatchThreadID){InjectAir(id,false);}
+[numthreads(8,8,1)]
+void CSInjectMapped(uint3 id:SV_DispatchThreadID){InjectAir(id,true);}
 
 // Pressure follows the divergence of velocity: air flowing into a cell from
 // both sides compresses it. Reads Air, writes AirScratch.

@@ -1,4 +1,6 @@
 # Металл — `core:metal`
+- [PA: профиль портрета и свежие регрессии](../shared/PORTRAIT_GPU_RESULTS.md).
+
 
 - [BD: перенос многослойной оболочки и FPS](../shared/BLAST_DEBRIS_RESULTS.md), [контракт](../shared/BLAST_DEBRIS_CONTRACT.md).
 

@@ -79,6 +79,7 @@ internal static class GpuWorkloadVerifier
                 rows.Add(new{kind="Jacobi128",r.Width,r.Height,layout,baseline=oldTimer.Statistics,current=newTimer.Statistics});
                 Console.WriteLine($"PHYXEL_WORKLOAD_TIME Jacobi128 {r.Width}x{r.Height} {layout} old={oldTimer.Statistics.AverageMilliseconds:F6} new={newTimer.Statistics.AverageMilliseconds:F6}");
             }
+            checks+=AirSourceMappingVerifier.Run(r,registry);
             uint metal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal);
             var grid=new GridCell[r.Width*r.Height];
             for(int y=r.Height/4;y<3*r.Height/4;y++)for(int x=r.Width/4;x<3*r.Width/4;x++)

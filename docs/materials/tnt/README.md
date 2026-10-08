@@ -1,4 +1,6 @@
 # Тротил
+- [PA: профиль портрета и свежие регрессии](../shared/PORTRAIT_GPU_RESULTS.md).
+
 
 [BD: полная сохранённая бомба, разлёт и FPS](../shared/BLAST_DEBRIS_RESULTS.md)
 · [контракт](../shared/BLAST_DEBRIS_CONTRACT.md).
