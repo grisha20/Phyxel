@@ -204,6 +204,41 @@ bool EmitSurfaceVapour(inout GridCell first, inout GridCell second, uint a, uint
     return true;
 }
 
+// A paid bubble can nucleate inside a full pool. The neighbour receives all
+// displaced liquid and its energy; the bubble stays at its origin and must
+// travel/condense through the existing gas-liquid transport, never teleport.
+bool NucleateVapour(inout GridCell first,inout GridCell second,uint a,uint b)
+{
+    if(first.IsActive==0 || second.IsActive==0 || first.MaterialIndex!=second.MaterialIndex)return false;
+    MaterialProperties m=Materials[first.MaterialIndex];
+    if((m.Flags & MaterialFlagSurfaceBoiling)==0)return false;
+    // An unresolved displaced parcel cannot nucleate repeatedly and collapse
+    // the pool into a handful of arbitrarily massive cells.
+    if(first.Mass>1.0001 || second.Mass>1.0001)return false;
+    bool sourceFirst=first.Lifetime>=second.Lifetime;
+    GridCell source=first, receiver=second;
+    if(!sourceFirst){source=second;receiver=first;}
+    if(source.Temperature<m.TransitionAboveTemperature-.001 || source.Lifetime<=0)return false;
+    float amount=min(.25*source.Mass,source.Mass*source.Lifetime/m.TransitionAboveLatentHeat);
+    if(amount<.02 || source.Mass-amount<.0005)return false;
+    uint sourceIndex=sourceFirst?a:b,receiverIndex=sourceFirst?b:a;
+    if(!FilterAllows(sourceIndex,m.TransitionAboveMaterialIndex,SimulationKindGas) ||
+       !FilterAllows(receiverIndex,source.MaterialIndex,SimulationKindLiquid) ||
+       !FilterPathAllows(sourceIndex,receiverIndex,source.MaterialIndex,SimulationKindLiquid,ContactWidth))return false;
+    float vapourSpecific=m.HeatCapacity*m.TransitionAboveTemperature+m.TransitionAboveLatentHeat;
+    float energy=source.Mass*CellSpecificEnthalpy(source)+receiver.Mass*CellSpecificEnthalpy(receiver);
+    receiver.Mass+=source.Mass-amount;
+    receiver=SetCellSpecificEnthalpy(receiver,(energy-amount*vapourSpecific)/receiver.Mass);
+    receiver.RestFrames=0;
+    source=CreateEmptyCell();source.IsActive=1;source.MaterialIndex=m.TransitionAboveMaterialIndex;source.Mass=amount;
+    source=SetCellSpecificEnthalpy(source,vapourSpecific);
+    first=source;second=receiver;
+    if(!sourceFirst){first=receiver;second=source;}
+    InterlockedOr(ContactSummary[0],PhaseSummaryPhaseOccurred | PhaseSummaryTargetGas |
+        PhaseSummaryTargetCellular | PhaseSummaryTouchesLiquid);
+    return true;
+}
+
 [numthreads(16, 16, 1)]
 void CSMoisture(uint3 id : SV_DispatchThreadID)
 {
@@ -220,13 +255,15 @@ void CSMoisture(uint3 id : SV_DispatchThreadID)
     if(!capillary)
     {
         bool emptyA=first.IsActive==0,emptyB=second.IsActive==0;
-        if(EmitSurfaceVapour(first,second,a,b))
+        bool gasA=Materials[first.MaterialIndex].SimulationKind==SimulationKindGas;
+        bool gasB=Materials[second.MaterialIndex].SimulationKind==SimulationKindGas;
+        if(EmitSurfaceVapour(first,second,a,b) || NucleateVapour(first,second,a,b))
         {
             Grid[a]=first; Grid[b]=second;
             CellMaterials[a]=first.IsActive!=0?first.MaterialIndex:0;
             CellMaterials[b]=second.IsActive!=0?second.MaterialIndex:0;
-            if(emptyA) GasMotion[a]=(GasMotionState)0;
-            if(emptyB) GasMotion[b]=(GasMotionState)0;
+            if(emptyA || (!gasA && Materials[first.MaterialIndex].SimulationKind==SimulationKindGas)) GasMotion[a]=(GasMotionState)0;
+            if(emptyB || (!gasB && Materials[second.MaterialIndex].SimulationKind==SimulationKindGas)) GasMotion[b]=(GasMotionState)0;
             return;
         }
     }

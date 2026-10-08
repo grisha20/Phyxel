@@ -33,5 +33,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         }
     }
     if(degree!=0 && !IsBulkInterior(int2(id.xy),cell.MaterialIndex))degree|=BulkSurfaceDegreeFlag;
+    if(cell.IsActive!=0 && Materials[cell.MaterialIndex].SimulationKind==SimulationKindSolid &&
+        Materials[cell.MaterialIndex].ThermalConductivity>.5 && HasWetWallPath(int2(id.xy),cell.MaterialIndex))
+        degree|=BulkWetPathFlag;
     Degrees[index] = degree;
 }

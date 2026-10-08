@@ -1,5 +1,7 @@
 # Вода — `core:water`
 
+- [QR: повторная работа над заливкой, пузырьками и отскоком](../shared/WATER_REWETTING_CONTRACT.md), [новые результаты](../shared/WATER_REWETTING_RESULTS.md).
+
 - [QH: мокрая горячая поверхность, капля и конечная энергия](../shared/WATER_QUENCH_CONTRACT.md), [новые проверки](../shared/WATER_QUENCH_RESULTS.md).
 
 - [QW: капля и большая порция на горячем чугуне](../shared/HOT_SURFACE_WATER_OBSERVATION.md): новые наблюдения, физика прежняя.

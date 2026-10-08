@@ -47,6 +47,16 @@ float EffectiveCapacity(GridCell cell)
 bool ThinOpenBoilingLiquid(uint index, GridCell cell)
 {
     if ((Materials[cell.MaterialIndex].Flags & MaterialFlagSurfaceBoiling) == 0) return false;
+    uint x=index%ThermalWidth,span=1;
+    [unroll]for(int direction=-1;direction<=1;direction+=2)
+    [loop]for(int distance=1;distance<=24;distance++)
+    {
+        int q=(int)x+direction*distance;
+        if(q<0 || q>=(int)ThermalWidth)break;
+        GridCell side=SourceGrid[(index/ThermalWidth)*ThermalWidth+q];
+        if(side.IsActive==0 || side.MaterialIndex!=cell.MaterialIndex)break;
+        if(++span>24)return false;
+    }
     uint y=index/ThermalWidth;
     [loop] for(uint depth=1;depth<=SurfaceFilmMaximumDepth;depth++)
     {

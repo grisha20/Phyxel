@@ -1937,6 +1937,31 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetUnorderedAccessView(0, resources.BulkThermalDegrees.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
         context.ComputeShader.SetUnorderedAccessView(0, null);
+        // Wet contact has a shorter time scale than the legacy dry-wall
+        // closure. Disjoint exchanges are conservative without global clamps.
+        if (convectWater)
+        {
+            context.ComputeShader.SetShaderResource(0, null);
+            context.ComputeShader.SetShaderResource(1, null);
+            context.ComputeShader.Set(resources.WaterConvectionShader);
+            context.ComputeShader.SetShaderResources(0, resources.Materials.View, resources.BulkThermalDegrees.View);
+            context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.ReadUnorderedView);
+            for (uint pass=0;pass<8;pass++)
+            {
+                uint colour=pass%4;
+                SimulationFrameConstants wet=new() {Width=(uint)resources.Width,Height=(uint)resources.Height,
+                    GasSubStep=3,SimulationPhase=colour,DispatchOffsetX=colour<2?colour:0,
+                    DispatchOffsetY=colour>=2?colour-2:0};
+                context.UpdateSubresource(ref wet,resources.FrameConstants);
+                context.ComputeShader.SetConstantBuffer(0,resources.FrameConstants);
+                context.Dispatch(DivideRoundUp(colour<2?(resources.Width+1)/2:resources.Width,16),
+                    DivideRoundUp(colour>=2?(resources.Height+1)/2:resources.Height,16),1);
+            }
+            context.ComputeShader.SetUnorderedAccessView(0,null);
+            context.ComputeShader.SetShaderResource(1,null);
+            context.ComputeShader.SetShaderResources(0,resources.Grid.ReadView,resources.Materials.View);
+            context.ComputeShader.SetConstantBuffer(0,resources.ThermalConstants);
+        }
         context.ComputeShader.Set(resources.RadiantDegreesShader);
         context.ComputeShader.SetUnorderedAccessView(2, resources.RadiantDegrees.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
@@ -1975,11 +2000,12 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetShaderResource(0, resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.ReadUnorderedView);
         constants.GasSubStep=2;
-        context.ComputeShader.SetUnorderedAccessViews(1,resources.ContactSummary.UnorderedView,resources.CellMaterials.UnorderedView);
+        context.ComputeShader.SetUnorderedAccessViews(1,resources.ContactSummary.UnorderedView,resources.CellMaterials.UnorderedView,resources.GasMotion.UnorderedView);
         context.UpdateSubresource(ref constants,resources.FrameConstants);
         context.Dispatch(DivideRoundUp(resources.Width,16),1,1);
         context.ComputeShader.SetUnorderedAccessView(1,null);
         context.ComputeShader.SetUnorderedAccessView(2,null);
+        context.ComputeShader.SetUnorderedAccessView(3,null);
         constants.GasSubStep=0;
         for (uint pass = 0; pass < 4; pass++)
         {

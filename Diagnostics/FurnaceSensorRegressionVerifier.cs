@@ -65,6 +65,7 @@ internal static class FurnaceSensorRegressionVerifier
         int seconds = int.Parse(Environment.GetEnvironmentVariable("PHYXEL_SENSOR_SECONDS") ?? "30");
         var points = settings.TemperatureSensors.ToArray();
         bool observationOnly = Environment.GetEnvironmentVariable("PHYXEL_SENSOR_OBSERVATION_ONLY") == "1";
+        bool earlySamples = Environment.GetEnvironmentVariable("PHYXEL_SENSOR_EARLY") == "1";
         var thermalMaterials = registry.CreateGpuTable();
         uint waterIndex = registry.GetRequiredRuntimeIndex("core:water");
         uint steamIndex = registry.GetRequiredRuntimeIndex("core:steam");
@@ -81,7 +82,7 @@ internal static class FurnaceSensorRegressionVerifier
                 coordinator.DispatchFrame(settings, [], 1f / fps);
                 timer.End(r.Context);
             }
-            if (frame % fps == 0)
+            if (frame % fps == 0 || (earlySamples && (frame==fps/4 || frame==fps/2)))
             {
                 var grid = MemoryMarshal.Cast<byte, GridCell>(AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer)).ToArray();
                 var air = MemoryMarshal.Cast<byte, AirCell>(AirInventoryRegressionVerifier.Read(r, r.Air.Buffer)).ToArray();
@@ -115,7 +116,7 @@ internal static class FurnaceSensorRegressionVerifier
                     return new { name, vx = vx / Math.Max(1, count), vy = vy / Math.Max(1, count),
                         airC = c > 0 ? (double?)(e / c - 273.15) : null, capacity = c, count };
                 }
-                var row = new { seconds = frame / fps, samples, sections = new[] {
+                var row = new { seconds = frame / (double)fps, samples, sections = new[] {
                     Section("turn1", 584, 350, 598, 420), Section("horizontal", 368, 332, 559, 362),
                     Section("turn5", 316, 316, 337, 360), Section("chimney", 312, 80, 332, 200) },
                     gpu = timer.Statistics, airGpu = coordinator.AirGpuTiming, airHeatGpu = coordinator.AirHeatGpuTiming,
@@ -129,6 +130,11 @@ internal static class FurnaceSensorRegressionVerifier
                     var cells = grid.Where(c => c.IsActive != 0 && c.MaterialIndex == material).ToArray();
                     double mass = cells.Sum(c => (double)c.Mass);
                     return new { cells = cells.Length, mass,
+                        maximumMass=cells.Length>0?cells.Max(c=>c.Mass):0,
+                        minX=cells.Length>0?grid.Select((c,i)=>(c,i)).Where(p=>p.c.IsActive!=0 && p.c.MaterialIndex==material).Min(p=>p.i%r.Width):-1,
+                        minY=cells.Length>0?grid.Select((c,i)=>(c,i)).Where(p=>p.c.IsActive!=0 && p.c.MaterialIndex==material).Min(p=>p.i/r.Width):-1,
+                        maxY=cells.Length>0?grid.Select((c,i)=>(c,i)).Where(p=>p.c.IsActive!=0 && p.c.MaterialIndex==material).Max(p=>p.i/r.Width):-1,
+                        flying=cells.Count(c=>(c.BodyId & 0x40000000u)!=0),
                         temperature = mass > 0 ? (double?)cells.Sum(c => (double)c.Mass * c.Temperature) / mass : null,
                         energy = cells.Sum(c => (double)c.Mass * PhaseEnthalpy.SpecificEnergy(c, thermalMaterials)),
                         latent = cells.Sum(c => (double)c.Mass * c.PhaseProgress) };
@@ -143,7 +149,7 @@ internal static class FurnaceSensorRegressionVerifier
                         energy = cells.Sum(c => (double)c.Mass * PhaseEnthalpy.SpecificEnergy(c, thermalMaterials)) };
                 }
                 rows.Add(row); Console.WriteLine("PHYXEL_SENSOR_ROW " + JsonSerializer.Serialize(row));
-                if (frame % (fps * 10) == 0)
+                if (frame % (fps * 10) == 0 || (earlySamples && frame%fps==0 && frame/fps is 1 or 2 or 5))
                 {
                     File.WriteAllBytes(Path.Combine(dir, $"grid-{frame / fps}.bin"), MemoryMarshal.AsBytes(grid.AsSpan()).ToArray());
                     SimulationScreenshotWriter.Save(r, Path.Combine(dir, $"world-{frame / fps}.png"));

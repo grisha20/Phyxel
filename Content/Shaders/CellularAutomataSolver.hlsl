@@ -313,6 +313,7 @@ void MarkMovement(inout GridCell first, inout GridCell second, float horizontal,
 bool LiquidStepAllowedLoaded(uint sourceIndex, uint destinationIndex, float load)
 {
     GridCell filtered=Grid[sourceIndex];
+    if(CellKind(filtered)==SimulationKindLiquid && (filtered.BodyId & VapourCushionMarker)!=0)return false;
     if(!FilterPathAllows(sourceIndex,destinationIndex,filtered.MaterialIndex,CellKind(filtered),Width))return false;
     GridCell source = Grid[sourceIndex];
     MaterialProperties material = Materials[source.MaterialIndex];
@@ -353,6 +354,8 @@ void SwapCells(uint firstIndex, uint secondIndex, float horizontal, float vertic
 {
     GridCell first = Grid[firstIndex];
     GridCell second = Grid[secondIndex];
+    if((CellKind(first)==SimulationKindLiquid && (first.BodyId & VapourCushionMarker)!=0) ||
+       (CellKind(second)==SimulationKindLiquid && (second.BodyId & VapourCushionMarker)!=0))return;
     if(!FilterPathAllows(firstIndex,secondIndex,first.MaterialIndex,CellKind(first),Width) ||
        !FilterPathAllows(secondIndex,firstIndex,second.MaterialIndex,CellKind(second),Width))return;
     // Free downward flight in air is gravity, not supported viscous flow.
@@ -1987,16 +1990,6 @@ void ResolveVerticalPair(uint2 upperCoordinate)
     uint lowerMaterial = CellMaterials[lowerIndex];
     uint upperKind = CellKindFromMaterial(upperMaterial);
     uint lowerKind = CellKindFromMaterial(lowerMaterial);
-    [branch] if(upperKind==SimulationKindLiquid && (Grid[upperIndex].BodyId & VapourCushionMarker)!=0 &&
-        lowerKind==SimulationKindNone && lowerIndex+Width<Width*Height &&
-        (Materials[upperMaterial].Flags & MaterialFlagSurfaceBoiling)!=0)
-    {
-        GridCell wall=Grid[lowerIndex+Width];
-        if(wall.IsActive!=0 && Materials[wall.MaterialIndex].SimulationKind==SimulationKindSolid &&
-            Materials[wall.MaterialIndex].ThermalConductivity>.5 &&
-            wall.Temperature>Materials[upperMaterial].TransitionAboveTemperature+SurfaceFilmTemperatureOffset)
-            return;
-    }
     if ((GasSubStep & 0x80000000u) != 0 && !IsPressurePowder(upperMaterial)) return;
     if (upperKind == SimulationKindLiquid && lowerKind == SimulationKindLiquid &&
         upperMaterial == lowerMaterial && ConsolidateLiquidDown(upperIndex, lowerIndex))
