@@ -1,0 +1,29 @@
+{
+  "Version": 19,
+  "Scale": 0.32,
+  "Gravity": 980.0,
+  "BrushRadius": 18,
+  "SpawnDensity": 0.82,
+  "SolidGravity": false,
+  "SelectedMaterialId": "core:metal",
+  "SavedAt": "2026-10-08T10:27:18.933051+00:00",
+  "HydraulicPressure": true,
+  "PressureDestruction": false,
+  "TemperatureSensors": [],
+  "FilterSelection": 0,
+  "OpenBoundaries": true,
+  "Mode": "Sandbox",
+  "MaterialPalette": [
+    "core:empty",
+    "core:water",
+    "core:sand",
+    "core:stone",
+    "core:coal",
+    "core:metal",
+    "core:steel",
+    "core:wood",
+    "core:copper",
+    "core:cooler",
+    "core:heater"
+  ]
+}
