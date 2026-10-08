@@ -109,6 +109,7 @@ Shift+ПКМ убирает все датчики. До 32 показаний о
 - [Предварительная проверка лицензий и происхождения кода](docs/LICENSING_REVIEW.md)
 - [Паспорта веществ и правило работы](docs/materials/README.md)
 - [Текущее состояние](docs/PROJECT_STATUS.md)
+- [FPS и равномерность вывода: замеры и границы](docs/FRAME_PACING_RESULTS.md)
 - [Архитектура](docs/ARCHITECTURE.md)
 - [Газовая симуляция](docs/GAS_SIMULATION.md)
 - [Фазовые переходы](docs/PHASE_TRANSITIONS_DESIGN.md)

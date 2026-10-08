@@ -44,7 +44,7 @@ internal static class FurnaceSensorRegressionVerifier
             serializer.ApplyWorldSnapshot(r, world);
         }
         if (Environment.GetEnvironmentVariable("PHYXEL_SENSOR_DISABLE") == "1") settings.TemperatureSensors.Clear();
-        settings.Paused = false;
+        settings.Paused = Environment.GetEnvironmentVariable("PHYXEL_SENSOR_PAUSED") == "1";
         return r;
     }
 

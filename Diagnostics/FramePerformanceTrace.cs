@@ -13,7 +13,7 @@ internal sealed class FramePerformanceTrace : IDisposable
     private StreamWriter? writer;
     private GpuStageTimer? gpu, computeGpu, drawGpu;
     private long start, dispatch, afterDispatch, draw, present;
-    private double updateMs, dispatchMs, drawMs;
+    private double updateMs, dispatchMs, drawMs, presentMs;
     private int frames;
     private readonly Stopwatch wall = Stopwatch.StartNew();
     internal void BeginUpdate(GpuSimulationResources? r)
@@ -47,15 +47,19 @@ internal sealed class FramePerformanceTrace : IDisposable
     internal void BeginPresent() { if (path is not null) present = Stopwatch.GetTimestamp(); }
     internal void EndPresent()
     {
+        if (path is not null) presentMs = Ms(Stopwatch.GetTimestamp() - present);
+    }
+    internal void EndFrame(double pacingMs)
+    {
         if (string.IsNullOrEmpty(path) || start == 0) return;
         if (writer is null)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
             writer = new(path);
-            writer.WriteLine("wallSeconds,frame,updateCpuMs,dispatchCpuMs,drawCpuMs,presentCpuMs,frameGpuAverageMs,gpuSamples,dispatchGpuAverageMs,drawGpuAverageMs");
+            writer.WriteLine("wallSeconds,frame,updateCpuMs,dispatchCpuMs,drawCpuMs,presentCpuMs,frameGpuAverageMs,gpuSamples,dispatchGpuAverageMs,drawGpuAverageMs,pacingCpuMs");
         }
         var stats = gpu?.Statistics ?? default;
-        writer.WriteLine(FormattableString.Invariant($"{wall.Elapsed.TotalSeconds:F6},{++frames},{updateMs:F6},{dispatchMs:F6},{drawMs:F6},{Ms(Stopwatch.GetTimestamp()-present):F6},{stats.AverageMilliseconds:F6},{stats.Samples},{computeGpu?.Statistics.AverageMilliseconds??0:F6},{drawGpu?.Statistics.AverageMilliseconds??0:F6}"));
+        writer.WriteLine(FormattableString.Invariant($"{wall.Elapsed.TotalSeconds:F6},{++frames},{updateMs:F6},{dispatchMs:F6},{drawMs:F6},{presentMs:F6},{stats.AverageMilliseconds:F6},{stats.Samples},{computeGpu?.Statistics.AverageMilliseconds??0:F6},{drawGpu?.Statistics.AverageMilliseconds??0:F6},{pacingMs:F6}"));
     }
     private static double Ms(long ticks) => ticks * 1000d / Stopwatch.Frequency;
     public void Dispose() { writer?.Dispose(); gpu?.Dispose(); computeGpu?.Dispose();drawGpu?.Dispose(); }

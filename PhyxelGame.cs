@@ -34,6 +34,7 @@ public sealed class PhyxelGame : Game
     private readonly AcceptanceRegressionHarness acceptance = new();
     private readonly SimulationClockTrace simulationClockTrace = new();
     private readonly FramePerformanceTrace framePerformanceTrace = new();
+    private readonly FramePacer? framePacer;
     private string scenePath;
     private bool hasChosenScenePath;
     private bool sceneDialogOpen;
@@ -99,7 +100,7 @@ public sealed class PhyxelGame : Game
             PreferredBackBufferWidth = requestedWidth,
             PreferredBackBufferHeight = requestedHeight,
             GraphicsProfile = GraphicsProfile.HiDef,
-            SynchronizeWithVerticalRetrace = true,
+            SynchronizeWithVerticalRetrace = false,
             PreferMultiSampling = false,
             IsFullScreen = !windowed,
             HardwareModeSwitch = false
@@ -108,6 +109,16 @@ public sealed class PhyxelGame : Game
         IsMouseVisible = true;
         IsFixedTimeStep = false;
         TargetElapsedTime = TimeSpan.FromSeconds(1d / 60d);
+        // Keep rendering bounded without coupling GPU submission to the display
+        // refresh interval. Physics continues on its existing fixed clocks.
+        if (Environment.GetEnvironmentVariable("PHYXEL_FRAME_VSYNC") is { } frameVsync)
+            graphics.SynchronizeWithVerticalRetrace = frameVsync != "0";
+        int frameLimit = graphics.SynchronizeWithVerticalRetrace ? 0 : 100;
+        if (int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_FRAME_LIMIT"), out int limit) && limit is >= 0 and <= 240)
+            frameLimit = limit;
+        if (frameLimit > 0) framePacer = new FramePacer(frameLimit);
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PHYXEL_FRAME_TRACE")))
+            Console.WriteLine($"PHYXEL_PRESENT vsync={graphics.SynchronizeWithVerticalRetrace} limit={frameLimit} highResolutionTimer={framePacer?.UsesHighResolutionTimer ?? false}");
         Window.AllowUserResizing = true;
         Window.Title = "Phyxel";
         if (acceptance.Active)
@@ -552,6 +563,7 @@ public sealed class PhyxelGame : Game
 
     protected override void Update(GameTime gameTime)
     {
+        framePacer?.BeginFrame();
         framePerformanceTrace.BeginUpdate(currentResources);
         if (userInterface is null || dispatchCoordinator is null || materialRegistry is null)
         {
@@ -953,6 +965,9 @@ public sealed class PhyxelGame : Game
         framePerformanceTrace.BeginPresent();
         base.EndDraw();
         framePerformanceTrace.EndPresent();
+        double pacingMs = !acceptance.Active && oilSmokeVerification is null && diagnosticFramesPerSecond == 0
+            ? framePacer?.WaitForNextFrame() ?? 0 : 0;
+        framePerformanceTrace.EndFrame(pacingMs);
     }
 
     protected override void UnloadContent()
@@ -961,6 +976,7 @@ public sealed class PhyxelGame : Game
         oilSmokeVerification?.Dispose();
         simulationClockTrace.Dispose();
         framePerformanceTrace.Dispose();
+        framePacer?.Dispose();
         userInterface?.Dispose();
         temperatureSensors.Dispose();
         resourceManager?.Dispose();
