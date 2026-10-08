@@ -1,4 +1,6 @@
 # Чугун — `core:cast_iron`
+
+- [QW: охлаждение водой и цвет накала](../shared/HOT_SURFACE_WATER_OBSERVATION.md): наблюдение, физика прежняя.
 - [PA: профиль портрета и свежие регрессии](../shared/PORTRAIT_GPU_RESULTS.md).
 
 

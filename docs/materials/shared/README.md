@@ -1,5 +1,7 @@
 # Общие документы материалов
 
+- [QW: вода на горячей поверхности — наблюдение и предлагаемая модель](HOT_SURFACE_WATER_OBSERVATION.md).
+
 - [PA: профиль портрета и устранение повторного поиска](PORTRAIT_GPU_CONTRACT.md), [свежие проверки и оставшаяся просадка](PORTRAIT_GPU_RESULTS.md).
 
 - [GW: уменьшение нагрузки GPU после отзывов RTX 3050](GPU_WORKLOAD_CONTRACT.md), [проверки и оставшиеся просадки](GPU_WORKLOAD_RESULTS.md).

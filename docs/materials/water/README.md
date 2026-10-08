@@ -1,5 +1,7 @@
 # Вода — `core:water`
 
+- [QW: капля и большая порция на горячем чугуне](../shared/HOT_SURFACE_WATER_OBSERVATION.md): новые наблюдения, физика прежняя.
+
 - [PC: замкнутый напор и отдельное включение разрушения](../shared/PRESSURE_CONFINEMENT_CONTRACT.md), [новые проверки](../shared/PRESSURE_CONFINEMENT_RESULTS.md).
 
 - [SP: проверка сохранённого кипящего котла](../shared/STEAM_ROOF_DIAGNOSIS.md).

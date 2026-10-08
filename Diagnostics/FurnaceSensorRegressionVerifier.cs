@@ -64,6 +64,11 @@ internal static class FurnaceSensorRegressionVerifier
         int fps = int.Parse(Environment.GetEnvironmentVariable("PHYXEL_SENSOR_FPS") ?? "60");
         int seconds = int.Parse(Environment.GetEnvironmentVariable("PHYXEL_SENSOR_SECONDS") ?? "30");
         var points = settings.TemperatureSensors.ToArray();
+        bool observationOnly = Environment.GetEnvironmentVariable("PHYXEL_SENSOR_OBSERVATION_ONLY") == "1";
+        var thermalMaterials = registry.CreateGpuTable();
+        uint waterIndex = registry.GetRequiredRuntimeIndex("core:water");
+        uint steamIndex = registry.GetRequiredRuntimeIndex("core:steam");
+        uint ironIndex = registry.GetRequiredRuntimeIndex("core:cast_iron");
         var rows = new List<object>();
         Console.WriteLine($"PHYXEL_SENSOR_REPLAY size={r.Width}x{r.Height} mode={settings.Mode} fps={fps} worldHash={hash}");
         var wallTime = Stopwatch.StartNew();
@@ -116,7 +121,27 @@ internal static class FurnaceSensorRegressionVerifier
                     gpu = timer.Statistics, airGpu = coordinator.AirGpuTiming, airHeatGpu = coordinator.AirHeatGpuTiming,
                     gasGpu = coordinator.GasMotionGpuTiming, thermalGpu = coordinator.ThermalGpuTiming,
                     combustionGpu = coordinator.CombustionGpuTiming,
+                    water = Inventory(waterIndex), steam = Inventory(steamIndex),
+                    impactPlate = PlateInventory(),
                     coalMass = grid.Where(c => c.IsActive != 0 && registry[(ushort)c.MaterialIndex].Id is "core:coal" or "core:stone_coal").Sum(c => (double)c.Mass) };
+                object Inventory(uint material)
+                {
+                    var cells = grid.Where(c => c.IsActive != 0 && c.MaterialIndex == material).ToArray();
+                    double mass = cells.Sum(c => (double)c.Mass);
+                    return new { cells = cells.Length, mass,
+                        temperature = mass > 0 ? (double?)cells.Sum(c => (double)c.Mass * c.Temperature) / mass : null,
+                        energy = cells.Sum(c => (double)c.Mass * PhaseEnthalpy.SpecificEnergy(c, thermalMaterials)),
+                        latent = cells.Sum(c => (double)c.Mass * c.PhaseProgress) };
+                }
+                object PlateInventory()
+                {
+                    // Observation region under the user's drop; no geometry or heat is injected.
+                    var cells = grid.Where((c, i) => c.IsActive != 0 && c.MaterialIndex == ironIndex &&
+                        i % r.Width >= 450 && i % r.Width <= 510 && i / r.Width >= 306 && i / r.Width <= 323).ToArray();
+                    return new { cells = cells.Length, temperature = cells.Length > 0 ? (double?)cells.Average(c => (double)c.Temperature) : null,
+                        minimum = cells.Length > 0 ? (double?)cells.Min(c => c.Temperature) : null,
+                        energy = cells.Sum(c => (double)c.Mass * PhaseEnthalpy.SpecificEnergy(c, thermalMaterials)) };
+                }
                 rows.Add(row); Console.WriteLine("PHYXEL_SENSOR_ROW " + JsonSerializer.Serialize(row));
                 if (frame % (fps * 10) == 0)
                 {
@@ -124,6 +149,13 @@ internal static class FurnaceSensorRegressionVerifier
                     settings.ShowAirField = true; coordinator.DispatchFrame(settings, [], 0);
                     SimulationScreenshotWriter.Save(r, Path.Combine(dir, $"air-{frame / fps}.png"));
                     settings.ShowAirField = false;
+                    if (observationOnly)
+                    {
+                        File.WriteAllBytes(Path.Combine(dir, $"grid-{frame / fps}.bin"), MemoryMarshal.AsBytes(grid.AsSpan()).ToArray());
+                        Console.WriteLine("PHYXEL_SENSOR_OBSERVATION_ONLY save/load assertions not run");
+                        if (frame % 4 == 0) yield return r;
+                        continue;
+                    }
                     // Explicit file output only to diagnostics, never the source scene.
                     serializer.BeginWorldCapture(r);
                     SimulationWorldSnapshot? snapshot;
