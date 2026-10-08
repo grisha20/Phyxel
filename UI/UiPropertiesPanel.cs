@@ -377,7 +377,7 @@ public sealed class UiPropertiesPanel
         }
 
         if (activeTool == PhyxelToolId.Sensor)
-            spriteBatch.DrawString(font, "ЛКМ: поставить · ПКМ: убрать\nShift+ПКМ: убрать все\nВещество / воздух, до 32 точек",
+            spriteBatch.DrawString(font, "ЛКМ: поставить · ПКМ: убрать\nShift+ПКМ: убрать все · до 32 точек\nP в газе/воздухе: игровые единицы",
                 new Vector2(bounds.X + 14, sensorHintY), UiTheme.TextSecondary, 0, Vector2.Zero, .6f, SpriteEffects.None, 0);
         DrawSectionLabel(spriteBatch, font, "СИМУЛЯЦИЯ", bounds.X + 14, simulationHeaderY, 0.68f);
         scaleSlider.Draw(spriteBatch, font, backdrop, pixel);
@@ -417,7 +417,7 @@ public sealed class UiPropertiesPanel
             PhyxelToolId.Brush => "Кисть",
             PhyxelToolId.Eraser => "Ластик",
             PhyxelToolId.Temperature => "Температура",
-            PhyxelToolId.Sensor => "Датчики температуры",
+            PhyxelToolId.Sensor => "Температура и давление",
             PhyxelToolId.Filter => "Фильтр",
             PhyxelToolId.Pan => "Камера / панорама",
             _ => "Инструмент"

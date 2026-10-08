@@ -27,20 +27,30 @@ internal static class TemperatureSensorsRegressionVerifier
         var grid = new GridCell[r.Width * r.Height];
         uint metal = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal);
         uint water = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
+        uint steam = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Steam);
         grid[100 * r.Width + 100] = new() { IsActive = 1, MaterialIndex = metal, Mass = 1, Temperature = 245.5f };
         grid[140 * r.Width + 180] = new() { IsActive = 1, MaterialIndex = water, Mass = 1, Temperature = 83.25f };
+        grid[160 * r.Width + 200] = new() { IsActive = 1, MaterialIndex = steam, Mass = .01f, Temperature = 123 };
         for (int y = 70; y <= 110; y++) grid[y * r.Width + 97] = new() { IsActive = 1, MaterialIndex = metal, Mass = 1, Temperature = 20 };
         var heat = new System.Numerics.Vector2[r.AirWidth * r.AirHeight];
         Array.Fill(heat, new(573.15f * .016f, .016f));
         heat[20 * r.AirWidth + 24] = new(1173.15f * .016f, .016f);
         r.Context.UpdateSubresource(grid, r.Grid.ReadBuffer);
         r.Context.UpdateSubresource(heat, r.AirThermal.Buffer);
-        r.Context.UpdateSubresource(new AirCell[heat.Length], r.Air.Buffer);
+        var air = new AirCell[heat.Length];
+        Array.Fill(air, new AirCell { Pressure = -2.5f });
+        air[20 * r.AirWidth + 24].Pressure = 17.25f;
+        air[40 * r.AirWidth + 50].Pressure = 0;
+        var wave = new System.Numerics.Vector4[heat.Length];
+        wave[20 * r.AirWidth + 24].X = 3.5f;
+        r.Context.UpdateSubresource(air, r.Air.Buffer);
+        r.Context.UpdateSubresource(wave, r.ReactionPulse.ReadBuffer);
         byte[] beforeGrid = AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer);
         byte[] beforeHeat = AirInventoryRegressionVerifier.Read(r, r.AirThermal.Buffer);
         byte[] beforeAir = AirInventoryRegressionVerifier.Read(r, r.Air.Buffer);
+        byte[] beforeWave = AirInventoryRegressionVerifier.Read(r, r.ReactionPulse.ReadBuffer);
         using var sensors = new GpuTemperatureSensors();
-        List<TemperatureSensorPosition> points = [new(100, 100), new(180, 140), new(96, 82), new(98, 82)];
+        List<TemperatureSensorPosition> points = [new(100, 100), new(180, 140), new(96, 82), new(98, 82), new(200,160)];
         void Read(bool air = true)
         {
             sensors.Update(r, points, air, .11f); r.Context.Flush();
@@ -53,23 +63,33 @@ internal static class TemperatureSensorsRegressionVerifier
             }
         }
         Read();
-        Check(sensors.Readings[points[0]].IsActive == 1 && sensors.Readings[points[0]].Temperature == 245.5f, "Metal reading wrong.");
-        Check(sensors.Readings[points[1]].MaterialIndex == water && sensors.Readings[points[1]].Temperature == 83.25f, "Water reading wrong.");
-        Check(sensors.Readings[points[2]].IsActive == 2 && Math.Abs(sensors.Readings[points[2]].Temperature - 300) < .01f, "Air probe sampled through a thin wall.");
-        Check(Math.Abs(sensors.Readings[points[3]].Temperature - 900) < .01f, "Air Kelvin/energy conversion wrong.");
+        Check(sensors.Readings[points[0]].Thermal.IsActive == 1 && sensors.Readings[points[0]].Thermal.Temperature == 245.5f, "Metal reading wrong.");
+        Check(sensors.Readings[points[1]].Thermal.MaterialIndex == water && sensors.Readings[points[1]].Thermal.Temperature == 83.25f, "Water reading wrong.");
+        Check(sensors.Readings[points[2]].Thermal.IsActive == 2 && Math.Abs(sensors.Readings[points[2]].Thermal.Temperature - 300) < .01f, "Air probe sampled through a thin wall.");
+        Check(Math.Abs(sensors.Readings[points[3]].Thermal.Temperature - 900) < .01f, "Air Kelvin/energy conversion wrong.");
+        Check(float.IsNaN(sensors.Readings[points[0]].Pressure) && float.IsNaN(sensors.Readings[points[1]].Pressure), "Solid/liquid supplied fake pressure.");
+        Check(sensors.Readings[points[2]].Pressure == -2.5f && sensors.Readings[points[3]].Pressure == 17.25f, "Pressure sampled through thin wall or lost sign.");
+        Check(sensors.Readings[points[3]].ReactionPressure == 3.5f, "Reaction pressure field read wrong.");
+        Check(sensors.Readings[points[4]].Pressure == 0 && sensors.Readings[points[4]].Thermal.Temperature == 123, "Gas temperature/zero pressure wrong.");
         Check(beforeGrid.AsSpan().SequenceEqual(AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer)) &&
             beforeHeat.AsSpan().SequenceEqual(AirInventoryRegressionVerifier.Read(r, r.AirThermal.Buffer)) &&
-            beforeAir.AsSpan().SequenceEqual(AirInventoryRegressionVerifier.Read(r, r.Air.Buffer)), "Sensors changed physics state.");
+            beforeAir.AsSpan().SequenceEqual(AirInventoryRegressionVerifier.Read(r, r.Air.Buffer)) &&
+            beforeWave.AsSpan().SequenceEqual(AirInventoryRegressionVerifier.Read(r, r.ReactionPulse.ReadBuffer)), "Sensors changed physics state.");
         Check(TemperatureSensorOverlay.Label(1, sensors.Readings[points[0]], registry).Contains("245,5 °C"), "Label/culture wrong.");
+        Check(TemperatureSensorOverlay.Label(4, sensors.Readings[points[3]], registry).Contains("P: 17,25 игр. ед.") &&
+            TemperatureSensorOverlay.Label(1, sensors.Readings[points[0]], registry).Contains("P: —"), "Pressure label/unit wrong.");
+        Check(System.Runtime.InteropServices.Marshal.SizeOf<TemperatureProbeResult>() == 24 &&
+            System.Runtime.InteropServices.Marshal.SizeOf<TemperatureSensorReading>() == 32, "Cursor/sensor ABI changed.");
         sensors.Reset(); Read(false);
-        Check(sensors.Readings[points[2]].IsActive == 0 && sensors.Readings[points[0]].Temperature == 245.5f, "Disabled air supplied fake readings.");
+        Check(sensors.Readings[points[2]].Thermal.IsActive == 0 && sensors.Readings[points[0]].Thermal.Temperature == 245.5f, "Disabled air supplied fake readings.");
+        Check(sensors.Readings.Values.All(p => float.IsNaN(p.Pressure)), "Disabled air supplied fake pressure.");
         sensors.Reset(); sensors.Update(r, points, true, .11f);
         points = [new(180, 140)]; r.Context.Flush(); Read();
-        Check(sensors.Readings.Count == 1 && sensors.Readings[points[0]].MaterialIndex == water, "Old pending coordinates leaked after removal.");
+        Check(sensors.Readings.Count == 1 && sensors.Readings[points[0]].Thermal.MaterialIndex == water, "Old pending coordinates leaked after removal.");
         points = Enumerable.Range(0, 32).Select(i => new TemperatureSensorPosition(220 + i, 180)).ToList();
-        Read(); Check(sensors.Readings.Count == 32 && sensors.Readings.Values.All(p => p.IsActive == 2), "Full sensor batch wrong.");
+        Read(); Check(sensors.Readings.Count == 32 && sensors.Readings.Values.All(p => p.Thermal.IsActive == 2), "Full sensor batch wrong.");
         points = [new(-1, 0), new(r.Width, 0)]; Read();
-        Check(sensors.Readings.Values.All(p => p.IsActive == 0), "Out of bounds sensors read data.");
+        Check(sensors.Readings.Values.All(p => p.Thermal.IsActive == 0 && float.IsNaN(p.Pressure)), "Out of bounds sensors read data.");
         var testSettings = new SimulationSettings { Width = 100, Height = 100 };
         Rectangle bounds = new(300, -100, 600, 600);
         var click = default(RawInputSnapshot) with { MousePosition = new(543, 143), LeftPressed = true };

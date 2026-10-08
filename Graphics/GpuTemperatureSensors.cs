@@ -15,15 +15,15 @@ public sealed class GpuTemperatureSensors : IDisposable
 {
     private GpuSimulationResources? bound;
     private GpuStructuredBuffer<TemperatureSensorPosition>? coordinates;
-    private GpuStructuredBuffer<TemperatureProbeResult>? results;
+    private GpuStructuredBuffer<TemperatureSensorReading>? results;
     private Buffer? constants, staging;
     private Query? query;
     private TemperatureSensorPosition[] points = [], pendingPoints = [];
     private bool pending, airEnabled;
     private int generation, pendingGeneration;
     private double elapsed;
-    private readonly Dictionary<TemperatureSensorPosition, TemperatureProbeResult> readings = [];
-    public IReadOnlyDictionary<TemperatureSensorPosition, TemperatureProbeResult> Readings => readings;
+    private readonly Dictionary<TemperatureSensorPosition, TemperatureSensorReading> readings = [];
+    public IReadOnlyDictionary<TemperatureSensorPosition, TemperatureSensorReading> Readings => readings;
 
     public void Reset() { readings.Clear(); generation++; elapsed = 0; }
 
@@ -51,13 +51,13 @@ public sealed class GpuTemperatureSensors : IDisposable
             {
                 if (pendingGeneration == generation)
                     for (int i = 0; i < pendingPoints.Length; i++)
-                        readings[pendingPoints[i]] = Marshal.PtrToStructure<TemperatureProbeResult>(
-                            IntPtr.Add(data.DataPointer, i * Marshal.SizeOf<TemperatureProbeResult>()));
+                        readings[pendingPoints[i]] = Marshal.PtrToStructure<TemperatureSensorReading>(
+                            IntPtr.Add(data.DataPointer, i * Marshal.SizeOf<TemperatureSensorReading>()));
             }
             finally { context.UnmapSubresource(staging!, 0); pending = false; }
         }
         if (!resources.IsSimulationAllocated)
-            foreach (var point in points) readings[point] = default;
+            foreach (var point in points) readings[point] = new() { Pressure = float.NaN, ReactionPressure = float.NaN };
         elapsed = Math.Min(.1, elapsed + Math.Clamp((double)deltaSeconds, 0, .25));
         if (count == 0 || !resources.IsSimulationAllocated || pending || elapsed < .1) return;
         if (coordinates is null)
@@ -67,7 +67,7 @@ public sealed class GpuTemperatureSensors : IDisposable
             results = new(device, TemperatureSensorPosition.MaximumCount);
             constants = new(device, new BufferDescription(16, ResourceUsage.Default, BindFlags.ConstantBuffer,
                 CpuAccessFlags.None, ResourceOptionFlags.None, 0));
-            staging = new(device, new BufferDescription(Marshal.SizeOf<TemperatureProbeResult>() * TemperatureSensorPosition.MaximumCount,
+            staging = new(device, new BufferDescription(Marshal.SizeOf<TemperatureSensorReading>() * TemperatureSensorPosition.MaximumCount,
                 ResourceUsage.Staging, BindFlags.None, CpuAccessFlags.Read, ResourceOptionFlags.None, 0));
             query = new(device, new QueryDescription { Type = QueryType.Event });
         }
@@ -84,9 +84,10 @@ public sealed class GpuTemperatureSensors : IDisposable
         context.ComputeShader.SetShaderResource(2, coordinates.View);
         context.ComputeShader.SetShaderResource(3, resources.AirThermal.View);
         context.ComputeShader.SetShaderResource(4, resources.Air.View);
+        context.ComputeShader.SetShaderResource(5, resources.ReactionPulse.ReadView);
         context.ComputeShader.SetUnorderedAccessView(0, results!.UnorderedView);
         context.Dispatch(1, 1, 1);
-        for (int slot = 0; slot < 5; slot++) context.ComputeShader.SetShaderResource(slot, null);
+        for (int slot = 0; slot < 6; slot++) context.ComputeShader.SetShaderResource(slot, null);
         context.ComputeShader.SetUnorderedAccessView(0, null);
         context.ComputeShader.Set(null);
         context.CopyResource(results.Buffer, staging!);

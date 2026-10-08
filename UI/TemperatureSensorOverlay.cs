@@ -41,22 +41,24 @@ internal static class TemperatureSensorOverlay
         settings.TemperatureSensors.Add(position); return true;
     }
 
-    internal static string Label(int number, TemperatureProbeResult? sample, MaterialRegistry registry)
+    internal static string Label(int number, TemperatureSensorReading? sample, MaterialRegistry registry)
     {
         string name = "Ожидание", value = "—";
-        if (sample is { } result)
+        if (sample is { Thermal: var result })
         {
             name = result.IsActive == 2 ? "Воздух" : result.IsActive == 1 && result.MaterialIndex <= ushort.MaxValue &&
                 registry.TryGet((ushort)result.MaterialIndex, out var material) ? material.Name : "Нет данных";
             if (result.IsActive != 0 && float.IsFinite(result.Temperature))
                 value = result.Temperature.ToString("0.0", CultureInfo.GetCultureInfo("ru-RU")) + " °C";
         }
-        return $"{number}: {name}\n{value}";
+        string pressure = sample is { } reading && float.IsFinite(reading.Pressure)
+            ? reading.Pressure.ToString("0.00", CultureInfo.GetCultureInfo("ru-RU")) + " игр. ед." : "—";
+        return $"{number}: {name}\n{value}\nP: {pressure}";
     }
 
     internal static void Draw(SpriteBatch batch, SpriteFont font, Texture2D pixel, Rectangle canvas, Rectangle worldBounds,
         SimulationSettings settings, MaterialRegistry registry,
-        IReadOnlyDictionary<TemperatureSensorPosition, TemperatureProbeResult> readings)
+        IReadOnlyDictionary<TemperatureSensorPosition, TemperatureSensorReading> readings)
     {
         List<Rectangle> labels = [];
         for (int i = 0; i < settings.TemperatureSensors.Count; i++)

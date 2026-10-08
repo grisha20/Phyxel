@@ -629,6 +629,15 @@ public struct TemperatureProbeResult
     public uint RetainedLiquidMaterialIndex;
 }
 
+// Batch sensors have their own ABI; the cursor probe and saved world stay unchanged.
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct TemperatureSensorReading
+{
+    public TemperatureProbeResult Thermal;
+    public float Pressure;
+    public float ReactionPressure;
+}
+
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct SimulationStatistics
 {

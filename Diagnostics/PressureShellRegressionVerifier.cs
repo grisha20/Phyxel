@@ -71,6 +71,19 @@ internal static class PressureShellRegressionVerifier
             // Reproduce reported edits in memory; never overwrite a user's scene.
             string variant = Environment.GetEnvironmentVariable("PHYXEL_SHELL_VARIANT") ?? "original";
             var initialCells = MemoryMarshal.Cast<byte, GridCell>(world.Grid).ToArray();
+            if(name=="Пар давление" && Environment.GetEnvironmentVariable("PHYXEL_SHELL_STEEL_BASE")=="1")
+            {
+                // A separate material control, not a replay of the original save:
+                // rebuild intact lower metal as steel at the same temperature.
+                // Old molten metal/fragments and the weak upper roof stay unchanged.
+                uint metal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal);
+                uint steel=registry.GetRequiredRuntimeIndex("core:steel");int converted=0;
+                for(int i=270*world.Width;i<initialCells.Length;i++)
+                    if(initialCells[i].IsActive!=0 && initialCells[i].MaterialIndex==metal &&
+                        (initialCells[i].BodyId&0x40000000u)==0)
+                    {initialCells[i].MaterialIndex=steel;initialCells[i].PhaseProgress=0;converted++;}
+                Console.WriteLine($"PHYXEL_STEEL_BASE converted={converted} originalRoof=true originalFragments=true");
+            }
             if (name == "Питарда" && variant == "vent")
                 for (int y=90;y<125;y++) for (int x=204;x<=244;x++)
                     if(initialCells[y*world.Width+x].IsActive!=0 &&

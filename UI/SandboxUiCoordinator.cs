@@ -368,7 +368,7 @@ public sealed class SandboxUiCoordinator : IDisposable
     }
 
     public void DrawTemperatureSensors(SpriteBatch spriteBatch, Rectangle worldBounds, SimulationSettings settings,
-        System.Collections.Generic.IReadOnlyDictionary<TemperatureSensorPosition, TemperatureProbeResult> readings)
+        System.Collections.Generic.IReadOnlyDictionary<TemperatureSensorPosition, TemperatureSensorReading> readings)
         => TemperatureSensorOverlay.Draw(spriteBatch, font, pixel, CanvasBounds, worldBounds, settings, materialRegistry, readings);
 
     internal static Vector2 GridToScreen(float x, float y, Rectangle worldBounds, SimulationSettings settings)

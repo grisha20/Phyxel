@@ -1,5 +1,7 @@
 # Общие документы материалов
 
+- [RS: локальный прорыв, измерение давления и FPS](PRESSURE_RELIABILITY_CONTRACT.md), [новые результаты и исключения](PRESSURE_RELIABILITY_RESULTS.md).
+
 - [PC: замкнутый напор и экспериментальное включение](PRESSURE_CONFINEMENT_CONTRACT.md), [новые проверки](PRESSURE_CONFINEMENT_RESULTS.md).
 
 Здесь хранятся контракты и планы, относящиеся к нескольким материалам.

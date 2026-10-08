@@ -28,6 +28,8 @@ internal static class FurnaceSensorRegressionVerifier
         SimulationStateSerializer.Apply(loaded.State, settings);
         settings.Width = world.Width; settings.Height = world.Height; settings.Paused = true;
         if (Enum.TryParse<SimulationMode>(Environment.GetEnvironmentVariable("PHYXEL_SENSOR_MODE"), out var mode)) settings.Mode = mode;
+        if (Environment.GetEnvironmentVariable("PHYXEL_SENSOR_DESTRUCTION") is { } destruction)
+            settings.PressureDestruction=destruction=="1";
         var r = coordinator.DispatchFrame(settings, [new() { X = 20, Y = 20, Radius = 1, Density = 1,
             MaterialIndex = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal) }], 0);
         serializer.ApplyWorldSnapshot(r, world);
