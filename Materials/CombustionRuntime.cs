@@ -15,7 +15,8 @@ public enum CombustionSummaryFlags : uint
     TouchesLiquid = 1u << 5,
     TouchesSolid = 1u << 6,
     TargetMovableSolid = 1u << 7,
-    PressurePowderPresent = 1u << 8
+    PressurePowderPresent = 1u << 8,
+    RadialReactionOccurred = 1u << 9
 }
 
 public static class CombustionRuntime
@@ -61,7 +62,8 @@ public static class CombustionRuntime
               cell.Temperature >= source.ContactIgnitionTemperature) ||
              ((source.Flags & (uint)MaterialFlags.PersistentCoalIgnition) != 0 && cell.Lifetime > 0) ||
              ((source.Flags & (uint)MaterialFlags.ProgressiveIgnition) != 0 && cell.Lifetime > 0 &&
-              (cell.Lifetime < 1 / source.FlameSpreadRate || cell.Temperature > source.ContactIgnitionTemperature)));
+              ((source.Flags & (uint)MaterialFlags.RadialIgnition) != 0 ||
+               cell.Lifetime < 1 / source.FlameSpreadRate || cell.Temperature > source.ContactIgnitionTemperature)));
     }
 
     public static bool TryApply(
@@ -75,6 +77,7 @@ public static class CombustionRuntime
         burnedMass = 0;
         if (cell.MaterialIndex < materials.Length &&
             (materials[(int)cell.MaterialIndex].Flags & (uint)MaterialFlags.ProgressiveIgnition) != 0 &&
+            (materials[(int)cell.MaterialIndex].Flags & (uint)MaterialFlags.RadialIgnition) == 0 &&
             cell.Lifetime >= 1 / materials[(int)cell.MaterialIndex].FlameSpreadRate &&
             cell.Temperature <= materials[(int)cell.MaterialIndex].ContactIgnitionTemperature)
             cell.Lifetime = 0;
@@ -114,6 +117,8 @@ public static class CombustionRuntime
             MaximumTemperature);
         cell.Mass = Math.Max(residueMass, cell.Mass - burnedMass);
         summary = CombustionSummaryFlags.CombustionOccurred | GetTargetFlags(source, target);
+        if ((source.Flags & (uint)MaterialFlags.RadialIgnition) != 0)
+            summary |= CombustionSummaryFlags.RadialReactionOccurred;
 
         if (availableFuel - burnedMass <= MassEpsilon)
         {

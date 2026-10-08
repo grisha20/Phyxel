@@ -386,6 +386,12 @@ internal static partial class MaterialFileLoader
              (flags & MaterialFlags.SelfOxidizing) == 0 || lifecycle is not null || transitions is not null ||
              combustion is null || combustion.FlameSpreadRate <= 0 || combustion.ContactIgnitionTemperature <= -273.15f))
             throw new InvalidDataException("progressive-ignition requires a fixed self-oxidizing solid with contact combustion/spreadRate, without lifecycle or phases.");
+        if ((flags & MaterialFlags.RadialIgnition) != 0 &&
+            ((flags & MaterialFlags.ProgressiveIgnition) == 0 || combustion is null || combustion.PressurePerMass <= 0))
+            throw new InvalidDataException("radial-ignition requires progressive-ignition and positive pressurePerMass.");
+        if (combustion is not null && combustion.FlameSpreadRate > MaterialRegistry.MaximumFlameSpreadRate &&
+            (flags & MaterialFlags.RadialIgnition) == 0)
+            throw new InvalidDataException("spreadRate above 100 requires radial-ignition.");
 
         if (regulator is not null)
         {
@@ -974,10 +980,10 @@ internal static partial class MaterialFileLoader
             (spreadRateElement.ValueKind != JsonValueKind.Number ||
              !spreadRateElement.TryGetSingle(out spreadRate) ||
              !float.IsFinite(spreadRate) || spreadRate < 0 ||
-             spreadRate > MaterialRegistry.MaximumFlameSpreadRate))
+             spreadRate > 600))
         {
             throw new InvalidDataException(
-                $"combustion.spreadRate must be a finite number from 0 to {MaterialRegistry.MaximumFlameSpreadRate}.");
+                "combustion.spreadRate must be finite, 0..100 normally or 0..600 for radial-ignition.");
         }
 
         float pressurePerMass = 0;
@@ -1341,6 +1347,7 @@ internal static partial class MaterialFileLoader
                 "flame" => MaterialFlags.Flame,
                 "self-oxidizing" => MaterialFlags.SelfOxidizing,
                 "progressive-ignition" => MaterialFlags.ProgressiveIgnition,
+                "radial-ignition" => MaterialFlags.RadialIgnition,
                 "blocks-air" => MaterialFlags.BlocksAir,
                 "smoke" => MaterialFlags.Smoke,
                 "phase-enthalpy" => MaterialFlags.PhaseEnthalpy,

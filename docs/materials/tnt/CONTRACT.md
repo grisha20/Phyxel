@@ -1,5 +1,8 @@
 # TN: контракт до реализации
 
+Исторический контракт добавления. Текущий фронт изменён этапом
+[RF](RADIAL_FRONT_CONTRACT.md); расход/тепло/давление ниже сохранены.
+
 2026-10-08, baseline f61e4ed. Data-driven TNT: fixed/self-oxidizing/progressive-ignition, density1.6, k.08, c1, auto300/contact100, burn15/spread100/Q2600/W12/max2200, empty. Эмиссии smoke.3/CO₂.2/fire60, flameLifetimeMultiplier.5. Масса кисти1 не заменяется density.
 
 Поддержать положительный ReactionPressurePerMass у fixed solid в трёх признаках активности: registry, brush wake-up и combustion summary. Оставить историческое имя PressurePowderPresent/RegistryHasPressurePowders совместимым; отдельный PowderFront остаётся только granular. Не трогать силу/скорость/геометрию wave и параметры имеющихся топлив. Иначе фиксированный TNT может записать pending, но не разбудить перенос давления.

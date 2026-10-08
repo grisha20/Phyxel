@@ -497,7 +497,8 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             AirHeight = airHeight,
             AirConstants = airConstants,
             GasActiveTiles = new(Device, Math.Max(1, ((width+63)/64)*((height+63)/64))),
-            GasActiveTilesShader = allocateSimulation ? CompileShader("GasActiveTiles.hlsl") : null,
+            GasActiveTilesShader = allocateSimulation ? CompileShader(
+                Environment.GetEnvironmentVariable("PHYXEL_GAS_TILE_OVERRIDE_SHADER") ?? "GasActiveTiles.hlsl") : null,
             AirTimer = Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE") == "1" ? new(Device) : null,
             AirHeatTimer = Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE") == "1" ? new(Device) : null,
             GasMotionTimer = Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE") == "1" ? new(Device) : null,

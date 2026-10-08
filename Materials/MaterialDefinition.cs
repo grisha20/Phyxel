@@ -60,7 +60,9 @@ public enum MaterialFlags : uint
     // Molten metals and other excluded liquids cannot enter or diffuse through pores.
     NonAbsorbableLiquid = 1u << 14,
     // Elapsed burning time in Lifetime; opt-in contact front along fixed fuel.
-    ProgressiveIgnition = 1u << 15
+    ProgressiveIgnition = 1u << 15,
+    // Euclidean fast front; spreadRate is fine cells/s for this opt-in model.
+    RadialIgnition = 1u << 16
 }
 
 public static class CoreMaterialIds

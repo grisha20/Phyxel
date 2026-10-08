@@ -8,7 +8,8 @@
   "kind": "solid",
   "flags": [
     "self-oxidizing",
-    "progressive-ignition"
+    "progressive-ignition",
+    "radial-ignition"
   ],
   "color": "#D9AC43",
   "physics": {
@@ -27,7 +28,7 @@
     "burnRate": 15,
     "heatPerMass": 2600,
     "pressurePerMass": 12,
-    "spreadRate": 100,
+    "spreadRate": 480,
     "maximumTemperature": 2200,
     "flameLifetimeMultiplier": 0.5,
     "burnedInto": "core:empty"

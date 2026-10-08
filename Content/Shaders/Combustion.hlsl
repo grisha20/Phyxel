@@ -284,6 +284,7 @@ float2 AvailableOxidizer(uint2 p)
 }
 
 static const uint MaterialFlagProgressiveIgnition = 1u << 15;
+static const uint MaterialFlagRadialIgnition = 1u << 16;
 
 uint LiveFlameCount(uint2 coordinate, bool immediateOnly)
 {
@@ -320,7 +321,7 @@ uint LiveFlameCount(uint2 coordinate, bool immediateOnly)
 
 // A newly lit cell has elapsed time dt, below the source delay: parallel
 // threads cannot ignite an entire connected cord during the same dispatch.
-bool HasMatureIgnitionNeighbor(uint2 coordinate)
+bool HasMatureIgnitionNeighbor(uint2 coordinate, bool nonRadialOnly)
 {
     [unroll] for (int dy = -1; dy <= 1; dy++)
     [unroll] for (int dx = -1; dx <= 1; dx++)
@@ -332,6 +333,7 @@ bool HasMatureIgnitionNeighbor(uint2 coordinate)
         if (c.IsActive == 0 || c.MaterialIndex >= CombustionMaterialCount || c.MoistureMass > 0) continue;
         MaterialProperties m = Materials[c.MaterialIndex];
         if ((m.Flags & MaterialFlagProgressiveIgnition) != 0 &&
+            (!nonRadialOnly || (m.Flags & MaterialFlagRadialIgnition) == 0) &&
             c.Lifetime >= max(1 / max(m.FlameSpreadRate,.0001),2 * CombustionDeltaTime) && c.Temperature > m.ContactIgnitionTemperature)
             return true;
     }
@@ -432,14 +434,15 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
     }
 
     bool progressiveIgnition = !absorbedFuel && (source.Flags & MaterialFlagProgressiveIgnition) != 0;
-    if (progressiveIgnition && cell.Lifetime >= 1 / source.FlameSpreadRate &&
+    bool radialIgnition = progressiveIgnition && (source.Flags & MaterialFlagRadialIgnition) != 0;
+    if (progressiveIgnition && !radialIgnition && cell.Lifetime >= 1 / source.FlameSpreadRate &&
         cell.Temperature <= source.ContactIgnitionTemperature)
     {
         cell.Lifetime = 0;
         Grid[index] = cell;
     }
     bool contactIgnited = progressiveIgnition &&
-        (cell.Lifetime > 0 || HasMatureIgnitionNeighbor(coordinate));
+        (cell.Lifetime > 0 || HasMatureIgnitionNeighbor(coordinate,radialIgnition));
     uint flameContacts = cell.Temperature <= source.IgnitionTemperature && source.FlameSpreadRate > 0 &&
         (!separateContact || cell.Temperature >= source.ContactIgnitionTemperature)
         ? LiveFlameCount(coordinate, progressiveIgnition) : 0;
@@ -486,6 +489,8 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
     }
     if (burnedMass <= 0) return;
     if (progressiveIgnition) cell.Lifetime += CombustionDeltaTime;
+    // Cheap GPU-side gate: a cold block must not scan radial rays every tick.
+    if(radialIgnition)InterlockedOr(CombustionSummary[0],1u<<9);
 
     if(absorbedFuel)
     {

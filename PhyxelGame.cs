@@ -33,6 +33,7 @@ public sealed class PhyxelGame : Game
     private readonly GpuTemperatureSensors temperatureSensors = new();
     private readonly AcceptanceRegressionHarness acceptance = new();
     private readonly SimulationClockTrace simulationClockTrace = new();
+    private readonly FramePerformanceTrace framePerformanceTrace = new();
     private string scenePath;
     private bool hasChosenScenePath;
     private bool sceneDialogOpen;
@@ -385,6 +386,18 @@ public sealed class PhyxelGame : Game
             oilSmokeVerification=AbsorptionRegressionVerifier.Run(dispatchCoordinator,materialRegistry,fps=>diagnosticFramesPerSecond=fps).GetEnumerator();
             IsFixedTimeStep=false; return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_PROFILE_GAS_TILES") == "1")
+        {
+            InactiveSleepTime=TimeSpan.Zero;
+            oilSmokeVerification=GasTilePerformanceVerifier.Run(dispatchCoordinator,materialRegistry).GetEnumerator();
+            IsFixedTimeStep=false;return;
+        }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_TNT_FRONT") == "1")
+        {
+            InactiveSleepTime=TimeSpan.Zero;
+            oilSmokeVerification=TntFrontRegressionVerifier.Run(dispatchCoordinator,materialRegistry).GetEnumerator();
+            IsFixedTimeStep=false;return;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_EXPLOSIVE_MATERIAL") == "1")
         {
             InactiveSleepTime = TimeSpan.Zero;
@@ -539,6 +552,7 @@ public sealed class PhyxelGame : Game
 
     protected override void Update(GameTime gameTime)
     {
+        framePerformanceTrace.BeginUpdate(currentResources);
         if (userInterface is null || dispatchCoordinator is null || materialRegistry is null)
         {
             base.Update(gameTime);
@@ -694,8 +708,10 @@ public sealed class PhyxelGame : Game
         {
             uint acceptanceFrame = frameIndex;
             float physicalElapsedSeconds = acceptance.AdjustElapsedSeconds(input.DeltaSeconds);
+            framePerformanceTrace.BeginDispatch(currentResources);
             currentResources = DispatchEditorFrame(commandEncoder.Encode(commands),
                 !acceptance.Active && brushController.CommandsStartStroke, physicalElapsedSeconds);
+            framePerformanceTrace.EndDispatch(currentResources);
             simulationClockTrace.Observe(physicalElapsedSeconds, settings, dispatchCoordinator);
             if (simulationClockTrace.ExitRequested)
             {
@@ -882,6 +898,7 @@ public sealed class PhyxelGame : Game
 
     protected override void Draw(GameTime gameTime)
     {
+        framePerformanceTrace.BeginDraw(currentResources);
         GraphicsDevice.Clear(new Color(9, 11, 14));
         if (spriteBatch is null || userInterface is null || currentResources is null)
         {
@@ -928,6 +945,14 @@ public sealed class PhyxelGame : Game
         CaptureUiScreenshotIfRequested();
         UpdateFrameRate(gameTime);
         base.Draw(gameTime);
+        framePerformanceTrace.EndDraw(currentResources);
+    }
+
+    protected override void EndDraw()
+    {
+        framePerformanceTrace.BeginPresent();
+        base.EndDraw();
+        framePerformanceTrace.EndPresent();
     }
 
     protected override void UnloadContent()
@@ -935,6 +960,7 @@ public sealed class PhyxelGame : Game
         if(diagnosticTimerResolution){timeEndPeriod(1);diagnosticTimerResolution=false;}
         oilSmokeVerification?.Dispose();
         simulationClockTrace.Dispose();
+        framePerformanceTrace.Dispose();
         userInterface?.Dispose();
         temperatureSensors.Dispose();
         resourceManager?.Dispose();

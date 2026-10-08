@@ -2085,11 +2085,11 @@ public sealed class SimulationDispatchCoordinator
         var c = r.Context;
         c.UpdateSubresource(ref constants, r.PressureFrameConstants);
         c.ComputeShader.SetConstantBuffer(0, r.PressureFrameConstants);
-        c.ComputeShader.SetShaderResources(0, r.Grid.ReadView, r.Materials.View);
+        c.ComputeShader.SetShaderResources(0, r.Grid.ReadView, r.Materials.View, r.CombustionSummary.View);
         c.ComputeShader.SetUnorderedAccessView(0, r.Grid.WriteUnorderedView);
         c.ComputeShader.Set(r.PowderFrontShader);
         c.Dispatch(DivideRoundUp(r.Width,16),DivideRoundUp(r.Height,16),1);
-        Unbind(c,2,1); r.Grid.Swap();
+        Unbind(c,3,1); r.Grid.Swap();
     }
 
     internal static void DispatchPressureFragments(GpuSimulationResources r, SimulationFrameConstants constants,
