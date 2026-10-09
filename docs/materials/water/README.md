@@ -1,5 +1,6 @@
 # Вода — `core:water`
 
+- [WN: вода на полном поле и общий перенос жидкостей](../shared/WATER_NATIVE_PERFORMANCE_CONTRACT.md), [проверки и пределы](../shared/WATER_NATIVE_PERFORMANCE_RESULTS.md).
 - [WP: ускорение заливки и уровня](../shared/WATER_POUR_PERFORMANCE_CONTRACT.md), [проверки](../shared/WATER_POUR_PERFORMANCE_RESULTS.md).
 
 - [SE: спокойная заливка и выход пара](../shared/STEAM_ESCAPE_CONTRACT.md), [измерения и границы](../shared/STEAM_ESCAPE_RESULTS.md).

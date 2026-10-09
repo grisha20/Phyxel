@@ -240,6 +240,10 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? BrushShader { get; init; }
     public ComputeShader? CellularAutomataShader { get; init; }
     public ComputeShader? BroadSurfaceShader { get; init; }
+    public ComputeShader? ParallelSurfaceShader { get; init; }
+    public ComputeShader? VerticalPairShader { get; init; }
+    public ComputeShader? HorizontalPairShader { get; init; }
+    public ComputeShader? DiagonalPairShader { get; init; }
     public ComputeShader? AdjacentSurfaceShader { get; init; }
     public ComputeShader? LocalSurfaceShader { get; init; }
     public ComputeShader? ViscousSurfaceShader { get; init; }
@@ -274,6 +278,8 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? CompositionShader { get; init; }
     public ComputeShader? ThermalDiffusionShader { get; init; }
     public ComputeShader? WaterConvectionShader { get; init; }
+    public ComputeShader? WaterColumnMovementShader { get; init; }
+    public required GpuStructuredBuffer<uint> WaterMovementColumns { get; init; }
     public ComputeShader? AirInjectShader { get; init; }
     public required GpuStructuredBuffer<uint> AirSourceNodes { get; init; }
     public ComputeShader? AirMapSourcesShader { get; init; }
@@ -334,6 +340,8 @@ public sealed class GpuSimulationResources : IDisposable
         TransientLifecycleShader?.Dispose();
         ThermalDiffusionShader?.Dispose();
         WaterConvectionShader?.Dispose();
+        WaterColumnMovementShader?.Dispose();
+        WaterMovementColumns.Dispose();
         AirInjectShader?.Dispose();
         AirSourceNodes.Dispose();
         AirMapSourcesShader?.Dispose();
@@ -375,6 +383,10 @@ public sealed class GpuSimulationResources : IDisposable
         ComponentInitializeShader?.Dispose();
         CellularAutomataShader?.Dispose();
         BroadSurfaceShader?.Dispose();
+        ParallelSurfaceShader?.Dispose();
+        VerticalPairShader?.Dispose();
+        HorizontalPairShader?.Dispose();
+        DiagonalPairShader?.Dispose();
         AdjacentSurfaceShader?.Dispose();
         LocalSurfaceShader?.Dispose();
         ViscousSurfaceShader?.Dispose();

@@ -133,6 +133,10 @@ float ContactHeatFlow(
         return 0;
     }
 
+    // Every contact coefficient multiplies this exact temperature difference.
+    // Equal endpoints pay no material/geometry/phase-film search cost.
+    if (ThermalReserved0 == 0 && neighbor.Temperature == cell.Temperature) return 0;
+
     bool sameGas = IsSameGas(cell, neighbor);
     bool gasSurface = IsOrdinaryGasSurface(cell, neighbor);
     bool wetSurface = IsWetSurface(cell, neighbor);
@@ -505,8 +509,12 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         cell.Temperature += heatFlow / capacity;
     if (material.AmbientCoolingRate > 0)
     {
-        float ambientRate = material.AmbientCoolingRate * AmbientSurfaceExposure(coordinate);
-        float ambientFactor = 1.0 - exp(-ambientRate * ThermalDeltaTime);
+        float ambientFactor = 0;
+        if (ThermalReserved0 != 0 || material.AmbientTemperature != cell.Temperature)
+        {
+            float ambientRate = material.AmbientCoolingRate * AmbientSurfaceExposure(coordinate);
+            ambientFactor = 1.0 - exp(-ambientRate * ThermalDeltaTime);
+        }
         float temperatureChange =
             (material.AmbientTemperature - cell.Temperature) * saturate(ambientFactor);
         ambientHeat = capacity * temperatureChange;

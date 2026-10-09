@@ -6,7 +6,22 @@ StructuredBuffer<uint> WetWallMask : register(t1);
 RWStructuredBuffer<uint> BoilingSummary : register(u1);
 RWStructuredBuffer<uint> BoilingCellMaterials : register(u2);
 RWStructuredBuffer<GasMotionState> BoilingGasMotion : register(u3);
+RWStructuredBuffer<uint> MovementColumns : register(u4);
 #include "PhaseEnthalpy.hlsli"
+
+[numthreads(16,16,1)]
+void CSPrepareMovement(uint3 thread : SV_DispatchThreadID)
+{
+    if(thread.x>=Width || thread.y>=Height)return;
+    GridCell cell=WaterGrid[thread.y*Width+thread.x];
+    if(cell.IsActive==0)return;
+    MaterialProperties m=Materials[cell.MaterialIndex];
+    if((m.Flags & MaterialFlagSurfaceBoiling)==0)return;
+    if(cell.Mass>1 || (cell.BodyId & VapourCushionMarker)!=0 ||
+        (cell.Temperature>=m.TransitionAboveTemperature-.001 && cell.Lifetime>0)){
+        uint ignored;InterlockedOr(MovementColumns[thread.x],1,ignored);
+    }
+}
 
 bool IsThinFilmColumn(uint index,GridCell cell)
 {
@@ -237,6 +252,7 @@ void CSMain(uint3 thread : SV_DispatchThreadID)
     {
         uint x=thread.x;
         if(thread.y!=0 || x>=Width)return;
+        [branch]if(DebugReserved2==0 && MovementColumns[x]==0)return;
         RelieveLiquidOverfill(x);
         [loop]for(uint y=2;y+1<Height;y++)y=AdvanceDrop(x,y);
         return;

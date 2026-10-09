@@ -1,5 +1,6 @@
 # Расплавленный чугун — `core:molten_cast_iron`
 
+- [WN: вода на полном поле и общий перенос жидкостей](../shared/WATER_NATIVE_PERFORMANCE_CONTRACT.md), [проверки и пределы](../shared/WATER_NATIVE_PERFORMANCE_RESULTS.md).
 - [WP: ускорение заливки и уровня](../shared/WATER_POUR_PERFORMANCE_CONTRACT.md), [проверки](../shared/WATER_POUR_PERFORMANCE_RESULTS.md).
 
 - [Паспорт](PASSPORT.md): источники, поведение, критерии, статусы и ограничения.

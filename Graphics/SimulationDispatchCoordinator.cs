@@ -177,6 +177,7 @@ public sealed class SimulationDispatchCoordinator
     private bool solidSleeping;
     private bool freeBodyMatter;
     private readonly bool bodyBalanceBaseline = Environment.GetEnvironmentVariable("PHYXEL_BODY_BALANCE_BASELINE") == "1";
+    private readonly bool nativePerformanceReference = Environment.GetEnvironmentVariable("PHYXEL_NATIVE_REFERENCE") == "1";
     private bool topologyDirty;
     private bool previousSolidGravity;
     private bool previousHydraulicPressure;
@@ -1423,7 +1424,9 @@ public sealed class SimulationDispatchCoordinator
             }
 
             constants.SimulationPhase = phase;
-            ComputeShader? phaseShader = !referenceSurface ? phase switch
+            bool parallelSurface = !referenceSurface && phase is 56 or 57 &&
+                !nativePerformanceReference;
+            ComputeShader? phaseShader = parallelSurface ? resources.ParallelSurfaceShader : !referenceSurface ? phase switch
             {
                 13 => resources.AdjacentSurfaceShader,
                 56 => resources.BroadSurfaceShader,
@@ -1431,6 +1434,13 @@ public sealed class SimulationDispatchCoordinator
                 58 => resources.ViscousSurfaceShader,
                 _ => resources.CellularAutomataShader
             } : resources.CellularAutomataShader;
+            if (!nativePerformanceReference && !referenceSurface)
+                phaseShader = phase switch {
+                    0 or 1 => resources.VerticalPairShader,
+                    2 or 3 => resources.HorizontalPairShader,
+                    >= 5 and <= 12 => resources.DiagonalPairShader,
+                    _ => phaseShader
+                };
             context.ComputeShader.Set(phaseShader);
             constants.GasSubStep = pressurePowderOnly ? 0x80000000u : 0u;
 
@@ -1512,7 +1522,10 @@ public sealed class SimulationDispatchCoordinator
                     constants.DeltaTime=1f/120;
                 }
                 UpdateConstants(context, resources, ref constants);
-                context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
+                if (parallelSurface)
+                    context.Dispatch(DivideRoundUp(resources.Width, phase == 56 ? 2048 : 256) + 1, 1, 1);
+                else
+                    context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
                 if (phase == 58 && enablePoolSurfaceBalance)
                 {
                     GpuStageTimer? poolTimer = null;
@@ -1951,7 +1964,7 @@ public sealed class SimulationDispatchCoordinator
     }
 
     internal void DispatchThermalDiffusion(GpuSimulationResources resources, bool measure,
-        uint tickIndex, bool convectWater)
+        uint tickIndex, bool convectWater, bool? referenceContacts = null)
     {
         ThermalSimulationConstants constants = new()
         {
@@ -1959,7 +1972,8 @@ public sealed class SimulationDispatchCoordinator
             ExchangeRate = ThermalExchangeRate,
             Width = (uint)resources.Width,
             Height = (uint)resources.Height,
-            ObserveEnergy = resources.ThermalEnergyLedger is null ? 0u : 1u
+            ObserveEnergy = resources.ThermalEnergyLedger is null ? 0u : 1u,
+            Reserved0 = (referenceContacts ?? nativePerformanceReference) ? 1u : 0u
         };
         DeviceContext context = resources.Context;
         if (measure)
@@ -1969,7 +1983,7 @@ public sealed class SimulationDispatchCoordinator
         }
         // Independent of cellular sleep, hydraulic mode and render FPS.
         // Same-material liquid rotations preserve occupancy and path maps.
-        if (convectWater) DispatchWaterConvection(resources, tickIndex);
+        if (convectWater) DispatchWaterConvection(resources, tickIndex, referenceContacts ?? nativePerformanceReference);
         context.ClearUnorderedAccessView(resources.Grid.WriteUnorderedView, new RawInt4());
         context.UpdateSubresource(ref constants, resources.ThermalConstants);
         context.ComputeShader.Set(resources.BulkThermalDegreesShader);
@@ -2031,7 +2045,7 @@ public sealed class SimulationDispatchCoordinator
         resources.Grid.Swap();
     }
 
-    private void DispatchWaterConvection(GpuSimulationResources resources, uint tickIndex)
+    private void DispatchWaterConvection(GpuSimulationResources resources, uint tickIndex, bool referenceColumns)
     {
         DeviceContext context = resources.Context;
         resources.WaterConvectionTimer?.Begin(context);
@@ -2039,7 +2053,7 @@ public sealed class SimulationDispatchCoordinator
         SimulationFrameConstants constants = new()
         {
             Width = (uint)resources.Width, Height = (uint)resources.Height,
-            FrameIndex = tickIndex
+            FrameIndex = tickIndex, DebugReserved2 = referenceColumns ? 1u : 0u
         };
         context.ComputeShader.Set(resources.WaterConvectionShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
@@ -2048,7 +2062,15 @@ public sealed class SimulationDispatchCoordinator
         constants.GasSubStep=2;
         context.ComputeShader.SetUnorderedAccessViews(1,resources.ContactSummary.UnorderedView,resources.CellMaterials.UnorderedView,resources.GasMotion.UnorderedView);
         context.UpdateSubresource(ref constants,resources.FrameConstants);
+        context.ComputeShader.SetUnorderedAccessView(4,resources.WaterMovementColumns.UnorderedView);
+        if(!referenceColumns){
+            context.ClearUnorderedAccessView(resources.WaterMovementColumns.UnorderedView,new RawInt4());
+            context.ComputeShader.Set(resources.WaterColumnMovementShader);
+            context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
+            context.ComputeShader.Set(resources.WaterConvectionShader);
+        }
         context.Dispatch(DivideRoundUp(resources.Width,16),1,1);
+        context.ComputeShader.SetUnorderedAccessView(4,null);
         context.ComputeShader.SetUnorderedAccessView(1,null);
         context.ComputeShader.SetUnorderedAccessView(2,null);
         context.ComputeShader.SetUnorderedAccessView(3,null);

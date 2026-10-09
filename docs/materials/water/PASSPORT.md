@@ -1,5 +1,10 @@
 # Вода — `core:water`
 
+WN2026-10-09: оптимизация полного поля без изменения коэффициентов;
+[контракт](../shared/WATER_NATIVE_PERFORMANCE_CONTRACT.md),
+[измерения и оставшиеся ограничения](../shared/WATER_NATIVE_PERFORMANCE_RESULTS.md).
+Выбранные WN-проверки общего переноса PASS; весь паспорт не закрыт.
+
 WP2026-10-09: ускорено вычисление уровня при непрерывной заливке;
 коэффициенты и правила переноса прежние. [Контракт](../shared/WATER_POUR_PERFORMANCE_CONTRACT.md),
 [новые проверки и ограничения](../shared/WATER_POUR_PERFORMANCE_RESULTS.md):

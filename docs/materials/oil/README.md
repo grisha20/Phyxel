@@ -1,5 +1,6 @@
 # Парафиновое масло — `core:oil`
 
+- [WN: вода на полном поле и общий перенос жидкостей](../shared/WATER_NATIVE_PERFORMANCE_CONTRACT.md), [проверки и пределы](../shared/WATER_NATIVE_PERFORMANCE_RESULTS.md).
 - [WP: ускорение заливки и уровня](../shared/WATER_POUR_PERFORMANCE_CONTRACT.md), [проверки](../shared/WATER_POUR_PERFORMANCE_RESULTS.md).
 
 - [Будущая задача: заливка раскалённой поверхности](HOT_SURFACE_FUTURE.md), после принятия воды; пока без изменения физики.
