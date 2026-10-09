@@ -326,14 +326,29 @@ public static class UiLayoutRegressionTests
                     "Property action buttons overlap the simulation switches.");
 
                 UiLeftToolbar toolbar = new();
+                var help = UiLeftToolbar.GetShortcutHelpLayout(font, layout.LeftToolbar);
+                Require(IsInside(help.Bounds, layout.LeftToolbar), "Shortcut guide escaped the left panel.");
                 foreach (ToolDefinition tool in UiLeftToolbar.Tools)
                 {
                     Rectangle toolBounds = toolbar.GetToolBounds(layout.LeftToolbar, font, tool.Id);
+                    if (toolBounds == Rectangle.Empty)
+                    {
+                        Require(!tool.Enabled, "Compact layout hid an available tool.");
+                        continue;
+                    }
                     Require(IsInside(toolBounds, layout.LeftToolbar),
                         $"Tool '{tool.DisplayName}' bounds {toolBounds} escaped panel {layout.LeftToolbar} " +
                         $"at {width}x{height}, DPI {dpi}.");
+                    Require(toolBounds.Bottom < help.Bounds.Top, "Tool overlaps the shortcut guide.");
                     if (tool.Enabled)
                     {
+                        var shortcuts = UiLeftToolbar.GetShortcutHelp(tool.Id);
+                        foreach (string shortcut in shortcuts)
+                            Require(font.MeasureString(shortcut).X * help.Scale <= help.Bounds.Width - 16,
+                                "Shortcut text exceeds the left panel width: " + shortcut);
+                        float helpBottom = help.Bounds.Y + 13 + MathF.Ceiling(font.MeasureString("УПРАВЛЕНИЕ").Y * help.Scale) +
+                            (shortcuts.Count - 1) * help.LineHeight + font.MeasureString(shortcuts[^1]).Y * help.Scale;
+                        Require(helpBottom <= help.Bounds.Bottom - 4, "Shortcut text exceeds the left panel height.");
                         int iconSize = Math.Clamp(toolBounds.Height - 14, 22, 30);
                         int availableTextWidth = Math.Max(1, toolBounds.Width - 11 - iconSize - 12);
                         int availableTextHeight = Math.Max(1, toolBounds.Height - 6);
@@ -344,7 +359,7 @@ public static class UiLayoutRegressionTests
                             availableTextHeight);
                         Vector2 textSize = font.MeasureString(text) * scale;
                         Require(textSize.X <= availableTextWidth + 0.5f && textSize.Y <= availableTextHeight + 0.5f,
-                            $"Tool '{tool.DisplayName}' text escaped its item at {width}x{height}, DPI {dpi}.");
+                            $"Tool {tool.Id} text {textSize} escaped {availableTextWidth}x{availableTextHeight} at {width}x{height}, DPI {dpi}.");
                         Require(scale >= 0.72f,
                             $"Tool '{tool.DisplayName}' became too small at {width}x{height}, DPI {dpi}.");
                         if (tool.Id == PhyxelToolId.Pan && width == 1920 && height == 1080 && dpi == 1f)

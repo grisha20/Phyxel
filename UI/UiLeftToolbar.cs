@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Phyxel.Input;
@@ -45,6 +46,21 @@ public sealed class UiLeftToolbar
         new(PhyxelToolId.Pan, "pan", "Камера / панорама", true, "ЛКМ — перемещение, Alt+колесо — масштаб")
     ];
 
+    private static readonly IReadOnlyList<ToolDefinition> EnabledTools = Tools.Where(tool => tool.Enabled).ToArray();
+    private static readonly string[] CommonShortcuts =
+    [
+        "Колесо — кисть", "Shift+ЛКМ — линия", "Alt+колесо — зум", "СКМ — двигать",
+        "Ctrl+Z — отмена", "Ctrl+Y — повтор", "Esc — меню"
+    ];
+    private static readonly string[] HelpLabels =
+    [
+        "ЛКМ — температура", "ЛКМ — рисовать", "ЛКМ — стирать", "ЛКМ — фильтр",
+        "ЛКМ — датчик", "ЛКМ — двигать", "ПКМ — стирать", "ПКМ — убрать", "Shift+ПКМ — все",
+        .. CommonShortcuts
+    ];
+    private readonly record struct ToolbarMetrics(IReadOnlyList<ToolDefinition> Tools, int ItemHeight, int ItemGap,
+        Rectangle HelpBounds, float HelpScale, int HelpLineHeight);
+
     private PhyxelToolId activeTool = PhyxelToolId.Brush;
     private ToolDefinition? hoveredTool;
     private ToolDefinition? previousHoveredTool;
@@ -66,13 +82,14 @@ public sealed class UiLeftToolbar
         hoveredTool = null;
 
         int padding = 10;
-        int itemHeight = GetItemHeight(font, bounds);
+        ToolbarMetrics metrics = CalculateMetrics(font, bounds);
+        int itemHeight = metrics.ItemHeight;
         int itemY = bounds.Y + GetHeaderHeight(font);
         int itemWidth = bounds.Width - padding * 2;
 
-        for (int index = 0; index < Tools.Count; index++)
+        for (int index = 0; index < metrics.Tools.Count; index++)
         {
-            ToolDefinition tool = Tools[index];
+            ToolDefinition tool = metrics.Tools[index];
             itemY += GetGroupGap(tool.Id);
             Rectangle itemBounds = new(bounds.X + padding, itemY, itemWidth, itemHeight);
             if (itemBounds.Contains(input.MousePosition))
@@ -84,7 +101,7 @@ public sealed class UiLeftToolbar
                 }
             }
 
-            itemY += itemHeight + GetItemGap(font, bounds);
+            itemY += itemHeight + metrics.ItemGap;
         }
 
         if (hoveredTool == previousHoveredTool && hoveredTool is not null)
@@ -117,13 +134,14 @@ public sealed class UiLeftToolbar
         spriteBatch.Draw(pixel, new Rectangle(bounds.X + 12, bounds.Y + GetHeaderHeight(font) - 7, bounds.Width - 24, 1), UiTheme.BorderColor);
 
         int padding = 10;
-        int itemHeight = GetItemHeight(font, bounds);
+        ToolbarMetrics metrics = CalculateMetrics(font, bounds);
+        int itemHeight = metrics.ItemHeight;
         int itemY = bounds.Y + GetHeaderHeight(font);
         int itemWidth = bounds.Width - padding * 2;
 
-        for (int index = 0; index < Tools.Count; index++)
+        for (int index = 0; index < metrics.Tools.Count; index++)
         {
-            ToolDefinition tool = Tools[index];
+            ToolDefinition tool = metrics.Tools[index];
             int groupGap = GetGroupGap(tool.Id);
             if (groupGap > 0)
             {
@@ -229,17 +247,19 @@ public sealed class UiLeftToolbar
                     0);
             }
 
-            itemY += itemHeight + GetItemGap(font, bounds);
+            itemY += itemHeight + metrics.ItemGap;
         }
 
-        int footerHeight = font.LineSpacing * 3 + 18;
-        if (itemY + footerHeight + 8 < bounds.Bottom)
+        Rectangle footer = metrics.HelpBounds;
+        backdrop.DrawRoundedRectangle(spriteBatch, footer, UiTheme.FieldBackground, 5);
+        spriteBatch.DrawString(font, "УПРАВЛЕНИЕ", new Vector2(footer.X + 8, footer.Y + 7),
+            UiTheme.TextSecondary, 0, Vector2.Zero, metrics.HelpScale, SpriteEffects.None, 0);
+        int helpY = footer.Y + 13 + (int)MathF.Ceiling(font.MeasureString("УПРАВЛЕНИЕ").Y * metrics.HelpScale);
+        foreach (string shortcut in GetShortcutHelp(activeTool))
         {
-            Rectangle footer = new(bounds.X + 10, itemY + 4, bounds.Width - 20, footerHeight);
-            backdrop.DrawRoundedRectangle(spriteBatch, footer, UiTheme.FieldBackground, 5);
-            spriteBatch.DrawString(font, activeTool == PhyxelToolId.Sensor ? "ЛКМ  Датчик" : "ЛКМ  Рисовать", new Vector2(footer.X + 10, footer.Y + 6), UiTheme.TextMuted);
-            spriteBatch.DrawString(font, activeTool == PhyxelToolId.Sensor ? "ПКМ  Убрать" : "ПКМ  Стирать", new Vector2(footer.X + 10, footer.Y + 7 + font.LineSpacing), UiTheme.TextMuted);
-            spriteBatch.DrawString(font, activeTool == PhyxelToolId.Sensor ? "Shift+ПКМ  Все" : "Ctrl+Z  Отмена", new Vector2(footer.X + 10, footer.Y + 8 + font.LineSpacing * 2), UiTheme.TextMuted);
+            spriteBatch.DrawString(font, shortcut, new Vector2(footer.X + 8, helpY),
+                UiTheme.TextSecondary, 0, Vector2.Zero, metrics.HelpScale, SpriteEffects.None, 0);
+            helpY += metrics.HelpLineHeight;
         }
 
         // Draw Tooltip if hovered
@@ -259,18 +279,19 @@ public sealed class UiLeftToolbar
     internal Rectangle GetToolBounds(Rectangle bounds, SpriteFont font, PhyxelToolId toolId)
     {
         int padding = 10;
-        int itemHeight = GetItemHeight(font, bounds);
+        ToolbarMetrics metrics = CalculateMetrics(font, bounds);
+        int itemHeight = metrics.ItemHeight;
         int itemY = bounds.Y + GetHeaderHeight(font);
-        for (int index = 0; index < Tools.Count; index++)
+        for (int index = 0; index < metrics.Tools.Count; index++)
         {
-            ToolDefinition tool = Tools[index];
+            ToolDefinition tool = metrics.Tools[index];
             itemY += GetGroupGap(tool.Id);
             Rectangle itemBounds = new(bounds.X + padding, itemY, bounds.Width - padding * 2, itemHeight);
             if (tool.Id == toolId)
             {
                 return itemBounds;
             }
-            itemY += itemHeight + GetItemGap(font, bounds);
+            itemY += itemHeight + metrics.ItemGap;
         }
         return Rectangle.Empty;
     }
@@ -313,17 +334,49 @@ public sealed class UiLeftToolbar
 
     private static int GetHeaderHeight(SpriteFont font) => font.LineSpacing + 28;
 
-    private static int GetItemHeight(SpriteFont font, Rectangle bounds)
+    internal static IReadOnlyList<string> GetShortcutHelp(PhyxelToolId tool) => tool switch
     {
-        int desired = Math.Clamp(font.LineSpacing + 22, 40, 54);
-        int fixedSpacing = (Tools.Count - 1) * GetItemGap(font, bounds) + GetGroupGap(PhyxelToolId.Line) + GetGroupGap(PhyxelToolId.Pan);
-        int available = Math.Max(Tools.Count * 34, bounds.Height - GetHeaderHeight(font) - fixedSpacing);
-        return Math.Clamp(Math.Min(desired, available / Tools.Count), 34, 54);
+        PhyxelToolId.Sensor => ["ЛКМ — датчик", "ПКМ — убрать", "Shift+ПКМ — все", "Alt+колесо — зум", "СКМ — двигать", "Esc — меню"],
+        PhyxelToolId.Pan => ["ЛКМ — двигать", "СКМ — двигать", "Alt+колесо — зум", "Ctrl+Z — отмена", "Ctrl+Y — повтор", "Esc — меню"],
+        _ => [tool switch
+        {
+            PhyxelToolId.Eraser => "ЛКМ — стирать",
+            PhyxelToolId.Temperature => "ЛКМ — температура",
+            PhyxelToolId.Filter => "ЛКМ — фильтр",
+            _ => "ЛКМ — рисовать"
+        }, "ПКМ — стирать", .. CommonShortcuts]
+    };
+
+    internal static (Rectangle Bounds, float Scale, int LineHeight) GetShortcutHelpLayout(SpriteFont font, Rectangle bounds)
+    {
+        var metrics = CalculateMetrics(font, bounds);
+        return (metrics.HelpBounds, metrics.HelpScale, metrics.HelpLineHeight);
     }
 
-    private static int GetItemGap(SpriteFont font, Rectangle bounds) => Math.Clamp(
-        (bounds.Height - GetHeaderHeight(font) - GetGroupGap(PhyxelToolId.Line) - GetGroupGap(PhyxelToolId.Pan)
-            - Tools.Count * 34 - 8) / Math.Max(1, Tools.Count - 1), 0, 6);
+    private static ToolbarMetrics CalculateMetrics(SpriteFont font, Rectangle bounds)
+    {
+        const int helpRows = 9;
+        float glyphHeight = HelpLabels.Max(label => font.MeasureString(label).Y);
+        int minimumItemHeight = Math.Max(34, (int)MathF.Ceiling(glyphHeight * .72f) + 6);
+        float maximumLabelWidth = HelpLabels.Max(label => font.MeasureString(label).X);
+        int maximumHelpHeight = bounds.Height - GetHeaderHeight(font) - EnabledTools.Count * minimumItemHeight - GetGroupGap(PhyxelToolId.Pan) - 16;
+        float scale = Math.Max(.3f, Math.Min(.78f, Math.Min(
+            (bounds.Width - 36) / Math.Max(1f, maximumLabelWidth),
+            (maximumHelpHeight - 48) / (glyphHeight * (helpRows + 1)))));
+        int textHeight = (int)MathF.Ceiling(glyphHeight * scale);
+        int lineHeight = textHeight + 2;
+        int helpHeight = 20 + textHeight + helpRows * lineHeight;
+        Rectangle help = new(bounds.X + 10, bounds.Bottom - helpHeight - 8, bounds.Width - 20, helpHeight);
+        int available = help.Top - 8 - bounds.Y - GetHeaderHeight(font);
+        int preferredItemHeight = Math.Clamp(font.LineSpacing + 22, 40, 54);
+        IReadOnlyList<ToolDefinition> tools = Tools.Count * preferredItemHeight + Tools.Sum(tool => GetGroupGap(tool.Id)) <= available
+            ? Tools : EnabledTools;
+        int groupSpacing = tools.Sum(tool => GetGroupGap(tool.Id));
+        int gap = Math.Clamp((available - groupSpacing - tools.Count * minimumItemHeight) / Math.Max(1, tools.Count - 1), 0, 6);
+        int height = Math.Clamp(Math.Min(preferredItemHeight,
+            (available - groupSpacing - (tools.Count - 1) * gap) / tools.Count), minimumItemHeight, 54);
+        return new(tools, height, gap, help, scale, lineHeight);
+    }
 
     private static int GetGroupGap(PhyxelToolId toolId) => toolId switch
     {
