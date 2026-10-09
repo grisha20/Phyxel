@@ -50,7 +50,7 @@ internal static class CameraZoomRegressionTests
             Check(Vector2.Distance(screenAfter, pointer.ToVector2()) <= 1.5f,
                 "wheel lost the point under the pointer at zoom " + camera.Zoom);
         }
-        Check(camera.Zoom < 1 && canvas.Contains(view), "zoom-out did not retain the whole world inside the canvas");
+        Check(camera.Zoom == 1 && view.Size == canvas.Size, "zoom-out shrank the world below its original size");
         float zoom = camera.Zoom;
         foreach (var blocked in new[]
         {
@@ -74,7 +74,7 @@ internal static class CameraZoomRegressionTests
         Check(camera.Zoom == 16, "maximum zoom missing");
         camera.Update(Input(canvas.Center) with { WheelDelta = -12000 }, canvas, canvas, false, false);
         Settle(camera, canvas, canvas);
-        Check(camera.Zoom == .25f, "minimum zoom missing");
+        Check(camera.Zoom == 1, "zoom-out must stop at the original view");
         camera.Reset();
         Check(camera.Zoom == 1 && camera.GetWorldBounds(canvas) == canvas, "reset is not the original view");
 
@@ -120,10 +120,13 @@ internal static class CameraZoomRegressionTests
         Check(brush.CreateCommands(click, changed, settings, metal, false, false, 20, false).Count == 0,
             "zoom during a held stroke drew across the world");
         camera.Reset();
-        Rectangle small = camera.Update(Input(canvas.Center) with { WheelDelta = -600 }, canvas, canvas, false, false);
-        small = Settle(camera, canvas, canvas);
+        Rectangle original = camera.Update(Input(canvas.Center) with { WheelDelta = -600 }, canvas, canvas, false, false);
+        Check(camera.Zoom == 1 && original == canvas && !camera.IsZooming,
+            "wheel-down at the original view moved or shrank the scene");
+        camera.Update(Input(canvas.Center) with { MiddleDown = true }, canvas, canvas, false, false);
+        Rectangle shiftedWorld = camera.Update(Input(canvas.Center + new Point(50, 20)) with { MiddleDown = true }, canvas, canvas, false, false);
         Check(new CanvasBrushController().CreateCommands(Input(canvas.Location) with { LeftDown = true },
-            small, settings, metal, false, false, 20, false).Count == 0, "empty margin painted into the world");
+            shiftedWorld, settings, metal, false, false, 20, false).Count == 0, "empty margin painted into the world");
 
         // Exercise the UI wheel route across layout/DPI changes, not just camera arithmetic.
         foreach (var size in new[] { new Point(1280, 720), new Point(1920, 1080), new Point(2560, 1440) })
@@ -155,7 +158,7 @@ internal static class CameraZoomRegressionTests
             ui.Update(Input(Point.Zero), viewport, dpi, settings);
         }
         TestSmoothZoomAndFreePan(canvas);
-        Console.WriteLine("[PASS] Smooth global zoom, 0.25-16x limits, frame-rate independence, pointer anchoring, free middle pan, UI/modal isolation, brush/probe/sensor mapping and stroke cancellation.");
+        Console.WriteLine("[PASS] Smooth global zoom, 1-16x limits, frame-rate independence, pointer anchoring, free middle pan, UI/modal isolation, brush/probe/sensor mapping and stroke cancellation.");
     }
 
     private static void TestSmoothZoomAndFreePan(Rectangle canvas)
@@ -172,6 +175,13 @@ internal static class CameraZoomRegressionTests
             previous = camera.Zoom;
         }
         Check(!camera.IsZooming && camera.Zoom == 1.25f, "smooth zoom did not finish");
+        camera.Update(wheel with { WheelDelta = -12000 }, canvas, canvas, false, false);
+        for (int i = 0; i < 120; i++)
+        {
+            camera.Update(Input(canvas.Center) with { WheelDelta = -120 }, canvas, canvas, false, false);
+            Check(camera.Zoom >= 1, "smooth zoom crossed below the original view");
+        }
+        Check(camera.Zoom == 1 && !camera.IsZooming, "repeated wheel-down did not stop at the original view");
         float AtTime(float dt, int frames)
         {
             var test = new CanvasCameraController();

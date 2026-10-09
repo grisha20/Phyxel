@@ -5,7 +5,7 @@ namespace Phyxel.Input;
 
 public sealed class CanvasCameraController
 {
-    private const float MinimumZoom = 0.25f;
+    private const float MinimumZoom = 1f;
     private const float MaximumZoom = 16f;
     private const float ZoomFactor = 1.25f;
     private const float ZoomResponse = 22f;
@@ -56,7 +56,8 @@ public sealed class CanvasCameraController
             // Logarithmic interpolation gives the same feel at every zoom and FPS.
             float difference = MathF.Log(targetZoom / Zoom);
             float blend = 1f - MathF.Exp(-ZoomResponse * Math.Clamp(input.DeltaSeconds, 0f, .05f));
-            Zoom = Math.Abs(difference) < .0001f ? targetZoom : Zoom * MathF.Exp(difference * blend);
+            Zoom = Math.Abs(difference) < .0001f ? targetZoom :
+                Math.Clamp(Zoom * MathF.Exp(difference * blend), MinimumZoom, MaximumZoom);
             KeepPointerAnchored(fittedWorldBounds);
         }
 
