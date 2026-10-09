@@ -6,13 +6,13 @@
   "SpawnDensity": 0.82,
   "SolidGravity": false,
   "SelectedMaterialId": "core:copper",
-  "SavedAt": "2026-10-09T12:33:50.515448+00:00",
+  "SavedAt": "2026-10-09T12:46:56.386446+00:00",
   "HydraulicPressure": true,
   "PressureDestruction": false,
   "TemperatureSensors": [
     {
       "X": 140,
-      "Y": 180
+      "Y": 190
     },
     {
       "X": 290,
