@@ -23,9 +23,9 @@ public sealed class CanvasBrushController
     public BrushDrawCommand? LinePreview => pendingLine;
     public bool CommandsStartStroke { get; private set; }
 
-    public void CancelStroke()
+    public void CancelStroke(bool suppressDrawingUntilRelease = false)
     {
-        suppressUntilRelease |= strokeActive;
+        suppressUntilRelease |= strokeActive || suppressDrawingUntilRelease;
         strokeActive = false;
         pendingLine = null;
     }

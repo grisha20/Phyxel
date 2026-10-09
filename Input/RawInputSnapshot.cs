@@ -20,4 +20,5 @@ public readonly record struct RawInputSnapshot(
 {
     public bool UndoPressed { get; init; }
     public bool RedoPressed { get; init; }
+    public bool MiddleDown { get; init; }
 }

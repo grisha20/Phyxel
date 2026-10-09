@@ -202,8 +202,8 @@ public sealed class SandboxUiCoordinator : IDisposable
 
         PointerConsumed = topConsumed || leftConsumed || rightConsumed || bottomConsumed || statusConsumed;
 
-        // Mouse Wheel brush size inside Canvas
-        if (input.WheelDelta != 0 && CanvasBounds.Contains(input.MousePosition) &&
+        // Plain wheel belongs to the camera; Shift+wheel adjusts the brush.
+        if (input.ShiftDown && input.WheelDelta != 0 && CanvasBounds.Contains(input.MousePosition) &&
             !PointerConsumed && !PanToolActive && !SensorToolActive)
         {
             settings.BrushRadius = Math.Clamp(settings.BrushRadius + Math.Sign(input.WheelDelta) * 2, 1, 96);
@@ -303,10 +303,14 @@ public sealed class SandboxUiCoordinator : IDisposable
             settings.Scale,
             settings.Paused || PauseMenuOpen,
             categoryPalette.HoveredFilter is { } hovered ? UiFilterCardRenderer.Description(hovered) : transientStatus,
-            FilterToolActive ? FilterRules.Label(settings.FilterSelection, currentMatDef.Name) : null);
+            FilterToolActive ? FilterRules.Label(settings.FilterSelection, currentMatDef.Name) : null,
+            CameraZoom);
         PauseMenu.Draw(spriteBatch, font, panelRenderer, pixel, iconTextures,
             pixel.GraphicsDevice.Viewport.Bounds, transientStatus);
     }
+
+    public void DrawWorldBoundary(SpriteBatch spriteBatch, Rectangle worldBounds)
+        => UiIconRenderer.DrawStrokedRectangle(spriteBatch, pixel, worldBounds, 1, UiTheme.BorderHighlight);
 
     public void DrawBrushIndicator(
         SpriteBatch spriteBatch,

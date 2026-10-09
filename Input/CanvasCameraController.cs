@@ -5,59 +5,72 @@ namespace Phyxel.Input;
 
 public sealed class CanvasCameraController
 {
-    private const float MinimumZoom = 1f;
-    private const float MaximumZoom = 4f;
-    private const float ZoomStep = 0.25f;
+    private const float MinimumZoom = 0.25f;
+    private const float MaximumZoom = 16f;
+    private const float ZoomFactor = 1.25f;
+    private const float ZoomResponse = 22f;
 
     private Vector2 center = new(0.5f, 0.5f);
     private Point previousPointer;
     private Rectangle previousCanvas;
+    private Rectangle previousFittedBounds;
     private bool dragging;
+    private float targetZoom = 1f;
+    private Vector2 zoomAnchorWorld;
+    private Point zoomAnchorScreen;
 
-    public float Zoom { get; private set; } = MinimumZoom;
+    public float Zoom { get; private set; } = 1f;
+    public bool IsZooming => Zoom != targetZoom;
 
     public Rectangle Update(
         RawInputSnapshot input,
         Rectangle canvas,
         Rectangle fittedWorldBounds,
-        bool active,
+        bool panToolActive,
         bool pointerConsumedByUi)
     {
-        if (canvas != previousCanvas)
+        if (canvas != previousCanvas || fittedWorldBounds != previousFittedBounds)
         {
             dragging = false;
             previousCanvas = canvas;
+            previousFittedBounds = fittedWorldBounds;
+            targetZoom = Zoom;
         }
 
         bool pointerInside = canvas.Contains(input.MousePosition) && !pointerConsumedByUi;
-        if (!active || !pointerInside)
+        if (pointerInside && input.WheelDelta != 0 && !input.ShiftDown)
         {
-            dragging = false;
-            return GetWorldBounds(fittedWorldBounds);
-        }
-
-        if (input.WheelDelta != 0)
-        {
-            float oldZoom = Zoom;
-            Zoom = Math.Clamp(
-                Zoom + Math.Sign(input.WheelDelta) * ZoomStep,
+            Rectangle oldBounds = GetWorldBounds(fittedWorldBounds);
+            targetZoom = Math.Clamp(
+                targetZoom * MathF.Pow(ZoomFactor, input.WheelDelta / 120f),
                 MinimumZoom,
                 MaximumZoom);
-            if (Zoom != oldZoom)
-            {
-                KeepPointerAnchored(input.MousePosition, fittedWorldBounds, oldZoom);
-            }
+            zoomAnchorScreen = input.MousePosition;
+            zoomAnchorWorld = new Vector2(
+                (input.MousePosition.X - oldBounds.X) / (float)oldBounds.Width,
+                (input.MousePosition.Y - oldBounds.Y) / (float)oldBounds.Height);
         }
 
-        if (input.LeftDown)
+        if (IsZooming)
+        {
+            // Logarithmic interpolation gives the same feel at every zoom and FPS.
+            float difference = MathF.Log(targetZoom / Zoom);
+            float blend = 1f - MathF.Exp(-ZoomResponse * Math.Clamp(input.DeltaSeconds, 0f, .05f));
+            Zoom = Math.Abs(difference) < .0001f ? targetZoom : Zoom * MathF.Exp(difference * blend);
+            KeepPointerAnchored(fittedWorldBounds);
+        }
+
+        if (pointerInside && (input.MiddleDown || panToolActive && input.LeftDown))
         {
             if (dragging)
             {
                 int width = Math.Max(1, (int)MathF.Round(fittedWorldBounds.Width * Zoom));
                 int height = Math.Max(1, (int)MathF.Round(fittedWorldBounds.Height * Zoom));
-                center.X -= (input.MousePosition.X - previousPointer.X) / (float)width;
-                center.Y -= (input.MousePosition.Y - previousPointer.Y) / (float)height;
-                ClampCenter();
+                Point offset = input.MousePosition - previousPointer;
+                center.X -= offset.X / (float)width;
+                center.Y -= offset.Y / (float)height;
+                // Continue an in-flight zoom from the location reached by dragging.
+                zoomAnchorScreen += offset;
             }
             previousPointer = input.MousePosition;
             dragging = true;
@@ -81,31 +94,16 @@ public sealed class CanvasCameraController
 
     public void Reset()
     {
-        Zoom = MinimumZoom;
+        Zoom = targetZoom = 1f;
         center = new Vector2(0.5f, 0.5f);
         dragging = false;
     }
 
-    private void KeepPointerAnchored(Point pointer, Rectangle fittedWorldBounds, float oldZoom)
+    private void KeepPointerAnchored(Rectangle fittedWorldBounds)
     {
-        int oldWidth = Math.Max(1, (int)MathF.Round(fittedWorldBounds.Width * oldZoom));
-        int oldHeight = Math.Max(1, (int)MathF.Round(fittedWorldBounds.Height * oldZoom));
-        float oldLeft = fittedWorldBounds.Center.X - center.X * oldWidth;
-        float oldTop = fittedWorldBounds.Center.Y - center.Y * oldHeight;
-        float worldX = (pointer.X - oldLeft) / oldWidth;
-        float worldY = (pointer.Y - oldTop) / oldHeight;
-
         int newWidth = Math.Max(1, (int)MathF.Round(fittedWorldBounds.Width * Zoom));
         int newHeight = Math.Max(1, (int)MathF.Round(fittedWorldBounds.Height * Zoom));
-        center.X = (fittedWorldBounds.Center.X - pointer.X + worldX * newWidth) / newWidth;
-        center.Y = (fittedWorldBounds.Center.Y - pointer.Y + worldY * newHeight) / newHeight;
-        ClampCenter();
-    }
-
-    private void ClampCenter()
-    {
-        float halfVisible = 0.5f / Zoom;
-        center.X = Math.Clamp(center.X, halfVisible, 1f - halfVisible);
-        center.Y = Math.Clamp(center.Y, halfVisible, 1f - halfVisible);
+        center.X = (fittedWorldBounds.Center.X - zoomAnchorScreen.X + zoomAnchorWorld.X * newWidth) / newWidth;
+        center.Y = (fittedWorldBounds.Center.Y - zoomAnchorScreen.Y + zoomAnchorWorld.Y * newHeight) / newHeight;
     }
 }

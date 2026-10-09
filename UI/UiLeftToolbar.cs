@@ -32,7 +32,7 @@ public sealed class UiLeftToolbar
 {
     public static readonly IReadOnlyList<ToolDefinition> Tools =
     [
-        new(PhyxelToolId.Brush, "brush", "Кисть", true, "ЛКМ — рисовать; Shift + перетаскивание — прямая линия"),
+        new(PhyxelToolId.Brush, "brush", "Кисть", true, "ЛКМ — рисовать; Shift + перетаскивание — прямая линия\nShift+колесо — размер кисти"),
         new(PhyxelToolId.Eraser, "eraser", "Ластик", true, "Стирание элементов"),
         new(PhyxelToolId.Temperature, "temperature", "Температура", true, "Изменение температуры"),
         new(PhyxelToolId.Sensor, "temperature", "Датчики", true, "ЛКМ — поставить; ПКМ — убрать; Shift+ПКМ — убрать все"),
@@ -245,7 +245,8 @@ public sealed class UiLeftToolbar
         // Draw Tooltip if hovered
         if (hoveredTool is not null && hoverSeconds >= 0.35f)
         {
-            string tooltipText = hoveredTool.Tooltip;
+            string tooltipText = hoveredTool.Tooltip + (hoveredTool.Enabled
+                ? "\nКолесо — масштаб вида; СКМ — перемещение" : "");
             Vector2 tipSize = font.MeasureString(tooltipText);
             Rectangle tipBounds = new(bounds.Right + 8, bounds.Y + GetHeaderHeight(font), (int)tipSize.X + 20, (int)tipSize.Y + 12);
 

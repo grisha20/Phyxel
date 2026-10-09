@@ -48,6 +48,7 @@ public static class UiLayoutRegressionTests
         TestBrushToolModesAndInputBreaks(registry);
         UiEditorInputRegressionTests.Run(registry, fonts, coordinator);
         TestCameraPanZoomAndInputIsolation();
+        CameraZoomRegressionTests.Run(registry, coordinator);
         TestCanvasWorldExpansion();
         TestCursorProbeMappingAndText(registry,coordinator);
         TestTemperatureSensorTool(registry, fonts, coordinator);
@@ -807,6 +808,7 @@ public static class UiLayoutRegressionTests
 
         Rectangle zoomed = camera.Update(
             Input(center, wheelDelta: 120), canvas, fittedWorld, true, false);
+        zoomed = CameraZoomRegressionTests.Settle(camera, canvas, fittedWorld);
         Require(Math.Abs(camera.Zoom - 1.25f) < 0.001f && zoomed.Width == 1000,
             "Camera wheel zoom did not update the visible world transform.");
 

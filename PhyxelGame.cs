@@ -639,6 +639,16 @@ public sealed class PhyxelGame : Game
             {
                 "line" => default(RawInputSnapshot) with { MousePosition = frameIndex == 1 ? start : end,
                     ShiftDown = true, LeftDown = true, LeftPressed = frameIndex == 1, DeltaSeconds = input.DeltaSeconds },
+                "zoom" or "zoom-out" or "zoom-pan" => default(RawInputSnapshot) with
+                {
+                    MousePosition = frameIndex == 1 ? start :
+                        editorPreview == "zoom-pan" && frameIndex >= 6 ? end + new Point(-100, -60) : end,
+                    ShiftDown = frameIndex <= 2, LeftDown = frameIndex <= 2,
+                    LeftPressed = frameIndex == 1, LeftReleased = frameIndex == 3,
+                    WheelDelta = frameIndex == 4 ? (editorPreview == "zoom-out" ? -600 : 960) : 0,
+                    MiddleDown = editorPreview == "zoom-pan" && frameIndex is 5 or 6,
+                    DeltaSeconds = input.DeltaSeconds
+                },
                 "menu" or "exit" => default(RawInputSnapshot) with { EscapePressed = frameIndex == 1,
                     MousePosition = editorPreview == "exit" && frameIndex == 2 ? userInterface.PauseMenu.ExitBounds.Center : Point.Zero,
                     LeftPressed = editorPreview == "exit" && frameIndex == 2, DeltaSeconds = input.DeltaSeconds },
@@ -727,9 +737,13 @@ public sealed class PhyxelGame : Game
                 userInterface.CanvasBounds,
                 fittedWorldBounds,
                 userInterface.PanToolActive,
-                userInterface.PointerConsumed);
+                userInterface.PointerConsumed || FileOperationPending ||
+                    !IsActive && string.IsNullOrEmpty(uiScreenshotPath));
+        userInterface.CameraZoom = cameraController.Zoom;
+        if (!acceptance.Active && (input.MiddleDown || cameraController.IsZooming))
+            brushController.CancelStroke(input.LeftDown || input.RightDown);
         if (!acceptance.Active && userInterface.SensorToolActive && !userInterface.PointerConsumed &&
-            !FileOperationPending && IsActive && userInterface.CanvasBounds.Contains(input.MousePosition))
+            !input.MiddleDown && !cameraController.IsZooming && !FileOperationPending && IsActive && userInterface.CanvasBounds.Contains(input.MousePosition))
             if (TemperatureSensorOverlay.Edit(input, worldBounds, settings)) temperatureSensors.Reset();
         IReadOnlyList<BrushDrawCommand> commands = acceptance.Active
             ? acceptance.CreateCommands(frameIndex)
@@ -743,9 +757,11 @@ public sealed class PhyxelGame : Game
                 userInterface.TemperatureToolActive,
                 userInterface.TargetTemperature,
                 userInterface.BlocksBrushInput ||
+                input.MiddleDown ||
+                cameraController.IsZooming ||
                 FileOperationPending ||
                 !IsActive && (string.IsNullOrEmpty(uiScreenshotPath) ||
-                    Environment.GetEnvironmentVariable("PHYXEL_UI_PREVIEW_INPUT") != "line") ||
+                    Environment.GetEnvironmentVariable("PHYXEL_UI_PREVIEW_INPUT") is not ("line" or "zoom" or "zoom-out" or "zoom-pan")) ||
                 !userInterface.CanvasBounds.Contains(input.MousePosition),
                 materialRegistry[userInterface.SelectedMaterial].ThermalRegulator is not null,
                 userInterface.DeviceTargetTemperature,
@@ -965,11 +981,12 @@ public sealed class PhyxelGame : Game
         spriteBatch.Begin(
             SpriteSortMode.Deferred,
             BlendState.Opaque,
-            SamplerState.LinearClamp,
+            cameraController.Zoom > 1f ? SamplerState.PointClamp : SamplerState.LinearClamp,
             DepthStencilState.None,
             canvasRasterizerState);
         GraphicsDevice.ScissorRectangle = userInterface.CanvasBounds;
         spriteBatch.Draw(currentResources.PresentationTexture, worldBounds, Color.White);
+        userInterface.DrawWorldBoundary(spriteBatch, worldBounds);
         spriteBatch.End();
         GraphicsDevice.ScissorRectangle = GraphicsDevice.Viewport.Bounds;
         spriteBatch.Begin(
@@ -979,7 +996,7 @@ public sealed class PhyxelGame : Game
             DepthStencilState.None,
             RasterizerState.CullNone);
         userInterface.DrawTemperatureSensors(spriteBatch, worldBounds, settings, temperatureSensors.Readings);
-        userInterface.DrawBrushIndicator(
+        if (!latestInput.MiddleDown) userInterface.DrawBrushIndicator(
             spriteBatch,
             latestInput.MousePosition,
             worldBounds,

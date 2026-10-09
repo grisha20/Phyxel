@@ -24,7 +24,8 @@ public sealed class UiStatusBar
         float currentScale,
         bool isPaused,
         string transientStatus = "",
-        string? filterBrush = null)
+        string? filterBrush = null,
+        float cameraZoom = 1f)
     {
         backdrop.Draw(spriteBatch, bounds, 0);
 
@@ -65,8 +66,9 @@ public sealed class UiStatusBar
             spriteBatch.DrawString(font, message, new Vector2(x, textY), UiTheme.TextPrimary);
             return;
         }
+        x = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, $"Вид: {cameraZoom:0.00}x", UiTheme.TextSecondary);
         x = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, tempProbeText, UiTheme.TextSecondary);
-        x = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, $"Масштаб: {currentScale:0.00}x", UiTheme.TextSecondary);
+        x = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, $"Сетка: {currentScale:0.00}x", UiTheme.TextSecondary);
         x = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, $"Частиц: {statistics.ActiveCells:N0}", UiTheme.TextSecondary);
         _ = DrawOptionalBlock(spriteBatch, font, pixel, bounds, x, statusX, $"{displayedFps:0} FPS", UiTheme.TextMuted);
     }

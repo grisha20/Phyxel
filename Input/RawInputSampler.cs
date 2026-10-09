@@ -40,7 +40,8 @@ public sealed class RawInputSampler
         snapshot = snapshot with
         {
             UndoPressed = historyKeys.Undo,
-            RedoPressed = historyKeys.Redo
+            RedoPressed = historyKeys.Redo,
+            MiddleDown = mouse.MiddleButton == ButtonState.Pressed
         };
         previousMouse = mouse;
         previousKeyboard = keyboard;
