@@ -1,5 +1,11 @@
 # Горючее масло — `core:oil`
 
+WT2026-10-09: выбранные побайтные сравнения общего термошага и переноса
+жидкостей PASS. [Контракт](../shared/WATER_THERMAL_PERFORMANCE_CONTRACT.md),
+[результаты](../shared/WATER_THERMAL_PERFORMANCE_RESULTS.md).
+Новые реакции масла на раскалённом металле остаются отложенными;
+полная приёмка паспорта не заявляется.
+
 WN2026-10-09: оптимизация полного поля без изменения коэффициентов;
 [контракт](../shared/WATER_NATIVE_PERFORMANCE_CONTRACT.md),
 [измерения и оставшиеся ограничения](../shared/WATER_NATIVE_PERFORMANCE_RESULTS.md).

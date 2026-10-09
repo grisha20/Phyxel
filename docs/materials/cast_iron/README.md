@@ -1,5 +1,7 @@
 # Чугун — `core:cast_iron`
 
+- [WT: проверка мокрой стенки и сохранённой печи](../shared/WATER_THERMAL_PERFORMANCE_RESULTS.md), [контракт](../shared/WATER_THERMAL_PERFORMANCE_CONTRACT.md).
+
 - [SE: спокойная заливка и выход пара](../shared/STEAM_ESCAPE_CONTRACT.md), [измерения и границы](../shared/STEAM_ESCAPE_RESULTS.md).
 
 - [QR: повторная работа над заливкой, пузырьками и отскоком](../shared/WATER_REWETTING_CONTRACT.md), [новые результаты](../shared/WATER_REWETTING_RESULTS.md).

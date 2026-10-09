@@ -7,7 +7,36 @@ RWStructuredBuffer<uint> BoilingSummary : register(u1);
 RWStructuredBuffer<uint> BoilingCellMaterials : register(u2);
 RWStructuredBuffer<GasMotionState> BoilingGasMotion : register(u3);
 RWStructuredBuffer<uint> MovementColumns : register(u4);
+RWStructuredBuffer<uint> QuenchTileOutput : register(u5);
+StructuredBuffer<uint> QuenchTiles : register(t2);
 #include "PhaseEnthalpy.hlsli"
+
+groupshared uint QuenchTileActive;
+[numthreads(16,16,1)]
+void CSPrepareQuench(uint3 thread : SV_DispatchThreadID,uint3 group : SV_GroupID,uint lane : SV_GroupIndex)
+{
+    if(lane==0)QuenchTileActive=0;
+    GroupMemoryBarrierWithGroupSync();
+    if(thread.x<Width && thread.y<Height)
+    {
+        uint index=thread.y*Width+thread.x;
+        bool active=(WetWallMask[index] & 0x40000000u)!=0;
+        GridCell cell=WaterGrid[index];
+        if(cell.IsActive!=0)
+        {
+            MaterialProperties m=Materials[cell.MaterialIndex];
+            if(m.SimulationKind==SimulationKindGas)
+            {
+                uint count,stride;Materials.GetDimensions(count,stride);
+                if(m.TransitionBelowMaterialIndex<count)
+                    active=active || (Materials[m.TransitionBelowMaterialIndex].Flags & MaterialFlagSurfaceBoiling)!=0;
+            }
+        }
+        if(active){uint ignored;InterlockedOr(QuenchTileActive,1,ignored);}
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if(lane==0)QuenchTileOutput[group.y*((Width+15)/16)+group.x]=QuenchTileActive;
+}
 
 [numthreads(16,16,1)]
 void CSPrepareMovement(uint3 thread : SV_DispatchThreadID)
@@ -46,10 +75,14 @@ bool IsThinFilmColumn(uint index,GridCell cell)
     return false;
 }
 
-void QuenchPair(uint a,uint b)
+void QuenchPair(uint a,uint b,bool optimized)
 {
     GridCell first=WaterGrid[a],second=WaterGrid[b];
     if(first.IsActive==0 || second.IsActive==0)return;
+    // Identical liquids cannot be a wet solid pair, a liquid/solid contact,
+    // or a liquid/vapour interface. Keep the original path for comparison.
+    [branch]if(optimized && first.MaterialIndex==second.MaterialIndex &&
+        Materials[first.MaterialIndex].SimulationKind==SimulationKindLiquid)return;
     MaterialProperties ma=Materials[first.MaterialIndex],mb=Materials[second.MaterialIndex];
     bool wetA=(WetWallMask[a] & 0x40000000u)!=0,wetB=(WetWallMask[b] & 0x40000000u)!=0;
     bool waterA=(ma.Flags & MaterialFlagSurfaceBoiling)!=0,waterB=(mb.Flags & MaterialFlagSurfaceBoiling)!=0;
@@ -238,17 +271,25 @@ void MixLiquidRow(uint2 p, uint span)
     }
 }
 
-[numthreads(16, 16, 1)]
-void CSMain(uint3 thread : SV_DispatchThreadID)
+void WaterStep(uint3 thread,uint subStep,bool optimized)
 {
-    if(GasSubStep==3)
+    if(subStep==3)
     {
         uint2 p=thread.xy*uint2(SimulationPhase<2?2:1,SimulationPhase<2?1:2)+uint2(DispatchOffsetX,DispatchOffsetY);
         uint2 q=p+(SimulationPhase<2?uint2(1,0):uint2(0,1));
-        if(q.x<Width && q.y<Height)QuenchPair(p.y*Width+p.x,q.y*Width+q.x);
+        if(q.x<Width && q.y<Height)
+        {
+            if(optimized)
+            {
+                uint columns=(Width+15)/16;
+                [branch]if((QuenchTiles[(p.y/16)*columns+p.x/16] |
+                    QuenchTiles[(q.y/16)*columns+q.x/16])==0)return;
+            }
+            QuenchPair(p.y*Width+p.x,q.y*Width+q.x,optimized);
+        }
         return;
     }
-    if(GasSubStep==2)
+    if(subStep==2)
     {
         uint x=thread.x;
         if(thread.y!=0 || x>=Width)return;
@@ -257,9 +298,9 @@ void CSMain(uint3 thread : SV_DispatchThreadID)
         [loop]for(uint y=2;y+1<Height;y++)y=AdvanceDrop(x,y);
         return;
     }
-    if (GasSubStep > 2)
+    if (subStep > 2)
     {
-        uint span = GasSubStep * 2;
+        uint span = subStep * 2;
         MixLiquidRow(thread.xy * uint2(span,1) + uint2(DispatchOffsetX,0),span);
         return;
     }
@@ -309,4 +350,21 @@ void CSMain(uint3 thread : SV_DispatchThreadID)
         WaterGrid[tl] = b; WaterGrid[bl] = a;
         WaterGrid[br] = c; WaterGrid[tr] = d;
     }
+}
+
+// Compile each independent task without the register/local-array cost of
+// the other branches. CSMain retains the original runtime selection.
+[numthreads(16,16,1)]
+void CSMain(uint3 thread : SV_DispatchThreadID) { WaterStep(thread,GasSubStep,false); }
+[numthreads(16,16,1)]
+void CSQuench(uint3 thread : SV_DispatchThreadID) { WaterStep(thread,3,true); }
+[numthreads(16,16,1)]
+void CSColumns(uint3 thread : SV_DispatchThreadID) { WaterStep(thread,2,true); }
+[numthreads(16,16,1)]
+void CSConvect(uint3 thread : SV_DispatchThreadID) { WaterStep(thread,0,true); }
+[numthreads(16,16,1)]
+void CSMix(uint3 thread : SV_DispatchThreadID)
+{
+    uint span=GasSubStep*2;
+    MixLiquidRow(thread.xy*uint2(span,1)+uint2(DispatchOffsetX,0),span);
 }

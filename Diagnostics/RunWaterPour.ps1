@@ -5,7 +5,7 @@ param(
  [ValidateRange(8,30)][int]$Seconds=10,[ValidateRange(1,96)][int]$Radius=33,
  [ValidateRange(400,4096)][int]$Width=968,[ValidateRange(300,2160)][int]$Height=564,
  [ValidateRange(0,1500)][int]$FillHeight=0,
- [switch]$Phases,[switch]$Reference,[switch]$Kernels,[switch]$NoAir,[switch]$NativeReference
+ [switch]$Phases,[switch]$Reference,[switch]$Kernels,[switch]$NoAir,[switch]$NativeReference,[switch]$WaterKernelReference
 )
 $ErrorActionPreference='Stop'
 $taskRepo=Split-Path -Parent $PSScriptRoot
@@ -26,6 +26,7 @@ try {
  if($Kernels){$env:PHYXEL_VERIFY_LIQUID_KERNELS='1';$env:PHYXEL_DRAFT_HEAT_TRACE='1'}
  if($NoAir){$env:PHYXEL_POUR_AIR='0'}
  if($NativeReference){$env:PHYXEL_NATIVE_REFERENCE='1'}
+ if($WaterKernelReference){$env:PHYXEL_WATER_KERNEL_REFERENCE='1'}
  $taskProcess=Start-Process "$taskRepo/bin/Debug/net8.0-windows/Phyxel.exe" -WorkingDirectory $taskRepo -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput "$taskDir/run.log" -RedirectStandardError "$taskDir/errors.log"
  $taskLog=Get-Content "$taskDir/run.log"
  $taskVerified=if($Kernels){

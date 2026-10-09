@@ -1,5 +1,7 @@
 # Парафиновое масло — `core:oil`
 
+- [WT: выбранные сравнения общего термошага с маслом](../shared/WATER_THERMAL_PERFORMANCE_RESULTS.md), [контракт](../shared/WATER_THERMAL_PERFORMANCE_CONTRACT.md).
+
 - [WN: вода на полном поле и общий перенос жидкостей](../shared/WATER_NATIVE_PERFORMANCE_CONTRACT.md), [проверки и пределы](../shared/WATER_NATIVE_PERFORMANCE_RESULTS.md).
 - [WP: ускорение заливки и уровня](../shared/WATER_POUR_PERFORMANCE_CONTRACT.md), [проверки](../shared/WATER_POUR_PERFORMANCE_RESULTS.md).
 

@@ -178,6 +178,7 @@ public sealed class SimulationDispatchCoordinator
     private bool freeBodyMatter;
     private readonly bool bodyBalanceBaseline = Environment.GetEnvironmentVariable("PHYXEL_BODY_BALANCE_BASELINE") == "1";
     private readonly bool nativePerformanceReference = Environment.GetEnvironmentVariable("PHYXEL_NATIVE_REFERENCE") == "1";
+    private readonly bool waterKernelReference = Environment.GetEnvironmentVariable("PHYXEL_WATER_KERNEL_REFERENCE") == "1";
     private bool topologyDirty;
     private bool previousSolidGravity;
     private bool previousHydraulicPressure;
@@ -1966,6 +1967,12 @@ public sealed class SimulationDispatchCoordinator
     internal void DispatchThermalDiffusion(GpuSimulationResources resources, bool measure,
         uint tickIndex, bool convectWater, bool? referenceContacts = null)
     {
+        GpuStageTimer? Stage(uint key)
+        {
+            if (resources.CellularPhaseTimers is not { } timers) return null;
+            if (!timers.TryGetValue(key, out var timer)) timers[key] = timer = new(resources.Device);
+            return timer;
+        }
         ThermalSimulationConstants constants = new()
         {
             DeltaTime = FixedThermalStep,
@@ -1984,6 +1991,8 @@ public sealed class SimulationDispatchCoordinator
         // Independent of cellular sleep, hydraulic mode and render FPS.
         // Same-material liquid rotations preserve occupancy and path maps.
         if (convectWater) DispatchWaterConvection(resources, tickIndex, referenceContacts ?? nativePerformanceReference);
+        var bulkTimer = Stage(200);
+        bulkTimer?.Begin(context);
         context.ClearUnorderedAccessView(resources.Grid.WriteUnorderedView, new RawInt4());
         context.UpdateSubresource(ref constants, resources.ThermalConstants);
         context.ComputeShader.Set(resources.BulkThermalDegreesShader);
@@ -1995,15 +2004,30 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetUnorderedAccessView(0, resources.BulkThermalDegrees.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
         context.ComputeShader.SetUnorderedAccessView(0, null);
+        bulkTimer?.End(context);
         // Wet contact has a shorter time scale than the legacy dry-wall
         // closure. Disjoint exchanges are conservative without global clamps.
         if (convectWater)
         {
+            var wetTimer = Stage(201);
+            wetTimer?.Begin(context);
             context.ComputeShader.SetShaderResource(0, null);
             context.ComputeShader.SetShaderResource(1, null);
-            context.ComputeShader.Set(resources.WaterConvectionShader);
+            bool referenceWater = UseWaterKernelReference(referenceContacts);
             context.ComputeShader.SetShaderResources(0, resources.Materials.View, resources.BulkThermalDegrees.View);
             context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.ReadUnorderedView);
+            if (!referenceWater)
+            {
+                SimulationFrameConstants prepare = new() { Width=(uint)resources.Width, Height=(uint)resources.Height };
+                context.UpdateSubresource(ref prepare, resources.FrameConstants);
+                context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
+                context.ComputeShader.Set(resources.WaterQuenchTilesShader);
+                context.ComputeShader.SetUnorderedAccessView(5, resources.WaterQuenchTiles.UnorderedView);
+                context.Dispatch(DivideRoundUp(resources.Width,16), DivideRoundUp(resources.Height,16), 1);
+                context.ComputeShader.SetUnorderedAccessView(5, null);
+                context.ComputeShader.SetShaderResource(2, resources.WaterQuenchTiles.View);
+            }
+            context.ComputeShader.Set(referenceWater ? resources.WaterConvectionShader : resources.WaterQuenchShader);
             for (uint pass=0;pass<8;pass++)
             {
                 uint colour=pass%4;
@@ -2017,13 +2041,20 @@ public sealed class SimulationDispatchCoordinator
             }
             context.ComputeShader.SetUnorderedAccessView(0,null);
             context.ComputeShader.SetShaderResource(1,null);
+            context.ComputeShader.SetShaderResource(2,null);
             context.ComputeShader.SetShaderResources(0,resources.Grid.ReadView,resources.Materials.View);
             context.ComputeShader.SetConstantBuffer(0,resources.ThermalConstants);
+            wetTimer?.End(context);
         }
+        var radiantTimer = Stage(202);
+        radiantTimer?.Begin(context);
         context.ComputeShader.Set(resources.RadiantDegreesShader);
         context.ComputeShader.SetUnorderedAccessView(2, resources.RadiantDegrees.UnorderedView);
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
         context.ComputeShader.SetUnorderedAccessView(2, null);
+        radiantTimer?.End(context);
+        var diffusionTimer = Stage(203);
+        diffusionTimer?.Begin(context);
         context.ComputeShader.SetShaderResource(2, resources.BulkThermalDegrees.View);
         context.ComputeShader.SetShaderResource(3, resources.RadiantDegrees.View);
         context.ComputeShader.Set(resources.ThermalDiffusionShader);
@@ -2035,6 +2066,7 @@ public sealed class SimulationDispatchCoordinator
             DivideRoundUp(resources.Width, 16),
             DivideRoundUp(resources.Height, 16),
             1);
+        diffusionTimer?.End(context);
         if (measure)
         {
             context.End(resources.ThermalTimestampEndQuery);
@@ -2044,6 +2076,8 @@ public sealed class SimulationDispatchCoordinator
         Unbind(context, 4, resources.ThermalEnergyLedger is null ? 1 : 2);
         resources.Grid.Swap();
     }
+
+    private bool UseWaterKernelReference(bool? reference) => reference == true || waterKernelReference;
 
     private void DispatchWaterConvection(GpuSimulationResources resources, uint tickIndex, bool referenceColumns)
     {
@@ -2055,7 +2089,8 @@ public sealed class SimulationDispatchCoordinator
             Width = (uint)resources.Width, Height = (uint)resources.Height,
             FrameIndex = tickIndex, DebugReserved2 = referenceColumns ? 1u : 0u
         };
-        context.ComputeShader.Set(resources.WaterConvectionShader);
+        bool referenceKernels = UseWaterKernelReference(referenceColumns);
+        context.ComputeShader.Set(referenceKernels ? resources.WaterConvectionShader : resources.WaterColumnsShader);
         context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
         context.ComputeShader.SetShaderResource(0, resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.Grid.ReadUnorderedView);
@@ -2067,7 +2102,7 @@ public sealed class SimulationDispatchCoordinator
             context.ClearUnorderedAccessView(resources.WaterMovementColumns.UnorderedView,new RawInt4());
             context.ComputeShader.Set(resources.WaterColumnMovementShader);
             context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
-            context.ComputeShader.Set(resources.WaterConvectionShader);
+            context.ComputeShader.Set(referenceKernels ? resources.WaterConvectionShader : resources.WaterColumnsShader);
         }
         context.Dispatch(DivideRoundUp(resources.Width,16),1,1);
         context.ComputeShader.SetUnorderedAccessView(4,null);
@@ -2075,6 +2110,7 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetUnorderedAccessView(2,null);
         context.ComputeShader.SetUnorderedAccessView(3,null);
         constants.GasSubStep=0;
+        context.ComputeShader.Set(referenceKernels ? resources.WaterConvectionShader : resources.WaterConvectShader);
         for (uint pass = 0; pass < 4; pass++)
         {
             uint parity = (tickIndex & 1) == 0 ? pass : 3 - pass;
@@ -2090,6 +2126,7 @@ public sealed class SimulationDispatchCoordinator
         // a stable warm upper layer.
         for (uint mixPass = 0; mixPass < 2; mixPass++)
         {
+            context.ComputeShader.Set(referenceKernels ? resources.WaterConvectionShader : resources.WaterMixShader);
             uint side = mixPass == 0 ? 4u : 8u;
             constants.GasSubStep = side;
             constants.SimulationPhase = 4 + mixPass;

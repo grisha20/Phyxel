@@ -1,5 +1,7 @@
 # Вода — `core:water`
 
+- [WT: ускорение мокрого теплообмена](../shared/WATER_THERMAL_PERFORMANCE_CONTRACT.md), [A/B и проверки](../shared/WATER_THERMAL_PERFORMANCE_RESULTS.md).
+
 - [WN: вода на полном поле и общий перенос жидкостей](../shared/WATER_NATIVE_PERFORMANCE_CONTRACT.md), [проверки и пределы](../shared/WATER_NATIVE_PERFORMANCE_RESULTS.md).
 - [WP: ускорение заливки и уровня](../shared/WATER_POUR_PERFORMANCE_CONTRACT.md), [проверки](../shared/WATER_POUR_PERFORMANCE_RESULTS.md).
 

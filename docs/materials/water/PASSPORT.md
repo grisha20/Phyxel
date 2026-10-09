@@ -1,5 +1,10 @@
 # Вода — `core:water`
 
+WT2026-10-09: мокрые тепловые проходы пропускают доказанно неактивные блоки;
+коэффициенты и движение прежние. [Контракт](../shared/WATER_THERMAL_PERFORMANCE_CONTRACT.md),
+[свежие проверки и ограничения](../shared/WATER_THERMAL_PERFORMANCE_RESULTS.md).
+Выбранные сценарии PASS; стабильный полный FPS и весь паспорт не закрыты.
+
 WN2026-10-09: оптимизация полного поля без изменения коэффициентов;
 [контракт](../shared/WATER_NATIVE_PERFORMANCE_CONTRACT.md),
 [измерения и оставшиеся ограничения](../shared/WATER_NATIVE_PERFORMANCE_RESULTS.md).

@@ -1,5 +1,9 @@
 # Паспорта материалов
 
+WT2026-10-09: ускорен мокрый теплообмен — [контракт](shared/WATER_THERMAL_PERFORMANCE_CONTRACT.md),
+[измерения и границы](shared/WATER_THERMAL_PERFORMANCE_RESULTS.md).
+Выбранные сравнения воды/пара/металлов/масла PASS; весь каталог не принят.
+
 WN2026-10-09: оптимизация воды на масштабе 100% —
 [контракт](shared/WATER_NATIVE_PERFORMANCE_CONTRACT.md), [измерения и границы](shared/WATER_NATIVE_PERFORMANCE_RESULTS.md).
 Физические коэффициенты и формат сохранений прежние; весь каталог не принят.

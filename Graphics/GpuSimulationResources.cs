@@ -278,6 +278,12 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? CompositionShader { get; init; }
     public ComputeShader? ThermalDiffusionShader { get; init; }
     public ComputeShader? WaterConvectionShader { get; init; }
+    public ComputeShader? WaterQuenchShader { get; init; }
+    public ComputeShader? WaterQuenchTilesShader { get; init; }
+    public GpuStructuredBuffer<uint> WaterQuenchTiles { get; init; } = null!;
+    public ComputeShader? WaterColumnsShader { get; init; }
+    public ComputeShader? WaterConvectShader { get; init; }
+    public ComputeShader? WaterMixShader { get; init; }
     public ComputeShader? WaterColumnMovementShader { get; init; }
     public required GpuStructuredBuffer<uint> WaterMovementColumns { get; init; }
     public ComputeShader? AirInjectShader { get; init; }
@@ -340,6 +346,9 @@ public sealed class GpuSimulationResources : IDisposable
         TransientLifecycleShader?.Dispose();
         ThermalDiffusionShader?.Dispose();
         WaterConvectionShader?.Dispose();
+        WaterQuenchShader?.Dispose(); WaterColumnsShader?.Dispose();
+        WaterQuenchTilesShader?.Dispose(); WaterQuenchTiles.Dispose();
+        WaterConvectShader?.Dispose(); WaterMixShader?.Dispose();
         WaterColumnMovementShader?.Dispose();
         WaterMovementColumns.Dispose();
         AirInjectShader?.Dispose();
