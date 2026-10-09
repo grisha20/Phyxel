@@ -1,5 +1,7 @@
 # Парафиновое масло — `core:oil`
 
+- [WP: ускорение заливки и уровня](../shared/WATER_POUR_PERFORMANCE_CONTRACT.md), [проверки](../shared/WATER_POUR_PERFORMANCE_RESULTS.md).
+
 - [Будущая задача: заливка раскалённой поверхности](HOT_SURFACE_FUTURE.md), после принятия воды; пока без изменения физики.
 
 - [Наблюдение горящего масла в песчаной куче](../shared/SLOPE_FLAME_OBSERVATION.md): воздух, склон и различие режимов; не полная физическая валидация.

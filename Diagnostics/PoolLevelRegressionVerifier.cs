@@ -52,7 +52,10 @@ internal static class PoolLevelRegressionVerifier
                 r.Context.ComputeShader.SetUnorderedAccessViews(0,r.Grid.ReadUnorderedView,r.BodyFlags.UnorderedView,
                     r.PathBlockerMasks.UnorderedView,r.CellMaterials.UnorderedView,r.WaterPressureRoutes.UnorderedView,
                     r.WaterPressureRouteScratch.UnorderedView,r.GasMotion.UnorderedView);
-                r.Context.Dispatch((w+15)/16,1,1);r.Context.ComputeShader.Set(r.LiquidSurfaceBalanceShader);r.Context.Dispatch(1,1,1);
+                r.Context.Dispatch((w+15)/16,1,1);
+                r.Context.ComputeShader.SetUnorderedAccessView(2,r.PoolColumnSupport.UnorderedView);
+                r.Context.ComputeShader.Set(r.PoolSupportShader);r.Context.Dispatch((w+63)/64,1,1);
+                r.Context.ComputeShader.Set(r.PoolCachedBalanceShader);r.Context.Dispatch(w,1,1);
                 for(int i=0;i<7;i++)r.Context.ComputeShader.SetUnorderedAccessView(i,null);r.Context.ComputeShader.SetShaderResource(0,null);
                 r.Context.ComputeShader.SetShaderResource(15,null);r.Context.ComputeShader.Set(null);}
             foreach(string gate in new[]{"wall","filter","drain","slot","shaft","floorless","world-floor","film","gas-filter","jet","open"}){

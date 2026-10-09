@@ -12,6 +12,8 @@ namespace Phyxel.Graphics;
 public sealed class SimulationDispatchCoordinator
 {
     private readonly bool enablePoolSurfaceBalance = Environment.GetEnvironmentVariable("PHYXEL_DISABLE_POOL_BALANCE") != "1";
+    private readonly bool referencePool = Environment.GetEnvironmentVariable("PHYXEL_POOL_REFERENCE") == "1";
+    private readonly bool referenceSurface = Environment.GetEnvironmentVariable("PHYXEL_SURFACE_REFERENCE") == "1";
     public const float FixedThermalStep = 0.05f;
     public const double FixedGasStep = 1d / 120d;
 
@@ -1357,6 +1359,7 @@ public sealed class SimulationDispatchCoordinator
         bool pressurePowderOnly = false)
     {
         DeviceContext context = resources.Context;
+        resources.CellularTimer?.Begin(context);
         // Resolve gravity and ordinary lateral flow before consulting the
         // hydraulic caches. Phase 13 balances adjacent columns only; phase 29
         // applies that local plan before the pressure-only passes run.
@@ -1420,6 +1423,15 @@ public sealed class SimulationDispatchCoordinator
             }
 
             constants.SimulationPhase = phase;
+            ComputeShader? phaseShader = !referenceSurface ? phase switch
+            {
+                13 => resources.AdjacentSurfaceShader,
+                56 => resources.BroadSurfaceShader,
+                57 => resources.LocalSurfaceShader,
+                58 => resources.ViscousSurfaceShader,
+                _ => resources.CellularAutomataShader
+            } : resources.CellularAutomataShader;
+            context.ComputeShader.Set(phaseShader);
             constants.GasSubStep = pressurePowderOnly ? 0x80000000u : 0u;
 
             bool buildPathBlockers = phase == 31;
@@ -1485,6 +1497,12 @@ public sealed class SimulationDispatchCoordinator
 
             uint previousFrame=constants.FrameIndex;
             float previousDelta=constants.DeltaTime;
+            GpuStageTimer? phaseTimer=null;
+            if(resources.CellularPhaseTimers is { } phaseTimers)
+            {
+                if(!phaseTimers.TryGetValue(phase,out phaseTimer))phaseTimers[phase]=phaseTimer=new(resources.Device);
+                phaseTimer.Begin(context);
+            }
             int repeats=phase==58 ? (primaryStep ? viscousSurfaceTicksThisFrame : 0) : 1;
             for(int repeat=0;repeat<repeats;repeat++)
             {
@@ -1497,11 +1515,28 @@ public sealed class SimulationDispatchCoordinator
                 context.Dispatch(DivideRoundUp(dispatchW, 16), DivideRoundUp(dispatchH, 16), 1);
                 if (phase == 58 && enablePoolSurfaceBalance)
                 {
-                    context.ComputeShader.Set(resources.LiquidSurfaceBalanceShader);
-                    context.Dispatch(1, 1, 1);
-                    context.ComputeShader.Set(resources.CellularAutomataShader);
+                    GpuStageTimer? poolTimer = null;
+                    if (resources.CellularPhaseTimers is { } poolTimers)
+                    {
+                        if (!poolTimers.TryGetValue(158, out poolTimer)) poolTimers[158] = poolTimer = new(resources.Device);
+                        poolTimer.Begin(context);
+                    }
+                    if (!referencePool)
+                    {
+                        // Rebuilt each tick. Surface swaps leave every column's
+                        // bed and lower supporting layers intact.
+                        context.ComputeShader.SetUnorderedAccessView(2, resources.PoolColumnSupport.UnorderedView);
+                        context.ComputeShader.Set(resources.PoolSupportShader);
+                        context.Dispatch(DivideRoundUp(resources.Width, 64), 1, 1);
+                    }
+                    context.ComputeShader.Set(referencePool ? resources.LiquidSurfaceBalanceShader : resources.PoolCachedBalanceShader);
+                    context.Dispatch(referencePool ? 1 : resources.Width, 1, 1);
+                    poolTimer?.End(context);
+                    if (!referencePool) context.ComputeShader.SetUnorderedAccessView(2, resources.PathBlockerMasks.UnorderedView);
+                    context.ComputeShader.Set(phaseShader);
                 }
             }
+            phaseTimer?.End(context);
             constants.FrameIndex=previousFrame;
             constants.DeltaTime=previousDelta;
             if(primaryStep && (phase==33||phase==58))Phyxel.Diagnostics.NonfiniteStateTrace.Surface(resources,previousFrame,phase);
@@ -1509,6 +1544,7 @@ public sealed class SimulationDispatchCoordinator
 
         // Unbind once at the end
         Unbind(context, 2, 7);
+        resources.CellularTimer?.End(context);
         constants.SimulationPhase = 0;
         constants.GasSubStep = 0;
     }
@@ -1998,6 +2034,7 @@ public sealed class SimulationDispatchCoordinator
     private void DispatchWaterConvection(GpuSimulationResources resources, uint tickIndex)
     {
         DeviceContext context = resources.Context;
+        resources.WaterConvectionTimer?.Begin(context);
         context.ComputeShader.SetShaderResource(15, resources.Filters.View);
         SimulationFrameConstants constants = new()
         {
@@ -2042,6 +2079,7 @@ public sealed class SimulationDispatchCoordinator
                 DivideRoundUp(resources.Height, 16),1);
         }
         Unbind(context, 1, 1);
+        resources.WaterConvectionTimer?.End(context);
     }
 
     /// <summary>

@@ -10,6 +10,9 @@ namespace Phyxel.Graphics;
 public sealed class GpuSimulationResources : IDisposable
 {
     internal GpuStageTimer? AirTimer { get; init; }
+    internal GpuStageTimer? CellularTimer { get; init; }
+    internal GpuStageTimer? WaterConvectionTimer { get; init; }
+    internal System.Collections.Generic.Dictionary<uint,GpuStageTimer>? CellularPhaseTimers { get; init; }
     internal GpuStageTimer? AirHeatTimer { get; init; }
     internal GpuStageTimer? GasMotionTimer { get; init; }
     internal GpuStageTimer? AirInjectTimer { get; init; }
@@ -236,6 +239,13 @@ public sealed class GpuSimulationResources : IDisposable
     public SharpDX.Direct3D11.Texture2D NativeReadTexture => NativePresentationTextures[1 - PresentationIndex];
     public ComputeShader? BrushShader { get; init; }
     public ComputeShader? CellularAutomataShader { get; init; }
+    public ComputeShader? BroadSurfaceShader { get; init; }
+    public ComputeShader? AdjacentSurfaceShader { get; init; }
+    public ComputeShader? LocalSurfaceShader { get; init; }
+    public ComputeShader? ViscousSurfaceShader { get; init; }
+    public required GpuStructuredBuffer<uint> PoolColumnSupport { get; init; }
+    public ComputeShader? PoolSupportShader { get; init; }
+    public ComputeShader? PoolCachedBalanceShader { get; init; }
     public ComputeShader? LiquidSurfaceBalanceShader { get; init; }
     public ComputeShader? GasRedistributionShader { get; init; }
     public ComputeShader? SteamGasStepObserverShader { get; init; }
@@ -364,6 +374,13 @@ public sealed class GpuSimulationResources : IDisposable
         ComponentUnionShader?.Dispose();
         ComponentInitializeShader?.Dispose();
         CellularAutomataShader?.Dispose();
+        BroadSurfaceShader?.Dispose();
+        AdjacentSurfaceShader?.Dispose();
+        LocalSurfaceShader?.Dispose();
+        ViscousSurfaceShader?.Dispose();
+        PoolColumnSupport.Dispose();
+        PoolSupportShader?.Dispose();
+        PoolCachedBalanceShader?.Dispose();
         LiquidSurfaceBalanceShader?.Dispose();
         GasRedistributionShader?.Dispose();
         SteamGasStepObserverShader?.Dispose();
@@ -474,6 +491,8 @@ public sealed class GpuSimulationResources : IDisposable
         SteamJetAirCouplingStaging?.Dispose();
         AirConstants.Dispose();
         AirTimer?.Dispose(); AirHeatTimer?.Dispose(); GasMotionTimer?.Dispose();
+        CellularTimer?.Dispose(); WaterConvectionTimer?.Dispose();
+        if(CellularPhaseTimers is not null)foreach(var timer in CellularPhaseTimers.Values)timer.Dispose();
         AirInjectTimer?.Dispose(); ReactionGatherTimer?.Dispose(); AirProjectionTimer?.Dispose();
         GasActiveTiles.Dispose(); GasActiveTilesShader?.Dispose();
         AirThermalConstants.Dispose(); AirThermal.Dispose(); AirThermalFlux.Dispose(); AirThermalStaging.Dispose();

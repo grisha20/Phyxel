@@ -35,6 +35,10 @@ internal sealed class ShaderBytecodeStore
     internal string ExpandSource(string fileName)
     {
         string source = File.ReadAllText(Path.Combine(sourceDirectory, fileName));
+        const string cellularInclude = "#include \"CellularAutomataSolver.hlsl\"";
+        if (source.Contains(cellularInclude, StringComparison.Ordinal))
+            source = source.Replace(cellularInclude,
+                File.ReadAllText(Path.Combine(sourceDirectory, "CellularAutomataSolver.hlsl")), StringComparison.Ordinal);
         // Preserve the old expansion order, optimizer and source-based cache key.
         foreach (string include in new[] { "PhysicsShared.hlsli", "PhaseEnthalpy.hlsli", "OxidizerShared.hlsli", "FineAirGeometry.hlsli", "BulkThermalGeometry.hlsli" })
             source = source.Replace("#include \"" + include + "\"", File.ReadAllText(Path.Combine(sourceDirectory, include)), StringComparison.Ordinal);

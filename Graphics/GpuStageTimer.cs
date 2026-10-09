@@ -8,6 +8,7 @@ internal sealed class GpuStageTimer : IDisposable
 {
     private readonly Query disjoint, start, end;
     private bool pending, recording;
+    private bool discardPending;
     private int samples;
     private double total, minimum = double.PositiveInfinity, maximum;
     internal GpuStageTimer(Device device)
@@ -25,11 +26,12 @@ internal sealed class GpuStageTimer : IDisposable
             context.GetData(end, AsynchronousFlags.DoNotFlush, out long e))
         {
             pending = false;
-            if (!d.Disjoint && d.Frequency > 0 && e >= s)
+            if (!discardPending && !d.Disjoint && d.Frequency > 0 && e >= s)
             {
                 double ms = (e - s) * 1000d / d.Frequency;
                 samples++; total += ms; minimum = Math.Min(minimum, ms); maximum = Math.Max(maximum, ms);
             }
+            discardPending = false;
         }
         recording = !pending;
         if (recording) { context.Begin(disjoint); context.End(start); }
@@ -38,6 +40,11 @@ internal sealed class GpuStageTimer : IDisposable
     {
         if (!recording) return;
         context.End(end); context.End(disjoint); pending = true; recording = false;
+    }
+    internal void ResetStatistics()
+    {
+        samples=0;total=0;minimum=double.PositiveInfinity;maximum=0;
+        discardPending=pending;
     }
     public void Dispose() { disjoint.Dispose(); start.Dispose(); end.Dispose(); }
 }

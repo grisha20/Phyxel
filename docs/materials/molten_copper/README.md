@@ -1,5 +1,7 @@
 # Расплавленная медь
 
+- [WP: ускорение заливки и уровня](../shared/WATER_POUR_PERFORMANCE_CONTRACT.md), [проверки](../shared/WATER_POUR_PERFORMANCE_RESULTS.md).
+
 - [Паспорт](PASSPORT.md) и [твёрдая медь](../copper/PASSPORT.md).
 - [Настройка жидкой фазы](../../../Materials/core/molten_copper.json).
 - [Общие результаты пары](../copper/RESULTS.md).
