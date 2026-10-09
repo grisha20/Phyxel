@@ -32,7 +32,7 @@ public sealed class UiLeftToolbar
 {
     public static readonly IReadOnlyList<ToolDefinition> Tools =
     [
-        new(PhyxelToolId.Brush, "brush", "Кисть", true, "ЛКМ — рисовать; Shift + перетаскивание — прямая линия\nShift+колесо — размер кисти"),
+        new(PhyxelToolId.Brush, "brush", "Кисть", true, "ЛКМ — рисовать; Shift + перетаскивание — прямая линия\nКолесо — размер кисти"),
         new(PhyxelToolId.Eraser, "eraser", "Ластик", true, "Стирание элементов"),
         new(PhyxelToolId.Temperature, "temperature", "Температура", true, "Изменение температуры"),
         new(PhyxelToolId.Sensor, "temperature", "Датчики", true, "ЛКМ — поставить; ПКМ — убрать; Shift+ПКМ — убрать все"),
@@ -42,7 +42,7 @@ public sealed class UiLeftToolbar
         new(PhyxelToolId.Circle, "circle", "Круг", false, "Скоро"),
         new(PhyxelToolId.Fill, "fill", "Заливка", false, "Скоро"),
         new(PhyxelToolId.Eyedropper, "eyedropper", "Пипетка", false, "Скоро"),
-        new(PhyxelToolId.Pan, "pan", "Камера / панорама", true, "ЛКМ — перемещение, колесо — масштаб")
+        new(PhyxelToolId.Pan, "pan", "Камера / панорама", true, "ЛКМ — перемещение, Alt+колесо — масштаб")
     ];
 
     private PhyxelToolId activeTool = PhyxelToolId.Brush;
@@ -246,7 +246,7 @@ public sealed class UiLeftToolbar
         if (hoveredTool is not null && hoverSeconds >= 0.35f)
         {
             string tooltipText = hoveredTool.Tooltip + (hoveredTool.Enabled
-                ? "\nКолесо — масштаб вида; СКМ — перемещение" : "");
+                ? "\nAlt+колесо — масштаб вида; СКМ — перемещение" : "");
             Vector2 tipSize = font.MeasureString(tooltipText);
             Rectangle tipBounds = new(bounds.Right + 8, bounds.Y + GetHeaderHeight(font), (int)tipSize.X + 20, (int)tipSize.Y + 12);
 

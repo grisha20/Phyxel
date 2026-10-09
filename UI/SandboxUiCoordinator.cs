@@ -202,8 +202,8 @@ public sealed class SandboxUiCoordinator : IDisposable
 
         PointerConsumed = topConsumed || leftConsumed || rightConsumed || bottomConsumed || statusConsumed;
 
-        // Plain wheel belongs to the camera; Shift+wheel adjusts the brush.
-        if (input.ShiftDown && input.WheelDelta != 0 && CanvasBounds.Contains(input.MousePosition) &&
+        // Plain wheel adjusts the brush; Alt+wheel belongs to the camera.
+        if (!input.AltDown && input.WheelDelta != 0 && CanvasBounds.Contains(input.MousePosition) &&
             !PointerConsumed && !PanToolActive && !SensorToolActive)
         {
             settings.BrushRadius = Math.Clamp(settings.BrushRadius + Math.Sign(input.WheelDelta) * 2, 1, 96);

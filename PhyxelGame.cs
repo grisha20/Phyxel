@@ -645,6 +645,7 @@ public sealed class PhyxelGame : Game
                         editorPreview == "zoom-return" && frameIndex >= 10 ? start + (frameIndex >= 46 ? new Point(100, 60) : Point.Zero) :
                         editorPreview == "zoom-pan" && frameIndex >= 6 ? end + new Point(-100, -60) : end,
                     ShiftDown = frameIndex <= 2, LeftDown = frameIndex <= 2,
+                    AltDown = frameIndex >= 4,
                     LeftPressed = frameIndex == 1, LeftReleased = frameIndex == 3,
                     WheelDelta = frameIndex == 4 ? (editorPreview == "zoom-out" ? -600 : 960) :
                         editorPreview == "zoom-return" && frameIndex == 10 ? -12000 : 0,

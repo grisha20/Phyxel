@@ -38,7 +38,7 @@ internal static class CameraZoomRegressionTests
         {
             Vector2 cellBefore = new((pointer.X - view.X) / (float)view.Width,
                 (pointer.Y - view.Y) / (float)view.Height);
-            view = camera.Update(Input(pointer) with { WheelDelta = wheel }, canvas, canvas, false, false);
+            view = camera.Update(Input(pointer) with { AltDown = true, WheelDelta = wheel }, canvas, canvas, false, false);
             for (int i = 0; camera.IsZooming && i < 120; i++)
             {
                 Vector2 anchored = new(view.X + cellBefore.X * view.Width, view.Y + cellBefore.Y * view.Height);
@@ -54,31 +54,32 @@ internal static class CameraZoomRegressionTests
         float zoom = camera.Zoom;
         foreach (var blocked in new[]
         {
+            Input(pointer) with { WheelDelta = 120 },
             Input(pointer) with { WheelDelta = 120, ShiftDown = true },
-            Input(new Point(-1, -1)) with { WheelDelta = 120 }
+            Input(new Point(-1, -1)) with { AltDown = true, WheelDelta = 120 }
         }) camera.Update(blocked, canvas, canvas, false, false);
-        camera.Update(Input(pointer) with { WheelDelta = 120 }, canvas, canvas, false, true);
-        Check(camera.Zoom == zoom, "Shift, outside pointer or UI consumption changed zoom");
+        camera.Update(Input(pointer) with { AltDown = true, WheelDelta = 120 }, canvas, canvas, false, true);
+        Check(camera.Zoom == zoom, "plain/Shift wheel, outside pointer or UI consumption changed zoom");
 
         camera.Reset();
-        camera.Update(Input(canvas.Center) with { WheelDelta = 240 }, canvas, canvas, false, false);
+        camera.Update(Input(canvas.Center) with { AltDown = true, WheelDelta = 240 }, canvas, canvas, false, false);
         Settle(camera, canvas, canvas);
         Check(Math.Abs(camera.Zoom - 1.5625f) < .001f, "multiple wheel notches were discarded");
         camera.Reset();
-        camera.Update(Input(canvas.Center) with { WheelDelta = 60 }, canvas, canvas, false, false);
-        camera.Update(Input(canvas.Center) with { WheelDelta = 60 }, canvas, canvas, false, false);
+        camera.Update(Input(canvas.Center) with { AltDown = true, WheelDelta = 60 }, canvas, canvas, false, false);
+        camera.Update(Input(canvas.Center) with { AltDown = true, WheelDelta = 60 }, canvas, canvas, false, false);
         Settle(camera, canvas, canvas);
         Check(Math.Abs(camera.Zoom - 1.25f) < .001f, "high-resolution wheel deltas were discarded");
-        camera.Update(Input(canvas.Center) with { WheelDelta = 12000 }, canvas, canvas, false, false);
+        camera.Update(Input(canvas.Center) with { AltDown = true, WheelDelta = 12000 }, canvas, canvas, false, false);
         Settle(camera, canvas, canvas);
         Check(camera.Zoom == 16, "maximum zoom missing");
-        camera.Update(Input(canvas.Center) with { WheelDelta = -12000 }, canvas, canvas, false, false);
+        camera.Update(Input(canvas.Center) with { AltDown = true, WheelDelta = -12000 }, canvas, canvas, false, false);
         Settle(camera, canvas, canvas);
         Check(camera.Zoom == 1, "zoom-out must stop at the original view");
         camera.Reset();
         Check(camera.Zoom == 1 && camera.GetWorldBounds(canvas) == canvas, "reset is not the original view");
 
-        view = camera.Update(Input(canvas.Center) with { WheelDelta = 480 }, canvas, canvas, false, false);
+        view = camera.Update(Input(canvas.Center) with { AltDown = true, WheelDelta = 480 }, canvas, canvas, false, false);
         view = Settle(camera, canvas, canvas);
         camera.Update(Input(canvas.Center) with { LeftDown = true }, canvas, canvas, false, false);
         Rectangle noPan = camera.Update(Input(pointer) with { LeftDown = true }, canvas, canvas, false, false);
@@ -116,11 +117,11 @@ internal static class CameraZoomRegressionTests
         }
         brush = new CanvasBrushController();
         brush.CreateCommands(click, view, settings, metal, false, false, 20, false);
-        Rectangle changed = camera.Update(Input(pointer) with { WheelDelta = 120 }, canvas, canvas, false, false);
+        Rectangle changed = camera.Update(Input(pointer) with { AltDown = true, WheelDelta = 120 }, canvas, canvas, false, false);
         Check(brush.CreateCommands(click, changed, settings, metal, false, false, 20, false).Count == 0,
             "zoom during a held stroke drew across the world");
         camera.Reset();
-        Rectangle original = camera.Update(Input(canvas.Center) with { WheelDelta = -600 }, canvas, canvas, false, false);
+        Rectangle original = camera.Update(Input(canvas.Center) with { AltDown = true, WheelDelta = -600 }, canvas, canvas, false, false);
         Check(camera.Zoom == 1 && original == canvas && !camera.IsZooming,
             "wheel-down at the original view moved or shrank the scene");
         camera.Update(Input(canvas.Center) with { MiddleDown = true }, canvas, canvas, false, false);
@@ -141,32 +142,36 @@ internal static class CameraZoomRegressionTests
             int radius = settings.BrushRadius;
             Rectangle fitted = CanvasWorldExpansion.CoverBounds(ui.CanvasBounds, width, height);
             camera.Reset();
-            var wheel = Input(ui.CanvasBounds.Center) with { WheelDelta = 120 };
+            var wheel = Input(ui.CanvasBounds.Center) with { AltDown = true, WheelDelta = 120 };
             ui.Update(wheel, viewport, dpi, settings);
             camera.Update(wheel, ui.CanvasBounds, fitted, ui.PanToolActive, ui.PointerConsumed);
             Settle(camera, ui.CanvasBounds, fitted);
             Check(camera.Zoom == 1.25f && settings.BrushRadius == radius && ui.SelectedMaterial == metal &&
                 settings.Width == width && settings.Height == height && settings.Scale == scale,
-                "plain wheel changed brush/material/grid instead of the view");
+                "Alt+wheel changed brush/material/grid instead of the view");
+            ui.Update(wheel with { AltDown = false }, viewport, dpi, settings);
+            camera.Update(wheel with { AltDown = false }, ui.CanvasBounds, fitted, ui.PanToolActive, ui.PointerConsumed);
+            Check(camera.Zoom == 1.25f && settings.BrushRadius == radius + 2, "plain wheel did not exclusively resize the brush");
             ui.Update(wheel with { ShiftDown = true }, viewport, dpi, settings);
             camera.Update(wheel with { ShiftDown = true }, ui.CanvasBounds, fitted, ui.PanToolActive, ui.PointerConsumed);
-            Check(camera.Zoom == 1.25f && settings.BrushRadius == radius + 2, "Shift+wheel did not exclusively resize the brush");
+            Settle(camera, ui.CanvasBounds, fitted);
+            Check(camera.Zoom == 1.5625f && settings.BrushRadius == radius + 2, "Alt must own zoom even with Shift held");
             ui.Update(Input(Point.Zero) with { EscapePressed = true }, viewport, dpi, settings);
             ui.Update(wheel, viewport, dpi, settings);
             camera.Update(wheel, ui.CanvasBounds, fitted, ui.PanToolActive, ui.PointerConsumed);
-            Check(camera.Zoom == 1.25f, "pause menu leaked wheel into camera");
+            Check(camera.Zoom == 1.5625f && settings.BrushRadius == radius + 2, "pause menu leaked wheel into camera/brush");
             ui.Update(Input(Point.Zero) with { EscapePressed = true }, viewport, dpi, settings);
             ui.Update(Input(Point.Zero), viewport, dpi, settings);
         }
         TestSmoothZoomAndPan(canvas);
         TestWorldBounds();
-        Console.WriteLine("[PASS] Smooth global zoom, 1-16x limits, frame-rate independence, bounded middle pan/zoom, UI/modal isolation, brush/probe/sensor mapping and stroke cancellation.");
+        Console.WriteLine("[PASS] Alt+wheel zoom / plain wheel brush size, 1-16x limits, frame-rate independence, bounded middle pan/zoom, UI/modal isolation, brush/probe/sensor mapping and stroke cancellation.");
     }
 
     private static void TestSmoothZoomAndPan(Rectangle canvas)
     {
         var camera = new CanvasCameraController();
-        var wheel = Input(canvas.Center) with { WheelDelta = 120 };
+        var wheel = Input(canvas.Center) with { AltDown = true, WheelDelta = 120 };
         camera.Update(wheel, canvas, canvas, false, false);
         Check(camera.Zoom > 1 && camera.Zoom < 1.25f && camera.IsZooming, "wheel jumped instantly to target");
         float previous = camera.Zoom;
@@ -177,10 +182,10 @@ internal static class CameraZoomRegressionTests
             previous = camera.Zoom;
         }
         Check(!camera.IsZooming && camera.Zoom == 1.25f, "smooth zoom did not finish");
-        camera.Update(wheel with { WheelDelta = -12000 }, canvas, canvas, false, false);
+        camera.Update(wheel with { AltDown = true, WheelDelta = -12000 }, canvas, canvas, false, false);
         for (int i = 0; i < 120; i++)
         {
-            camera.Update(Input(canvas.Center) with { WheelDelta = -120 }, canvas, canvas, false, false);
+            camera.Update(Input(canvas.Center) with { AltDown = true, WheelDelta = -120 }, canvas, canvas, false, false);
             Check(camera.Zoom >= 1, "smooth zoom crossed below the original view");
         }
         Check(camera.Zoom == 1 && !camera.IsZooming, "repeated wheel-down did not stop at the original view");
@@ -188,7 +193,7 @@ internal static class CameraZoomRegressionTests
         {
             var test = new CanvasCameraController();
             for (int i = 0; i < frames; i++)
-                test.Update(wheel with { WheelDelta = i == 0 ? 120 : 0, DeltaSeconds = dt }, canvas, canvas, false, false);
+                test.Update(wheel with { AltDown = true, WheelDelta = i == 0 ? 120 : 0, DeltaSeconds = dt }, canvas, canvas, false, false);
             return test.Zoom;
         }
         Check(Math.Abs(AtTime(.01f, 10) - AtTime(.05f, 2)) < .00001f, "zoom speed depends on rendered FPS");
@@ -197,9 +202,9 @@ internal static class CameraZoomRegressionTests
         Rectangle shifted = camera.Update(Input(canvas.Center + new Point(120, 80)) with { MiddleDown = true }, canvas, canvas, false, false);
         Check(shifted == canvas, "middle pan moved the original view outside the world");
         camera.Reset();
-        var zooming = Input(canvas.Center) with { WheelDelta = 480, MiddleDown = true };
+        var zooming = Input(canvas.Center) with { AltDown = true, WheelDelta = 480, MiddleDown = true };
         camera.Update(zooming, canvas, canvas, false, false);
-        var moved = zooming with { WheelDelta = 0, MousePosition = canvas.Center + new Point(50, 20) };
+        var moved = zooming with { AltDown = true, WheelDelta = 0, MousePosition = canvas.Center + new Point(50, 20) };
         camera.Update(moved, canvas, canvas, false, false);
         Rectangle settled = Settle(camera, canvas, canvas);
         Check(Math.Abs(settled.Center.X - moved.MousePosition.X) <= 1 &&
@@ -211,9 +216,9 @@ internal static class CameraZoomRegressionTests
         // Reproduce the reported case: zoom in at one point, out at another.
         Rectangle canvas = new(100, 80, 800, 450);
         var camera = new CanvasCameraController();
-        camera.Update(Input(new Point(300, 200)) with { WheelDelta = 480 }, canvas, canvas, false, false);
+        camera.Update(Input(new Point(300, 200)) with { AltDown = true, WheelDelta = 480 }, canvas, canvas, false, false);
         Settle(camera, canvas, canvas);
-        camera.Update(Input(new Point(700, 400)) with { WheelDelta = -480 }, canvas, canvas, false, false);
+        camera.Update(Input(new Point(700, 400)) with { AltDown = true, WheelDelta = -480 }, canvas, canvas, false, false);
         Check(Settle(camera, canvas, canvas) == canvas && camera.Zoom == 1,
             "zoom at different points left the original screen displaced");
 
@@ -233,7 +238,7 @@ internal static class CameraZoomRegressionTests
             for (int cycle = 0; cycle < 12; cycle++)
             {
                 Point corner = corners[cycle % 4];
-                Step(Input(corner) with { WheelDelta = 480 }, viewport, fitted);
+                Step(Input(corner) with { AltDown = true, WheelDelta = 480 }, viewport, fitted);
                 for (int frame = 0; frame < 40; frame++) Step(Input(corner), viewport, fitted);
                 // Repeated large drags in every direction while zoomed in.
                 for (int drag = 0; drag < 12; drag++)
@@ -243,7 +248,7 @@ internal static class CameraZoomRegressionTests
                     Step(Input(corner), viewport, fitted);
                 }
                 Point other = corners[(cycle + 1) % 4];
-                Step(Input(other) with { WheelDelta = -12000 }, viewport, fitted);
+                Step(Input(other) with { AltDown = true, WheelDelta = -12000 }, viewport, fitted);
                 for (int frame = 0; frame < 80; frame++) Step(Input(other), viewport, fitted);
                 Check(camera.Zoom == 1 && !camera.IsZooming, "bounded zoom-out did not finish at 1x");
                 if (fitted.Size == viewport.Size) Check(camera.GetWorldBounds(fitted) == viewport, "1x view is offset");

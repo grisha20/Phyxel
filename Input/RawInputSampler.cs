@@ -41,7 +41,8 @@ public sealed class RawInputSampler
         {
             UndoPressed = historyKeys.Undo,
             RedoPressed = historyKeys.Redo,
-            MiddleDown = mouse.MiddleButton == ButtonState.Pressed
+            MiddleDown = mouse.MiddleButton == ButtonState.Pressed,
+            AltDown = keyboard.IsKeyDown(Keys.LeftAlt) || keyboard.IsKeyDown(Keys.RightAlt)
         };
         previousMouse = mouse;
         previousKeyboard = keyboard;

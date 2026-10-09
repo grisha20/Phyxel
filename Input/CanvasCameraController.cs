@@ -39,7 +39,7 @@ public sealed class CanvasCameraController
         ClampToWorld(canvas, fittedWorldBounds);
 
         bool pointerInside = canvas.Contains(input.MousePosition) && !pointerConsumedByUi;
-        if (pointerInside && input.WheelDelta != 0 && !input.ShiftDown)
+        if (pointerInside && input.WheelDelta != 0 && input.AltDown)
         {
             Rectangle oldBounds = GetWorldBounds(fittedWorldBounds);
             targetZoom = Math.Clamp(

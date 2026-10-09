@@ -115,7 +115,7 @@ public static class UiLayoutRegressionTests
             var camera=new CanvasCameraController();
             foreach(int zoomStep in new[]{0,1,2})
             {
-                Rectangle view=camera.Update(Input(canvas.Center,wheelDelta:zoomStep==0?0:120),canvas,fitted,true,false);
+                Rectangle view=camera.Update(Input(canvas.Center,wheelDelta:zoomStep==0?0:120) with { AltDown = true },canvas,fitted,true,false);
                 if(zoomStep>0)
                 {
                     camera.Update(Input(canvas.Center,leftDown:true),canvas,fitted,true,false);
@@ -807,7 +807,7 @@ public static class UiLayoutRegressionTests
         Point center = canvas.Center;
 
         Rectangle zoomed = camera.Update(
-            Input(center, wheelDelta: 120), canvas, fittedWorld, true, false);
+            Input(center, wheelDelta: 120) with { AltDown = true }, canvas, fittedWorld, true, false);
         zoomed = CameraZoomRegressionTests.Settle(camera, canvas, fittedWorld);
         Require(Math.Abs(camera.Zoom - 1.25f) < 0.001f && zoomed.Width == 1000,
             "Camera wheel zoom did not update the visible world transform.");
