@@ -1,0 +1,49 @@
+{
+  "Version": 19,
+  "Scale": 0.32,
+  "Gravity": 980.0,
+  "BrushRadius": 18,
+  "SpawnDensity": 0.82,
+  "SolidGravity": false,
+  "SelectedMaterialId": "core:copper",
+  "SavedAt": "2026-10-09T12:33:50.515448+00:00",
+  "HydraulicPressure": true,
+  "PressureDestruction": false,
+  "TemperatureSensors": [
+    {
+      "X": 140,
+      "Y": 180
+    },
+    {
+      "X": 290,
+      "Y": 235
+    },
+    {
+      "X": 450,
+      "Y": 305
+    },
+    {
+      "X": 605,
+      "Y": 315
+    }
+  ],
+  "FilterSelection": 0,
+  "OpenBoundaries": true,
+  "Mode": "Sandbox",
+  "MaterialPalette": [
+    "core:empty",
+    "core:stone",
+    "core:steel",
+    "core:cast_iron",
+    "core:copper",
+    "core:molten_copper",
+    "core:stone_coal",
+    "core:fire",
+    "core:heater",
+    "core:cooler",
+    "core:water",
+    "core:steam",
+    "core:smoke",
+    "core:wood"
+  ]
+}
