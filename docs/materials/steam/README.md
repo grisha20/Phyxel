@@ -1,5 +1,7 @@
 # Пар — `core:steam`
 
+- [HC: угольный фронт, бункер, наружный воздух и выбранные регрессии](../shared/HOPPER_COMBUSTION_RESULTS.md), [контракт](../shared/HOPPER_COMBUSTION_CONTRACT.md).
+
 - [WT: проверка конденсации и выхода пара после оптимизации тепла](../shared/WATER_THERMAL_PERFORMANCE_RESULTS.md), [контракт](../shared/WATER_THERMAL_PERFORMANCE_CONTRACT.md).
 
 - [SE: спокойная заливка и выход пара](../shared/STEAM_ESCAPE_CONTRACT.md), [измерения и границы](../shared/STEAM_ESCAPE_RESULTS.md).

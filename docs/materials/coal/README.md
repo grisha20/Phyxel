@@ -1,5 +1,7 @@
 # Древесный уголь — `core:coal`
 
+- [HC: угольный фронт, бункер, наружный воздух и выбранные регрессии](../shared/HOPPER_COMBUSTION_RESULTS.md), [контракт](../shared/HOPPER_COMBUSTION_CONTRACT.md).
+
 - [CG: полоса горящего угля, профиль и защита горения](../shared/COAL_GPU_RESULTS.md), [контракт](../shared/COAL_GPU_CONTRACT.md).
 
 TN2026-10-08: при добавлении TNT повторно проверены реакция/O₂/эмиссии/выгорание

@@ -60,7 +60,8 @@ public static class CombustionRuntime
             (cell.Temperature > source.IgnitionTemperature ||
              (RetainsFuelIgnition(source) && (cell.BodyId & FuelBurningMarker) != 0 &&
               cell.Temperature >= source.ContactIgnitionTemperature) ||
-             ((source.Flags & (uint)MaterialFlags.PersistentCoalIgnition) != 0 && cell.Lifetime > 0) ||
+             ((source.Flags & (uint)MaterialFlags.PersistentCoalIgnition) != 0 && cell.Lifetime > 0 &&
+              cell.Temperature > .75f * source.IgnitionTemperature) ||
              ((source.Flags & (uint)MaterialFlags.ProgressiveIgnition) != 0 && cell.Lifetime > 0 &&
               ((source.Flags & (uint)MaterialFlags.RadialIgnition) != 0 ||
                cell.Lifetime < 1 / source.FlameSpreadRate || cell.Temperature > source.ContactIgnitionTemperature)));
@@ -75,6 +76,10 @@ public static class CombustionRuntime
     {
         summary = CombustionSummaryFlags.None;
         burnedMass = 0;
+        if (cell.MaterialIndex < materials.Length &&
+            (materials[(int)cell.MaterialIndex].Flags & (uint)MaterialFlags.PersistentCoalIgnition) != 0 &&
+            cell.Temperature <= .75f * materials[(int)cell.MaterialIndex].IgnitionTemperature)
+            cell.Lifetime = 0;
         if (cell.MaterialIndex < materials.Length &&
             (materials[(int)cell.MaterialIndex].Flags & (uint)MaterialFlags.ProgressiveIgnition) != 0 &&
             (materials[(int)cell.MaterialIndex].Flags & (uint)MaterialFlags.RadialIgnition) == 0 &&

@@ -65,7 +65,7 @@ internal static class StartupRegressionVerifier
             string package = Path.Combine(fixture, "package");
             string cacheDir = Path.Combine(fixture, "cache");
             Directory.CreateDirectory(source);
-            foreach (string include in new[] { "PhysicsShared.hlsli", "PhaseEnthalpy.hlsli", "OxidizerShared.hlsli", "FineAirGeometry.hlsli", "BulkThermalGeometry.hlsli" })
+            foreach (string include in new[] { "PhysicsShared.hlsli", "CoalFlameShared.hlsli", "PhaseEnthalpy.hlsli", "OxidizerShared.hlsli", "FineAirGeometry.hlsli", "BulkThermalGeometry.hlsli" })
                 File.WriteAllText(Path.Combine(source, include), "// " + include);
             var program = new ShaderProgram("Tiny.hlsl");
             string path = Path.Combine(source, program.FileName);

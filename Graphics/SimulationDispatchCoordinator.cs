@@ -2166,7 +2166,7 @@ public sealed class SimulationDispatchCoordinator
             AirAmbientTemperature = AirAmbientTemperature,
             AirHotScale = AirHotScale,
             AirTickIndex = tickIndex,
-            AirSandboxMode = sandbox ? 1u : 0u
+            AirSandboxMode = (sandbox ? 1u : 0u) | (openBoundaries ? 2u : 0u)
         };
         DeviceContext context = resources.Context;
         // This is deliberately before CSInject: the observer sees the same
@@ -2409,14 +2409,14 @@ public sealed class SimulationDispatchCoordinator
             Exchange=.12f,OpenBoundaries=(openBoundaries?1u:0u)|((surfacePhase&3u)<<1) };
         context.UpdateSubresource(ref constants,resources.AirThermalConstants);
         context.ComputeShader.SetConstantBuffer(0,resources.AirThermalConstants);
-        context.ComputeShader.SetShaderResources(0,resources.Air.View,resources.AirFlowLinks.View,resources.Materials.View);
+        context.ComputeShader.SetShaderResources(0,resources.Air.View,resources.AirFlowLinks.View,resources.Materials.View,resources.AirProjectionB.View);
         context.ComputeShader.SetUnorderedAccessViews(0,resources.AirThermal.UnorderedView,resources.Grid.ReadUnorderedView,resources.AirThermalFlux.UnorderedView);
         int x=DivideRoundUp(resources.AirWidth,8), y=DivideRoundUp(resources.AirHeight,8);
         RunAirPass(context,resources.AirHeatExchangeShader,x,y);
         RunAirPass(context,resources.AirHeatFluxShader,x,y);
         RunAirPass(context,resources.AirHeatTransportShader,x,y);
         resources.AirHeatTimer?.End(context);
-        Unbind(context,3,3);
+        Unbind(context,4,3);
     }
 
     private static void RunAirPass(
@@ -3418,7 +3418,7 @@ public sealed class SimulationDispatchCoordinator
         gasTimingMaximumMilliseconds = 0;
     }
 
-    private void DispatchEmissionResolve(GpuSimulationResources resources)
+    internal void DispatchEmissionResolve(GpuSimulationResources resources)
     {
         EmissionConstants constants = new()
         {
@@ -3439,12 +3439,15 @@ public sealed class SimulationDispatchCoordinator
         context.ComputeShader.SetUnorderedAccessViews(
             0,
             resources.Grid.ReadUnorderedView,
-            resources.CombustionSummary.UnorderedView);
+            resources.CombustionSummary.UnorderedView,
+            resources.ReactionPending.UnorderedView);
         context.Dispatch(
             DivideRoundUp(resources.Width, 16),
             DivideRoundUp(resources.Height, 16),
             1);
-        Unbind(context, 3, 2);
+        context.ComputeShader.Set(resources.EmissionHeatConsumeShader);
+        context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
+        Unbind(context, 3, 3);
     }
 
     internal static void DispatchTransientLifecycle(

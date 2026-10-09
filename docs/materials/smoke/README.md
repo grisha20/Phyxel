@@ -1,5 +1,7 @@
 # Smoke — `core:smoke`
 
+- [HC: угольный фронт, бункер, наружный воздух и выбранные регрессии](../shared/HOPPER_COMBUSTION_RESULTS.md), [контракт](../shared/HOPPER_COMBUSTION_CONTRACT.md).
+
 - [CG: межкадровое мерцание, sparse/dense проверки](../shared/COAL_GPU_RESULTS.md), [контракт](../shared/COAL_GPU_CONTRACT.md).
 
 - [SE: контроль сухой тяги при изменении выхода пара](../shared/STEAM_ESCAPE_RESULTS.md).

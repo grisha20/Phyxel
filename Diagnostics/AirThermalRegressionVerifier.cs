@@ -23,10 +23,23 @@ internal static class AirThermalRegressionVerifier
         Vector2[] Read() => MemoryMarshal.Cast<byte,Vector2>(AirInventoryRegressionVerifier.Read(r,r.AirThermal.Buffer)).ToArray();
         Vector2[] Fresh() { var a=new Vector2[an]; Array.Fill(a,new(293.15f*.016f,.016f)); return a; }
         var air=new AirCell[an]; var links=new uint[an];
+        void SetCarrier()
+        {
+            // These tests prescribe a face flow, independently of the pressure
+            // solver. Production now retains the solver's exact face output.
+            ctx.UpdateSubresource(air,r.Air.Buffer);
+            var faces=new Vector2[an];
+            for(int y=0;y<r.AirHeight;y++)for(int x=0;x<r.AirWidth;x++){
+                int i=y*r.AirWidth+x;
+                if(x+1<r.AirWidth)faces[i].X=(air[i].VelocityX+air[i+1].VelocityX)*.5f;
+                if(y+1<r.AirHeight)faces[i].Y=(air[i].VelocityY+air[i+r.AirWidth].VelocityY)*.5f;
+            }
+            ctx.UpdateSubresource(faces,r.AirProjectionB.Buffer);
+        }
         var grid=new GridCell[n]; int gi=80*r.Width+80, ai=20*r.AirWidth+20;
         grid[gi]=new() { IsActive=1,MaterialIndex=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire),Mass=1,Temperature=800,Lifetime=2 };
         ctx.UpdateSubresource(grid,r.Grid.ReadBuffer);
-        ctx.UpdateSubresource(air,r.Air.Buffer); ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer);
+        SetCarrier(); ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer);
         ctx.UpdateSubresource(Fresh(),r.AirThermal.Buffer);
         var initial=Read();
         for(int i=0;i<300;i++) SimulationDispatchCoordinator.DispatchAirHeat(r,false);
@@ -58,7 +71,7 @@ internal static class AirThermalRegressionVerifier
             if(x>0) links[i]|=1u<<3; if(x+1<r.AirWidth) links[i]|=1u<<5;
             if(y>0) links[i]|=1u<<1; if(y+1<r.AirHeight) links[i]|=1u<<7;
         }
-        ctx.UpdateSubresource(air,r.Air.Buffer); ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer);
+        SetCarrier(); ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer);
         ctx.UpdateSubresource(Fresh(),r.AirThermal.Buffer);
         for(int i=0;i<120;i++) SimulationDispatchCoordinator.DispatchAirHeat(r,false);
         heat=Read();
@@ -103,7 +116,7 @@ internal static class AirThermalRegressionVerifier
         remapTable[registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal)].ThermalConductivity=0;
         ctx.UpdateSubresource(remapTable,r.Materials.Buffer);
         air[ai].Blocked=1;
-        ctx.UpdateSubresource(grid,r.Grid.ReadBuffer); ctx.UpdateSubresource(air,r.Air.Buffer);
+        ctx.UpdateSubresource(grid,r.Grid.ReadBuffer); SetCarrier();
         ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer); ctx.UpdateSubresource(Fresh(),r.AirThermal.Buffer);
         for(int i=0;i<120;i++) SimulationDispatchCoordinator.DispatchAirHeat(r,false);
         heat=Read(); after=MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer)).ToArray();
@@ -126,7 +139,7 @@ internal static class AirThermalRegressionVerifier
             if(x>0) links[i]|=1u<<3; if(x+1<r.AirWidth) links[i]|=1u<<5;
             if(y>0) links[i]|=1u<<1; if(y+1<r.AirHeight) links[i]|=1u<<7;
         }
-        ctx.UpdateSubresource(grid,r.Grid.ReadBuffer); ctx.UpdateSubresource(air,r.Air.Buffer);
+        ctx.UpdateSubresource(grid,r.Grid.ReadBuffer); SetCarrier();
         ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer); ctx.UpdateSubresource(stress,r.AirThermal.Buffer);
         for(int i=0;i<40;i++) SimulationDispatchCoordinator.DispatchAirHeat(r,false);
         heat=Read();
@@ -145,7 +158,7 @@ internal static class AirThermalRegressionVerifier
         var pair=new Vector2[an];pair[ai]=new(300,1);pair[ai+1]=new(5000,1);
         air[ai].VelocityX=air[ai+1].VelocityX=4;
         links[ai]=1u<<5;links[ai+1]=1u<<3;
-        ctx.UpdateSubresource(grid,r.Grid.ReadBuffer);ctx.UpdateSubresource(air,r.Air.Buffer);
+        ctx.UpdateSubresource(grid,r.Grid.ReadBuffer);SetCarrier();
         ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer);ctx.UpdateSubresource(pair,r.AirThermal.Buffer);
         for(int step=0;step<1000;step++)
         {
@@ -159,7 +172,7 @@ internal static class AirThermalRegressionVerifier
         // Surface exchange must carry pore stocks and latent heat, including
         // at a plateau, rather than discarding Q in a temperature clamp.
         Array.Clear(air); Array.Clear(links);
-        ctx.UpdateSubresource(air,r.Air.Buffer); ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer);
+        SetCarrier(); ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer);
         foreach(string id in new[]{CoreMaterialIds.Water,CoreMaterialIds.Ice,CoreMaterialIds.Wood,CoreMaterialIds.Coal})
         foreach(bool warming in new[]{true,false})
         {

@@ -24,7 +24,7 @@ internal static class FurnaceCombustionRegressionVerifier
             var material=registry[id].Properties;
             var grid=new GridCell[n];
             grid[index]=new() { IsActive=1, MaterialIndex=registry.GetRequiredRuntimeIndex(id),
-                Mass=mass>0?mass:material.Density, Temperature=material.IgnitionTemperature+10,
+                Mass=mass>0?mass:material.Density, Temperature=material.MaximumCombustionTemperature-10,
                 Lifetime=latched?1:0 };
             var available=new float[n];
             foreach (int neighbor in new[] { index-1, index+1, index-w, index+w })
@@ -38,6 +38,7 @@ internal static class FurnaceCombustionRegressionVerifier
             context.ClearUnorderedAccessView(resources.EmissionClaims.UnorderedView,new RawInt4(-1,-1,-1,-1));
             context.ClearUnorderedAccessView(resources.EmissionRequests.UnorderedView,new RawInt4());
             context.ClearUnorderedAccessView(resources.OxidizerDemand.UnorderedView,new RawInt4());
+            context.ClearUnorderedAccessView(resources.ReactionPending.UnorderedView,new RawInt4());
             var constants=new CombustionConstants { Width=(uint)w, Height=(uint)h,
                 MaterialCount=(uint)registry.Materials.Count, DeltaTime=1f/60, TickIndex=1, FiniteOxidizer=finite?1u:0u };
             context.UpdateSubresource(ref constants,resources.CombustionConstants);
@@ -45,16 +46,16 @@ internal static class FurnaceCombustionRegressionVerifier
             context.ComputeShader.SetConstantBuffer(0,resources.CombustionConstants);
             context.ComputeShader.SetShaderResources(0,resources.Materials.View,resources.Emissions.View,resources.OxidizerAvailable.View);
             context.ComputeShader.SetUnorderedAccessViews(0,resources.Grid.ReadUnorderedView,resources.CombustionSummary.UnorderedView,
-                resources.EmissionClaims.UnorderedView,resources.EmissionRequests.UnorderedView,resources.OxidizerDemand.UnorderedView);
+                resources.EmissionClaims.UnorderedView,resources.EmissionRequests.UnorderedView,resources.OxidizerDemand.UnorderedView,resources.ReactionPending.UnorderedView);
             context.Dispatch((w+15)/16,(h+15)/16,1);
             for(int i=0;i<3;i++) context.ComputeShader.SetShaderResource(i,null);
-            for(int i=0;i<5;i++) context.ComputeShader.SetUnorderedAccessView(i,null);
+            for(int i=0;i<6;i++) context.ComputeShader.SetUnorderedAccessView(i,null);
             var after=MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(resources,resources.Grid.ReadBuffer));
             var requests=MemoryMarshal.Cast<byte,EmissionRequest>(AirInventoryRegressionVerifier.Read(resources,resources.EmissionRequests.Buffer));
             var demand=MemoryMarshal.Cast<byte,float>(AirInventoryRegressionVerifier.Read(resources,resources.OxidizerDemand.Buffer));
             double burn=(mass>0?mass:material.Density)-after[index].Mass;
             Check(Math.Abs(demand[index]-(finite?burn*registry.CreateEmissionGpuTable()[registry.GetRequiredRuntimeIndex(id)].OxidizerPerMass:0))<2e-6,"Demand disagrees with actual fuel loss");
-            return (burn,requests[n*2+index].Mass,after[index].Temperature-material.IgnitionTemperature-10);
+            return (burn,requests[n*2+index].Mass,after[index].Temperature-material.MaximumCombustionTemperature+10);
         }
         foreach (string id in new[] { CoreMaterialIds.Coal, CoreMaterialIds.StoneCoal, CoreMaterialIds.Wood })
         {
@@ -68,7 +69,11 @@ internal static class FurnaceCombustionRegressionVerifier
             Check(Math.Abs(weak.Gas/full.Gas-.25)<.001,"Starved fuel emitted full-rate CO2");
             Check(empty.Burn==0 && empty.Gas==0,"Empty oxygen produced reaction products");
             float sandboxGas=registry.CreateEmissionGpuTable()[registry.GetRequiredRuntimeIndex(id)].GasRate/60;
-            Check(Math.Abs(sandbox.Burn-full.Burn)<2e-7 && Math.Abs(sandbox.Gas-sandboxGas)<1e-7,"Sandbox changed its full-rate reaction");
+            bool boundedCoal=(registry[id].Properties.Flags&(uint)MaterialFlags.PersistentCoalIgnition)!=0;
+            Check(Math.Abs(sandbox.Burn-full.Burn)<2e-7 && (boundedCoal
+                ? sandbox.Gas>0 && sandbox.Gas<=sandboxGas+1e-7
+                : Math.Abs(sandbox.Gas-sandboxGas)<1e-7),
+                "Sandbox changed full fuel rate or exceeded the declared product rate");
             Console.WriteLine(FormattableString.Invariant($"PHYXEL_FURNACE_REACTION fuel={id} full={full.Burn:F8} surface={surface.Burn:F8} weak={weak.Burn:F8} gasRatio={weak.Gas/full.Gas:F4} sandbox=PASS"));
         }
         // Test the actual Mass1 emitted by the brush, rather than Density.2.
@@ -80,8 +85,8 @@ internal static class FurnaceCombustionRegressionVerifier
         var painted = MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(resources,resources.Grid.ReadBuffer));
         Check(painted[index].Mass == 1, "Coal test must exercise actual brush Mass1");
         var calibrated = Reaction(CoreMaterialIds.Coal,1,false,true,mass:painted[index].Mass);
-        Check(Math.Abs(calibrated.Burn-.06/60)<2e-7 && Math.Abs(calibrated.Rise-6)<.001,
-            "Coal calibration changed the previous 360/s full-rate heating power");
+        Check(Math.Abs(calibrated.Burn-.06/60)<2e-7 && Math.Abs(calibrated.Rise-3/(1-.06/60))<.001,
+            "Coal full-rate/half-retained heat partition changed");
         Check(Math.Abs(calibrated.Burn*registry.CreateEmissionGpuTable()[registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal)].OxidizerPerMass-.24/60)<2e-7,
             "Coal calibration changed full-rate oxidizer consumption");
         foreach(string id in new[]{CoreMaterialIds.Coal,CoreMaterialIds.StoneCoal})
@@ -89,7 +94,7 @@ internal static class FurnaceCombustionRegressionVerifier
             var enclosed = Reaction(id,0,false,false,mass:1,noFace:true);
             var retained = Reaction(id,0,false,false,mass:1,noFace:true,latched:true);
             var starved = Reaction(id,0,false,true,mass:1,noFace:true,latched:true);
-            Check(enclosed.Burn==0 && retained.Burn>0 && starved.Burn==0,
+            Check(enclosed.Burn==0 && retained.Burn==0 && starved.Burn==0,
                 "Coal surface ignition/latch/finite oxygen contract failed");
         }
         VerifyCoalLifetime(coordinator,registry,resources,index);
@@ -164,7 +169,7 @@ internal static class FurnaceCombustionRegressionVerifier
         int w=r.Width,h=r.Height,n=w*h;var context=r.Context;
         uint coal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal),fire=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire);
         var grid=new GridCell[n];
-        grid[index]=new(){IsActive=1,MaterialIndex=coal,Mass=1,Temperature=410};
+        grid[index]=new(){IsActive=1,MaterialIndex=coal,Mass=1,Temperature=750};
         context.UpdateSubresource(grid,r.Grid.ReadBuffer);
         void Step(int count)
         {
@@ -174,10 +179,10 @@ internal static class FurnaceCombustionRegressionVerifier
             context.ComputeShader.Set(r.CombustionShader);context.ComputeShader.SetConstantBuffer(0,r.CombustionConstants);
             context.ComputeShader.SetShaderResources(0,r.Materials.View,r.Emissions.View,r.OxidizerAvailable.View);
             context.ComputeShader.SetUnorderedAccessViews(0,r.Grid.ReadUnorderedView,r.CombustionSummary.UnorderedView,
-                r.EmissionClaims.UnorderedView,r.EmissionRequests.UnorderedView,r.OxidizerDemand.UnorderedView);
+                r.EmissionClaims.UnorderedView,r.EmissionRequests.UnorderedView,r.OxidizerDemand.UnorderedView,r.ReactionPending.UnorderedView);
             for(int i=0;i<count;i++)context.Dispatch((w+15)/16,(h+15)/16,1);
             for(int i=0;i<3;i++)context.ComputeShader.SetShaderResource(i,null);
-            for(int i=0;i<5;i++)context.ComputeShader.SetUnorderedAccessView(i,null);
+            for(int i=0;i<6;i++)context.ComputeShader.SetUnorderedAccessView(i,null);
         }
         byte[] Read()=>AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer);
         void Check(bool ok,string message){if(!ok)throw new InvalidOperationException(message);}
@@ -188,10 +193,12 @@ internal static class FurnaceCombustionRegressionVerifier
         string dir=System.IO.Path.Combine(Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")??"artifacts/coal-unit","resume");
         System.IO.Directory.CreateDirectory(dir);string path=System.IO.Path.Combine(dir,"scene.json");
         var settings=new SimulationSettings{Paused=true};
-        var world=new Phyxel.Serialization.SimulationWorldSnapshot(w,h,half);
+        var pending=AirInventoryRegressionVerifier.Read(r,r.ReactionPending.Buffer);
+        var world=new Phyxel.Serialization.SimulationWorldSnapshot(w,h,half,ReactionPending:pending);
         System.Threading.Tasks.Task.Run(()=>serializer.SaveAsync(path,settings,(ushort)coal,world,registry)).GetAwaiter().GetResult();
         var loaded=System.Threading.Tasks.Task.Run(()=>serializer.LoadAsync(path,registry)).GetAwaiter().GetResult()!.World!;
         Check(half.AsSpan().SequenceEqual(loaded.Grid),"Partial coal mass/latch changed across save-load");
+        Check(pending.AsSpan().SequenceEqual(loaded.ReactionPending),"Coal pending heat changed across save-load");
         foreach(var mode in new[]{SimulationMode.Sandbox,SimulationMode.Simulation})
         {
             serializer.ApplyWorldSnapshot(r,loaded);coordinator.RestoreWorldActivity(r,true,false,false,true);
@@ -203,6 +210,6 @@ internal static class FurnaceCombustionRegressionVerifier
         Check(before.MaterialIndex==coal && before.Mass>0,"Coal burned out before its calibrated lifetime");
         Step(2);var after=MemoryMarshal.Cast<byte,GridCell>(Read())[index];
         Check(after.MaterialIndex==fire,"Coal did not become a flame at 16.7s after save-load");
-        Console.WriteLine("PHYXEL_COAL_LIFETIME brushMass=1 heatingPower=360 oxidizerRate=.24 burnoutSeconds=16.7 closedCore=PASS pauseModesSaveLoad=PASS");
+        Console.WriteLine("PHYXEL_COAL_LIFETIME brushMass=1 totalReactionPower=360 halfInitiallyRetained oxidizerRate=.24 fullRateBurnoutSeconds=16.7 closedCore=PASS pauseModesSaveLoadPending=PASS");
     }
 }

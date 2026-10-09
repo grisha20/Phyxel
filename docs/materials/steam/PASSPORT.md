@@ -1,5 +1,11 @@
 # Пар — `core:steam`
 
+HC2026-10-10: общий воздушный носитель Simulation имеет единую проекцию,
+исправленные гранные тепловые потоки и открытый выход. Собственные
+фазовые параметры пара прежние. Повторены AirHeat/энтальпия, AirInventory,
+WaterQuench/SteamPlume; [выбранные результаты и границы](../shared/HOPPER_COMBUSTION_RESULTS.md).
+Полный паспорт/все пользовательские котлы не приняты.
+
 WT2026-10-09: прямые сравнения конденсации, выбранные SteamPlume и печь
 обоих режимов PASS после оптимизации мокрого теплообмена.
 [Контракт](../shared/WATER_THERMAL_PERFORMANCE_CONTRACT.md), [результаты](../shared/WATER_THERMAL_PERFORMANCE_RESULTS.md).

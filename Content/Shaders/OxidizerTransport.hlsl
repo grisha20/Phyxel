@@ -228,7 +228,7 @@ void CSConsume(uint3 tid : SV_DispatchThreadID)
         if (p.y+1<OxygenHeight) used+=ConsumerShare(p+uint2(0,1),own);
     }
     GridCell cell=Cells[i];
-    float flameUse=cell.IsActive!=0 && cell.BodyId!=SelfOxidizingFlameMarker && cell.BodyId!=ReactedFuelFlameMarker &&
+    float flameUse=cell.IsActive!=0 && (cell.BodyId&(SelfOxidizingFlameMarker|ReactedFuelFlameMarker))==0 &&
         (Materials[cell.MaterialIndex].Flags&MaterialFlagFlame)!=0 ? min(own/5,.15*OxygenDeltaTime) : 0;
     DestinationOxygen[i]=max(0,Amount(i)-used-flameUse);
 }

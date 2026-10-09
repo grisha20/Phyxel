@@ -1,5 +1,7 @@
 # CO₂ — `core:co2`
 
+- [HC: угольный фронт, бункер, наружный воздух и выбранные регрессии](../shared/HOPPER_COMBUSTION_RESULTS.md), [контракт](../shared/HOPPER_COMBUSTION_CONTRACT.md).
+
 - [Паспорт](PASSPORT.md): источники, поведение, критерии, статусы и ограничения.
 - [Настройки игры](../../../Materials/core/co2.json): JSON, загружаемый движком.
 - [Общая регистрация материалов](../../../Materials/MaterialRegistry.cs).

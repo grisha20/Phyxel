@@ -63,6 +63,7 @@ internal static class ShaderCatalog
         new("GasVisual.hlsl", "CSDeposit"), new("GasVisual.hlsl", "CSDiffuse"), new("GasVisual.hlsl", "CSCommit"),
         new("ContactTransitions.hlsl"), new("ContactTransitions.hlsl", "CSMoisture"), new("PhaseTransitions.hlsl"),
         new("Combustion.hlsl"), new("EmissionResolve.hlsl"), new("TransientLifecycle.hlsl"),
+        new("EmissionResolve.hlsl", "CSConsumeHeat"),
         new("TemperatureProbe.hlsl"), new("TemperatureSensors.hlsl")
     ];
 

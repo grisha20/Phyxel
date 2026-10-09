@@ -18,7 +18,7 @@ RWStructuredBuffer<float2> ProjectionSource : register(u5);
 #define FineAirHeight AirGridHeight
 #define FineAirMaterialAt(p) Grid[uint((p).y)*AirGridWidth+uint((p).x)].MaterialIndex
 #define FineAirMaterials Materials
-#define FineAirBlockGranular (Sandbox==0)
+#define FineAirBlockGranular ((Sandbox&1u)==0)
 #include "FineAirGeometry.hlsli"
 // The pressure mapping uses the same fine walls/filter geometry, with pores.
 #define FineAirWidth AirGridWidth
@@ -56,6 +56,26 @@ bool Open(int2 p,int2 d,bool scratch)
 }
 bool Edge(int2 p) { return p.x==0 || p.y==0 || p.x==int(AirWidth)-1 || p.y==int(AirHeight)-1; }
 
+// Surface oxidation releases heat into an adjacent gas volume, even while
+// the grain itself still occupies its cell. Select one receiver identically
+// in gather and clear; no heat leaks through a wall or a closed filter.
+bool ReactionHeatNodeFor(int2 q,out int2 node)
+{
+    if(AirFineNodeFor(q,node))return true;
+    uint i=uint(q.y)*AirGridWidth+uint(q.x);
+    if((Materials[Grid[i].MaterialIndex].Flags & MaterialFlagPersistentCoalIgnition)==0 || !FilterAirAllows(i))return false;
+    int2 offsets[4]={int2(0,-1),int2(-1,0),int2(1,0),int2(0,1)};
+    [unroll]for(int k=0;k<4;k++)
+    {
+        int2 neighbor=q+offsets[k];
+        if(any(neighbor<0)||neighbor.x>=int(AirGridWidth)||neighbor.y>=int(AirGridHeight))continue;
+        int2 candidate;
+        if(AirFineNodeFor(neighbor,candidate) && all(abs(candidate*4+2-q)<=4))
+        {node=candidate;return true;}
+    }
+    return false;
+}
+
 // Gather one unique receiver for each finite stock. Pressure can cross pores;
 // heat stays pending until the original gas mapping opens. Solids block both.
 [numthreads(8,8,1)]
@@ -71,9 +91,11 @@ void CSGather(uint3 id:SV_DispatchThreadID)
         if(all(s==0)) continue;
         int2 node;
         if(PressureFineNodeFor(q,node) && all(node==p))source.x+=s.x;
-        if(AirFineNodeFor(q,node) && all(node==p))source.yz+=s.yz;
+        if(ReactionHeatNodeFor(q,node) && all(node==p))source.yz+=s.yz;
     }
-    float4 packet=Previous[i]+float4(source.x,0,0,source.x*6.0);
+    float phasePressure=ProjectionSource[i].x;
+    ProjectionSource[i].x=0;
+    float4 packet=Previous[i]+float4(source.x+phasePressure,0,0,source.x*6.0);
     // Admit the finite newly produced expansion over ~0.16 s in this wave.
     // The W stock is issued once and consumed, not a permanent HotAir source.
     float admitted=packet.w*.1;
@@ -103,7 +125,7 @@ void CSClearMapped(uint3 id:SV_DispatchThreadID)
     if(all(Pending[i]==0)) return;
     int2 node;float4 source=Pending[i];
     if(PressureFineNodeFor(q,node))source.x=0;
-    if(AirFineNodeFor(q,node))source.yz=0;
+    if(ReactionHeatNodeFor(q,node))source.yz=0;
     Pending[i]=source;
 }
 

@@ -1,4 +1,5 @@
 #include "PhysicsShared.hlsli"
+#include "CoalFlameShared.hlsli"
 #include "OxidizerShared.hlsli"
 
 cbuffer CombustionConstants : register(b0)
@@ -105,7 +106,8 @@ void ProposeEmission(
     uint requestIndex,
     float temperature,
     bool selfOxidizing,
-    float flameLifetimeMultiplier)
+    float flameLifetimeMultiplier,
+    bool finiteHeat)
 {
     if (productIndex == 0xffffffffu || productIndex >= CombustionMaterialCount || rate <= 0 ||
         destinationIndex == sourceIndex)
@@ -139,10 +141,21 @@ void ProposeEmission(
     request.DestinationIndex = destinationIndex;
     request.MaterialIndex = productIndex;
     request.Mass = discreteFlame ? product.Density : min(product.Density, rate * elapsedSeconds);
+    float quotaCapacity = 0;
+    if (finiteHeat)
+    {
+        float4 budget = ReactionPending[sourceIndex];
+        quotaCapacity = budget.z * (discreteFlame ? .5 : .25);
+        request.Mass = min(request.Mass, quotaCapacity / max(product.HeatCapacity, .000001));
+        if (request.Mass <= 0 || budget.z <= 0) return;
+        temperature = budget.y / budget.z - 273.15;
+    }
     request.Temperature = temperature;
-    request.FlameLifetimeMultiplier = discreteFlame ? flameLifetimeMultiplier : 1;
+    request.FlameLifetimeMultiplier = discreteFlame
+        ? flameLifetimeMultiplier * (finiteHeat ? CoalFlameResidenceScale : 1) : 1;
     request.SourceIndex = sourceIndex | (discreteFlame
         ? (selfOxidizing ? SelfOxidizingFlameMarker : (FiniteOxidizer != 0 ? ReactedFuelFlameMarker : 0)) : 0);
+    if (finiteHeat) request.SourceIndex |= FiniteHeatEmissionMarker;
     // Host and retained fuel share this cell's three product slots. Combine
     // matching proposals; overwriting a slot would lose the first reaction's
     // product and could leave a claim pointing at another destination.
@@ -155,6 +168,11 @@ void ProposeEmission(
         request.Mass = min(product.Density, previous.Mass + request.Mass);
         request.FlameLifetimeMultiplier = max(previous.FlameLifetimeMultiplier, request.FlameLifetimeMultiplier);
         request.SourceIndex |= previous.SourceIndex;
+        if (finiteHeat)
+        {
+            request.Mass = min(request.Mass, quotaCapacity / max(product.HeatCapacity, .000001));
+            request.Temperature = temperature;
+        }
     }
     EmissionRequests[requestIndex] = request;
     uint ignored;
@@ -162,10 +180,18 @@ void ProposeEmission(
 }
 
 void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, uint height, GridCell sourceCell,
-    float reactionFraction)
+    float reactionFraction, bool finiteHeat)
 {
     MaterialEmissionProperties emission = Emissions[sourceMaterialIndex];
     MaterialProperties source = Materials[sourceMaterialIndex];
+    if ((source.Flags & MaterialFlagPersistentCoalIgnition)!=0)
+    {
+        // Surface char oxidation can glow without a gaseous flame. This is
+        // a bounded gameplay approximation, not a resolved volatile/CO model.
+        float flameStart=lerp(source.IgnitionTemperature,source.MaximumCombustionTemperature,.25);
+        emission.FlameRate*=saturate((sourceCell.Temperature-flameStart)/
+            max(1,source.MaximumCombustionTemperature-flameStart))*reactionFraction;
+    }
     if (FiniteOxidizer != 0 && (source.Flags & MaterialFlagPersistentCoalIgnition) != 0 &&
         emission.GasIntoMaterialIndex < CombustionMaterialCount &&
         (Materials[emission.GasIntoMaterialIndex].Flags & MaterialFlagThermalCarbonDioxide) != 0)
@@ -187,12 +213,12 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
     if (y > 0 && emission.SmokeIntoMaterialIndex < CombustionMaterialCount)
     {
         ProposeEmission(sourceIndex, sourceIndex - width, emission.SmokeIntoMaterialIndex,
-            emission.SmokeRate, CombustionDeltaTime, worldCellCount + sourceIndex, sourceCell.Temperature, (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0,source.ReactionFlameLifetimeMultiplier);
+            emission.SmokeRate, CombustionDeltaTime, worldCellCount + sourceIndex, sourceCell.Temperature, (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0,source.ReactionFlameLifetimeMultiplier,finiteHeat);
     }
     if (x + 1 < width)
     {
         ProposeEmission(sourceIndex, sourceIndex + 1, emission.GasIntoMaterialIndex,
-            emission.GasRate, CombustionDeltaTime, worldCellCount * 2 + sourceIndex, sourceCell.Temperature, (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0,source.ReactionFlameLifetimeMultiplier);
+            emission.GasRate, CombustionDeltaTime, worldCellCount * 2 + sourceIndex, sourceCell.Temperature, (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0,source.ReactionFlameLifetimeMultiplier,finiteHeat);
     }
     if (emission.FlameIntoMaterialIndex < CombustionMaterialCount)
     {
@@ -258,7 +284,7 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
                 // CO2 proposal; flame contacts are what propagate ignition.
                 emission.FlameRate, CombustionDeltaTime, sourceIndex,
                 max(sourceCell.Temperature, Materials[emission.FlameIntoMaterialIndex].InitialTemperature),
-                (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0,source.ReactionFlameLifetimeMultiplier);
+                (Materials[sourceMaterialIndex].Flags & MaterialFlagSelfOxidizing) != 0,source.ReactionFlameLifetimeMultiplier,finiteHeat);
         }
     }
 }
@@ -268,7 +294,9 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
 float2 OxidizerAt(uint index)
 {
     GridCell cell = Grid[index];
-    return float2(Oxidizer[index], OxidizerSpace(cell, Materials[cell.MaterialIndex]));
+    MaterialProperties material=Materials[cell.MaterialIndex];
+    return float2(FiniteOxidizer!=0 ? Oxidizer[index] : OxidizerCapacity(cell,material),
+        OxidizerSpace(cell,material));
 }
 
 float2 AvailableOxidizer(uint2 p)
@@ -355,6 +383,7 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
     }
 
     MaterialProperties source = Materials[cell.MaterialIndex];
+    bool finiteCoalHeat = (source.Flags & MaterialFlagPersistentCoalIgnition) != 0;
     if ((source.SimulationKind == SimulationKindGranular || source.SimulationKind == SimulationKindSolid) &&
         source.ReactionPressurePerMass > 0)
     {
@@ -393,7 +422,7 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
     MaterialProperties target = Materials[targetIndex];
     float residueMass = ResidueMass(target, targetIndex);
     float availableFuel = absorbedFuel ? cell.FuelMass : max(0, cell.Mass - residueMass);
-    if (availableFuel <= (absorbedFuel ? 0 : CombustionMassEpsilon) || CombustionDeltaTime <= 0)
+    if (availableFuel <= (absorbedFuel || finiteCoalHeat ? 0 : CombustionMassEpsilon) || CombustionDeltaTime <= 0)
     {
         return;
     }
@@ -419,13 +448,13 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
         return;
     }
     // Warm coal is not automatically burning throughout a closed mound.
-    // Start its reaction on a gas face; retain an existing Sandbox latch even
-    // if a falling grain buries it, like TPT's already-running coal life.
-    if (persistentIgnition && cell.Lifetime <= 0 && supply.y < 0.5) return;
+    // A buried ember cannot keep reacting through its solid cover.
+    if (persistentIgnition && (supply.y < .5 || cell.Temperature <= .75 * source.IgnitionTemperature))
+    { cell.Lifetime = 0; Grid[index] = cell; return; }
     float oxygen = supply.x;
     // Gate ignition as well as fuel loss/heat/emissions. A flame in inert gas
     // must not ignite an otherwise cold piece of wood for one frame.
-    if (needsOxidizer && oxygen <= max(supply.y, 1) * OxidizerExtinctionThreshold)
+    if ((needsOxidizer || persistentIgnition) && oxygen <= max(supply.y, 1) * OxidizerExtinctionThreshold)
     {
         if (persistentIgnition && cell.Lifetime != 0) { cell.Lifetime = 0; Grid[index] = cell; }
         if (retainFuelIgnition && (cell.BodyId & FuelBurningMarker) != 0)
@@ -443,16 +472,14 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
     }
     bool contactIgnited = progressiveIgnition &&
         (cell.Lifetime > 0 || HasMatureIgnitionNeighbor(coordinate,radialIgnition));
-    uint flameContacts = cell.Temperature <= source.IgnitionTemperature && source.FlameSpreadRate > 0 &&
+    uint flameContacts = !persistentIgnition && cell.Temperature <= source.IgnitionTemperature && source.FlameSpreadRate > 0 &&
         (!separateContact || cell.Temperature >= source.ContactIgnitionTemperature)
         ? LiveFlameCount(coordinate, progressiveIgnition) : 0;
     if (flameContacts > 0)
     {
-        // TPT checks coal ignition from every nearby FIRE particle, rather
-        // than giving one particle and a dense burning front the same chance.
-        // Keep the existing contact rate for other fuels.
-        float contacts = persistentIgnition ? float(flameContacts) : 1.0;
-        float ignitionChance = 1.0 - exp(-source.FlameSpreadRate * contacts * CombustionDeltaTime);
+        // Other fuels retain their existing contact ignition. Coal must heat
+        // through the thermal passes, without an artificial temperature jump.
+        float ignitionChance = 1.0 - exp(-source.FlameSpreadRate * CombustionDeltaTime);
         uint ignitionSeed = index ^ (CombustionTickIndex * 0x9e3779b9u);
         if (HashUnitFloat(ignitionSeed) < ignitionChance)
         {
@@ -469,8 +496,10 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
     // Only open gas faces count. A fuel surface with one fresh-air face must
     // burn at the same concentration as one with four, not at one third rate.
     float exposure = needsOxidizer ? saturate(oxygen / max(supply.y, 1)) : 1;
+    if(persistentIgnition)exposure *= .1+.9*saturate((cell.Temperature-source.IgnitionTemperature)/
+        max(1,.5*(source.MaximumCombustionTemperature-source.IgnitionTemperature)));
     float burnedMass = min(availableFuel, source.BurnRate * exposure * CombustionDeltaTime);
-    if(absorbedFuel)
+    if(absorbedFuel && !finiteCoalHeat)
     {
         // Stored liquid is a separate fuel ledger. Bound heat before reacting;
         // neither the dry grain nor capped-away reaction heat is consumed.
@@ -494,21 +523,47 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
 
     if(absorbedFuel)
     {
+        float oldCapacity = CellEffectiveCapacity(cell);
+        float oldEnergy = oldCapacity * (cell.Temperature + 273.15);
         cell.FuelMass=max(0,cell.FuelMass-burnedMass);
         if(cell.FuelMass==0)cell.RetainedLiquidMaterialIndex=0;
-        cell.Temperature+=burnedMass*source.HeatPerMass/CellEffectiveCapacity(cell);
+        if (finiteCoalHeat)
+        {
+            float remainingCapacity = CellEffectiveCapacity(cell);
+            float rise = min(max(0,source.MaximumCombustionTemperature-cell.Temperature),
+                .5 * burnedMass * source.HeatPerMass / max(remainingCapacity,.000001));
+            cell.Temperature += rise;
+            float releasedEnergy = oldEnergy + burnedMass * source.HeatPerMass -
+                remainingCapacity * (cell.Temperature + 273.15);
+            float releasedCapacity = max(burnedMass * source.HeatCapacity,
+                releasedEnergy / (source.MaximumCombustionTemperature + 273.15));
+            ReactionPending[index] += float4(0,releasedEnergy,releasedCapacity,0);
+        }
+        else cell.Temperature+=burnedMass*source.HeatPerMass/CellEffectiveCapacity(cell);
         cell.RestFrames=0;
         Grid[index]=cell;
         InterlockedOr(CombustionSummary[0],CombustionOccurred | TargetCellular);
         ProposeEmissions(index,sourceMaterialIndex,CombustionWidth,CombustionHeight,cell,
-            saturate(burnedMass/max(source.BurnRate*CombustionDeltaTime,.0000001)));
+            saturate(burnedMass/max(source.BurnRate*CombustionDeltaTime,.0000001)),finiteCoalHeat);
         return;
     }
 
     float capacity = max(0.01, CellEffectiveCapacity(cell));
     float generatedRise = burnedMass * source.HeatPerMass / capacity;
     float permittedRise = max(0.0, source.MaximumCombustionTemperature - cell.Temperature);
-    if (CombustionHasReactionSources != 0 && source.ReactionPressurePerMass > 0)
+    if (finiteCoalHeat)
+    {
+        float remainingCapacity = max(0,CellEffectiveCapacity(cell)-burnedMass*source.HeatCapacity);
+        float rise = remainingCapacity > 0 ? min(permittedRise,
+            .5 * burnedMass * source.HeatPerMass / remainingCapacity) : 0;
+        float releasedEnergy = CellEffectiveCapacity(cell) * (cell.Temperature+273.15) +
+            burnedMass * source.HeatPerMass - remainingCapacity * (cell.Temperature+rise+273.15);
+        float releasedCapacity = max(burnedMass*source.HeatCapacity,
+            releasedEnergy/(source.MaximumCombustionTemperature+273.15));
+        ReactionPending[index] += float4(0,releasedEnergy,releasedCapacity,0);
+        generatedRise = rise;
+    }
+    else if (CombustionHasReactionSources != 0 && source.ReactionPressurePerMass > 0)
     {
         // Partition reaction heat before the fuel disappears. The released
         // portion remains pending until this location has a visible gas node.
@@ -533,7 +588,7 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
     float burnoutTemperature = cell.Temperature;
     cell.Mass = max(residueMass, cell.Mass - burnedMass);
     uint flags = CombustionOccurred | TargetFlags(source, target);
-    if (availableFuel - burnedMass <= CombustionMassEpsilon)
+    if (availableFuel - burnedMass <= (finiteCoalHeat ? 0 : CombustionMassEpsilon))
     {
         cell.Mass = residueMass;
         flags |= BurnoutOccurred;
@@ -563,7 +618,8 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
         // empty cell for a flame to be emitted into: scattered grains lying on
         // the ground would heat up, consume themselves and quietly disappear
         // without ever igniting their neighbours.
-        if (targetIndex == 0 && !releaseLiquid)
+        if (targetIndex == 0 && !releaseLiquid && (!persistentIgnition ||
+            burnoutTemperature > lerp(source.IgnitionTemperature,source.MaximumCombustionTemperature,.25)))
         {
             uint flameIndex = Emissions[sourceMaterialIndex].FlameIntoMaterialIndex;
             if (flameIndex != 0xffffffffu && flameIndex < CombustionMaterialCount)
@@ -576,11 +632,22 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
                     cell.IsActive = 1;
                     cell.Mass = flame.Density;
                     cell.Temperature = max(burnoutTemperature, flame.InitialTemperature);
+                    if (finiteCoalHeat)
+                    {
+                        float4 budget = ReactionPending[index];
+                        cell.Mass = min(flame.Density,budget.z/max(flame.HeatCapacity,.000001));
+                        cell.Temperature = budget.z > 0 ? budget.y/budget.z-273.15 : 20;
+                        float fraction = cell.Mass*flame.HeatCapacity/max(budget.z,.000001);
+                        ReactionPending[index].yz = budget.yz * (1-fraction);
+                        cell.IsActive = cell.Mass > 0 ? 1 : 0;
+                    }
                     cell.Lifetime = InitialMaterialLifetime(
                         flame,
                         index ^ (CombustionTickIndex * 0x9e3779b9u)) * source.ReactionFlameLifetimeMultiplier;
+                    if(finiteCoalHeat)cell.Lifetime*=CoalFlameResidenceScale;
                     cell.RestFrames = 0;
                     cell.BodyId = selfOxidizing ? SelfOxidizingFlameMarker : (FiniteOxidizer != 0 ? ReactedFuelFlameMarker : 0);
+                    if (finiteCoalHeat) cell.BodyId |= FiniteHeatEmissionMarker;
                     cell.VelocityX = 0;
                     cell.VelocityY = 0;
                     cell.Pressure = 0;
@@ -593,7 +660,7 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
     InterlockedOr(CombustionSummary[0], flags);
     float reactionFraction = FiniteOxidizer != 0
         ? saturate(burnedMass / max(source.BurnRate * CombustionDeltaTime, 0.0000001)) : 1;
-    ProposeEmissions(index, sourceMaterialIndex, CombustionWidth, CombustionHeight, cell, reactionFraction);
+    ProposeEmissions(index, sourceMaterialIndex, CombustionWidth, CombustionHeight, cell, reactionFraction,finiteCoalHeat);
 }
 
 [numthreads(16, 16, 1)]

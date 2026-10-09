@@ -1,4 +1,5 @@
 #include "PhysicsShared.hlsli"
+#include "CoalFlameShared.hlsli"
 
 // Persistent additive light field for fire, on the same coarse grid as the air.
 //
@@ -152,7 +153,7 @@ void CSDeposit(uint3 dispatchThreadId : SV_DispatchThreadID)
                 // lifetime is stored in seconds, so normalising by the
                 // material's own maximum incorrectly made every new cell 1.0
                 // and made a blocked, dense band turn white.
-                uint lifeIndex = min(199u, (uint)max(0.0, floor(source.Lifetime * 60.0)));
+                uint lifeIndex = min(199u, (uint)max(0.0, floor(FlameDisplayLifetime(source) * 60.0)));
                 // Every flame adds its own light. Summing rather than taking a
                 // maximum preserves the contribution of neighbouring sources.
                 deposited += FireAddContribution(FlameGradient(lifeIndex));

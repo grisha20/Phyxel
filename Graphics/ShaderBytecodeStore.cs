@@ -40,7 +40,7 @@ internal sealed class ShaderBytecodeStore
             source = source.Replace(cellularInclude,
                 File.ReadAllText(Path.Combine(sourceDirectory, "CellularAutomataSolver.hlsl")), StringComparison.Ordinal);
         // Preserve the old expansion order, optimizer and source-based cache key.
-        foreach (string include in new[] { "PhysicsShared.hlsli", "PhaseEnthalpy.hlsli", "OxidizerShared.hlsli", "FineAirGeometry.hlsli", "BulkThermalGeometry.hlsli" })
+        foreach (string include in new[] { "PhysicsShared.hlsli", "CoalFlameShared.hlsli", "PhaseEnthalpy.hlsli", "OxidizerShared.hlsli", "FineAirGeometry.hlsli", "BulkThermalGeometry.hlsli" })
             source = source.Replace("#include \"" + include + "\"", File.ReadAllText(Path.Combine(sourceDirectory, include)), StringComparison.Ordinal);
         return source;
     }

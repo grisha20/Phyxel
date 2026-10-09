@@ -119,7 +119,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
                 // material command is strictly empty-only.
                 existing.Temperature = max(
                     existing.Temperature,
-                    existingMaterial.IgnitionTemperature + 1.0);
+                    (existingMaterial.Flags & MaterialFlagPersistentCoalIgnition)!=0
+                        ? lerp(existingMaterial.IgnitionTemperature,existingMaterial.MaximumCombustionTemperature,.25)+1
+                        : existingMaterial.IgnitionTemperature + 1.0);
                 if(existing.MoistureMass>0)
                     existing=SetCellSpecificEnthalpy(existing,CellSpecificEnthalpy(existing));
                 Grid[index] = existing;

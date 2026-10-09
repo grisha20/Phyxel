@@ -125,10 +125,12 @@ internal static class CombustionMaterialRegressionVerifier
         coldCoal.Temperature = 301f;
         Require(CombustionRuntime.TryApply(ref coldCoal, coalMaterials, 0.05f, out _, out _) && coldCoal.Lifetime == 1,
             "Ignited granular coal did not retain ignition.");
+        coldCoal.Temperature = 250f;
+        Require(CombustionRuntime.TryApply(ref coldCoal, coalMaterials, 0.05f, out _, out _) && coldCoal.Temperature > 250f,
+            "Warm ignited coal lost its thermal hysteresis.");
         coldCoal.Temperature = 100f;
-        Require(CombustionRuntime.TryApply(ref coldCoal, coalMaterials, 0.05f, out _, out _) && coldCoal.Temperature > 100f,
-            "Ignited coal stopped reacting when its surface cooled.");
-        coldCoal.Lifetime = 0;
+        Require(!CombustionRuntime.TryApply(ref coldCoal, coalMaterials, 0.05f, out _, out _) && coldCoal.Lifetime == 0,
+            "Cooled coal retained an unlimited ignition latch.");
         Require(!CombustionRuntime.IsBurning(coldCoal, coalMaterials), "Extinguished cold coal restarted by itself.");
         GridCell hotMetal = new() { MaterialIndex = 3, Mass = 7.8f, IsActive = 1, Temperature = 900f };
         Require(!CombustionRuntime.IsBurning(hotMetal, materials),

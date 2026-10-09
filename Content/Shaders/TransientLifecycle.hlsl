@@ -1,4 +1,5 @@
 #include "PhysicsShared.hlsli"
+#include "CoalFlameShared.hlsli"
 #include "OxidizerShared.hlsli"
 
 cbuffer TransientConstants : register(b0)
@@ -77,9 +78,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     // stop when cooled. Combustion applies the same temperature gate before
     // this pass, so a cold marker cannot ignite another grain for one tick.
     bool thermallyExtinguished = flame && cell.Temperature <= material.FlameExtinctionTemperature;
-    bool extinguished = thermallyExtinguished || (flame && cell.BodyId != SelfOxidizingFlameMarker &&
+    bool extinguished = thermallyExtinguished || (flame && (cell.BodyId & SelfOxidizingFlameMarker)==0 &&
         (FiniteOxidizer != 0
-            ? cell.BodyId != ReactedFuelFlameMarker && supply.x <= max(supply.y, 1) * OxidizerExtinctionThreshold
+            ? ((cell.BodyId & ReactedFuelFlameMarker)==0 || (cell.BodyId & FiniteHeatEmissionMarker)!=0) && supply.x <= max(supply.y, 1) * OxidizerExtinctionThreshold
             : TouchesCarbonDioxide(coordinate)));
     cell.Lifetime = extinguished ? 0 : max(0, cell.Lifetime - TransientDeltaTime);
     if (cell.Lifetime > 0)

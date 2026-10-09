@@ -1,5 +1,7 @@
 # Каменный уголь — `core:stone_coal`
 
+- [HC: угольный фронт, бункер, наружный воздух и выбранные регрессии](../shared/HOPPER_COMBUSTION_RESULTS.md), [контракт](../shared/HOPPER_COMBUSTION_CONTRACT.md).
+
 - [CG: свежий контроль поджига/выгорания после оптимизации O₂](../shared/COAL_GPU_RESULTS.md).
 
 - [Паспорт](PASSPORT.md): источники, поведение, критерии, статусы и ограничения.

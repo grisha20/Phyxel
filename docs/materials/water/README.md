@@ -1,5 +1,7 @@
 # Вода — `core:water`
 
+- [HC: угольный фронт, бункер, наружный воздух и выбранные регрессии](../shared/HOPPER_COMBUSTION_RESULTS.md), [контракт](../shared/HOPPER_COMBUSTION_CONTRACT.md).
+
 - [WT: ускорение мокрого теплообмена](../shared/WATER_THERMAL_PERFORMANCE_CONTRACT.md), [A/B и проверки](../shared/WATER_THERMAL_PERFORMANCE_RESULTS.md).
 
 - [WN: вода на полном поле и общий перенос жидкостей](../shared/WATER_NATIVE_PERFORMANCE_CONTRACT.md), [проверки и пределы](../shared/WATER_NATIVE_PERFORMANCE_RESULTS.md).

@@ -319,6 +319,7 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? PhaseTransitionShader { get; init; }
     public ComputeShader? CombustionShader { get; init; }
     public ComputeShader? EmissionResolveShader { get; init; }
+    public ComputeShader? EmissionHeatConsumeShader { get; init; }
     public ComputeShader? TransientLifecycleShader { get; init; }
     public ComputeShader? TemperatureProbeShader { get; init; }
     public ComputeShader? TemperatureSensorsShader { get; init; }
@@ -345,6 +346,7 @@ public sealed class GpuSimulationResources : IDisposable
         FractureUpdateShader?.Dispose(); FragmentUpdateOnlyShader?.Dispose(); FragmentPlanShader?.Dispose(); FragmentApplyShader?.Dispose();
         FragmentAdvectOnlyShader?.Dispose();
         EmissionResolveShader?.Dispose();
+        EmissionHeatConsumeShader?.Dispose();
         TransientLifecycleShader?.Dispose();
         ThermalDiffusionShader?.Dispose();
         WaterConvectionShader?.Dispose();
