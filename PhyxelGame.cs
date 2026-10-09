@@ -639,14 +639,17 @@ public sealed class PhyxelGame : Game
             {
                 "line" => default(RawInputSnapshot) with { MousePosition = frameIndex == 1 ? start : end,
                     ShiftDown = true, LeftDown = true, LeftPressed = frameIndex == 1, DeltaSeconds = input.DeltaSeconds },
-                "zoom" or "zoom-out" or "zoom-pan" => default(RawInputSnapshot) with
+                "zoom" or "zoom-out" or "zoom-pan" or "zoom-return" => default(RawInputSnapshot) with
                 {
                     MousePosition = frameIndex == 1 ? start :
+                        editorPreview == "zoom-return" && frameIndex >= 10 ? start + (frameIndex >= 46 ? new Point(100, 60) : Point.Zero) :
                         editorPreview == "zoom-pan" && frameIndex >= 6 ? end + new Point(-100, -60) : end,
                     ShiftDown = frameIndex <= 2, LeftDown = frameIndex <= 2,
                     LeftPressed = frameIndex == 1, LeftReleased = frameIndex == 3,
-                    WheelDelta = frameIndex == 4 ? (editorPreview == "zoom-out" ? -600 : 960) : 0,
-                    MiddleDown = editorPreview == "zoom-pan" && frameIndex is 5 or 6,
+                    WheelDelta = frameIndex == 4 ? (editorPreview == "zoom-out" ? -600 : 960) :
+                        editorPreview == "zoom-return" && frameIndex == 10 ? -12000 : 0,
+                    MiddleDown = editorPreview == "zoom-pan" && frameIndex is 5 or 6 ||
+                        editorPreview == "zoom-return" && frameIndex is 45 or 46,
                     DeltaSeconds = input.DeltaSeconds
                 },
                 "menu" or "exit" => default(RawInputSnapshot) with { EscapePressed = frameIndex == 1,
@@ -761,7 +764,7 @@ public sealed class PhyxelGame : Game
                 cameraController.IsZooming ||
                 FileOperationPending ||
                 !IsActive && (string.IsNullOrEmpty(uiScreenshotPath) ||
-                    Environment.GetEnvironmentVariable("PHYXEL_UI_PREVIEW_INPUT") is not ("line" or "zoom" or "zoom-out" or "zoom-pan")) ||
+                    Environment.GetEnvironmentVariable("PHYXEL_UI_PREVIEW_INPUT") is not ("line" or "zoom" or "zoom-out" or "zoom-pan" or "zoom-return")) ||
                 !userInterface.CanvasBounds.Contains(input.MousePosition),
                 materialRegistry[userInterface.SelectedMaterial].ThermalRegulator is not null,
                 userInterface.DeviceTargetTemperature,

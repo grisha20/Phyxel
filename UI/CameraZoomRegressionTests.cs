@@ -125,8 +125,9 @@ internal static class CameraZoomRegressionTests
             "wheel-down at the original view moved or shrank the scene");
         camera.Update(Input(canvas.Center) with { MiddleDown = true }, canvas, canvas, false, false);
         Rectangle shiftedWorld = camera.Update(Input(canvas.Center + new Point(50, 20)) with { MiddleDown = true }, canvas, canvas, false, false);
+        Check(shiftedWorld == canvas, "middle drag exposed empty margins at the original view");
         Check(new CanvasBrushController().CreateCommands(Input(canvas.Location) with { LeftDown = true },
-            shiftedWorld, settings, metal, false, false, 20, false).Count == 0, "empty margin painted into the world");
+            shiftedWorld, settings, metal, false, false, 20, false).Count == 1, "bounded camera lost the canvas edge cell");
 
         // Exercise the UI wheel route across layout/DPI changes, not just camera arithmetic.
         foreach (var size in new[] { new Point(1280, 720), new Point(1920, 1080), new Point(2560, 1440) })
@@ -157,11 +158,12 @@ internal static class CameraZoomRegressionTests
             ui.Update(Input(Point.Zero) with { EscapePressed = true }, viewport, dpi, settings);
             ui.Update(Input(Point.Zero), viewport, dpi, settings);
         }
-        TestSmoothZoomAndFreePan(canvas);
-        Console.WriteLine("[PASS] Smooth global zoom, 1-16x limits, frame-rate independence, pointer anchoring, free middle pan, UI/modal isolation, brush/probe/sensor mapping and stroke cancellation.");
+        TestSmoothZoomAndPan(canvas);
+        TestWorldBounds();
+        Console.WriteLine("[PASS] Smooth global zoom, 1-16x limits, frame-rate independence, bounded middle pan/zoom, UI/modal isolation, brush/probe/sensor mapping and stroke cancellation.");
     }
 
-    private static void TestSmoothZoomAndFreePan(Rectangle canvas)
+    private static void TestSmoothZoomAndPan(Rectangle canvas)
     {
         var camera = new CanvasCameraController();
         var wheel = Input(canvas.Center) with { WheelDelta = 120 };
@@ -193,7 +195,7 @@ internal static class CameraZoomRegressionTests
         camera.Reset();
         camera.Update(Input(canvas.Center) with { MiddleDown = true }, canvas, canvas, false, false);
         Rectangle shifted = camera.Update(Input(canvas.Center + new Point(120, 80)) with { MiddleDown = true }, canvas, canvas, false, false);
-        Check(shifted.Location == canvas.Location + new Point(120, 80), "middle pan is locked at the original view");
+        Check(shifted == canvas, "middle pan moved the original view outside the world");
         camera.Reset();
         var zooming = Input(canvas.Center) with { WheelDelta = 480, MiddleDown = true };
         camera.Update(zooming, canvas, canvas, false, false);
@@ -202,5 +204,54 @@ internal static class CameraZoomRegressionTests
         Rectangle settled = Settle(camera, canvas, canvas);
         Check(Math.Abs(settled.Center.X - moved.MousePosition.X) <= 1 &&
             Math.Abs(settled.Center.Y - moved.MousePosition.Y) <= 1, "zoom settling undid a simultaneous middle pan");
+    }
+
+    private static void TestWorldBounds()
+    {
+        // Reproduce the reported case: zoom in at one point, out at another.
+        Rectangle canvas = new(100, 80, 800, 450);
+        var camera = new CanvasCameraController();
+        camera.Update(Input(new Point(300, 200)) with { WheelDelta = 480 }, canvas, canvas, false, false);
+        Settle(camera, canvas, canvas);
+        camera.Update(Input(new Point(700, 400)) with { WheelDelta = -480 }, canvas, canvas, false, false);
+        Check(Settle(camera, canvas, canvas) == canvas && camera.Zoom == 1,
+            "zoom at different points left the original screen displaced");
+
+        foreach (Rectangle viewport in new[] { canvas, new Rectangle(17, 31, 801, 451), new Rectangle(23, 19, 1501, 803) })
+        foreach (Point size in new[] { new Point(480, 270), new Point(1024, 300), new Point(400, 1200) })
+        {
+            Rectangle fitted = CanvasWorldExpansion.CoverBounds(viewport, size.X, size.Y);
+            camera = new CanvasCameraController();
+            Point[] corners = [viewport.Location, new(viewport.Right - 1, viewport.Top),
+                new(viewport.Right - 1, viewport.Bottom - 1), new(viewport.Left, viewport.Bottom - 1)];
+            Rectangle Step(RawInputSnapshot input, Rectangle activeCanvas, Rectangle activeFitted)
+            {
+                Rectangle result = camera.Update(input, activeCanvas, activeFitted, false, false);
+                Check(result.Contains(activeCanvas), "navigation exposed a world edge: " + result + " / " + activeCanvas);
+                return result;
+            }
+            for (int cycle = 0; cycle < 12; cycle++)
+            {
+                Point corner = corners[cycle % 4];
+                Step(Input(corner) with { WheelDelta = 480 }, viewport, fitted);
+                for (int frame = 0; frame < 40; frame++) Step(Input(corner), viewport, fitted);
+                // Repeated large drags in every direction while zoomed in.
+                for (int drag = 0; drag < 12; drag++)
+                {
+                    Step(Input(corners[(cycle + 2) % 4]) with { MiddleDown = true }, viewport, fitted);
+                    Step(Input(corner) with { MiddleDown = true }, viewport, fitted);
+                    Step(Input(corner), viewport, fitted);
+                }
+                Point other = corners[(cycle + 1) % 4];
+                Step(Input(other) with { WheelDelta = -12000 }, viewport, fitted);
+                for (int frame = 0; frame < 80; frame++) Step(Input(other), viewport, fitted);
+                Check(camera.Zoom == 1 && !camera.IsZooming, "bounded zoom-out did not finish at 1x");
+                if (fitted.Size == viewport.Size) Check(camera.GetWorldBounds(fitted) == viewport, "1x view is offset");
+            }
+            Rectangle resized = new(viewport.X + 7, viewport.Y + 13, viewport.Width + 131, viewport.Height + 97);
+            Rectangle resizedFit = CanvasWorldExpansion.CoverBounds(resized, size.X, size.Y);
+            Step(Input(resized.Center), resized, resizedFit);
+        }
+        Console.WriteLine("[PASS] Different-point zoom-out, all four pan/zoom edges, every animation frame, odd dimensions, wide/tall scenes and resize stay inside world bounds.");
     }
 }

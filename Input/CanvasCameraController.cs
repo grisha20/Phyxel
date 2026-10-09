@@ -36,6 +36,7 @@ public sealed class CanvasCameraController
             previousFittedBounds = fittedWorldBounds;
             targetZoom = Zoom;
         }
+        ClampToWorld(canvas, fittedWorldBounds);
 
         bool pointerInside = canvas.Contains(input.MousePosition) && !pointerConsumedByUi;
         if (pointerInside && input.WheelDelta != 0 && !input.ShiftDown)
@@ -81,6 +82,7 @@ public sealed class CanvasCameraController
             dragging = false;
         }
 
+        ClampToWorld(canvas, fittedWorldBounds);
         return GetWorldBounds(fittedWorldBounds);
     }
 
@@ -106,5 +108,31 @@ public sealed class CanvasCameraController
         int newHeight = Math.Max(1, (int)MathF.Round(fittedWorldBounds.Height * Zoom));
         center.X = (fittedWorldBounds.Center.X - zoomAnchorScreen.X + zoomAnchorWorld.X * newWidth) / newWidth;
         center.Y = (fittedWorldBounds.Center.Y - zoomAnchorScreen.Y + zoomAnchorWorld.Y * newHeight) / newHeight;
+    }
+
+    private void ClampToWorld(Rectangle canvas, Rectangle fittedWorldBounds)
+    {
+        Rectangle view = GetWorldBounds(fittedWorldBounds);
+        // The viewport must stay inside the world after both zoom and pan.
+        // Use pixel bounds, including the fitted world's aspect/rounding, so a
+        // single exposed row or column cannot accumulate through repeated zooms.
+        int x = view.Width >= canvas.Width
+            ? Math.Clamp(view.X, canvas.Right - view.Width, canvas.Left)
+            : canvas.Center.X - view.Width / 2;
+        int y = view.Height >= canvas.Height
+            ? Math.Clamp(view.Y, canvas.Bottom - view.Height, canvas.Top)
+            : canvas.Center.Y - view.Height / 2;
+        if (x == view.X && y == view.Y) return;
+
+        center.X = (fittedWorldBounds.Center.X - x) / (float)view.Width;
+        center.Y = (fittedWorldBounds.Center.Y - y) / (float)view.Height;
+        if (IsZooming)
+        {
+            // Once an edge stops the camera, continue smoothly from that edge
+            // rather than pulling back toward the now-unreachable old anchor.
+            zoomAnchorWorld = new Vector2(
+                (zoomAnchorScreen.X - x) / (float)view.Width,
+                (zoomAnchorScreen.Y - y) / (float)view.Height);
+        }
     }
 }
