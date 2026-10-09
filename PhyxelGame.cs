@@ -449,6 +449,12 @@ public sealed class PhyxelGame : Game
             oilSmokeVerification = GpuWorkloadVerifier.Run(dispatchCoordinator, materialRegistry, settings).GetEnumerator();
             IsFixedTimeStep = false; return;
         }
+        if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_COAL_GPU") == "1")
+        {
+            InactiveSleepTime = TimeSpan.Zero;
+            oilSmokeVerification = CoalGpuRegressionVerifier.Run(dispatchCoordinator, materialRegistry, settings).GetEnumerator();
+            IsFixedTimeStep = false; return;
+        }
         if (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_SAVED_FLAME") == "1")
         {
             InactiveSleepTime = TimeSpan.Zero;
@@ -1026,7 +1032,7 @@ public sealed class PhyxelGame : Game
         framePerformanceTrace.BeginPresent();
         base.EndDraw();
         framePerformanceTrace.EndPresent();
-        double pacingMs = !acceptance.Active && oilSmokeVerification is null && diagnosticFramesPerSecond == 0
+        double pacingMs = (!acceptance.Active || Environment.GetEnvironmentVariable("PHYXEL_PERFORMANCE_FRAME_PACING") == "1") && oilSmokeVerification is null && diagnosticFramesPerSecond == 0
             ? framePacer?.WaitForNextFrame() ?? 0 : 0;
         framePerformanceTrace.EndFrame(pacingMs);
     }

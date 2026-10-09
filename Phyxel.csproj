@@ -39,6 +39,9 @@
     <None Update="Diagnostics\Profile-GPU.cmd" Link="Profile-GPU.cmd" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Diagnostics\Profile-Scene.ps1" Link="Profile-Scene.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Diagnostics\Profile-Scene.cmd" Link="Profile-Scene.cmd" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Diagnostics\Profile-Coal.ps1" Link="Profile-Coal.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Diagnostics\Profile-Coal.cmd" Link="Profile-Coal.cmd" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Diagnostics\RunFirePerformance.ps1" Link="Diagnostics\RunFirePerformance.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <PropertyGroup>
     <ShaderDotNetHost Condition="'$(DotNetHostPath)' != ''">$(DotNetHostPath)</ShaderDotNetHost>

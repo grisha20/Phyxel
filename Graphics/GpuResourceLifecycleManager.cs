@@ -270,6 +270,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
         Buffer fireGlowConstants = CreateConstantBuffer<FireGlowConstants>();
         GpuStructuredBuffer<FireGlowCell> fireGlow = new(Device, airCellCount);
         GpuStructuredBuffer<FireGlowCell> fireGlowScratch = new(Device, airCellCount);
+        GpuStructuredBuffer<FireGlowCell> fireGlowPresentation = new(Device, airCellCount);
         GpuStructuredBuffer<FireGlowCell> gasVisual = new(Device, airCellCount);
         GpuStructuredBuffer<FireGlowCell> gasVisualScratch = new(Device, airCellCount);
         Buffer contactTransitionConstants = CreateConstantBuffer<ContactTransitionConstants>();
@@ -591,6 +592,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             FireGlowConstants = fireGlowConstants,
             FireGlow = fireGlow,
             FireGlowScratch = fireGlowScratch,
+            FireGlowPresentation = fireGlowPresentation,
             GasVisual = gasVisual,
             GasVisualScratch = gasVisualScratch,
             ContactTransitionConstants = contactTransitionConstants,
@@ -701,6 +703,7 @@ public sealed class GpuResourceLifecycleManager : IDisposable
             OxidizerCarrierFacesShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSCarrierFaces") : null,
             OxidizerCarrierDivergenceShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSCarrierDivergence") : null,
             OxidizerCarrierJacobiShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSCarrierJacobi") : null,
+            OxidizerCarrierJacobiFourShader = allocateSimulation ? CompileShader("OxidizerTransport.hlsl", "CSCarrierJacobiFour") : null,
             AirInjectShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSInject") : null,
             AirMapSourcesShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSMapSources") : null,
             AirInjectMappedShader = allocateSimulation ? CompileShader("AirSimulation.hlsl", "CSInjectMapped") : null,

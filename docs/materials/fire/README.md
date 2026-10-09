@@ -1,4 +1,6 @@
 # Огонь — `core:fire`
+
+- [CG: стабильный отображаемый слой и контроль горения/печи](../shared/COAL_GPU_RESULTS.md), [контракт](../shared/COAL_GPU_CONTRACT.md).
 - [PA: профиль портрета и свежие регрессии](../shared/PORTRAIT_GPU_RESULTS.md).
 
 - [SE: контроль сухой тяги при изменении выхода пара](../shared/STEAM_ESCAPE_RESULTS.md).

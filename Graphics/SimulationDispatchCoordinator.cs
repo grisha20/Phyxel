@@ -874,6 +874,7 @@ public sealed class SimulationDispatchCoordinator
                 DispatchFireGlowClear(resources);
                 DispatchFireGlowDeposit(resources);
                 gasVisualNeedsRebuild = false;
+                resources.Context.CopyResource(resources.FireGlow.Buffer, resources.FireGlowPresentation.Buffer);
             }
             DispatchComposition(resources, ref constants, fireGlowTicks);
             if (fireGlowTicks > 0) gasVisualNeedsRebuild = false;
@@ -1641,6 +1642,10 @@ public sealed class SimulationDispatchCoordinator
             DispatchGasVisual(resources, decay: true);
             DispatchGasVisual(resources, decay: false);
         }
+        // Keep the freshly deposited visual phase between 60 Hz ticks.
+        // FireGlow itself still decays exactly as before after presentation.
+        if (fireGlowTicks > 0)
+            context.CopyResource(resources.FireGlow.Buffer, resources.FireGlowPresentation.Buffer);
         constants.SimulationPhase = collect ? 1u : 0u;
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.CompositionShader);
@@ -1651,7 +1656,7 @@ public sealed class SimulationDispatchCoordinator
             resources.Materials.View,
             resources.BodyFlags.View,
             resources.PathBlockerMasks.View,
-            resources.FireGlow.View,
+            Environment.GetEnvironmentVariable("PHYXEL_GLOW_REFERENCE") == "1" ? resources.FireGlow.View : resources.FireGlowPresentation.View,
             resources.Air.View,
             resources.GasVisual.View);
         context.ComputeShader.SetUnorderedAccessViews(
@@ -2521,6 +2526,7 @@ public sealed class SimulationDispatchCoordinator
 
     private static void DispatchFireGlowClear(GpuSimulationResources resources)
     {
+        resources.Context.ClearUnorderedAccessView(resources.FireGlowPresentation.UnorderedView, new RawInt4());
         if (resources.FireGlowClearShader is null)
         {
             return;
@@ -3204,11 +3210,12 @@ public sealed class SimulationDispatchCoordinator
             context.ComputeShader.SetUnorderedAccessView(4,null);
             context.ComputeShader.SetShaderResource(7,null);
             resources.OxidizerCarrierPotential.Swap();
-            context.ComputeShader.Set(resources.OxidizerCarrierJacobiShader);
+            bool reference = Environment.GetEnvironmentVariable("PHYXEL_OXYGEN_REFERENCE") == "1";
+            context.ComputeShader.Set(reference ? resources.OxidizerCarrierJacobiShader : resources.OxidizerCarrierJacobiFourShader);
             // Reconstruct solver scratch once after loading; then converge the
             // changing flow with a warm pressure guess, as the coarse air does.
             int fineCarrierProjectionIterations = resources.OxidizerCarrierWarm ? 64 : 1024;
-            for(int iteration=0;iteration<fineCarrierProjectionIterations;iteration++)
+            for(int iteration=0;iteration<fineCarrierProjectionIterations;iteration+=reference?1:4)
             {
                 context.ComputeShader.SetShaderResource(7,resources.OxidizerCarrierPotential.ReadView);
                 context.ComputeShader.SetUnorderedAccessView(4,resources.OxidizerCarrierPotential.WriteUnorderedView);

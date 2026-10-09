@@ -299,6 +299,7 @@ public static class AcceptanceRegressionScenario
 
     private static IReadOnlyList<BrushDrawCommand> CreateFireOpen(uint frame, uint scenarioSeed)
     {
+        if (CoalStripPerformanceScenario.Enabled) return [];
         if (frame >= FireDiagnosticFrames && Environment.GetEnvironmentVariable("PHYXEL_FIRE_PERFORMANCE") != "1")
         {
             return [];

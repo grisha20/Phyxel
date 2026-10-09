@@ -112,6 +112,7 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? OxidizerCarrierFacesShader { get; init; }
     public ComputeShader? OxidizerCarrierDivergenceShader { get; init; }
     public ComputeShader? OxidizerCarrierJacobiShader { get; init; }
+    public ComputeShader? OxidizerCarrierJacobiFourShader { get; init; }
     public required Buffer OxidizerConstants { get; init; }
     public required Buffer OxidizerStaging { get; init; }
     public ComputeShader? OxidizerTransportShader { get; init; }
@@ -183,6 +184,7 @@ public sealed class GpuSimulationResources : IDisposable
     public required Buffer FireGlowConstants { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlow { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> FireGlowScratch { get; init; }
+    public required GpuStructuredBuffer<FireGlowCell> FireGlowPresentation { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> GasVisual { get; init; }
     public required GpuStructuredBuffer<FireGlowCell> GasVisualScratch { get; init; }
     public required Buffer ContactTransitionConstants { get; init; }
@@ -460,9 +462,11 @@ public sealed class GpuSimulationResources : IDisposable
         OxidizerCarrierFacesShader?.Dispose();
         OxidizerCarrierDivergenceShader?.Dispose();
         OxidizerCarrierJacobiShader?.Dispose();
+        OxidizerCarrierJacobiFourShader?.Dispose();
         OxidizerConstants.Dispose();
         OxidizerStaging.Dispose();
         FireGlowScratch.Dispose();
+        FireGlowPresentation.Dispose();
         GasVisual.Dispose();
         GasVisualScratch.Dispose();
         FireGlow.Dispose();

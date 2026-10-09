@@ -94,6 +94,47 @@ void CSCarrierJacobi(uint3 tid:SV_DispatchThreadID)
     float2 own=CarrierPotential[i];
     DestinationPotential[i]=float2(count>0?(sum-own.y)/count:0,own.y);
 }
+// Four exact steps over a 16x16 output tile and a four-cell dependency halo.
+groupshared float OxygenPsi0[576];
+groupshared float OxygenPsi1[576];
+groupshared float OxygenDiv[576];
+groupshared uint OxygenMasks[576];
+[numthreads(16,16,1)]
+void CSCarrierJacobiFour(uint3 group:SV_GroupID,uint lane:SV_GroupIndex)
+{
+    int2 origin=int2(group.xy)*16-4;
+    [unroll]for(uint j=lane;j<576;j+=256)
+    {
+        int2 p=origin+int2(j%24,j/24);
+        float2 value=0;uint mask=0;
+        if(Inside(p)){uint i=Index(p);value=CarrierPotential[i];mask=uint(CarrierFaces[i].z);}
+        OxygenPsi0[j]=value.x;OxygenDiv[j]=value.y;OxygenMasks[j]=mask;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    [unroll]for(uint step=1;step<=4;step++)
+    {
+        [unroll]for(uint j=lane;j<576;j+=256)
+        {
+            uint x=j%24,y=j/24;
+            if(x<step||y<step||x>=24-step||y>=24-step)continue;
+            uint mask=OxygenMasks[j];float sum=0,count=0,value=0;
+            if((mask&16u)!=0&&(mask&32u)==0)
+            {
+                if(mask&1u){sum+=step%2?OxygenPsi0[j+1]:OxygenPsi1[j+1];count+=1;}
+                if(mask&2u){sum+=step%2?OxygenPsi0[j-1]:OxygenPsi1[j-1];count+=1;}
+                if(mask&4u){sum+=step%2?OxygenPsi0[j+24]:OxygenPsi1[j+24];count+=1;}
+                if(mask&8u){sum+=step%2?OxygenPsi0[j-24]:OxygenPsi1[j-24];count+=1;}
+                value=count>0?(sum-OxygenDiv[j])/count:0;
+            }
+            if(step%2)OxygenPsi1[j]=value;else OxygenPsi0[j]=value;
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    uint2 p=group.xy*16+uint2(lane%16,lane/16);if(!Inside(int2(p)))return;
+    uint outputIndex=(lane/16+4)*24+lane%16+4,outputMask=OxygenMasks[outputIndex];
+    DestinationPotential[Index(int2(p))]=(outputMask&16u)==0||(outputMask&32u)!=0?0:float2(OxygenPsi0[outputIndex],OxygenDiv[outputIndex]);
+}
+
 float RawFace(int2 a, int2 b)
 {
     if (!Inside(b)) return 0;

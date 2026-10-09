@@ -304,7 +304,8 @@ public sealed class AcceptanceRegressionHarness
     public SimulationWorldSnapshot? CreateInitialWorld(int width, int height) =>
         materialRegistry is null
             ? null
-            : OxidizerAcceptance.Create(Mode, width, height, materialRegistry) ??
+            : CoalStripPerformanceScenario.Create(Mode, width, height, materialRegistry) ??
+                OxidizerAcceptance.Create(Mode, width, height, materialRegistry) ??
                 CoalFireAcceptance.Create(Mode, width, height, materialRegistry) ??
                 GasFlowAcceptance.Create(Mode, width, height, materialRegistry) ??
                 HydraulicsAcceptance.Create(Mode, width, height, materialRegistry) ??
