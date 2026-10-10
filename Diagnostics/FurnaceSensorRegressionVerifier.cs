@@ -14,7 +14,8 @@ using Phyxel.Serialization;
 
 namespace Phyxel.Diagnostics;
 
-// Replays the complete user save. No injected heat, changed geometry or forced draft.
+// Replays the complete user save without injected heat or forced draft.
+// An explicit diagnostic inlet option changes only a copy of the geometry.
 internal static class FurnaceSensorRegressionVerifier
 {
     internal static GpuSimulationResources LoadFixture(SimulationDispatchCoordinator coordinator,
@@ -27,6 +28,46 @@ internal static class FurnaceSensorRegressionVerifier
         var world = loaded.World!;
         SimulationStateSerializer.Apply(loaded.State, settings);
         settings.Width = world.Width; settings.Height = world.Height; settings.Paused = true;
+        // Geometry-only aperture control for this saved furnace. Production
+        // flow never reads these observation coordinates or this environment.
+        if(int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_SENSOR_INLET"),out int aperture))
+        {
+            if(world.Width!=968 || world.Height!=564 || aperture<0 || aperture>42)
+                throw new InvalidDataException("Inlet fixture requires the 968x564 sensor furnace and aperture0..42.");
+            var cells=MemoryMarshal.Cast<byte,GridCell>(world.Grid).ToArray();
+            var filters=world.Filters is null ? new byte[world.Width*world.Height*4] : (byte[])world.Filters.Clone();
+            var filterCells=MemoryMarshal.Cast<byte,uint>(filters);
+            uint iron=registry.GetRequiredRuntimeIndex("core:cast_iron");
+            for(int y=463;y<505;y++)for(int x=598;x<617;x++)
+            {
+                int i=y*world.Width+x;
+                bool open=y>=484-aperture/2 && y<484+(aperture+1)/2;
+                cells[i]=open?default:new(){IsActive=1,MaterialIndex=iron,Mass=registry[iron].Properties.Density,Temperature=30};
+                filterCells[i]=0;
+            }
+            world=world with {Grid=MemoryMarshal.AsBytes(cells.AsSpan()).ToArray(),Filters=filters};
+        }
+        // Diagnostic copy only: distinguish historic displaced inventory from
+        // a newly filled atmosphere. Never migrate or clamp a loaded user world.
+        if (Environment.GetEnvironmentVariable("PHYXEL_SENSOR_FRESH_ATMOSPHERE") == "1")
+        {
+            var cells = MemoryMarshal.Cast<byte, GridCell>(world.Grid);
+            var table = registry.CreateGpuTable();
+            var rules = world.Filters is null ? new uint[cells.Length] :
+                MemoryMarshal.Cast<byte, uint>(world.Filters).ToArray();
+            var oxygen = new float[cells.Length];
+            for (int i = 0; i < cells.Length; i++)
+            {
+                if (!FilterRules.AirAllows(rules[i])) continue;
+                var cell = cells[i]; var material = table[cell.MaterialIndex];
+                if (cell.IsActive == 0) oxygen[i] = 1;
+                else if (material.SimulationKind == (uint)MaterialSimulationKind.Gas)
+                    oxygen[i] = (material.Flags & (uint)MaterialFlags.Flame) != 0 ? 1 :
+                        1 - Math.Clamp(material.GasOxidizerDisplacement, 0, 1) *
+                        Math.Clamp(cell.Mass / Math.Max(material.Density, .0001f), 0, 1);
+            }
+            world = world with { Oxidizer = MemoryMarshal.AsBytes(oxygen.AsSpan()).ToArray() };
+        }
         if (Enum.TryParse<SimulationMode>(Environment.GetEnvironmentVariable("PHYXEL_SENSOR_MODE"), out var mode)) settings.Mode = mode;
         if (Environment.GetEnvironmentVariable("PHYXEL_SENSOR_DESTRUCTION") is { } destruction)
             settings.PressureDestruction=destruction=="1";
@@ -63,6 +104,8 @@ internal static class FurnaceSensorRegressionVerifier
             throw new InvalidDataException("Sensor measurement sections require the user's 968x564 furnace.");
         int fps = int.Parse(Environment.GetEnvironmentVariable("PHYXEL_SENSOR_FPS") ?? "60");
         int seconds = int.Parse(Environment.GetEnvironmentVariable("PHYXEL_SENSOR_SECONDS") ?? "30");
+        int snapshotSeconds = int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_SENSOR_SNAPSHOT_SECONDS"),out int interval)
+            ? Math.Clamp(interval,1,3600) : 10;
         var points = settings.TemperatureSensors.ToArray();
         bool observationOnly = Environment.GetEnvironmentVariable("PHYXEL_SENSOR_OBSERVATION_ONLY") == "1";
         bool earlySamples = Environment.GetEnvironmentVariable("PHYXEL_SENSOR_EARLY") == "1";
@@ -71,7 +114,10 @@ internal static class FurnaceSensorRegressionVerifier
         uint steamIndex = registry.GetRequiredRuntimeIndex("core:steam");
         uint ironIndex = registry.GetRequiredRuntimeIndex("core:cast_iron");
         var rows = new List<object>();
+        var flows = new List<(double Seconds, double Inlet, double Chimney)>();
+        string? apertureControl=Environment.GetEnvironmentVariable("PHYXEL_SENSOR_INLET");
         Console.WriteLine($"PHYXEL_SENSOR_REPLAY size={r.Width}x{r.Height} mode={settings.Mode} fps={fps} worldHash={hash}");
+        if(apertureControl is not null)Console.WriteLine($"PHYXEL_SENSOR_INLET geometryCopy=true aperture={apertureControl}");
         var wallTime = Stopwatch.StartNew();
         using var timer = new GpuStageTimer(r.Device);
         for (int frame = 0; frame <= seconds * fps; frame++)
@@ -87,6 +133,14 @@ internal static class FurnaceSensorRegressionVerifier
                 var grid = MemoryMarshal.Cast<byte, GridCell>(AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer)).ToArray();
                 var air = MemoryMarshal.Cast<byte, AirCell>(AirInventoryRegressionVerifier.Read(r, r.Air.Buffer)).ToArray();
                 var thermal = MemoryMarshal.Cast<byte, System.Numerics.Vector2>(AirInventoryRegressionVerifier.Read(r, r.AirThermal.Buffer)).ToArray();
+                var canonicalFaces=MemoryMarshal.Cast<byte,System.Numerics.Vector2>(AirInventoryRegressionVerifier.Read(r,r.AirProjectionB.Buffer)).ToArray();
+                double? inletFlux=null,chimneyFlux=null;
+                if(r.Width==968 && r.Height==564)
+                {
+                    inletFlux=0;chimneyFlux=0;
+                    for(int y=115;y<127;y++)inletFlux-=canonicalFaces[y*r.AirWidth+151].X;
+                    for(int x=77;x<85;x++)chimneyFlux-=canonicalFaces[40*r.AirWidth+x].Y;
+                }
                 var samples = points.Select((p, n) =>
                 {
                     var cell = grid[p.Y * r.Width + p.X];
@@ -116,7 +170,7 @@ internal static class FurnaceSensorRegressionVerifier
                     return new { name, vx = vx / Math.Max(1, count), vy = vy / Math.Max(1, count),
                         airC = c > 0 ? (double?)(e / c - 273.15) : null, capacity = c, count };
                 }
-                var row = new { seconds = frame / (double)fps, samples, sections = new[] {
+                var row = new { seconds = frame / (double)fps, apertureControl,inletFlux,chimneyFlux,samples, sections = new[] {
                     Section("turn1", 584, 350, 598, 420), Section("horizontal", 368, 332, 559, 362),
                     Section("turn5", 316, 316, 337, 360), Section("chimney", 312, 80, 332, 200) },
                     gpu = timer.Statistics, airGpu = coordinator.AirGpuTiming, airHeatGpu = coordinator.AirHeatGpuTiming,
@@ -155,10 +209,20 @@ internal static class FurnaceSensorRegressionVerifier
                         minimum = cells.Length > 0 ? (double?)cells.Min(c => c.Temperature) : null,
                         energy = cells.Sum(c => (double)c.Mass * PhaseEnthalpy.SpecificEnergy(c, thermalMaterials)) };
                 }
+                if(inletFlux is double inletValue && chimneyFlux is double chimneyValue)
+                    flows.Add((frame / (double)fps, inletValue, chimneyValue));
                 rows.Add(row); Console.WriteLine("PHYXEL_SENSOR_ROW " + JsonSerializer.Serialize(row));
-                if (frame % (fps * 10) == 0 || (earlySamples && frame%fps==0 && frame/fps is 1 or 2 or 5))
+                if (frame % (fps * snapshotSeconds) == 0 || (earlySamples && frame%fps==0 && frame/fps is 1 or 2 or 5))
                 {
                     File.WriteAllBytes(Path.Combine(dir, $"grid-{frame / fps}.bin"), MemoryMarshal.AsBytes(grid.AsSpan()).ToArray());
+                    // Keep actual carrier/oxygen/tracer fields beside the ten
+                    // sensors: chimney direction alone misses a cold firebox.
+                    foreach (var (name,buffer) in new[] {
+                        ("oxygen",r.Oxidizer.ReadBuffer),("motion",r.GasMotion.Buffer),
+                        ("air",r.Air.Buffer),("faces",r.AirProjectionB.Buffer),("projection",r.AirProjectionA.Buffer),("heat",r.AirThermal.Buffer),
+                        ("pending",r.ReactionPending.Buffer) })
+                        File.WriteAllBytes(Path.Combine(dir,$"{name}-{frame/fps}.bin"),
+                            AirInventoryRegressionVerifier.Read(r,buffer));
                     SimulationScreenshotWriter.Save(r, Path.Combine(dir, $"world-{frame / fps}.png"));
                     settings.ShowAirField = true; coordinator.DispatchFrame(settings, [], 0);
                     SimulationScreenshotWriter.Save(r, Path.Combine(dir, $"air-{frame / fps}.png"));
@@ -216,11 +280,31 @@ internal static class FurnaceSensorRegressionVerifier
             if (frame % 4 == 0) yield return r;
         }
         File.WriteAllText(Path.Combine(dir, "measurements.json"), JsonSerializer.Serialize(new { hash, fps, mode = settings.Mode,
-            size = new { r.Width, r.Height }, wallSeconds = wallTime.Elapsed.TotalSeconds, rows }, new JsonSerializerOptions { WriteIndented = true }));
+            size = new { r.Width, r.Height },
+            freshAtmosphere = Environment.GetEnvironmentVariable("PHYXEL_SENSOR_FRESH_ATMOSPHERE") == "1",
+            wallSeconds = wallTime.Elapsed.TotalSeconds, rows }, new JsonSerializerOptions { WriteIndented = true }));
         if (hash != Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(Path.ChangeExtension(path, ".world")))))
             throw new InvalidOperationException("Original user world changed.");
         if (jsonHash != Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))))
             throw new InvalidOperationException("Original user metadata changed.");
+        if (Environment.GetEnvironmentVariable("PHYXEL_SENSOR_INLET_ACCEPTANCE") == "1")
+        {
+            if (seconds < 60 || apertureControl is not ("0" or "8" or "42") || flows.Count==0)
+                throw new InvalidOperationException("Inlet acceptance requires aperture0/8/42, the sensor fixture, and at least 60 seconds.");
+            var tail = flows.Where(f => f.Seconds >= seconds - 30).ToArray();
+            double net = tail.Average(f => Math.Abs(f.Chimney));
+            double upward = tail.Average(f => f.Chimney);
+            double inlet = tail.Average(f => Math.Abs(f.Inlet));
+            Console.WriteLine($"PHYXEL_INLET_ACCEPTANCE aperture={apertureControl} meanAbsChimney={net:F6} meanUpward={upward:F6} meanAbsInlet={inlet:F6}");
+            // Predeclared convergence/flow criteria for this fixture, in solver
+            // units. A closed inlet must not sustain a spurious net circuit.
+            if (apertureControl == "0" && (net > .5 || inlet > .001))
+                throw new InvalidOperationException("Closed inlet has excessive residual net chimney flow.");
+            if (apertureControl == "42" && upward < .9 * 37.302)
+                throw new InvalidOperationException("Open inlet lost more than 10% of the reference chimney flow.");
+            if (apertureControl == "8" && upward <= 0)
+                throw new InvalidOperationException("Narrow inlet failed to sustain upward chimney flow.");
+        }
         Console.WriteLine("PHYXEL_SENSOR_REPLAY_COMPLETE");
     }
 }

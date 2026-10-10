@@ -51,6 +51,8 @@ internal static class ShaderCatalog
         new("OxidizerTransport.hlsl", "CSTransport"), new("OxidizerTransport.hlsl", "CSFlux"), new("OxidizerTransport.hlsl", "CSConsume"),
         new("OxidizerTransport.hlsl", "CSCarrierFaces"), new("OxidizerTransport.hlsl", "CSCarrierDivergence"), new("OxidizerTransport.hlsl", "CSCarrierJacobi"),
         new("OxidizerTransport.hlsl", "CSCarrierJacobiFour"),
+        new("OxidizerTransport.hlsl", "CSCarrierSorRed"), new("OxidizerTransport.hlsl", "CSCarrierSorBlack"),
+        new("OxidizerTransport.hlsl", "CSCarrierSorTwo"),
         new("AirSimulation.hlsl", "CSInject"), new("AirSimulation.hlsl", "CSFineMaterials"),
         new("AirSimulation.hlsl", "CSPressure"), new("AirSimulation.hlsl", "CSVelocity"),
         new("AirSimulation.hlsl", "CSAdvect"), new("AirSimulation.hlsl", "CSCommit"), new("AirSimulation.hlsl", "CSClear"),

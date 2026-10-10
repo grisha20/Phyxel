@@ -231,6 +231,7 @@ float RadiantPair(GridCell cell, GridCell other, uint index, uint otherIndex, fl
     if (a.ThermalConductivity <= 0 || b.ThermalConductivity <= 0) return 0;
     if (degreeOnly) return weight;
     bool gasA = IsRadiantGas(a);
+    bool gasB = IsRadiantGas(b);
     uint gasFlags = gasA ? a.Flags : b.Flags;
     float solidConductivity = gasA ? b.ThermalConductivity : a.ThermalConductivity;
     // Explicit game strengths, not measured emissivity. Each endpoint has
@@ -238,6 +239,17 @@ float RadiantPair(GridCell cell, GridCell other, uint index, uint otherIndex, fl
     float coupling = saturate(solidConductivity) *
         ((gasFlags & MaterialFlagFlame) != 0 ? 1.0 : 0.25);
     float fraction = min(0.18, 10.8 * ThermalDeltaTime);
+    if (!gasA && !gasB)
+    {
+        // Bounded reciprocal surface exchange. The T^4 secant gives the
+        // temperature dependence; this normalized rate is not a SI flux.
+        // Optical emissivities and cell lengths are not resolved here.
+        float ta=max(0,cell.Temperature+273.15),tb=max(0,other.Temperature+273.15);
+        float reference=1273.15;
+        float slope=(ta+tb)*(ta*ta+tb*tb)/(4*reference*reference*reference);
+        fraction*=saturate(slope);
+        coupling=saturate(min(a.ThermalConductivity,b.ThermalConductivity));
+    }
     float degree = max(1.0, max(RadiantDegrees[index], RadiantDegrees[otherIndex]));
     float coefficient = min(EffectiveCapacity(cell), EffectiveCapacity(other)) *
         coupling * fraction * weight / degree;
@@ -281,7 +293,7 @@ float RadiantExchange(GridCell cell, uint2 coordinate, bool degreeOnly)
                     heat += RadiantPair(cell, other, index, p.y * ThermalWidth + p.x, weight, degreeOnly);
                 continue;
             }
-            if (emitter && distance > 1 && otherMaterial.SimulationKind == SimulationKindSolid)
+            if ((emitter || ThermalReserved1 != 0) && distance > 1 && otherMaterial.SimulationKind == SimulationKindSolid)
                 heat += RadiantPair(cell, other, index, p.y * ThermalWidth + p.x, weight, degreeOnly);
             break;
         }

@@ -1970,7 +1970,7 @@ public sealed class SimulationDispatchCoordinator
     }
 
     internal void DispatchThermalDiffusion(GpuSimulationResources resources, bool measure,
-        uint tickIndex, bool convectWater, bool? referenceContacts = null)
+        uint tickIndex, bool convectWater, bool? referenceContacts = null, bool? surfaceRadiation = null)
     {
         GpuStageTimer? Stage(uint key)
         {
@@ -1985,7 +1985,8 @@ public sealed class SimulationDispatchCoordinator
             Width = (uint)resources.Width,
             Height = (uint)resources.Height,
             ObserveEnergy = resources.ThermalEnergyLedger is null ? 0u : 1u,
-            Reserved0 = (referenceContacts ?? nativePerformanceReference) ? 1u : 0u
+            Reserved0 = (referenceContacts ?? nativePerformanceReference) ? 1u : 0u,
+            Reserved1 = (surfaceRadiation ?? EnableSurfaceRadiation) ? 1u : 0u
         };
         DeviceContext context = resources.Context;
         if (measure)
@@ -2235,7 +2236,11 @@ public sealed class SimulationDispatchCoordinator
         RunAirPass(context, resources.AirFacesShader, groupsX, groupsY);
         RunAirPass(context, resources.AirDivergenceShader, groupsX, groupsY);
         bool reference = UseReferenceGpuWorkload;
-        for (int iteration = 0; iteration < (reference ? 64 : 16); iteration++)
+        // The former128-step budget leaves a false net chimney flow in a
+        // closed-bottom hot furnace. Simulation must close that circuit;
+        // Sandbox retains its bounded gameplay expansion and previous budget.
+        int projectionIterations=AirProjectionIterations>0 ? AirProjectionIterations : sandbox?128:1024;
+        for (int iteration = 0; iteration < projectionIterations / (reference ? 2 : 8); iteration++)
         {
             RunAirPass(context, reference ? resources.AirJacobiABShader : resources.AirJacobiFourABShader, groupsX, groupsY);
             RunAirPass(context, reference ? resources.AirJacobiBAShader : resources.AirJacobiFourBAShader, groupsX, groupsY);
@@ -2364,6 +2369,13 @@ public sealed class SimulationDispatchCoordinator
         Unbind(c,2,2);r.PressureGraphValid=true;
     }
 
+    // Diagnostic convergence control: compare identical geometry/forcing with
+    // additional Poisson work before changing the production solve budget.
+    private static readonly int AirProjectionIterations =
+        int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_AIR_PROJECTION_ITERATIONS"),out int iterations)
+            ? (Math.Clamp(iterations,128,2048)+7)/8*8 : 0;
+    private static readonly bool EnableSurfaceRadiation =
+        Environment.GetEnvironmentVariable("PHYXEL_SURFACE_RADIATION")!="0";
     private static readonly bool UseReferenceGpuWorkload =
         Environment.GetEnvironmentVariable("PHYXEL_GPU_WORKLOAD_REFERENCE")=="1" &&
         (Environment.GetEnvironmentVariable("PHYXEL_VERIFY_FURNACE_SENSORS")=="1" ||
@@ -3189,7 +3201,8 @@ public sealed class SimulationDispatchCoordinator
             DeltaTime = dt,
             OpenEdges = openEdges ? 1u : 0u,
             UseAir = useAir ? 1u : 0u,
-            Reserved0 = resources.OxidizerCarrierWarm ? 1u : 0u
+            Reserved0 = resources.OxidizerCarrierWarm ? 1u : 0u,
+            Reserved1 = Environment.GetEnvironmentVariable("PHYXEL_OXYGEN_GEOMETRY_REFERENCE") == "1" ? 1u : 0u
         };
         DeviceContext context = resources.Context;
         context.UpdateSubresource(ref constants, resources.OxidizerConstants);
@@ -3219,7 +3232,36 @@ public sealed class SimulationDispatchCoordinator
             // Reconstruct solver scratch once after loading; then converge the
             // changing flow with a warm pressure guess, as the coarse air does.
             int fineCarrierProjectionIterations = resources.OxidizerCarrierWarm ? 64 : 1024;
-            for(int iteration=0;iteration<fineCarrierProjectionIterations;iteration+=reference?1:4)
+            if (int.TryParse(Environment.GetEnvironmentVariable(resources.OxidizerCarrierWarm
+                ? "PHYXEL_OXYGEN_WARM_ITERATIONS" : "PHYXEL_OXYGEN_INITIAL_ITERATIONS"), out int diagnosticIterations))
+                fineCarrierProjectionIterations = (Math.Clamp(diagnosticIterations, 4, 65536) + 3) / 4 * 4;
+            bool sor = Environment.GetEnvironmentVariable("PHYXEL_OXYGEN_SOR") == "1";
+            if (sor && Environment.GetEnvironmentVariable("PHYXEL_OXYGEN_SOR_REFERENCE") == "1")
+            {
+                context.ComputeShader.SetUnorderedAccessView(4, resources.OxidizerCarrierPotential.ReadUnorderedView);
+                for (int iteration = 0; iteration < fineCarrierProjectionIterations; iteration++)
+                {
+                    context.ComputeShader.Set(resources.OxidizerCarrierSorRedShader);
+                    context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
+                    context.ComputeShader.Set(resources.OxidizerCarrierSorBlackShader);
+                    context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
+                }
+                context.ComputeShader.SetUnorderedAccessView(4, null);
+            }
+            else if (sor)
+            {
+                context.ComputeShader.Set(resources.OxidizerCarrierSorTwoShader);
+                for (int iteration = 0; iteration < fineCarrierProjectionIterations; iteration += 2)
+                {
+                    context.ComputeShader.SetShaderResource(7, resources.OxidizerCarrierPotential.ReadView);
+                    context.ComputeShader.SetUnorderedAccessView(4, resources.OxidizerCarrierPotential.WriteUnorderedView);
+                    context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
+                    context.ComputeShader.SetShaderResource(7, null);
+                    context.ComputeShader.SetUnorderedAccessView(4, null);
+                    resources.OxidizerCarrierPotential.Swap();
+                }
+            }
+            else for(int iteration=0;iteration<fineCarrierProjectionIterations;iteration+=reference?1:4)
             {
                 context.ComputeShader.SetShaderResource(7,resources.OxidizerCarrierPotential.ReadView);
                 context.ComputeShader.SetUnorderedAccessView(4,resources.OxidizerCarrierPotential.WriteUnorderedView);
@@ -3235,6 +3277,8 @@ public sealed class SimulationDispatchCoordinator
             // Resolve the same elapsed time; projection and chemistry stay
             // on their existing clocks. Still-air diffusion retains one pass.
             int transportSteps=useAir&&Environment.GetEnvironmentVariable("PHYXEL_OXYGEN_CFL_REFERENCE")!="1"?8:1;
+            if (useAir && int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_OXYGEN_TRANSPORT_STEPS"), out int diagnosticSteps))
+                transportSteps = Math.Clamp(diagnosticSteps, 1, 64);
             constants.DeltaTime=dt/transportSteps;
             constants.Reserved2=transportSteps>1?1u:0u;
             context.UpdateSubresource(ref constants,resources.OxidizerConstants);

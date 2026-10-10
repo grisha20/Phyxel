@@ -113,6 +113,9 @@ public sealed class GpuSimulationResources : IDisposable
     public ComputeShader? OxidizerCarrierDivergenceShader { get; init; }
     public ComputeShader? OxidizerCarrierJacobiShader { get; init; }
     public ComputeShader? OxidizerCarrierJacobiFourShader { get; init; }
+    public ComputeShader? OxidizerCarrierSorRedShader { get; init; }
+    public ComputeShader? OxidizerCarrierSorBlackShader { get; init; }
+    public ComputeShader? OxidizerCarrierSorTwoShader { get; init; }
     public required Buffer OxidizerConstants { get; init; }
     public required Buffer OxidizerStaging { get; init; }
     public ComputeShader? OxidizerTransportShader { get; init; }
@@ -465,6 +468,9 @@ public sealed class GpuSimulationResources : IDisposable
         OxidizerCarrierDivergenceShader?.Dispose();
         OxidizerCarrierJacobiShader?.Dispose();
         OxidizerCarrierJacobiFourShader?.Dispose();
+        OxidizerCarrierSorRedShader?.Dispose();
+        OxidizerCarrierSorBlackShader?.Dispose();
+        OxidizerCarrierSorTwoShader?.Dispose();
         OxidizerConstants.Dispose();
         OxidizerStaging.Dispose();
         FireGlowScratch.Dispose();

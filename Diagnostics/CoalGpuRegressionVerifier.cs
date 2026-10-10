@@ -63,13 +63,48 @@ internal static class CoalGpuRegressionVerifier
                     }
                     var old=Execute(false);var current=Execute(true);
                     Check(old.AsSpan().SequenceEqual(current),$"Oxygen projection {size}/{layout}/{iterations}");
+                    if (iterations <= 64)
+                    {
+                        byte[] ExecuteSor(bool fused)
+                        {
+                            c.UpdateSubresource(initial,r.OxidizerCarrierPotential.ReadBuffer);
+                            c.ComputeShader.SetConstantBuffer(0,r.OxidizerConstants);
+                            c.ComputeShader.SetShaderResource(8,r.OxidizerCarrierFaces.View);
+                            for (int iteration=0;iteration<iterations;iteration+=fused?2:1)
+                            {
+                                if (fused)
+                                {
+                                    c.ComputeShader.SetShaderResource(7,r.OxidizerCarrierPotential.ReadView);
+                                    c.ComputeShader.SetUnorderedAccessView(4,r.OxidizerCarrierPotential.WriteUnorderedView);
+                                    c.ComputeShader.Set(r.OxidizerCarrierSorTwoShader);
+                                    c.Dispatch((r.Width+15)/16,(r.Height+15)/16,1);
+                                    c.ComputeShader.SetShaderResource(7,null);c.ComputeShader.SetUnorderedAccessView(4,null);
+                                    r.OxidizerCarrierPotential.Swap();
+                                }
+                                else
+                                {
+                                    c.ComputeShader.SetUnorderedAccessView(4,r.OxidizerCarrierPotential.ReadUnorderedView);
+                                    c.ComputeShader.Set(r.OxidizerCarrierSorRedShader);c.Dispatch((r.Width+15)/16,(r.Height+15)/16,1);
+                                    c.ComputeShader.Set(r.OxidizerCarrierSorBlackShader);c.Dispatch((r.Width+15)/16,(r.Height+15)/16,1);
+                                    c.ComputeShader.SetUnorderedAccessView(4,null);
+                                }
+                            }
+                            c.ComputeShader.SetShaderResource(8,null);
+                            return AirInventoryRegressionVerifier.Read(r,r.OxidizerCarrierPotential.ReadBuffer);
+                        }
+                        Check(ExecuteSor(false).AsSpan().SequenceEqual(ExecuteSor(true)),
+                            $"Oxygen SOR tile/reference {size}/{layout}/{iterations}");
+                    }
                 }
                 yield return r;
             }
             // Exercise the actual faces/projection/flux/transport/consumption path.
             foreach(bool open in new[]{false,true})foreach(bool filter in new[]{false,true})
+            foreach(bool carrier in new[]{false,true})
             {
                 var grid=new GridCell[n];var oxygen=new float[n];var demand=new float[n];var motion=new GasMotionState[n];var filters=new uint[n+1];
+                var air = new AirCell[r.AirWidth * r.AirHeight];
+                for (int i=0;i<air.Length;i++) air[i]=new(){VelocityX=2+.01f*(i%r.AirWidth),VelocityY=-3};
                 for(int y=0;y<r.Height;y++)for(int x=0;x<r.Width;x++){
                     int i=y*r.Width+x;oxygen[i]=(x%17+1)/18f;demand[i]=(x%7)*.003f;
                     if(x%23==0&&y%19!=0)grid[i]=new(){IsActive=1,MaterialIndex=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal),Mass=7.8f,Temperature=20};
@@ -78,24 +113,27 @@ internal static class CoalGpuRegressionVerifier
                 }
                 byte[] Execute(bool reference){
                     Environment.SetEnvironmentVariable("PHYXEL_OXYGEN_REFERENCE",reference?"1":null);
+                    Environment.SetEnvironmentVariable("PHYXEL_OXYGEN_GEOMETRY_REFERENCE",reference?"1":null);
                     c.UpdateSubresource(grid,r.Grid.ReadBuffer);c.UpdateSubresource(motion,r.GasMotion.Buffer);
+                    c.UpdateSubresource(air,r.Air.Buffer);
                     c.UpdateSubresource(filters,r.Filters.Buffer);
                     foreach(var buffer in r.Oxidizer.Buffers)c.UpdateSubresource(oxygen,buffer);
                     foreach(var buffer in r.OxidizerCarrierPotential.Buffers)c.UpdateSubresource(new Vector2[n],buffer);
                     c.UpdateSubresource(demand,r.OxidizerDemand.Buffer);r.OxidizerCarrierWarm=false;
                     for(int tick=0;tick<2;tick++){
-                        SimulationDispatchCoordinator.DispatchOxidizer(r,1f/60,open,false,false);
+                        SimulationDispatchCoordinator.DispatchOxidizer(r,1f/60,open,false,carrier);
                         SimulationDispatchCoordinator.DispatchOxidizer(r,1f/60,open,true,false);
                     }
                     return new[]{r.Oxidizer.ReadBuffer,r.OxidizerCarrierPotential.ReadBuffer,r.OxidizerFlux.Buffer,r.OxidizerAvailable.Buffer}
                         .SelectMany(buffer=>AirInventoryRegressionVerifier.Read(r,buffer)).ToArray();
                 }
                 var old=Execute(true);var current=Execute(false);
-                Check(old.AsSpan().SequenceEqual(current),$"Oxygen complete {size}/open{open}/filter{filter}");
+                Check(old.AsSpan().SequenceEqual(current),$"Oxygen complete {size}/open{open}/filter{filter}/air{carrier}");
             }
             c.UpdateSubresource(new uint[n+1],r.Filters.Buffer);
         }
         Environment.SetEnvironmentVariable("PHYXEL_OXYGEN_REFERENCE",null);
+        Environment.SetEnvironmentVariable("PHYXEL_OXYGEN_GEOMETRY_REFERENCE",null);
         settings.Width=480;settings.Height=300;settings.RenderWithoutEffects=false;
         settings.Paused=true;
         var visual=coordinator.DispatchFrame(settings,[new(){X=170,Y=130,Radius=12,Density=1,

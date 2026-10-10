@@ -43,7 +43,9 @@ internal static class BulkHeatRegressionVerifier
         GridCell[] Advance(GridCell[] grid, int ticks, string name)
         {
             r.Context.UpdateSubresource(grid, r.Grid.ReadBuffer); double before = Energy(grid);
-            for (uint i = 0; i < ticks; i++) coordinator.DispatchThermalDiffusion(r, false, i, false);
+            // Isolate conduction: an empty gap blocks this mechanism, while
+            // the separate surface suite requires radiation across that gap.
+            for (uint i = 0; i < ticks; i++) coordinator.DispatchThermalDiffusion(r, false, i, false, surfaceRadiation:false);
             var after = Read(); double error = Math.Abs(Energy(after) - before);
             Check(error < Math.Max(.01, Math.Abs(before) * .00005), name + " energy");
             Check(after.Sum(c => (double)c.Mass) == grid.Sum(c => (double)c.Mass), name + " mass");
@@ -81,8 +83,8 @@ internal static class BulkHeatRegressionVerifier
         Task.Run(() => serializer.SaveAsync(path, settings, (ushort)metal, snapshot, registry)).GetAwaiter().GetResult();
         var loaded = Task.Run(() => serializer.LoadAsync(path, registry)).GetAwaiter().GetResult()!.World!;
         Check(loaded.Grid.AsSpan().SequenceEqual(snapshot.Grid), "partial phase save exact");
-        serializer.ApplyWorldSnapshot(r, loaded); coordinator.DispatchThermalDiffusion(r, false, 0, false); var next = Read();
-        serializer.ApplyWorldSnapshot(r, loaded); coordinator.DispatchThermalDiffusion(r, false, 0, false);
+        serializer.ApplyWorldSnapshot(r, loaded); coordinator.DispatchThermalDiffusion(r, false, 0, false, surfaceRadiation:false); var next = Read();
+        serializer.ApplyWorldSnapshot(r, loaded); coordinator.DispatchThermalDiffusion(r, false, 0, false, surfaceRadiation:false);
         Check(Read().AsSpan().SequenceEqual(next), "reload thermal continuation exact");
         Console.WriteLine($"PHYXEL_BULK_COMPLETE checks={checks} failures={failures}");
         if (failures > 0 && Environment.GetEnvironmentVariable("PHYXEL_DRAFT_BASELINE") != "1")

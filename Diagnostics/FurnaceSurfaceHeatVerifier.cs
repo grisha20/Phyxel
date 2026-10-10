@@ -55,6 +55,26 @@ internal static class FurnaceSurfaceHeatVerifier
             var after = Advance(grid, 120, "gap/" + donor);
             Check(after[centre].Temperature > 21 && after[centre + 12 * w].Temperature < 999, "gap must heat and cool both endpoints");
         }
+        uint iron=registry.GetRequiredRuntimeIndex("core:cast_iron");
+        foreach(var (dx,dy) in new[]{(12,0),(0,12),(12,12)})
+        {
+            var grid=new GridCell[w*r.Height];
+            int donor=centre+dx+dy*w;
+            grid[centre]=Cell(iron,20,7.2f);grid[donor]=Cell(iron,1000,3.6f);
+            var after=Advance(grid,120,$"surface/surface/{dx},{dy}");
+            Check(after[centre].Temperature>21 && after[donor].Temperature<999,
+                "Visible hot wall must heat the opposite wall without FIRE or hot gas");
+        }
+        foreach(string control in new[]{"equal","opaque","corner","range"})
+        {
+            var grid=new GridCell[w*r.Height];
+            int donor=centre+(control=="range"?97:12)*w+(control=="corner"?12:0);
+            grid[centre]=Cell(iron,20,7.2f);grid[donor]=Cell(iron,control=="equal"?20:1000,3.6f);
+            if(control=="opaque")grid[centre+6*w]=Cell(fixture,20);
+            if(control=="corner")grid[centre+1]=Cell(fixture,20);
+            var after=Advance(grid,1,"surface/control/"+control);
+            Check(after[centre].Temperature==20,"Surface radiation must respect "+control);
+        }
         foreach (string control in new[] { "cold", "range", "wall", "water", "insulator" })
         {
             var grid = new GridCell[w * r.Height]; grid[centre] = Cell(metal, 20, 7.8f);

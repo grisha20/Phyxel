@@ -80,7 +80,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     bool thermallyExtinguished = flame && cell.Temperature <= material.FlameExtinctionTemperature;
     bool extinguished = thermallyExtinguished || (flame && (cell.BodyId & SelfOxidizingFlameMarker)==0 &&
         (FiniteOxidizer != 0
-            ? ((cell.BodyId & ReactedFuelFlameMarker)==0 || (cell.BodyId & FiniteHeatEmissionMarker)!=0) && supply.x <= max(supply.y, 1) * OxidizerExtinctionThreshold
+            // A finite heat tracer already paid the reaction's oxygen demand.
+            // Its budget marker does not turn the packet back into fresh fuel.
+            ? (cell.BodyId & ReactedFuelFlameMarker)==0 && supply.x <= max(supply.y, 1) * OxidizerExtinctionThreshold
             : TouchesCarbonDioxide(coordinate)));
     cell.Lifetime = extinguished ? 0 : max(0, cell.Lifetime - TransientDeltaTime);
     if (cell.Lifetime > 0)

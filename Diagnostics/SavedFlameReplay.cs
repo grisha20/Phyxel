@@ -37,6 +37,8 @@ internal static class SavedFlameReplay
         uint coal = registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal);
         int fps=int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_FLAME_FPS"),out int f)?f:60;
         int seconds=int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_FLAME_SECONDS"),out int s)?s:10;
+        int snapshotSeconds=int.TryParse(Environment.GetEnvironmentVariable("PHYXEL_FLAME_SNAPSHOT_SECONDS"),out int snapshotInterval)
+            ?Math.Clamp(snapshotInterval,1,3600):30;
         string[] controls=(Environment.GetEnvironmentVariable("PHYXEL_FLAME_CONTROLS")??"saved,still,cold,mirror-cold").Split(',');
         string? selectedMode=Environment.GetEnvironmentVariable("PHYXEL_FLAME_MODE");
         var results = new List<object>();
@@ -159,7 +161,7 @@ internal static class SavedFlameReplay
                         airMaxSpeed = air.Max(a => Math.Sqrt(a.VelocityX * a.VelocityX + a.VelocityY * a.VelocityY)) };
                     rows.Add(row);
                     Console.WriteLine("PHYXEL_FLAME_ROW " + label + " " + JsonSerializer.Serialize(row));
-                    if (frame==0 || frame==3*fps || frame==10*fps || frame% (30*fps)==0 || frame==seconds*fps)
+                    if (frame==0 || frame==3*fps || frame==10*fps || frame% (snapshotSeconds*fps)==0 || frame==seconds*fps)
                     {
                         SimulationScreenshotWriter.Save(r, Path.Combine(dir, $"{label}-{frame / fps}.png"));
                         File.WriteAllBytes(Path.Combine(dir, $"{label}-{frame / fps}-grid.bin"), MemoryMarshal.AsBytes(grid.AsSpan()).ToArray());

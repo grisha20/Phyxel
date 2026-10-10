@@ -19,6 +19,11 @@ internal static class AirInventoryRegressionVerifier
 
     public static void Run(SimulationDispatchCoordinator coordinator, MaterialRegistry registry)
     {
+        if (Environment.GetEnvironmentVariable("PHYXEL_OXYGEN_PROJECT_TRACE") == "1")
+        {
+            OxidizerProjectionRegressionVerifier.Run(coordinator, registry);
+            return;
+        }
         if (Marshal.SizeOf<SimulationFrameConstants>() != 80 || Marshal.SizeOf<OxidizerConstants>() != 32)
             throw new InvalidOperationException("Shader constant layout changed.");
         Directory.CreateDirectory(DirectoryPath);
@@ -47,7 +52,7 @@ internal static class AirInventoryRegressionVerifier
             var faces=new System.Numerics.Vector4[w*h];
             int cx=w/2,cy=h/2;
             for(int y=0;y<h;y++)for(int x=0;x<w;x++)
-                faces[y*w+x]=new(2+.01f*(x-cx),-.01f*(y-cy),16,0);
+                faces[y*w+x]=new(2+.01f*(x-cx),-.01f*(y-cy),16|64,1);
             resources.Context.UpdateSubresource(faces,resources.OxidizerCarrierFaces.Buffer);
             resources.Context.UpdateSubresource(new System.Numerics.Vector2[w*h],resources.OxidizerCarrierPotential.ReadBuffer);
             var c=resources.Context;var constants=new OxidizerConstants{Width=(uint)w,Height=(uint)h,

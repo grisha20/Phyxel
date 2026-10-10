@@ -137,11 +137,12 @@ internal static class FurnaceCombustionRegressionVerifier
             bool merged=after[index].IsActive==0 || after[index+1].IsActive==0;
             Check(merged==(finite&&!nominal),"Packet consolidation affected Sandbox or nominal gas");
         }
-        foreach (uint marker in new uint[] { 0, 0x40000000u, 0x80000000u })
+        foreach (uint marker in new uint[] { 0, 0x20000000u, 0x40000000u, 0x60000000u, 0x80000000u })
+        foreach(float flameTemperature in new[]{420f,100f})
         {
             var grid=new GridCell[n];
             grid[index]=new() { IsActive=1,MaterialIndex=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire),
-                Mass=1,Temperature=420,Lifetime=.5f,BodyId=marker };
+                Mass=1,Temperature=flameTemperature,Lifetime=.5f,BodyId=marker };
             var stock=new float[n]; stock[index]=.5f;
             context.UpdateSubresource(grid,resources.Grid.ReadBuffer);
             context.UpdateSubresource(stock,resources.Oxidizer.ReadBuffer);
@@ -149,7 +150,8 @@ internal static class FurnaceCombustionRegressionVerifier
             context.ClearUnorderedAccessView(resources.OxidizerDemand.UnorderedView,new RawInt4());
             SimulationDispatchCoordinator.DispatchOxidizer(resources,1f/60,false,true);
             var oxygen=MemoryMarshal.Cast<byte,float>(AirInventoryRegressionVerifier.Read(resources,resources.Oxidizer.ReadBuffer));
-            Check(Math.Abs(oxygen[index]-(marker==0?.4975f:.5f))<1e-7,"Fuel-created flame spent oxygen twice");
+            bool paid=(marker&0xc0000000u)!=0;
+            Check(Math.Abs(oxygen[index]-(paid?.5f:.4975f))<1e-7,"Fuel-created flame spent oxygen twice");
             context.ClearUnorderedAccessView(resources.OxidizerAvailable.UnorderedView,new RawInt4());
             var constants=new CombustionConstants { Width=(uint)w,Height=(uint)h,MaterialCount=(uint)registry.Materials.Count,
                 DeltaTime=1f/60,FiniteOxidizer=1 };
@@ -161,7 +163,7 @@ internal static class FurnaceCombustionRegressionVerifier
             context.Dispatch((w+15)/16,(h+15)/16,1);
             for(int i=0;i<2;i++) { context.ComputeShader.SetShaderResource(i,null); context.ComputeShader.SetUnorderedAccessView(i,null); }
             var after=MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(resources,resources.Grid.ReadBuffer));
-            Check((after[index].MaterialIndex==registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire))==(marker!=0),
+            Check((after[index].MaterialIndex==registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire))==(paid&&flameTemperature>100),
                 "Fuel heat tracer was quenched a second time or painted fire ignored oxygen");
         }
         Console.WriteLine("PHYXEL_FURNACE_COMBUSTION_SUCCESS");

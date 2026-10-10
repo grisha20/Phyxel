@@ -60,12 +60,13 @@ void CSCarrierFaces(uint3 tid:SV_DispatchThreadID)
 {
     int2 p=int2(tid.xy);if(!Inside(p))return;
     uint mask=Space(Index(p))>0?16u:0u;
+    if (FilterAirAllows(Index(p))) mask |= 64u;
     int2 ds[4]={int2(1,0),int2(-1,0),int2(0,1),int2(0,-1)};
     [unroll]for(int k=0;k<4;k++)if(Inside(p+ds[k])&&Space(Index(p+ds[k]))>0)mask|=1u<<k;
     if(CarrierBoundary(p))mask|=32u;
     // Store a numeric integer, not denormal float bits: GPU arithmetic may
     // flush asfloat(1..63) to zero and silently close every projection face.
-    DestinationCarrierFaces[Index(p)]=float4(VolumeFace(p,p+int2(1,0)),VolumeFace(p,p+int2(0,1)),float(mask),0);
+    DestinationCarrierFaces[Index(p)]=float4(VolumeFace(p,p+int2(1,0)),VolumeFace(p,p+int2(0,1)),float(mask),Capacity(Index(p)));
 }
 [numthreads(16,16,1)]
 void CSCarrierDivergence(uint3 tid:SV_DispatchThreadID)
@@ -94,13 +95,36 @@ void CSCarrierJacobi(uint3 tid:SV_DispatchThreadID)
     float2 own=CarrierPotential[i];
     DestinationPotential[i]=float2(count>0?(sum-own.y)/count:0,own.y);
 }
+
+// Opt-in red/black SOR over the same face graph. Only one independent
+// checkerboard colour writes per dispatch; its neighbours are read-only.
+// The two dispatches are ordered globally, with no cross-group spin barrier.
+void CarrierSor(uint2 p, uint colour)
+{
+    if (!Inside(int2(p)) || ((p.x + p.y) & 1u) != colour) return;
+    uint i = p.y * OxygenWidth + p.x;
+    uint mask = uint(CarrierFaces[i].z);
+    if ((mask & 16u) == 0 || (mask & 32u) != 0) { DestinationPotential[i] = 0; return; }
+    float2 own = DestinationPotential[i];
+    float sum = 0, count = 0;
+    if (mask & 1u) { sum += DestinationPotential[i + 1].x; count++; }
+    if (mask & 2u) { sum += DestinationPotential[i - 1].x; count++; }
+    if (mask & 4u) { sum += DestinationPotential[i + OxygenWidth].x; count++; }
+    if (mask & 8u) { sum += DestinationPotential[i - OxygenWidth].x; count++; }
+    float target = count > 0 ? (sum - own.y) / count : 0;
+    DestinationPotential[i] = float2(count > 0 ? own.x + 1.9 * (target - own.x) : 0, own.y);
+}
+[numthreads(16,16,1)]
+void CSCarrierSorRed(uint3 tid:SV_DispatchThreadID) { CarrierSor(tid.xy, 0); }
+[numthreads(16,16,1)]
+void CSCarrierSorBlack(uint3 tid:SV_DispatchThreadID) { CarrierSor(tid.xy, 1); }
+
 // Four exact steps over a 16x16 output tile and a four-cell dependency halo.
 groupshared float OxygenPsi0[576];
 groupshared float OxygenPsi1[576];
 groupshared float OxygenDiv[576];
 groupshared uint OxygenMasks[576];
-[numthreads(16,16,1)]
-void CSCarrierJacobiFour(uint3 group:SV_GroupID,uint lane:SV_GroupIndex)
+void CarrierTileFour(uint3 group,uint lane,bool sor)
 {
     int2 origin=int2(group.xy)*16-4;
     [unroll]for(uint j=lane;j<576;j+=256)
@@ -124,7 +148,13 @@ void CSCarrierJacobiFour(uint3 group:SV_GroupID,uint lane:SV_GroupIndex)
                 if(mask&2u){sum+=step%2?OxygenPsi0[j-1]:OxygenPsi1[j-1];count+=1;}
                 if(mask&4u){sum+=step%2?OxygenPsi0[j+24]:OxygenPsi1[j+24];count+=1;}
                 if(mask&8u){sum+=step%2?OxygenPsi0[j-24]:OxygenPsi1[j-24];count+=1;}
-                value=count>0?(sum-OxygenDiv[j])/count:0;
+                float own=step%2?OxygenPsi0[j]:OxygenPsi1[j];
+                float target=count>0?(sum-OxygenDiv[j])/count:0;
+                // Four colour steps are two complete red/black iterations.
+                // The four-cell halo contains the entire dependency cone;
+                // unlike block-local SOR this is identical across tile edges.
+                bool updateColour=((x+y)&1u)==((step-1)&1u);
+                value=sor?(updateColour?(count>0?own+1.9*(target-own):0):own):target;
             }
             if(step%2)OxygenPsi1[j]=value;else OxygenPsi0[j]=value;
         }
@@ -134,20 +164,29 @@ void CSCarrierJacobiFour(uint3 group:SV_GroupID,uint lane:SV_GroupIndex)
     uint outputIndex=(lane/16+4)*24+lane%16+4,outputMask=OxygenMasks[outputIndex];
     DestinationPotential[Index(int2(p))]=(outputMask&16u)==0||(outputMask&32u)!=0?0:float2(OxygenPsi0[outputIndex],OxygenDiv[outputIndex]);
 }
+[numthreads(16,16,1)]
+void CSCarrierJacobiFour(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) { CarrierTileFour(group,lane,false); }
+[numthreads(16,16,1)]
+void CSCarrierSorTwo(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) { CarrierTileFour(group,lane,true); }
 
 float RawFace(int2 a, int2 b)
 {
     if (!Inside(b)) return 0;
     uint ia=Index(a),ib=Index(b);
-    if(!FilterAirAllows(ia)||!FilterAirAllows(ib))return 0;
-    float ma=Amount(ia),mb=Amount(ib),sa=Space(ia),sb=Space(ib);
+    uint maskA=uint(CarrierFaces[ia].z),maskB=uint(CarrierFaces[ib].z);
+    bool reference=OxygenReserved1!=0;
+    if (reference ? (!FilterAirAllows(ia)||!FilterAirAllows(ib)) : ((maskA&64u)==0||(maskB&64u)==0)) return 0;
+    float ma=Amount(ia),mb=Amount(ib);
+    float sa=reference?Space(ia):((maskA&16u)!=0?1:0);
+    float sb=reference?Space(ib):((maskB&16u)!=0?1:0);
     float diffusion=min(.24,12*OxygenDeltaTime);
     // Occupied solids/liquids may evacuate their trapped stock but never
     // receive new stock: a static wall cannot relay air through itself.
     if (sa==0 && sb==0) return 0;
     if (sa==0) return diffusion*ma;
     if (sb==0) return -diffusion*mb;
-    float ca=Capacity(ia),cb=Capacity(ib);
+    float ca=reference?Capacity(ia):CarrierFaces[ia].w;
+    float cb=reference?Capacity(ib):CarrierFaces[ib].w;
     float concentrationA=ca>0 ? saturate(ma/ca) : 0;
     float concentrationB=cb>0 ? saturate(mb/cb) : 0;
     float mixed=min(ca,cb)*(concentrationA-concentrationB);
@@ -199,10 +238,12 @@ void CSTransport(uint3 tid : SV_DispatchThreadID)
     if (p.x>0) amount+=Limited(Faces[i-1].x,p-int2(1,0),p);
     if (p.y>0) amount+=Limited(Faces[i-OxygenWidth].y,p-int2(0,1),p);
     // Only exposed side/top boundary cells exchange with the reservoir.
-    if (OpenEdges!=0 && Space(i)>0 && (p.x==0 || p.y==0 || p.x+1==int(OxygenWidth))) amount=Capacity(i);
+    float capacity=OxygenReserved1!=0?Capacity(i):CarrierFaces[i].w;
+    bool space=OxygenReserved1!=0?Space(i)>0:(uint(CarrierFaces[i].z)&16u)!=0;
+    if (OpenEdges!=0 && space && (p.x==0 || p.y==0 || p.x+1==int(OxygenWidth))) amount=capacity;
     amount=max(0,amount); // only roundoff, never cap by available volume
     DestinationOxygen[i]=amount;
-    DestinationAvailable[i]=min(amount,Capacity(i));
+    DestinationAvailable[i]=min(amount,capacity);
 }
 float NeighborSum(uint2 p)
 {
