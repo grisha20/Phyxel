@@ -747,7 +747,11 @@ void CSCommit(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 bool ProjectionBoundary(int2 p)
 {
-    return p.x < 1 || p.y < 1 || p.x + 1 >= int(AirWidth) || p.y + 1 >= int(AirHeight);
+    // The particle world and oxygen reservoir have a solid floor. Giving
+    // that same edge atmospheric pressure creates a second, incompatible
+    // inlet below it. Closed edges use the missing-face Neumann condition.
+    return (AirSandboxMode & 2u)!=0 &&
+        (p.x < 1 || p.y < 1 || p.x + 1 >= int(AirWidth));
 }
 
 [numthreads(8, 8, 1)]
@@ -905,7 +909,6 @@ void CSProject(uint3 id : SV_DispatchThreadID)
         if(p.x==0)leftFlux=rightFlux;
         if(p.x+1==int(AirWidth))rightFlux=leftFlux;
         if(p.y==0)upFlux=downFlux;
-        if(p.y+1==int(AirHeight))downFlux=upFlux;
     }
     c.VelocityX = (leftFlux + rightFlux) * 0.5;
     c.VelocityY = (upFlux + downFlux) * 0.5;

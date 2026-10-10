@@ -38,6 +38,44 @@ internal static class AirInventoryRegressionVerifier
         void Tick(bool useAir=false,bool open=false,bool consume=false) => SimulationDispatchCoordinator.DispatchOxidizer(resources,1f/60,open,consume,useAir);
         static double Sum(float[] v) => v.Sum(x=>(double)x);
         static void Check(bool condition,string message) { if (!condition) throw new InvalidOperationException(message); }
+        // A prescribed canonical face field has exactly zero divergence in
+        // the measured interior. Inventory conservation alone missed the
+        // concentration error introduced by independent donor CFL limiters.
+        foreach(int steps in new[]{1,8,32})
+        {
+            var stock=Enumerable.Repeat(1f,w*h).ToArray();Upload(new GridCell[w*h],stock);
+            var faces=new System.Numerics.Vector4[w*h];
+            int cx=w/2,cy=h/2;
+            for(int y=0;y<h;y++)for(int x=0;x<w;x++)
+                faces[y*w+x]=new(2+.01f*(x-cx),-.01f*(y-cy),16,0);
+            resources.Context.UpdateSubresource(faces,resources.OxidizerCarrierFaces.Buffer);
+            resources.Context.UpdateSubresource(new System.Numerics.Vector2[w*h],resources.OxidizerCarrierPotential.ReadBuffer);
+            var c=resources.Context;var constants=new OxidizerConstants{Width=(uint)w,Height=(uint)h,
+                DeltaTime=1f/(60*steps),Reserved2=steps>1?1u:0u};
+            c.UpdateSubresource(ref constants,resources.OxidizerConstants);
+            c.ComputeShader.SetConstantBuffer(0,resources.OxidizerConstants);
+            c.ComputeShader.SetShaderResources(0,resources.Grid.ReadView,resources.Materials.View);
+            c.ComputeShader.SetShaderResource(7,resources.OxidizerCarrierPotential.ReadView);
+            c.ComputeShader.SetShaderResource(8,resources.OxidizerCarrierFaces.View);
+            c.ComputeShader.SetUnorderedAccessView(1,resources.OxidizerFlux.UnorderedView);
+            for(int step=0;step<steps;step++)
+            {
+                c.ComputeShader.SetShaderResource(2,resources.Oxidizer.ReadView);
+                c.ComputeShader.SetUnorderedAccessView(0,resources.Oxidizer.WriteUnorderedView);
+                c.ComputeShader.SetUnorderedAccessView(2,null);
+                c.ComputeShader.Set(resources.OxidizerFluxShader);c.Dispatch((w+15)/16,(h+15)/16,1);
+                c.ComputeShader.SetUnorderedAccessView(2,resources.OxidizerAvailable.UnorderedView);
+                c.ComputeShader.Set(resources.OxidizerTransportShader);c.Dispatch((w+15)/16,(h+15)/16,1);
+                c.ComputeShader.SetShaderResource(2,null);c.ComputeShader.SetUnorderedAccessView(0,null);
+                resources.Oxidizer.Swap();
+            }
+            c.ComputeShader.SetShaderResources(0,new ShaderResourceView?[9]);
+            c.ComputeShader.SetUnorderedAccessViews(0,new UnorderedAccessView?[5]);
+            var after=Oxygen();double error=0;
+            for(int y=cy-20;y<=cy+20;y++)for(int x=cx-20;x<=cx+20;x++)error=Math.Max(error,Math.Abs(after[y*w+x]-1));
+            Console.WriteLine($"PHYXEL_OXYGEN_UNIFORM steps={steps} maxError={error:R}");
+            Check(steps==1?error>1e-4:error<=5e-6,$"Uniform oxygen CFL fixture failed: steps={steps},error={error}");
+        }
         void Balance(double expected,string label)
         {
             var stock=Oxygen(); double error=Math.Abs(Sum(stock)-expected);

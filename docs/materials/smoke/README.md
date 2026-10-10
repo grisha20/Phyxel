@@ -1,5 +1,7 @@
 # Smoke — `core:smoke`
 
+- [FL: длительная печь, границы воздуха и выбранные проверки](../shared/FURNACE_LONG_RUN_RESULTS.md), [контракт](../shared/FURNACE_LONG_RUN_CONTRACT.md).
+
 - [HC: угольный фронт, бункер, наружный воздух и выбранные регрессии](../shared/HOPPER_COMBUSTION_RESULTS.md), [контракт](../shared/HOPPER_COMBUSTION_CONTRACT.md).
 
 - [CG: межкадровое мерцание, sparse/dense проверки](../shared/COAL_GPU_RESULTS.md), [контракт](../shared/COAL_GPU_CONTRACT.md).

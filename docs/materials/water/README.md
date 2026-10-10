@@ -1,5 +1,7 @@
 # Вода — `core:water`
 
+- [FL: длительная печь, границы воздуха и выбранные проверки](../shared/FURNACE_LONG_RUN_RESULTS.md), [контракт](../shared/FURNACE_LONG_RUN_CONTRACT.md).
+
 - [HC: угольный фронт, бункер, наружный воздух и выбранные регрессии](../shared/HOPPER_COMBUSTION_RESULTS.md), [контракт](../shared/HOPPER_COMBUSTION_CONTRACT.md).
 
 - [WT: ускорение мокрого теплообмена](../shared/WATER_THERMAL_PERFORMANCE_CONTRACT.md), [A/B и проверки](../shared/WATER_THERMAL_PERFORMANCE_RESULTS.md).

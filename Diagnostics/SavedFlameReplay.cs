@@ -103,6 +103,22 @@ internal static class SavedFlameReplay
                     var grid = MemoryMarshal.Cast<byte, GridCell>(AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer)).ToArray();
                     var air = MemoryMarshal.Cast<byte, AirCell>(AirInventoryRegressionVerifier.Read(r, r.Air.Buffer)).ToArray();
                     var motion = MemoryMarshal.Cast<byte, GasMotionState>(AirInventoryRegressionVerifier.Read(r, r.GasMotion.Buffer)).ToArray();
+                    var heat = MemoryMarshal.Cast<byte, System.Numerics.Vector2>(AirInventoryRegressionVerifier.Read(r, r.AirThermal.Buffer)).ToArray();
+                    var oxygen = MemoryMarshal.Cast<byte, float>(AirInventoryRegressionVerifier.Read(r, r.Oxidizer.ReadBuffer)).ToArray();
+                    object Section(string name, int x0, int y0, int x1, int y1)
+                    {
+                        double vx=0,vy=0,e=0,c=0,o=0; int count=0;
+                        for(int y=y0/4;y<=y1/4;y++)for(int x=x0/4;x<=x1/4;x++)
+                        {
+                            int i=y*r.AirWidth+x;
+                            if(air[i].Blocked>.5f)continue;
+                            vx+=air[i].VelocityX;vy+=air[i].VelocityY;e+=heat[i].X;c+=heat[i].Y;count++;
+                        }
+                        int fineCount=0;
+                        for(int y=y0;y<=y1;y++)for(int x=x0;x<=x1;x++){o+=oxygen[y*r.Width+x];fineCount++;}
+                        return new{name,vx=vx/Math.Max(1,count),vy=vy/Math.Max(1,count),
+                            temperature=c>0?(double?)(e/c-273.15):null,capacity=c,oxygen=o/Math.Max(1,fineCount)};
+                    }
                     var indices = Enumerable.Range(0, grid.Length).Where(i => grid[i].IsActive != 0 && grid[i].MaterialIndex == fire).ToArray();
                     double Mean(Func<int, double> f) => indices.Length > 0 ? indices.Average(f) : 0;
                     var stocks=Enumerable.Range(0,grid.Length).Where(i=>grid[i].IsActive!=0&&grid[i].MaterialIndex==coal).ToArray();
@@ -117,6 +133,13 @@ internal static class SavedFlameReplay
                         fireAirVy = Mean(i => air[(i / r.Width / 4) * r.AirWidth + i % r.Width / 4].VelocityY),
                         hopper=Stock(i=>i/r.Width<350),firebox=Stock(i=>i/r.Width>=350&&i%r.Width<400),
                         exterior=Stock(i=>i%r.Width>=500),
+                        // Observation coordinates belong only to the HC user fixture.
+                        // Never used to control production physics or smaller fixtures.
+                        sections=r.Width==968&&r.Height==564?new[]{
+                            Section("inlet",170,500,200,510),Section("underGrate",200,520,340,540),
+                            Section("firebox",280,430,355,475),Section("turn",278,375,307,405),
+                            Section("horizontal",145,338,255,355),Section("chimney",102,100,124,300),
+                            Section("mouth",100,35,126,58)}:Array.Empty<object>(),
                         oilStock = grid.Where(c => c.IsActive != 0).Sum(c => (double)c.FuelMass),
                         airMaxSpeed = air.Max(a => Math.Sqrt(a.VelocityX * a.VelocityX + a.VelocityY * a.VelocityY)) };
                     rows.Add(row);

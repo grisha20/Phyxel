@@ -3226,12 +3226,31 @@ public sealed class SimulationDispatchCoordinator
             }
             context.ComputeShader.SetShaderResource(7,resources.OxidizerCarrierPotential.ReadView);
             resources.OxidizerCarrierWarm = true;
-            context.ComputeShader.Set(resources.OxidizerFluxShader);
-            context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
-            // The availability output is distinct from its SRV while writing.
-            context.ComputeShader.SetShaderResource(6, null);
-            context.ComputeShader.SetUnorderedAccessView(2, resources.OxidizerAvailable.UnorderedView);
-            context.ComputeShader.Set(resources.OxidizerTransportShader);
+            // Local donor clipping of one fast tick conserves inventory but
+            // destroys uniform concentration in a divergence-free carrier.
+            // Resolve the same elapsed time; projection and chemistry stay
+            // on their existing clocks. Still-air diffusion retains one pass.
+            int transportSteps=useAir&&Environment.GetEnvironmentVariable("PHYXEL_OXYGEN_CFL_REFERENCE")!="1"?8:1;
+            constants.DeltaTime=dt/transportSteps;
+            constants.Reserved2=transportSteps>1?1u:0u;
+            context.UpdateSubresource(ref constants,resources.OxidizerConstants);
+            context.ComputeShader.SetShaderResource(6,null);
+            for(int step=0;step<transportSteps;step++)
+            {
+                context.ComputeShader.SetShaderResource(2,resources.Oxidizer.ReadView);
+                context.ComputeShader.SetUnorderedAccessView(0,resources.Oxidizer.WriteUnorderedView);
+                context.ComputeShader.SetUnorderedAccessView(2,null);
+                context.ComputeShader.Set(resources.OxidizerFluxShader);
+                context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
+                context.ComputeShader.SetUnorderedAccessView(2,resources.OxidizerAvailable.UnorderedView);
+                context.ComputeShader.Set(resources.OxidizerTransportShader);
+                context.Dispatch(DivideRoundUp(resources.Width,16),DivideRoundUp(resources.Height,16),1);
+                context.ComputeShader.SetShaderResource(2,null);
+                context.ComputeShader.SetUnorderedAccessView(0,null);
+                resources.Oxidizer.Swap();
+            }
+            Unbind(context,9,5);
+            return;
         }
         context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
         Unbind(context, 9, 5);

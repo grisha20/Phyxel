@@ -1,5 +1,7 @@
 # CO₂ — `core:co2`
 
+- [FL: длительная печь, границы воздуха и выбранные проверки](../shared/FURNACE_LONG_RUN_RESULTS.md), [контракт](../shared/FURNACE_LONG_RUN_CONTRACT.md).
+
 - [HC: угольный фронт, бункер, наружный воздух и выбранные регрессии](../shared/HOPPER_COMBUSTION_RESULTS.md), [контракт](../shared/HOPPER_COMBUSTION_CONTRACT.md).
 
 - [Паспорт](PASSPORT.md): источники, поведение, критерии, статусы и ограничения.

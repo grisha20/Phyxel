@@ -184,7 +184,11 @@ float Limited(float flux,int2 a,int2 b)
     // Exhausting a donor in one step makes alternating empty/compressed
     // cells under convergent carrier flow, falsely extinguishing hot FIRE.
     // Both endpoints use this same face flux, so the reserve creates no air.
-    return flux*min(1,.5*Amount(Index(donor))/max(Outgoing(donor),1e-20));
+    // Carrier transport uses CFL substeps. The full donor budget preserves
+    // constant concentration whenever the resolved face flux is divergence-free
+    // and within CFL; locally rescaling a fast whole tick does not.
+    float reserve=OxygenReserved2!=0?1.0:.5;
+    return flux*min(1,reserve*Amount(Index(donor))/max(Outgoing(donor),1e-20));
 }
 [numthreads(16,16,1)]
 void CSTransport(uint3 tid : SV_DispatchThreadID)

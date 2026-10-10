@@ -158,15 +158,23 @@ float2 LimitFace(float2 f,float2 a,float2 b)
     float2 incoming=(p.x>0?Flux[i-1].xy:0)+(p.y>0?Flux[i-HeatWidth].zw:0);
     float2 transfer=incoming-own.xy-own.zw;
     float2 next=Thermal[i]+transfer.yx;
-    if ((HeatOpenBoundaries&1)!=0 && (p.x==0 || p.y==0 || p.x+1==int(HeatWidth) || p.y+1==int(HeatHeight)))
+    if ((HeatOpenBoundaries&1)!=0 && (p.x==0 || p.y==0 || p.x+1==int(HeatWidth)))
     {
         float2 velocity=float2(Carrier[i].VelocityX,Carrier[i].VelocityY);
         bool inflow=(p.x==0&&velocity.x>0)||(p.y==0&&velocity.y>0)||
-            (p.x+1==int(HeatWidth)&&velocity.x<0)||(p.y+1==int(HeatHeight)&&velocity.y<0);
-        // The atmosphere supplies fresh inflow and accepts outgoing heat.
-        // Cooling an outflow back to ambient here used to brake its buoyancy.
-        float temperature=inflow||next.y<=0 ? HeatAmbient+273.15 : next.x/next.y;
-        next=float2(temperature*HeatCapacity,HeatCapacity);
+            (p.x+1==int(HeatWidth)&&velocity.x<0);
+        float ambient=HeatAmbient+273.15;
+        if(inflow || next.y<=0) next=float2(ambient*HeatCapacity,HeatCapacity);
+        else
+        {
+            // The reservoir accepts excess capacity at its own temperature;
+            // any missing capacity arrives with ambient specific energy.
+            // Restoring C while retaining hot T multiplied finite excess heat
+            // at depleted outlets and sustained wind after the source ended.
+            float change=HeatCapacity-next.y;
+            next.x+=change*(change>=0?ambient:next.x/next.y);
+            next.y=HeatCapacity;
+        }
     }
     Thermal[i]=next;
 }

@@ -1,5 +1,7 @@
 # Огонь — `core:fire`
 
+- [FL: длительная печь, границы воздуха и выбранные проверки](../shared/FURNACE_LONG_RUN_RESULTS.md), [контракт](../shared/FURNACE_LONG_RUN_CONTRACT.md).
+
 - [HC: угольный фронт, бункер, наружный воздух и выбранные регрессии](../shared/HOPPER_COMBUSTION_RESULTS.md), [контракт](../shared/HOPPER_COMBUSTION_CONTRACT.md).
 
 - [CG: стабильный отображаемый слой и контроль горения/печи](../shared/COAL_GPU_RESULTS.md), [контракт](../shared/COAL_GPU_CONTRACT.md).

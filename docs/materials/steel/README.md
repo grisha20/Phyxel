@@ -1,5 +1,7 @@
 # Сталь — `core:steel`
 
+- [FL: длительная печь, границы воздуха и выбранные проверки](../shared/FURNACE_LONG_RUN_RESULTS.md), [контракт](../shared/FURNACE_LONG_RUN_CONTRACT.md).
+
 - [SE: спокойная заливка и выход пара](../shared/STEAM_ESCAPE_CONTRACT.md), [измерения и границы](../shared/STEAM_ESCAPE_RESULTS.md).
 
 - [QR: повторная работа над заливкой, пузырьками и отскоком](../shared/WATER_REWETTING_CONTRACT.md), [новые результаты](../shared/WATER_REWETTING_RESULTS.md).

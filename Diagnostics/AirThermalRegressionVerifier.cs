@@ -198,6 +198,28 @@ internal static class AirThermalRegressionVerifier
             if(warming && id==CoreMaterialIds.Wood)Check(after[gi].Temperature==100 && after[gi].MoistureEnergy>20,"Wet wood lost drying plateau Q");
             Console.WriteLine(FormattableString.Invariant($"PHYXEL_AIR_HEAT_SURFACE id={id} warming={warming} Q={bodyChange:F6} error={balance:F8}"));
         }
+        // The same floor is sealed for particles, oxygen and the pressure
+        // carrier. An open atmosphere at the other three edges must not reset
+        // this bottom stock even though the scene uses OpenBoundaries.
+        Array.Clear(grid);Array.Clear(air);Array.Clear(links);
+        ctx.UpdateSubresource(grid,r.Grid.ReadBuffer);SetCarrier();ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer);
+        var floorStock=Enumerable.Repeat(new Vector2(773.15f*.032f,.032f),an).ToArray();
+        ctx.UpdateSubresource(floorStock,r.AirThermal.Buffer);
+        SimulationDispatchCoordinator.DispatchAirHeat(r,true);
+        heat=Read();int floorIndex=(r.AirHeight-1)*r.AirWidth+r.AirWidth/2;
+        Check(heat[floorIndex]==floorStock[floorIndex],"Closed floor exchanged thermal stock with atmosphere");
+        Console.WriteLine("PHYXEL_AIR_HEAT_CLOSED_FLOOR_SUCCESS");
+        // Resetting a depleted hot outflow to nominal capacity must not
+        // multiply its excess heat. An atmospheric refill supplies ambient E.
+        int outlet=(r.AirHeight/2)*r.AirWidth+r.AirWidth-1;
+        var outletStock=Fresh();outletStock[outlet]=new(773.15f*.004f,.004f);
+        air[outlet].VelocityX=1;SetCarrier();ctx.UpdateSubresource(outletStock,r.AirThermal.Buffer);
+        SimulationDispatchCoordinator.DispatchAirHeat(r,true);heat=Read();
+        double outletBefore=outletStock[outlet].X-293.15*outletStock[outlet].Y;
+        double outletAfter=heat[outlet].X-293.15*heat[outlet].Y;
+        Console.WriteLine(FormattableString.Invariant($"PHYXEL_AIR_HEAT_OUTLET before={outletBefore:F8} after={outletAfter:F8}"));
+        Check(outletAfter<=outletBefore+1e-5 && outletAfter>=outletBefore-1e-5,
+            "Atmospheric outlet created excess thermal energy");
         Console.WriteLine("PHYXEL_AIR_HEAT_SUCCESS");
     }
 }
