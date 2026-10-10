@@ -220,6 +220,28 @@ internal static class AirThermalRegressionVerifier
         Console.WriteLine(FormattableString.Invariant($"PHYXEL_AIR_HEAT_OUTLET before={outletBefore:F8} after={outletAfter:F8}"));
         Check(outletAfter<=outletBefore+1e-5 && outletAfter>=outletBefore-1e-5,
             "Atmospheric outlet created excess thermal energy");
+        // A closed streamfunction gives exactly balanced canonical faces.
+        // Uniform stock must stay uniform, not merely retain its global sum.
+        // A per-donor whole-tick limiter can pass every balance above while
+        // creating near-vacuum pockets that drive temperature-based buoyancy.
+        Array.Clear(grid);Array.Clear(air);Array.Clear(links);
+        int cw=r.AirWidth,ch=r.AirHeight;
+        double Psi(int x,int y) => 3.0*Math.Min(cw,ch)/Math.PI*
+            Math.Pow(Math.Sin(Math.PI*x/cw),2)*Math.Pow(Math.Sin(Math.PI*y/ch),2);
+        var canonical=new Vector2[an];
+        for(int y=0;y<ch;y++)for(int x=0;x<cw;x++){
+            int i=y*cw+x;
+            canonical[i]=new((float)(Psi(x+1,y+1)-Psi(x+1,y)),(float)(Psi(x,y+1)-Psi(x+1,y+1)));
+            if(x>0)links[i]|=1u<<3;if(x+1<cw)links[i]|=1u<<5;
+            if(y>0)links[i]|=1u<<1;if(y+1<ch)links[i]|=1u<<7;
+        }
+        ctx.UpdateSubresource(grid,r.Grid.ReadBuffer);ctx.UpdateSubresource(air,r.Air.Buffer);
+        ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer);ctx.UpdateSubresource(canonical,r.AirProjectionB.Buffer);
+        ctx.UpdateSubresource(Fresh(),r.AirThermal.Buffer);
+        for(int tick=0;tick<120;tick++)SimulationDispatchCoordinator.DispatchAirHeat(r,false);
+        heat=Read();double uniformCapacityError=heat.Max(s=>Math.Abs(s.Y/.016-1));
+        Console.WriteLine(FormattableString.Invariant($"PHYXEL_AIR_HEAT_UNIFORM capacityError={uniformCapacityError:R} minC={heat.Min(s=>s.Y):R} maxC={heat.Max(s=>s.Y):R}"));
+        Check(uniformCapacityError<=1e-4,"Divergence-free carrier created nonuniform heat capacity");
         Console.WriteLine("PHYXEL_AIR_HEAT_SUCCESS");
     }
 }

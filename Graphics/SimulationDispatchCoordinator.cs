@@ -2404,17 +2404,21 @@ public sealed class SimulationDispatchCoordinator
     {
         var context=resources.Context;
         resources.AirHeatTimer?.Begin(context);
+        int transportSteps=Environment.GetEnvironmentVariable("PHYXEL_HEAT_CFL_REFERENCE")=="1"?1:4;
         var constants=new AirThermalConstants { Width=(uint)resources.AirWidth, Height=(uint)resources.AirHeight,
             GridWidth=(uint)resources.Width,GridHeight=(uint)resources.Height, Ambient=20,Capacity=.016f,
-            Exchange=.12f,OpenBoundaries=(openBoundaries?1u:0u)|((surfacePhase&3u)<<1) };
+            Exchange=.12f,OpenBoundaries=(openBoundaries?1u:0u)|((surfacePhase&3u)<<1)|((uint)transportSteps<<8) };
         context.UpdateSubresource(ref constants,resources.AirThermalConstants);
         context.ComputeShader.SetConstantBuffer(0,resources.AirThermalConstants);
         context.ComputeShader.SetShaderResources(0,resources.Air.View,resources.AirFlowLinks.View,resources.Materials.View,resources.AirProjectionB.View);
         context.ComputeShader.SetUnorderedAccessViews(0,resources.AirThermal.UnorderedView,resources.Grid.ReadUnorderedView,resources.AirThermalFlux.UnorderedView);
         int x=DivideRoundUp(resources.AirWidth,8), y=DivideRoundUp(resources.AirHeight,8);
         RunAirPass(context,resources.AirHeatExchangeShader,x,y);
-        RunAirPass(context,resources.AirHeatFluxShader,x,y);
-        RunAirPass(context,resources.AirHeatTransportShader,x,y);
+        for(int step=0;step<transportSteps;step++)
+        {
+            RunAirPass(context,resources.AirHeatFluxShader,x,y);
+            RunAirPass(context,resources.AirHeatTransportShader,x,y);
+        }
         resources.AirHeatTimer?.End(context);
         Unbind(context,4,3);
     }

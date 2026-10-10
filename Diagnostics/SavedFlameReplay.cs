@@ -59,9 +59,9 @@ internal static class SavedFlameReplay
                 return copy;
             }
             var world = control == "saved" ? source : source with { Air = null, GasMotion = null };
-            if (control is "cold" or "mirror-cold" or "cold-hopper" or "fresh-mound")
+            if (control is "cold" or "mirror-cold" or "cold-hopper" or "filled-hopper" or "fresh-mound")
                 world = world with { AirThermal = null, Oxidizer = null, ReactionPending = null, ReactionPulse = null };
-            if(control=="cold-hopper")
+            if(control is "cold-hopper" or "filled-hopper")
             {
                 var coldGrid=MemoryMarshal.Cast<byte,GridCell>(source.Grid).ToArray();
                 for(int i=0;i<coldGrid.Length;i++)
@@ -71,6 +71,13 @@ internal static class SavedFlameReplay
                     if(i/source.Width<350 && coldGrid[i].MaterialIndex==coal)
                     {coldGrid[i].Temperature=30;coldGrid[i].Lifetime=0;}
                     if(i/source.Width<350 && coldGrid[i].MaterialIndex==fire)coldGrid[i]=default;
+                    // A separate fixture fills the user's upper hopper.
+                    // Observation coordinates never control production physics.
+                    int x=i%source.Width,y=i/source.Width;
+                    if(control=="filled-hopper" && source.Width==968 && source.Height==564 &&
+                        x>344 && x<466 && y>198+(x-344)*.44 && y<712-x && y<324 &&
+                        (coldGrid[i].IsActive==0 || registry[coldGrid[i].MaterialIndex].Properties.SimulationKind==(uint)MaterialSimulationKind.Gas))
+                        coldGrid[i]=new(){IsActive=1,MaterialIndex=coal,Mass=1,Temperature=30};
                 }
                 world=world with {Grid=MemoryMarshal.AsBytes(coldGrid.AsSpan()).ToArray()};
             }
@@ -87,17 +94,24 @@ internal static class SavedFlameReplay
             if (control == "mirror-cold")
                 world = world with { Grid = Mirror(source.Grid)!, Filters = Mirror(source.Filters) };
             serializer.ApplyWorldSnapshot(r, world);
+            File.WriteAllBytes(Path.Combine(dir,$"{mode}-{control}-filters.bin"),MemoryMarshal.AsBytes(r.FilterMap.AsSpan()).ToArray());
             coordinator.RestoreWorldActivity(r, true, true, settings.HydraulicPressure, true);
             coordinator.RenderDiagnosticSnapshot(r,settings);
             settings.Paused = false;
             string label = $"{mode}-{control}";
             var rows = new List<object>();
+            using var timer=new GpuStageTimer(r.Device);
             for (int frame = 0; frame <= seconds*fps; frame++)
             {
-                if (frame > 0) coordinator.DispatchFrame(settings,
-                    control=="fresh-mound"&&frame>=fps&&frame<fps*1.5
-                        ? [new(){X=18,Y=143,EndX=18,EndY=143,Radius=4,Density=1,MaterialIndex=fire,Seed=73001}]
-                        : [],1f/fps);
+                if (frame > 0)
+                {
+                    timer.Begin(r.Context);
+                    coordinator.DispatchFrame(settings,
+                        control=="fresh-mound"&&frame>=fps&&frame<fps*1.5
+                            ? [new(){X=18,Y=143,EndX=18,EndY=143,Radius=4,Density=1,MaterialIndex=fire,Seed=73001}]
+                            : [],1f/fps);
+                    timer.End(r.Context);
+                }
                 if (frame % fps == 0)
                 {
                     var grid = MemoryMarshal.Cast<byte, GridCell>(AirInventoryRegressionVerifier.Read(r, r.Grid.ReadBuffer)).ToArray();
@@ -127,6 +141,7 @@ internal static class SavedFlameReplay
                         burning=cells.Count(i=>grid[i].Lifetime>0),temperature=cells.Length>0?cells.Average(i=>(double)grid[i].Temperature):0,
                         maxTemperature=cells.Length>0?cells.Max(i=>grid[i].Temperature):0};}
                     var row = new { seconds = frame / fps, fireCount = indices.Length,
+                        gpu=timer.Statistics, airHeatGpu=coordinator.AirHeatGpuTiming,
                         fireX = Mean(i => i % r.Width), fireY = Mean(i => i / r.Width),
                         fireVx = Mean(i => motion[i].VelocityX), fireVy = Mean(i => motion[i].VelocityY),
                         fireAirVx = Mean(i => air[(i / r.Width / 4) * r.AirWidth + i % r.Width / 4].VelocityX),

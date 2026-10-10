@@ -105,10 +105,14 @@ float2 Candidate(int2 p,int2 d)
 {
     if (!Connected(p,d)) return 0;
     float v=d.x!=0 ? CarrierFaces[Index(p)].x : CarrierFaces[Index(p)].y;
-    float advection=clamp(v/4,-1,1);
+    // Bits 8..15 encode transport substeps; exchange still happens once.
+    // Per-donor limiting of a fast whole tick breaks uniform carrier stock
+    // even when the canonical face field has exactly zero divergence.
+    float step=1.0/max(1u,(HeatOpenBoundaries>>8)&255u);
+    float advection=clamp(v/4*step,-1,1);
     float2 sa=Thermal[Index(p)], sb=Thermal[Index(p+d)];
     float capacityFlux=advection*(advection>=0?sa.y:sb.y);
-    float energyFlux=capacityFlux*(advection>=0?T(p):T(p+d))+.025*min(sa.y,sb.y)*(T(p)-T(p+d));
+    float energyFlux=capacityFlux*(advection>=0?T(p):T(p+d))+.025*step*min(sa.y,sb.y)*(T(p)-T(p+d));
     return float2(capacityFlux,energyFlux);
 }
 // Share raw faces and donor limits within the tile. Two halo layers cover

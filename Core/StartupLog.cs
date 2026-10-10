@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Phyxel.Core;
@@ -21,6 +23,9 @@ internal static class StartupLog
             // Unique per process/run: another launch doesn't overwrite evidence.
             path = System.IO.Path.Combine(directory, $"startup-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}.log");
             Write($"start version={typeof(StartupLog).Assembly.GetName().Version} os={Environment.OSVersion} 64bit={Environment.Is64BitProcess}");
+            var assembly=typeof(StartupLog).Assembly;
+            Write($"runtime executable={Environment.ProcessPath} assembly={assembly.Location}");
+            Write($"build configuration={assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration} revision={assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion} assemblySha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(assembly.Location)))}");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }

@@ -89,6 +89,12 @@ internal static class HopperCombustionRegressionVerifier
             var after=Read<GridCell>(r.Grid.ReadBuffer);var pending=Read<Vector4>(r.ReactionPending.Buffer);
             double consumed=initialFuel-after.Where(cell=>cell.IsActive!=0&&cell.MaterialIndex==fuel).Sum(cell=>(double)cell.Mass);
             double oilConsumed=initialOil-after.Sum(cell=>(double)cell.FuelMass);
+            if(finiteOxygen && scenario!="absorbed-oil")
+            {
+                double demand=Read<float>(r.OxidizerDemand.Buffer).Sum(value=>(double)value);
+                double expectedDemand=consumed*registry.CreateEmissionGpuTable()[fuel].OxidizerPerMass;
+                Check(Math.Abs(demand-expectedDemand)<=1e-5,"Oxygen demand did not follow actual burned fuel mass");
+            }
             double expected=before+consumed*registry[fuel].Properties.HeatPerMass+oilConsumed*registry[oil].Properties.HeatPerMass;
             double actual=Energy(after)+pending.Sum(p=>(double)p.Y);
             double error=Math.Abs(actual-expected)/Math.Max(1,Math.Abs(expected));

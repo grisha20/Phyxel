@@ -18,7 +18,7 @@ internal static class FurnaceCombustionRegressionVerifier
         int w=resources.Width, h=resources.Height, n=w*h, index=80*w+80;
         var context=resources.Context;
         void Check(bool ok, string message) { if (!ok) throw new InvalidOperationException(message); }
-        (double Burn, float Gas, float Rise) Reaction(string id, float oxygen, bool oneFace, bool finite,
+        (double Burn, float Gas, float Rise, float Oxygen) Reaction(string id, float oxygen, bool oneFace, bool finite,
             float mass = 0, bool noFace = false, bool latched = false)
         {
             var material=registry[id].Properties;
@@ -55,7 +55,7 @@ internal static class FurnaceCombustionRegressionVerifier
             var demand=MemoryMarshal.Cast<byte,float>(AirInventoryRegressionVerifier.Read(resources,resources.OxidizerDemand.Buffer));
             double burn=(mass>0?mass:material.Density)-after[index].Mass;
             Check(Math.Abs(demand[index]-(finite?burn*registry.CreateEmissionGpuTable()[registry.GetRequiredRuntimeIndex(id)].OxidizerPerMass:0))<2e-6,"Demand disagrees with actual fuel loss");
-            return (burn,requests[n*2+index].Mass,after[index].Temperature-material.MaximumCombustionTemperature+10);
+            return (burn,requests[n*2+index].Mass,after[index].Temperature-material.MaximumCombustionTemperature+10,demand[index]);
         }
         foreach (string id in new[] { CoreMaterialIds.Coal, CoreMaterialIds.StoneCoal, CoreMaterialIds.Wood })
         {
@@ -87,8 +87,12 @@ internal static class FurnaceCombustionRegressionVerifier
         var calibrated = Reaction(CoreMaterialIds.Coal,1,false,true,mass:painted[index].Mass);
         Check(Math.Abs(calibrated.Burn-.06/60)<2e-7 && Math.Abs(calibrated.Rise-3/(1-.06/60))<.001,
             "Coal full-rate/half-retained heat partition changed");
-        Check(Math.Abs(calibrated.Burn*registry.CreateEmissionGpuTable()[registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal)].OxidizerPerMass-.24/60)<2e-7,
-            "Coal calibration changed full-rate oxidizer consumption");
+        // FA06 restores the per-mass normalization: .06 fuel/s * 20 O2/fuel.
+        // Accelerating burnout must not silently reduce demand per fuel mass.
+        // Read the actual GPU ledger; multiplying a subtraction of two
+        // Mass1 floats amplifies its quantization error by the new factor20.
+        Check(Math.Abs(calibrated.Oxygen-1.2/60)<2e-7,
+            "Coal full-rate oxidizer demand does not match the per-mass contract");
         foreach(string id in new[]{CoreMaterialIds.Coal,CoreMaterialIds.StoneCoal})
         {
             var enclosed = Reaction(id,0,false,false,mass:1,noFace:true);
@@ -210,6 +214,6 @@ internal static class FurnaceCombustionRegressionVerifier
         Check(before.MaterialIndex==coal && before.Mass>0,"Coal burned out before its calibrated lifetime");
         Step(2);var after=MemoryMarshal.Cast<byte,GridCell>(Read())[index];
         Check(after.MaterialIndex==fire,"Coal did not become a flame at 16.7s after save-load");
-        Console.WriteLine("PHYXEL_COAL_LIFETIME brushMass=1 totalReactionPower=360 halfInitiallyRetained oxidizerRate=.24 fullRateBurnoutSeconds=16.7 closedCore=PASS pauseModesSaveLoadPending=PASS");
+        Console.WriteLine("PHYXEL_COAL_LIFETIME brushMass=1 totalReactionPower=360 halfInitiallyRetained oxidizerRate=1.2 fullRateBurnoutSeconds=16.7 closedCore=PASS pauseModesSaveLoadPending=PASS");
     }
 }

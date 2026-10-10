@@ -1,5 +1,9 @@
 # Паспорта материалов
 
+FA2026-10-10: три новые печи, холодный запас, численный перенос E/C и
+синхронизация Debug/Release — [контракт](shared/FURNACE_ATMOSPHERE_CONTRACT.md),
+[проверки и ограничения](shared/FURNACE_ATMOSPHERE_RESULTS.md).
+
 FL2026-10-10: длительная печь, согласованный закрытый пол, перенос O₂
 и конечное тепло атмосферного выхода — [контракт](shared/FURNACE_LONG_RUN_CONTRACT.md),
 [измерения, стоимость и ограничения](shared/FURNACE_LONG_RUN_RESULTS.md).
