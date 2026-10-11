@@ -65,7 +65,7 @@ float3 FlameColor(GridCell cell, uint seed)
 {
     MaterialProperties material = Materials[cell.MaterialIndex];
     float life = material.MaximumLifetime > 0
-        ? saturate(FlameDisplayLifetime(cell) / material.MaximumLifetime)
+        ? saturate(FlameDisplayLifetime(cell, material) / material.MaximumLifetime)
         : 1;
     float flicker = 0.78 + 0.22 * HashUnitFloat(seed + FrameIndex * 17);
     float3 orange = float3(1.0, 0.10, 0.005);

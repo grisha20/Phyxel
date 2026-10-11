@@ -166,7 +166,61 @@ internal static class FurnaceCombustionRegressionVerifier
             Check((after[index].MaterialIndex==registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire))==(paid&&flameTemperature>100),
                 "Fuel heat tracer was quenched a second time or painted fire ignored oxygen");
         }
+        VerifyPaidFlameDisplay(registry, resources);
         Console.WriteLine("PHYXEL_FURNACE_COMBUSTION_SUCCESS");
+    }
+
+    private static void VerifyPaidFlameDisplay(MaterialRegistry registry, GpuSimulationResources r)
+    {
+        // Exercise the actual GPU light deposit on identical 4x4 parcels.
+        // No simulation step: graphics must not create heat, life or oxygen.
+        int x0=80, y0=80;
+        var context=r.Context;
+        uint fire=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Fire);
+        FireGlowCell Deposit(float temperature, float life, uint marker, uint material, float mass=.001f)
+        {
+            var grid=new GridCell[r.Width*r.Height];
+            for(int y=y0;y<y0+4;y++) for(int x=x0;x<x0+4;x++)
+                grid[y*r.Width+x]=new(){IsActive=1,MaterialIndex=material,Mass=mass,
+                    Temperature=temperature,Lifetime=life,BodyId=marker};
+            context.UpdateSubresource(grid,r.Grid.ReadBuffer);
+            byte[] before=AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer);
+            context.ClearUnorderedAccessView(r.FireGlow.UnorderedView,new RawInt4());
+            var constants=new FireGlowConstants{FireGlowWidth=(uint)r.AirWidth,
+                FireGlowHeight=(uint)r.AirHeight,FireGlowGridWidth=(uint)r.Width,
+                FireGlowGridHeight=(uint)r.Height,FireGlowDeposit=31f/255f,
+                FireGlowDecay=.0157f,FireGlowEmberStrength=.45f};
+            context.UpdateSubresource(ref constants,r.FireGlowConstants);
+            context.ComputeShader.Set(r.FireGlowDepositShader);
+            context.ComputeShader.SetConstantBuffer(0,r.FireGlowConstants);
+            context.ComputeShader.SetShaderResources(0,r.Materials.View,r.Grid.ReadView);
+            context.ComputeShader.SetUnorderedAccessViews(0,r.FireGlow.UnorderedView,r.FireGlowScratch.UnorderedView);
+            context.Dispatch((r.AirWidth+7)/8,(r.AirHeight+7)/8,1);
+            for(int i=0;i<2;i++){context.ComputeShader.SetShaderResource(i,null);context.ComputeShader.SetUnorderedAccessView(i,null);}
+            if(!before.AsSpan().SequenceEqual(AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer)))
+                throw new InvalidOperationException("Flame display changed physical parcels.");
+            return MemoryMarshal.Cast<byte,FireGlowCell>(AirInventoryRegressionVerifier.Read(r,r.FireGlow.Buffer))[
+                (y0/4)*r.AirWidth+x0/4];
+        }
+        void Check(bool pass,string message){if(!pass)throw new InvalidOperationException(message);}
+        const uint paid=0x60000000u;
+        var hot=Deposit(800,.16f,paid,fire);
+        var ordinary=Deposit(800,.16f,0,fire);
+        var cold=Deposit(100,.16f,paid,fire);
+        var warm=Deposit(260,.16f,paid,fire);
+        var ending=Deposit(800,.005f,paid,fire);
+        var expired=Deposit(800,0,paid,fire);
+        var fresh=Deposit(800,2.5f,paid,fire);
+        var ordinaryFresh=Deposit(800,2.5f,0,fire);
+        var smoke=Deposit(800,.16f,paid,registry.GetRequiredRuntimeIndex(CoreMaterialIds.Smoke));
+        Check(hot.Red>4*ordinary.Red,"Hot paid tail still fades almost black like an old ordinary flame.");
+        Check(cold.Red==0 && cold.Green==0 && cold.Blue==0,"Cooled paid flame emits hot light.");
+        Check(warm.Red>cold.Red && warm.Red<hot.Red,"Cooling does not reduce paid flame light.");
+        Check(ending.Red<hot.Red && expired.Red==0,"Paid flame does not fade at the end of its actual life.");
+        Check(fresh.Equals(ordinaryFresh),"Newborn paid flame no longer uses the existing palette.");
+        Check(smoke.Red==0 && smoke.Green==0 && smoke.Blue==0 && smoke.Smoke>0,
+            "Hot smoke has been painted as flame.");
+        Console.WriteLine(FormattableString.Invariant($"PHYXEL_PAID_FLAME_DISPLAY_SUCCESS hotRed={hot.Red:F6} ordinaryRed={ordinary.Red:F6} coolingEndSmokeFresh=PASS gridUnchanged=PASS"));
     }
 
     private static void VerifyCoalLifetime(SimulationDispatchCoordinator coordinator, MaterialRegistry registry,

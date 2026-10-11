@@ -1,5 +1,7 @@
 # Древесный уголь — `core:coal`
 
+- [FP12: видимость фактического горячего хвоста и парные сравнения](../shared/FURNACE_POWER_RESULTS.md).
+
 - [FP: пламя, поддув, излучение стен и нерешённый нагрев](../shared/FURNACE_POWER_RESULTS.md), [контракт](../shared/FURNACE_POWER_CONTRACT.md).
 
 - [FA: новые печи, перенос E/C и проверяемая сборка](../shared/FURNACE_ATMOSPHERE_RESULTS.md), [контракт](../shared/FURNACE_ATMOSPHERE_CONTRACT.md).
