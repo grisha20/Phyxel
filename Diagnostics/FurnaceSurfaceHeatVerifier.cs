@@ -129,6 +129,22 @@ internal static class FurnaceSurfaceHeatVerifier
                 "Visible granular surface must exchange with fire and hot metal");
         }
         uint charcoal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal);
+        // Compare direct finite flame heating with the same low-k grain's
+        // dry interior conduction; external coupling must not raise bulk k.
+        var contact=new GridCell[w*r.Height];contact[centre]=Cell(charcoal,30);
+        contact[centre-w]=Cell(fire,1000,.1f);
+        var direct=Advance(contact,1,"granular/direct-flame");
+        float directRise=direct[centre].Temperature-30;
+        Check(directRise>5,"Direct flame must heat the exposed grain without a temperature jump");
+        contact[centre-w]=Cell(charcoal,1000,.1f);
+        var internalHeat=Advance(contact,1,"granular/internal-conduction");
+        Check(directRise>3*(internalHeat[centre].Temperature-30),"External heating must not share the slow interior rate");
+        contact[centre-w]=default;contact[centre-w+1]=Cell(fire,1000,.1f);
+        Check(Advance(contact,1,"granular/diagonal-flame")[centre].Temperature>30,
+            "Exposed diagonal grain must receive flame heat");
+        contact[centre+1]=Cell(fixture,30);contact[centre-w]=Cell(fixture,30);
+        Check(Advance(contact,1,"granular/closed-contact-corner")[centre].Temperature==30,
+            "Diagonal flame must not heat through a closed corner");
         foreach(string control in new[]{"opaque","corner","range","insulator"})
         {
             var grid=new GridCell[w*r.Height];grid[centre]=Cell(charcoal,20);
@@ -176,6 +192,29 @@ internal static class FurnaceSurfaceHeatVerifier
         var drying = Advance(porous, 120, "wood/drying");
         Check(drying[centre].Temperature == 100 && drying[centre].MoistureEnergy > 20.01f,
             "radiant heat enters retained water drying plateau");
+        // One finite hot carrier exchange: the exposed grain warms, a
+        // completely covered grain does not, and air pays the same energy.
+        var surfaceGrid=new GridCell[w*r.Height];int buried=centre+20;
+        surfaceGrid[centre]=Cell(charcoal,30);surfaceGrid[buried]=Cell(charcoal,30);
+        foreach(int offset in new[]{-1,1,-w,w})surfaceGrid[buried+offset]=Cell(fixture,30);
+        int airCount=r.AirWidth*r.AirHeight;
+        var carrierHeat=new System.Numerics.Vector2[airCount];
+        Array.Fill(carrierHeat,new((800+273.15f)*.016f,.016f));
+        r.Context.UpdateSubresource(surfaceGrid,r.Grid.ReadBuffer);
+        r.Context.UpdateSubresource(new AirCell[airCount],r.Air.Buffer);
+        r.Context.UpdateSubresource(new uint[airCount],r.AirFlowLinks.Buffer);
+        r.Context.UpdateSubresource(new System.Numerics.Vector2[airCount],r.AirProjectionB.Buffer);
+        r.Context.UpdateSubresource(carrierHeat,r.AirThermal.Buffer);
+        SimulationDispatchCoordinator.DispatchAirHeat(r,false);
+        var surfaceAfter=Read();
+        var airAfter=MemoryMarshal.Cast<byte,System.Numerics.Vector2>(AirInventoryRegressionVerifier.Read(r,r.AirThermal.Buffer)).ToArray();
+        double carrierBalance=Energy(surfaceAfter)-Energy(surfaceGrid);
+        for(int i=0;i<airCount;i++)carrierBalance+=airAfter[i].X-carrierHeat[i].X;
+        Check(Math.Abs(carrierBalance)<.002,"Granular/carrier exchange must conserve finite energy");
+        Check(surfaceAfter[centre].Temperature>31 && surfaceAfter[buried].Temperature==30,
+            "Only the exposed grain receives carrier heat");
+        Check(surfaceAfter.Sum(c=>(double)c.Mass)==surfaceGrid.Sum(c=>(double)c.Mass),"Carrier exchange must preserve grain mass");
+        Console.WriteLine(FormattableString.Invariant($"PHYXEL_SURFACE_CARRIER error={carrierBalance:F8} exposedC={surfaceAfter[centre].Temperature:F6} buriedC={surfaceAfter[buried].Temperature:F6}"));
         Console.WriteLine($"PHYXEL_SURFACE_COMPLETE checks={checks} failures={failures}");
         if (failures > 0 && Environment.GetEnvironmentVariable("PHYXEL_DRAFT_BASELINE") != "1")
             throw new InvalidOperationException("Surface heating checks failed.");

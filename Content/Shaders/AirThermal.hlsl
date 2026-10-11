@@ -9,6 +9,7 @@ StructuredBuffer<uint> Links : register(t1);
 StructuredBuffer<MaterialProperties> Materials : register(t2);
 StructuredBuffer<float2> CarrierFaces : register(t3);
 #include "PhaseEnthalpy.hlsli"
+#include "SurfaceThermalResponse.hlsli"
 RWStructuredBuffer<float2> Thermal : register(u0); // energy, transported heat capacity
 RWStructuredBuffer<GridCell> Grid : register(u1);
 RWStructuredBuffer<float4> Flux : register(u2); // right capacity/energy, down capacity/energy
@@ -68,7 +69,7 @@ bool ExchangeNode(int2 q, MaterialProperties m, out int2 mapped)
             if(c.IsActive!=0 && c.Mass>0 && ExchangeNode(q,m,mapped))
             {
                 owner=Index(mapped); capacity=CellEffectiveCapacity(c);
-                response=m.SimulationKind==SimulationKindGas ? 1 : saturate(m.ThermalConductivity);
+                response=m.SimulationKind==SimulationKindGas ? 1 : ExternalSurfaceThermalResponse(m);
                 InterlockedOr(ExchangeHasCells,1);
             }
         }

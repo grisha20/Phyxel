@@ -22,6 +22,7 @@ struct ThermalEnergyLedgerCell { float DeviceHeat; float AmbientHeat; };
 RWStructuredBuffer<ThermalEnergyLedgerCell> EnergyLedger : register(u1);
 
 #include "PhaseEnthalpy.hlsli"
+#include "SurfaceThermalResponse.hlsli"
 
 static const float MinimumThermalMass = 0.0001;
 static const float MaximumExchangeFraction = 0.80;
@@ -90,11 +91,13 @@ bool IsOrdinaryGasSurface(GridCell cell, GridCell neighbor)
     MaterialProperties a = Materials[cell.MaterialIndex];
     MaterialProperties b = Materials[neighbor.MaterialIndex];
     bool gasA = a.SimulationKind == SimulationKindGas &&
-        (a.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0;
+        ((a.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0 ||
+         b.SimulationKind == SimulationKindGranular);
     bool gasB = b.SimulationKind == SimulationKindGas &&
-        (b.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0;
-    return (gasA && b.SimulationKind == SimulationKindSolid) ||
-        (gasB && a.SimulationKind == SimulationKindSolid);
+        ((b.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0 ||
+         a.SimulationKind == SimulationKindGranular);
+    return (gasA && (b.SimulationKind == SimulationKindSolid || b.SimulationKind == SimulationKindGranular)) ||
+        (gasB && (a.SimulationKind == SimulationKindSolid || a.SimulationKind == SimulationKindGranular));
 }
 
 bool IsWetSurface(GridCell cell, GridCell neighbor)
@@ -149,6 +152,20 @@ float ContactHeatFlow(
         if (!HasWetCornerPath(index, neighborIndex, cell, neighbor)) return 0;
         contactWeight = DiagonalWetContactWeight;
     }
+    if (diagonalContact && gasSurface &&
+        (Materials[cell.MaterialIndex].SimulationKind == SimulationKindGranular ||
+         Materials[neighbor.MaterialIndex].SimulationKind == SimulationKindGranular))
+    {
+        // The diagonal flame cannot reach a buried grain through two solid
+        // side cells. The same two corners are tested by both endpoints.
+        uint2 p = uint2(index % ThermalWidth, index / ThermalWidth);
+        uint2 q = uint2(neighborIndex % ThermalWidth, neighborIndex / ThermalWidth);
+        GridCell sideA = SourceGrid[p.y * ThermalWidth + q.x];
+        GridCell sideB = SourceGrid[q.y * ThermalWidth + p.x];
+        bool blockedA = sideA.IsActive != 0 && Materials[sideA.MaterialIndex].SimulationKind != SimulationKindGas;
+        bool blockedB = sideB.IsActive != 0 && Materials[sideB.MaterialIndex].SimulationKind != SimulationKindGas;
+        if (blockedA && blockedB) return 0;
+    }
 
     float conductivityA = Materials[cell.MaterialIndex].ThermalConductivity;
     float conductivityB = Materials[neighbor.MaterialIndex].ThermalConductivity;
@@ -169,17 +186,20 @@ float ContactHeatFlow(
     }
     if (gasSurface)
     {
-        // Particle/wall contact represents unresolved gas mixing at a surface,
-        // not conduction through two stationary material slabs. Bound the
-        // interface by the solid's conductivity so insulators still insulate.
-        float solidConductivity = Materials[cell.MaterialIndex].SimulationKind == SimulationKindSolid
-            ? conductivityA : conductivityB;
+        // Gas/surface contact represents unresolved mixing at the interface.
+        // Fixed walls retain their existing conductivity-limited floor;
+        // grains separate external coupling from their slow interior k.
+        uint surfaceIndex = Materials[cell.MaterialIndex].SimulationKind == SimulationKindGas
+            ? neighbor.MaterialIndex : cell.MaterialIndex;
+        MaterialProperties surface = Materials[surfaceIndex];
+        float solidConductivity = surface.ThermalConductivity;
         uint gasFlags = Materials[cell.MaterialIndex].SimulationKind == SimulationKindGas
             ? Materials[cell.MaterialIndex].Flags : Materials[neighbor.MaterialIndex].Flags;
         float surfaceFloor = (gasFlags & MaterialFlagPhaseEnthalpy) != 0
             ? PhaseVapourSurfaceConductivityFloor : GasSurfaceConductivityFloor;
         contactConductivity = max(contactConductivity,
-            min(solidConductivity, surfaceFloor));
+            surface.SimulationKind == SimulationKindGranular
+                ? ExternalSurfaceThermalResponse(surface) : min(solidConductivity, surfaceFloor));
     }
     float neighborCapacity = EffectiveCapacity(neighbor);
     float exchangeFraction = min(
@@ -241,7 +261,7 @@ float RadiantPair(GridCell cell, GridCell other, uint index, uint otherIndex, fl
     bool gasA = IsRadiantGas(a);
     bool gasB = IsRadiantGas(b);
     uint gasFlags = gasA ? a.Flags : b.Flags;
-    float solidConductivity = gasA ? b.ThermalConductivity : a.ThermalConductivity;
+    float solidConductivity = gasA ? ExternalSurfaceThermalResponse(b) : ExternalSurfaceThermalResponse(a);
     // Explicit game strengths, not measured emissivity. Each endpoint has
     // the same visibility graph and coefficient; total incident budget <=.18 C.
     float coupling = saturate(solidConductivity) *
@@ -256,7 +276,7 @@ float RadiantPair(GridCell cell, GridCell other, uint index, uint otherIndex, fl
         float reference=1273.15;
         float slope=(ta+tb)*(ta*ta+tb*tb)/(4*reference*reference*reference);
         fraction*=saturate(slope);
-        coupling=saturate(min(a.ThermalConductivity,b.ThermalConductivity));
+        coupling=min(ExternalSurfaceThermalResponse(a),ExternalSurfaceThermalResponse(b));
     }
     float degree = max(1.0, max(RadiantDegrees[index], RadiantDegrees[otherIndex]));
     float coefficient = min(EffectiveCapacity(cell), EffectiveCapacity(other)) *
