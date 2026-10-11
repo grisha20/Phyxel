@@ -10,6 +10,7 @@
     "ignitionTemperature": 500.0,
     "burnRate": 0.030,
     "heatPerMass": 3000.0,
+    "oxidizerPerMass": 200.0,
     "burnedInto": "core:empty",
     "spreadRate": 2.0,
     "maximumTemperature": 1400.0

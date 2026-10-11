@@ -189,8 +189,14 @@ void ProposeEmissions(uint sourceIndex, uint sourceMaterialIndex, uint width, ui
         // Surface char oxidation can glow without a gaseous flame. This is
         // a bounded gameplay approximation, not a resolved volatile/CO model.
         float flameStart=lerp(source.IgnitionTemperature,source.MaximumCombustionTemperature,.25);
+        // Finite FIRE parcels sample the hot gas phase: their mass and heat
+        // already come from the actual reaction's pending energy. Reducing
+        // both their birth frequency and their paid capacity leaves sparse
+        // tracers at lower power. Keep the existing surface sampling rate;
+        // zero reaction never calls this function. Sandbox retains its rule.
         emission.FlameRate*=saturate((sourceCell.Temperature-flameStart)/
-            max(1,source.MaximumCombustionTemperature-flameStart))*reactionFraction;
+            max(1,source.MaximumCombustionTemperature-flameStart))*
+            (finiteHeat && FiniteOxidizer != 0 ? 1 : reactionFraction);
     }
     if (FiniteOxidizer != 0 && (source.Flags & MaterialFlagPersistentCoalIgnition) != 0 &&
         emission.GasIntoMaterialIndex < CombustionMaterialCount &&
@@ -513,7 +519,30 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
         float oxidizerPerMass = Emissions[sourceMaterialIndex].OxidizerPerMass;
         if (oxidizerPerMass <= 0) oxidizerPerMass = OxidizerPerFuelMass;
         float reserved = OxidizerDemand[index];
-        burnedMass = min(burnedMass, max(0, oxygen / 5 - reserved) / oxidizerPerMass);
+        float quota = max(0, oxygen / 5 - reserved);
+        if (!absorbedFuel && finiteCoalHeat && cell.FuelMass > 0 && source.FuelCapacity > 0)
+        {
+            // Dry coal and its retained liquid share this cell's donor quota.
+            // Reserve proportionally to their requested reactions so the first
+            // reaction cannot starve the second. No extra oxygen is created.
+            uint poreIndex = RetainedLiquidIndex(cell, source);
+            if (poreIndex < CombustionMaterialCount)
+            {
+                MaterialProperties pore = Materials[poreIndex];
+                if (pore.BurnedIntoMaterialIndex == 0 && pore.BurnRate > 0 &&
+                    (pore.Flags & MaterialFlagSelfOxidizing) == 0 &&
+                    cell.Temperature > pore.IgnitionTemperature)
+                {
+                    float poreBudget = Emissions[poreIndex].OxidizerPerMass;
+                    if (poreBudget <= 0) poreBudget = OxidizerPerFuelMass;
+                    float poreDemand = min(cell.FuelMass, pore.BurnRate *
+                        saturate(oxygen / max(supply.y, 1)) * CombustionDeltaTime) * poreBudget;
+                    float dryDemand = burnedMass * oxidizerPerMass;
+                    quota *= dryDemand / max(dryDemand + poreDemand, .0000001);
+                }
+            }
+        }
+        burnedMass = min(burnedMass, quota / oxidizerPerMass);
         OxidizerDemand[index] = reserved + burnedMass * oxidizerPerMass;
     }
     if (burnedMass <= 0) return;

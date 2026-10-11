@@ -1,5 +1,7 @@
 # Каменный уголь — `core:stone_coal`
 
+- [FP15: конечный кислород и оплаченный факел; выбранные проверки](../shared/FURNACE_POWER_RESULTS.md).
+
 - [FP12: общий рендер горячего конечного угольного FIRE](../shared/FURNACE_POWER_RESULTS.md).
 
 - [FP: пламя, поддув, излучение стен и нерешённый нагрев](../shared/FURNACE_POWER_RESULTS.md), [контракт](../shared/FURNACE_POWER_CONTRACT.md).

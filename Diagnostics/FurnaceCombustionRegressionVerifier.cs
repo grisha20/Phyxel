@@ -54,7 +54,12 @@ internal static class FurnaceCombustionRegressionVerifier
             var requests=MemoryMarshal.Cast<byte,EmissionRequest>(AirInventoryRegressionVerifier.Read(resources,resources.EmissionRequests.Buffer));
             var demand=MemoryMarshal.Cast<byte,float>(AirInventoryRegressionVerifier.Read(resources,resources.OxidizerDemand.Buffer));
             double burn=(mass>0?mass:material.Density)-after[index].Mass;
-            Check(Math.Abs(demand[index]-(finite?burn*registry.CreateEmissionGpuTable()[registry.GetRequiredRuntimeIndex(id)].OxidizerPerMass:0))<2e-6,"Demand disagrees with actual fuel loss");
+            float initialMass = mass > 0 ? mass : material.Density;
+            float budget = registry.CreateEmissionGpuTable()[registry.GetRequiredRuntimeIndex(id)].OxidizerPerMass;
+            // The reaction ledger uses the requested float decrement, while
+            // subtracting two stored masses includes their one-ULP rounding.
+            double storageError = budget * (MathF.BitIncrement(initialMass) - initialMass);
+            Check(Math.Abs(demand[index]-(finite?burn*budget:0))<2e-6+storageError,"Demand disagrees with actual fuel loss");
             return (burn,requests[n*2+index].Mass,after[index].Temperature-material.MaximumCombustionTemperature+10,demand[index]);
         }
         foreach (string id in new[] { CoreMaterialIds.Coal, CoreMaterialIds.StoneCoal, CoreMaterialIds.Wood })
@@ -87,11 +92,9 @@ internal static class FurnaceCombustionRegressionVerifier
         var calibrated = Reaction(CoreMaterialIds.Coal,1,false,true,mass:painted[index].Mass);
         Check(Math.Abs(calibrated.Burn-.06/60)<2e-7 && Math.Abs(calibrated.Rise-3/(1-.06/60))<.001,
             "Coal full-rate/half-retained heat partition changed");
-        // FA06 restores the per-mass normalization: .06 fuel/s * 20 O2/fuel.
-        // Accelerating burnout must not silently reduce demand per fuel mass.
-        // Read the actual GPU ledger; multiplying a subtraction of two
-        // Mass1 floats amplifies its quantization error by the new factor20.
-        Check(Math.Abs(calibrated.Oxygen-1.2/60)<2e-7,
+        // FP14: one fresh donor's safe quota still permits the unchanged
+        // .06 fuel/s at the fixed 60 Hz reaction clock: .2 O2 per tick.
+        Check(Math.Abs(calibrated.Oxygen-12.0/60)<2e-7,
             "Coal full-rate oxidizer demand does not match the per-mass contract");
         foreach(string id in new[]{CoreMaterialIds.Coal,CoreMaterialIds.StoneCoal})
         {
@@ -167,7 +170,65 @@ internal static class FurnaceCombustionRegressionVerifier
                 "Fuel heat tracer was quenched a second time or painted fire ignored oxygen");
         }
         VerifyPaidFlameDisplay(registry, resources);
+        VerifyFiniteCoalSupply(coordinator, registry);
         Console.WriteLine("PHYXEL_FURNACE_COMBUSTION_SUCCESS");
+    }
+
+    private static void VerifyFiniteCoalSupply(SimulationDispatchCoordinator coordinator, MaterialRegistry registry)
+    {
+        var settings = new SimulationSettings { Width=64,Height=64,Paused=true };
+        coordinator.ClearCurrentWorld(settings);
+        var r=coordinator.DispatchFrame(settings,[new(){X=1,Y=1,Radius=0,Density=1,
+            MaterialIndex=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal)}],0);
+        int w=r.Width,h=r.Height,n=w*h,index=30*w+w-2,donor=index+1;
+        uint metal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Metal);
+        foreach(string id in new[]{CoreMaterialIds.Coal,CoreMaterialIds.StoneCoal})
+        {
+            uint fuel=registry.GetRequiredRuntimeIndex(id);
+            var property=registry[id].Properties;
+            var grid=new GridCell[n];
+            for(int i=0;i<n;i++) grid[i]=new(){IsActive=1,MaterialIndex=metal,Mass=7.8f,Temperature=30};
+            grid[index]=new(){IsActive=1,MaterialIndex=fuel,Mass=1,
+                Temperature=property.MaximumCombustionTemperature-10};
+            grid[donor]=default;
+            var oxygen=new float[n];oxygen[donor]=1;
+            r.Context.UpdateSubresource(grid,r.Grid.ReadBuffer);
+            foreach(var buffer in r.Oxidizer.Buffers)r.Context.UpdateSubresource(oxygen,buffer);
+            r.Context.ClearUnorderedAccessView(r.OxidizerAvailable.UnorderedView,new RawInt4());
+            r.Context.ClearUnorderedAccessView(r.ReactionPending.UnorderedView,new RawInt4());
+            r.Context.ClearUnorderedAccessView(r.GasMotion.UnorderedView,new RawInt4());
+            r.OxidizerCarrierWarm=false;
+            float Mass() => MemoryMarshal.Cast<byte,GridCell>(AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer))[index].Mass;
+            double Oxygen()
+            {
+                double sum=0;foreach(float amount in MemoryMarshal.Cast<byte,float>(AirInventoryRegressionVerifier.Read(r,r.Oxidizer.ReadBuffer)))sum+=amount;
+                return sum;
+            }
+            void Step(int ticks,bool open)
+            {
+                for(int i=0;i<ticks;i++)
+                {
+                    // This fixture dispatches chemistry without particle motion.
+                    // Remove products escaping through its sole reservoir face;
+                    // otherwise it tests a stagnant exhaust, not fresh supply.
+                    // Brush erasure changes geometry, never the oxygen inventory.
+                    if(open) coordinator.DispatchFrame(settings,[new(){X=w-1,Y=30,Radius=0,
+                        Mode=BrushCommandMode.Erase}],0);
+                    coordinator.DispatchCombustion(r,1f/60,false,open,true,false);
+                }
+            }
+            Step(60,true);float fed=Mass();double oxygenBefore=Oxygen();
+            Step(150,false);float closed=Mass();double oxygenAfter=Oxygen();
+            Step(30,false);float settled=Mass();
+            Step(60,true);float reopened=Mass();
+            float budget=registry.CreateEmissionGpuTable()[fuel].OxidizerPerMass;
+            if(Math.Abs(1-fed-property.BurnRate)>2e-5 ||
+                Math.Abs(closed-settled)>2e-6 || settled<.9 ||
+                Math.Abs(oxygenBefore-oxygenAfter-(fed-closed)*budget)>budget*2e-5 ||
+                settled-reopened<.9*property.BurnRate)
+                throw new InvalidOperationException($"Finite local supply failed for {id}: fed={fed}, closed={closed}, settled={settled}, reopened={reopened}.");
+            Console.WriteLine(FormattableString.Invariant($"PHYXEL_COAL_FINITE_SUPPLY fuel={id} fullBurn={1-fed:F8} closedBurn={fed-settled:F8} reopenedBurn={settled-reopened:F8} oxygenLedger=PASS noReset=PASS"));
+        }
     }
 
     private static void VerifyPaidFlameDisplay(MaterialRegistry registry, GpuSimulationResources r)
@@ -270,6 +331,6 @@ internal static class FurnaceCombustionRegressionVerifier
         Check(before.MaterialIndex==coal && before.Mass>0,"Coal burned out before its calibrated lifetime");
         Step(2);var after=MemoryMarshal.Cast<byte,GridCell>(Read())[index];
         Check(after.MaterialIndex==fire,"Coal did not become a flame at 16.7s after save-load");
-        Console.WriteLine("PHYXEL_COAL_LIFETIME brushMass=1 totalReactionPower=360 halfInitiallyRetained oxidizerRate=1.2 fullRateBurnoutSeconds=16.7 closedCore=PASS pauseModesSaveLoadPending=PASS");
+        Console.WriteLine("PHYXEL_COAL_LIFETIME brushMass=1 totalReactionPower=360 halfInitiallyRetained oxidizerRate=12 fullRateBurnoutSeconds=16.7 closedCore=PASS pauseModesSaveLoadPending=PASS");
     }
 }

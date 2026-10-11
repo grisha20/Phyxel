@@ -240,24 +240,24 @@ internal static class CombustionMaterialRegressionVerifier
     private static async Task VerifyOxidizerBudgetDefinitionsAsync(string root, string coreDirectory)
     {
         string template = File.ReadAllText(Path.Combine(coreDirectory, "coal.json"));
-        foreach (bool configured in new[] { false, true })
+        foreach (int budget in new[] { 0, 4, 200 })
         {
             var node = JsonNode.Parse(template)!;
-            string id = configured ? "test:configured_budget" : "test:default_budget";
+            string id = "test:budget_" + budget;
             node["id"] = id;
             node.AsObject().Remove("moisture");
             node.AsObject().Remove("fuelAbsorption");
             node.AsObject().Remove("liquidAbsorption");
-            if (configured) node["combustion"]!["oxidizerPerMass"] = 4;
+            if (budget != 0) node["combustion"]!["oxidizerPerMass"] = budget;
             else node["combustion"]!.AsObject().Remove("oxidizerPerMass");
             string directory = CreateDirectory(root, id.Replace(':', '-'));
             await WriteMaterialAsync(directory, "fuel.json", node.ToJsonString());
             var registry = new MaterialRegistry(coreDirectory, directory);
             Require(registry.TryGet(id, out var material) &&
                 Same(registry.CreateEmissionGpuTable()[material!.RuntimeIndex].OxidizerPerMass,
-                    configured ? 4 : 20), "Reaction oxidizer budget/default lost from GPU table.");
+                    budget != 0 ? budget : 20), "Reaction oxidizer budget/default lost from GPU table.");
         }
-        foreach (string bad in new[] { "null", "\"4\"", "0", "-1", "101" })
+        foreach (string bad in new[] { "null", "\"4\"", "0", "-1", "201" })
         {
             var node = JsonNode.Parse(template)!;
             node["id"] = "test:bad_budget";

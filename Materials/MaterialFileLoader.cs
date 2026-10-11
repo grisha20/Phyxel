@@ -1004,8 +1004,8 @@ internal static partial class MaterialFileLoader
         if (oxidizerPerMassElement.ValueKind != JsonValueKind.Undefined &&
             (oxidizerPerMassElement.ValueKind != JsonValueKind.Number ||
              !oxidizerPerMassElement.TryGetSingle(out oxidizerPerMass) ||
-             !float.IsFinite(oxidizerPerMass) || oxidizerPerMass <= 0 || oxidizerPerMass > 100))
-            throw new InvalidDataException("combustion.oxidizerPerMass must be finite, greater than 0 and at most 100 (gameplay units).");
+             !float.IsFinite(oxidizerPerMass) || oxidizerPerMass <= 0 || oxidizerPerMass > 200))
+            throw new InvalidDataException("combustion.oxidizerPerMass must be finite, greater than 0 and at most 200 (gameplay units).");
         float contactIgnitionTemperature = -273.15f;
         if (contactIgnitionElement.ValueKind != JsonValueKind.Undefined &&
             (contactIgnitionElement.ValueKind != JsonValueKind.Number ||

@@ -40,10 +40,12 @@ internal static class HopperCombustionRegressionVerifier
             if(c.FuelMass>0)capacity+=c.FuelMass*registry[c.RetainedLiquidMaterialIndex].Properties.HeatCapacity;
             return capacity*(c.Temperature+273.15);
         });
+        var weakFlames=new Dictionary<uint,int>();
         foreach(uint fuel in new[]{coal,registry.GetRequiredRuntimeIndex("core:stone_coal")})
         foreach(string scenario in new[]{"cold-contact","cold-latch","buried","no-oxygen","hot-wall-no-oxygen",
-            "inert-co2","inert-steam","smolder","hot","burnout","epsilon-residue","collision","absorbed-oil"})
+            "inert-co2","inert-steam","smolder","hot","burnout","epsilon-residue","collision","absorbed-oil","quarter-oxygen"})
         foreach(bool finiteOxygen in new[]{false,true})
+        foreach(int tick in scenario=="quarter-oxygen" ? Enumerable.Range(0,32) : new[]{17})
         {
             if(scenario=="absorbed-oil"&&registry[fuel].Properties.FuelCapacity<=0)continue;
             var grid=new GridCell[n];var oxygen=new float[n];Array.Fill(oxygen,1);
@@ -53,6 +55,11 @@ internal static class HopperCombustionRegressionVerifier
             if(scenario=="cold-contact")grid[center-r.Width]=Cell(fire,700,1,2);
             if(scenario=="buried")foreach(int offset in new[]{-1,1,-r.Width,r.Width})grid[center+offset]=Cell(steel,700,7.8f);
             if(scenario is "no-oxygen" or "hot-wall-no-oxygen")Array.Fill(oxygen,0);
+            if(scenario=="quarter-oxygen")
+            {
+                Array.Fill(oxygen,.25f);
+                grid[center].Temperature=registry[fuel].Properties.MaximumCombustionTemperature-10;
+            }
             if(scenario=="hot-wall-no-oxygen"){
                 grid[center]=Cell(fuel,30);grid[center+1]=Cell(steel,1000,7.8f);
             }
@@ -76,7 +83,7 @@ internal static class HopperCombustionRegressionVerifier
             c.ClearUnorderedAccessView(r.CombustionSummary.UnorderedView,new RawInt4());
             c.ClearUnorderedAccessView(r.OxidizerDemand.UnorderedView,new RawInt4());
             var constants=new CombustionConstants{Width=(uint)r.Width,Height=(uint)r.Height,
-                MaterialCount=(uint)registry.Count,DeltaTime=1f/60,TickIndex=17,FiniteOxidizer=finiteOxygen?1u:0u,Reserved1=1};
+                MaterialCount=(uint)registry.Count,DeltaTime=1f/60,TickIndex=(uint)tick,FiniteOxidizer=finiteOxygen?1u:0u,Reserved1=1};
             c.UpdateSubresource(ref constants,r.CombustionConstants);
             c.ComputeShader.Set(r.CombustionShader);c.ComputeShader.SetConstantBuffer(0,r.CombustionConstants);
             c.ComputeShader.SetShaderResources(0,r.Materials.View,r.Emissions.View,r.OxidizerAvailable.View);
@@ -100,7 +107,14 @@ internal static class HopperCombustionRegressionVerifier
             double error=Math.Abs(actual-expected)/Math.Max(1,Math.Abs(expected));
             bool blocked=scenario is "cold-contact" or "cold-latch" or "buried" or "hot-wall-no-oxygen" or "inert-co2" or "inert-steam" ||
                 finiteOxygen&&scenario=="no-oxygen";
-            rows.Add(new{fuel,scenario,finiteOxygen,consumed,oilConsumed,error,temperature=after[center].Temperature,
+            if(scenario=="quarter-oxygen" && finiteOxygen)
+            {
+                int flames=after.Count(cell=>cell.IsActive!=0&&cell.MaterialIndex==fire);
+                weakFlames[fuel]=weakFlames.GetValueOrDefault(fuel)+flames;
+                Check(Math.Abs(consumed-registry[fuel].Properties.BurnRate*.25/60)<1e-7,
+                    "Weak paid flame sampling changed fuel power");
+            }
+            rows.Add(new{fuel,scenario,finiteOxygen,tick,consumed,oilConsumed,error,temperature=after[center].Temperature,
                 pendingHeat=pending.Sum(p=>(double)p.Y),products=after.Count(cell=>cell.IsActive!=0&&cell.MaterialIndex!=fuel&&cell.MaterialIndex!=steel)});
             File.WriteAllText(Path.Combine(dir,"kernels.json"),JsonSerializer.Serialize(rows,new JsonSerializerOptions{WriteIndented=true}));
             Check(error<=1e-4,$"Heat budget {fuel}/{scenario}/{finiteOxygen}: {error}");
@@ -110,6 +124,8 @@ internal static class HopperCombustionRegressionVerifier
             Check(pending.All(p=>p.X==0),"Coal created mechanical pressure");
             yield return r;
         }
+        foreach(uint fuel in new[]{coal,registry.GetRequiredRuntimeIndex("core:stone_coal")})
+            Check(weakFlames.GetValueOrDefault(fuel)>0,"Weak heat ledger never exercised an accepted FIRE parcel");
         // Mapping/clearing must agree even near tile borders, fine walls and
         // filters: every released stock has one receiver or remains pending.
         foreach(bool sealedStock in new[]{false,true})

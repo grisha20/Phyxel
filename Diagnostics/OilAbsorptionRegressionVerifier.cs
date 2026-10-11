@@ -126,7 +126,9 @@ internal static class OilAbsorptionRegressionVerifier
         GridCell[] React(GridCell[] grid,bool finite,float oxygen,float dt=1f/60)
         {
             Upload(grid);var ctx=r.Context;
-            ctx.UpdateSubresource(Enumerable.Repeat(oxygen,n).ToArray(),r.OxidizerAvailable.Buffer);
+            // Match the transport pass: solid/liquid cells cannot donate air.
+            ctx.UpdateSubresource(grid.Select(cell=>cell.IsActive==0 ||
+                table[cell.MaterialIndex].SimulationKind==(uint)MaterialSimulationKind.Gas ? oxygen : 0f).ToArray(),r.OxidizerAvailable.Buffer);
             ctx.ClearUnorderedAccessView(r.CombustionSummary.UnorderedView,new RawInt4());
             ctx.ClearUnorderedAccessView(r.EmissionClaims.UnorderedView,new RawInt4(-1,-1,-1,-1));
             ctx.ClearUnorderedAccessView(r.EmissionRequests.UnorderedView,new RawInt4());
@@ -148,6 +150,10 @@ internal static class OilAbsorptionRegressionVerifier
         var oilOnly=(MaterialProperties[])table.Clone();
         oilOnly[coal].IgnitionTemperature=float.MaxValue;
         oilOnly[coal].FlameSpreadRate=0;
+        // Isolate the oil-only cap/retained-heat contract too. A real coal
+        // host partitions reaction heat into pending gas energy (FP); the
+        // combined production-host ledger is checked separately below.
+        oilOnly[coal].Flags&=~(uint)MaterialFlags.PersistentCoalIgnition;
         r.Materials.Upload(r.Context,oilOnly);
         foreach(bool finite in new[]{false,true}) foreach(string cover in new[]{"air","water","solid","wet","inert"})
         {
@@ -188,18 +194,31 @@ internal static class OilAbsorptionRegressionVerifier
 
         r.Materials.Upload(r.Context,table);
         foreach(bool finite in new[]{false,true}) foreach(float oxygen in new[]{0f,.01f,1f})
+        foreach(bool oneFace in new[]{false,true})
         {
-            var initial=new GridCell[n];initial[p]=Cell(coal,300);initial[p].Lifetime=1;initial[p].FuelMass=.2f;
+            // Both fuels are actually hot; 300C is the existing coal
+            // extinction boundary and must not retain a fabricated latch.
+            var initial=new GridCell[n];initial[p]=Cell(coal,750);initial[p].Lifetime=1;initial[p].FuelMass=.2f;
+            if(oneFace)foreach(int offset in new[]{-1,-w,w})initial[p+offset]=Cell(fixture);
             var reacted=React(initial,finite,oxygen);
             float dryBurn=initial[p].Mass-reacted[p].Mass, oilBurn=initial[p].FuelMass-reacted[p].FuelMass;
             // Existing concentration extinction threshold is .20, including ignition.
             bool shouldBurn=!finite||oxygen>.20f;
-            Check(shouldBurn ? dryBurn>0&&oilBurn>0 : dryBurn==0&&oilBurn==0,"Combined dry/oil reaction gate");
+            Check(shouldBurn ? dryBurn>0&&oilBurn>0 : dryBurn==0&&oilBurn==0,
+                $"Combined dry/oil reaction gate finite={finite} oneFace={oneFace} oxygen={oxygen} dry={dryBurn} oil={oilBurn}");
             var demands=MemoryMarshal.Cast<byte,float>(AirInventoryRegressionVerifier.Read(r,r.OxidizerDemand.Buffer));
             float expected=finite ? dryBurn*registry[coal].Combustion!.OxidizerPerMass+oilBurn*registry[oil].Combustion!.OxidizerPerMass : 0;
-            Check(Math.Abs(demands[p]-expected)<1e-6 && (!finite||demands[p]<=4*oxygen/5+1e-6),"Combined dry/oil oxygen reservation");
+            double storedMassError=(MathF.BitIncrement(initial[p].Mass)-initial[p].Mass)*registry[coal].Combustion!.OxidizerPerMass+
+                (MathF.BitIncrement(initial[p].FuelMass)-initial[p].FuelMass)*registry[oil].Combustion!.OxidizerPerMass;
+            Check(Math.Abs(demands[p]-expected)<=1e-6+storedMassError && (!finite||demands[p]<=(oneFace?1:4)*oxygen/5+1e-6),"Combined dry/oil oxygen reservation");
             Check(float.IsFinite(reacted[p].Temperature)&&reacted[p].Temperature<=1100.01f,"Combined reaction temperature");
-            Console.WriteLine($"PHYXEL_OIL_ABSORPTION_COMBINED finite={finite} oxygen={oxygen} dry={dryBurn} oil={oilBurn} demand={demands[p]}");
+            double AbsoluteEnergy(GridCell[] cells)=>cells.Where(cell=>cell.IsActive!=0).Sum(cell=>
+                (double)PhaseEnthalpy.EffectiveCapacity(cell,table)*(cell.Temperature+273.15));
+            var pending=MemoryMarshal.Cast<byte,System.Numerics.Vector4>(AirInventoryRegressionVerifier.Read(r,r.ReactionPending.Buffer));
+            double actual=AbsoluteEnergy(reacted);foreach(var stock in pending)actual+=stock.Y;
+            double expectedEnergy=AbsoluteEnergy(initial)+dryBurn*table[coal].HeatPerMass+oilBurn*table[oil].HeatPerMass;
+            Check(Math.Abs(actual-expectedEnergy)<=.0001*Math.Max(1,Math.Abs(expectedEnergy)),"Combined dry/oil full heat ledger");
+            Console.WriteLine($"PHYXEL_OIL_ABSORPTION_COMBINED finite={finite} oneFace={oneFace} oxygen={oxygen} dry={dryBurn} oil={oilBurn} demand={demands[p]}");
         }
 
         var saved=new GridCell[n];saved[p]=Cell(table[coal].MoistureWetMaterialIndex,100);saved[p].MoistureMass=.07f;

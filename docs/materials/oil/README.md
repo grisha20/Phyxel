@@ -1,5 +1,7 @@
 # Парафиновое масло — `core:oil`
 
+- [FP15: общая квота O₂ сухой/поровой реакций угля,182 выбранные проверки](../shared/FURNACE_POWER_RESULTS.md).
+
 - [WT: выбранные сравнения общего термошага с маслом](../shared/WATER_THERMAL_PERFORMANCE_RESULTS.md), [контракт](../shared/WATER_THERMAL_PERFORMANCE_CONTRACT.md).
 
 - [WN: вода на полном поле и общий перенос жидкостей](../shared/WATER_NATIVE_PERFORMANCE_CONTRACT.md), [проверки и пределы](../shared/WATER_NATIVE_PERFORMANCE_RESULTS.md).

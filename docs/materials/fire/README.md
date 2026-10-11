@@ -1,5 +1,7 @@
 # Огонь — `core:fire`
 
+- [FP15: плотность конечных оплаченных FIRE и тепловой баланс](../shared/FURNACE_POWER_RESULTS.md).
+
 - [FP12: видимость фактического горячего хвоста и парные сравнения](../shared/FURNACE_POWER_RESULTS.md).
 
 - [FP: пламя, поддув, излучение стен и нерешённый нагрев](../shared/FURNACE_POWER_RESULTS.md), [контракт](../shared/FURNACE_POWER_CONTRACT.md).
