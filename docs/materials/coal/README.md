@@ -1,5 +1,7 @@
 # Древесный уголь — `core:coal`
 
+- [FP13: управление поддувалом и отклонённая длинная кислородная проба](../shared/FURNACE_POWER_RESULTS.md).
+
 - [FP12: видимость фактического горячего хвоста и парные сравнения](../shared/FURNACE_POWER_RESULTS.md).
 
 - [FP: пламя, поддув, излучение стен и нерешённый нагрев](../shared/FURNACE_POWER_RESULTS.md), [контракт](../shared/FURNACE_POWER_CONTRACT.md).
