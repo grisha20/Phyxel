@@ -40,6 +40,7 @@ internal static class CombustionMaterialRegressionVerifier
             await VerifyInvalidDefinitionsAsync(root, coreDirectory);
             await VerifyFlameExtinctionDefinitionsAsync(root, coreDirectory);
             await VerifyOxidizerBudgetDefinitionsAsync(root, coreDirectory);
+            await VerifyProductCapacityDefinitionsAsync(root, coreDirectory);
             await VerifySolidMoistureDefinitionsAsync(root, coreDirectory);
         }
         finally
@@ -264,6 +265,36 @@ internal static class CombustionMaterialRegressionVerifier
             node["combustion"]!["oxidizerPerMass"] = JsonNode.Parse(bad);
             await ExpectRejectedAsync(root, coreDirectory, "budget-" + bad.GetHashCode(),
                 "test:bad_budget", node.ToJsonString());
+        }
+    }
+
+    private static async Task VerifyProductCapacityDefinitionsAsync(string root,string coreDirectory)
+    {
+        string template = File.ReadAllText(Path.Combine(coreDirectory, "coal.json"));
+        foreach (float? capacity in new float?[] { null, 15 })
+        {
+            var node = JsonNode.Parse(template)!;
+            string id = capacity is null ? "test:legacy_products" : "test:finite_products";
+            node["id"] = id;
+            node.AsObject().Remove("moisture");
+            node.AsObject().Remove("fuelAbsorption");
+            node.AsObject().Remove("liquidAbsorption");
+            if (capacity is null) node["combustion"]!.AsObject().Remove("productHeatCapacityPerMass");
+            else node["combustion"]!["productHeatCapacityPerMass"] = capacity.Value;
+            string directory = CreateDirectory(root, id.Replace(':', '-'));
+            await WriteMaterialAsync(directory, "fuel.json", node.ToJsonString());
+            var registry = new MaterialRegistry(coreDirectory, directory);
+            Require(registry.TryGet(id, out var material) &&
+                Same(BitConverter.UInt32BitsToSingle(registry.CreateEmissionGpuTable()[material!.RuntimeIndex].Reserved1),
+                    capacity ?? 0), "Product capacity/default lost from GPU table.");
+        }
+        foreach (string bad in new[] { "null", "0", "201" })
+        {
+            var node = JsonNode.Parse(template)!;
+            node["id"] = "test:bad_product_capacity";
+            node["combustion"]!["productHeatCapacityPerMass"] = JsonNode.Parse(bad);
+            await ExpectRejectedAsync(root, coreDirectory, "product-capacity-" + bad,
+                "test:bad_product_capacity", node.ToJsonString());
         }
     }
 

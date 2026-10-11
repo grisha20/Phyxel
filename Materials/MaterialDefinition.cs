@@ -135,7 +135,8 @@ public sealed record MaterialCombustionDefinition(
     float PressurePerMass = 0,
     float FlameLifetimeMultiplier = 1,
     float OxidizerPerMass = 20,
-    float ContactIgnitionTemperature = -273.15f);
+    float ContactIgnitionTemperature = -273.15f,
+    float ProductHeatCapacityPerMass = 0);
 
 public sealed record MaterialEmissionDefinition(
     string SmokeIntoId,

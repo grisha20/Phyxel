@@ -1,5 +1,7 @@
 # Чугун — `core:cast_iron`
 
+- [CP: тепло угольных продуктов, измерения и ограничения](../shared/COAL_PRODUCT_HEAT_RESULTS.md), [критерии](../shared/COAL_PRODUCT_HEAT_CONTRACT.md).
+
 - [FP: пламя, поддув, излучение стен и нерешённый нагрев](../shared/FURNACE_POWER_RESULTS.md), [контракт](../shared/FURNACE_POWER_CONTRACT.md).
 
 - [FL: длительная печь, границы воздуха и выбранные проверки](../shared/FURNACE_LONG_RUN_RESULTS.md), [контракт](../shared/FURNACE_LONG_RUN_CONTRACT.md).

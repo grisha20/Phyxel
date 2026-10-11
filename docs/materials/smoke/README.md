@@ -1,5 +1,7 @@
 # Smoke — `core:smoke`
 
+- [CP: тепло угольных продуктов, измерения и ограничения](../shared/COAL_PRODUCT_HEAT_RESULTS.md), [критерии](../shared/COAL_PRODUCT_HEAT_CONTRACT.md).
+
 - [FP: пламя, поддув, излучение стен и нерешённый нагрев](../shared/FURNACE_POWER_RESULTS.md), [контракт](../shared/FURNACE_POWER_CONTRACT.md).
 
 - [FA: новые печи, перенос E/C и проверяемая сборка](../shared/FURNACE_ATMOSPHERE_RESULTS.md), [контракт](../shared/FURNACE_ATMOSPHERE_CONTRACT.md).

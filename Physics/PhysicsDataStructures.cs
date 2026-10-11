@@ -586,6 +586,8 @@ public struct MaterialEmissionProperties
     public float FlameRate;
     // Former padding; runtime reaction budget, not SI stoichiometry.
     public float OxidizerPerMass;
+    // Float bits: effective product/entrained-gas capacity per reacted fuel
+    // mass. Zero retains legacy E/T normalization. ABI remains 32 bytes.
     public uint Reserved1;
 }
 

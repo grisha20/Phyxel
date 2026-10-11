@@ -1,5 +1,7 @@
 # Огонь — `core:fire`
 
+- [CP: тепло угольных продуктов, измерения и ограничения](../shared/COAL_PRODUCT_HEAT_RESULTS.md), [критерии](../shared/COAL_PRODUCT_HEAT_CONTRACT.md).
+
 - [CR: конечный лучевой обмен с открытыми зёрнами](../shared/COAL_REHEAT_RESULTS.md).
 
 - [FP15: плотность конечных оплаченных FIRE и тепловой баланс](../shared/FURNACE_POWER_RESULTS.md).

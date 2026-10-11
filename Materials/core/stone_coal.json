@@ -9,7 +9,8 @@
   "combustion": {
     "ignitionTemperature": 500.0,
     "burnRate": 0.030,
-    "heatPerMass": 3000.0,
+    "heatPerMass": 27000.0,
+    "productHeatCapacityPerMass": 14.0,
     "oxidizerPerMass": 200.0,
     "burnedInto": "core:empty",
     "spreadRate": 2.0,

@@ -104,6 +104,19 @@ internal static class HopperCombustionRegressionVerifier
             }
             double expected=before+consumed*registry[fuel].Properties.HeatPerMass+oilConsumed*registry[oil].Properties.HeatPerMass;
             double actual=Energy(after)+pending.Sum(p=>(double)p.Y);
+            if (scenario != "absorbed-oil" && registry[fuel].Combustion!.ProductHeatCapacityPerMass > 0)
+            {
+                double gasCapacity=after.Where(cell=>cell.IsActive!=0 &&
+                    registry[cell.MaterialIndex].Properties.SimulationKind==(uint)MaterialSimulationKind.Gas)
+                    .Sum(cell=>(double)cell.Mass*registry[cell.MaterialIndex].Properties.HeatCapacity);
+                // Initial flame/inert packets are outside the new reaction's ledger.
+                gasCapacity-=grid.Where(cell=>cell.IsActive!=0 &&
+                    registry[cell.MaterialIndex].Properties.SimulationKind==(uint)MaterialSimulationKind.Gas)
+                    .Sum(cell=>(double)cell.Mass*registry[cell.MaterialIndex].Properties.HeatCapacity);
+                double expectedCapacity=consumed*registry[fuel].Combustion!.ProductHeatCapacityPerMass;
+                Check(Math.Abs(gasCapacity+pending.Sum(p=>(double)p.Z)-expectedCapacity)<1e-5,
+                    "Product capacity must follow reacted fuel mass, not released heat or grain ceiling");
+            }
             double error=Math.Abs(actual-expected)/Math.Max(1,Math.Abs(expected));
             bool blocked=scenario is "cold-contact" or "cold-latch" or "buried" or "hot-wall-no-oxygen" or "inert-co2" or "inert-steam" ||
                 finiteOxygen&&scenario=="no-oxygen";

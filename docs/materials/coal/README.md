@@ -1,5 +1,7 @@
 # Древесный уголь — `core:coal`
 
+- [CP: тепло угольных продуктов, измерения и ограничения](../shared/COAL_PRODUCT_HEAT_RESULTS.md), [критерии](../shared/COAL_PRODUCT_HEAT_CONTRACT.md).
+
 - [CR: нагрев свежего угля, парное измерение и границы](../shared/COAL_REHEAT_RESULTS.md), [контракт](../shared/COAL_REHEAT_CONTRACT.md).
 
 - [FP15: регулировка поддувалом, конечный кислород и оплаченный факел](../shared/FURNACE_POWER_RESULTS.md).

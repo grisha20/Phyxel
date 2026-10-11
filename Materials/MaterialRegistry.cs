@@ -773,7 +773,8 @@ public sealed class MaterialRegistry
                 SmokeIntoMaterialIndex = uint.MaxValue,
                 GasIntoMaterialIndex = uint.MaxValue,
                 FlameIntoMaterialIndex = uint.MaxValue,
-                OxidizerPerMass = source.Combustion?.OxidizerPerMass ?? 20
+                OxidizerPerMass = source.Combustion?.OxidizerPerMass ?? 20,
+                Reserved1 = BitConverter.SingleToUInt32Bits(source.Combustion?.ProductHeatCapacityPerMass ?? 0)
             };
         }
         return new MaterialEmissionProperties
@@ -786,7 +787,8 @@ public sealed class MaterialRegistry
                 ? indexedById[flameId].RuntimeIndex
                 : uint.MaxValue,
             FlameRate = emissions.FlameRate,
-            OxidizerPerMass = source.Combustion?.OxidizerPerMass ?? 20
+            OxidizerPerMass = source.Combustion?.OxidizerPerMass ?? 20,
+            Reserved1 = BitConverter.SingleToUInt32Bits(source.Combustion?.ProductHeatCapacityPerMass ?? 0)
         };
     }
 

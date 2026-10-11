@@ -192,6 +192,7 @@ Combustion естественно вставляется между thermal и p
 | `ignitionTemperature` | конечное число `-273.15 ≤ T < 5000` °C | Горение только при строгом `Temperature > threshold`; порог 5000 недостижим из-за общего clamp. |
 | `burnRate` | `(0…100]` mass units/s | Абсолютная скорость, не доля в секунду. |
 | `heatPerMass` | `(0…1_000_000]` thermal-energy units/mass | Энергия на фактически сгоревшую массу; не °C/s. |
+| `productHeatCapacityPerMass` | optional `(0…200]`, нормированные C/mass | У конечной угольной реакции постоянная эффективная теплоёмкость продуктов на сгоревшую массу, минимум cp топлива. Отсутствие сохраняет legacy E/(Tmax+273.15); это не cp в СИ. |
 | `burnedInto` | нормализованный `namespace:name` | Raw string до стабилизации registry, затем runtime index. |
 
 Почему `burnRate` не fraction/s: абсолютная скорость даёт понятную длительность `(initialMass - residueMass) / burnRate`, линейно работает с разной массой и достигает конечного состояния без произвольного процентного cutoff.

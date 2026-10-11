@@ -847,6 +847,7 @@ internal static partial class MaterialFileLoader
         JsonElement flameLifetimeElement = default;
         JsonElement oxidizerPerMassElement = default;
         JsonElement contactIgnitionElement = default;
+        JsonElement productCapacityElement = default;
         HashSet<string> fields = new(StringComparer.OrdinalIgnoreCase);
         foreach (JsonProperty property in value.EnumerateObject())
         {
@@ -895,6 +896,10 @@ internal static partial class MaterialFileLoader
             else if (property.Name.Equals("oxidizerPerMass", StringComparison.OrdinalIgnoreCase))
             {
                 oxidizerPerMassElement = property.Value;
+            }
+            else if (property.Name.Equals("productHeatCapacityPerMass", StringComparison.OrdinalIgnoreCase))
+            {
+                productCapacityElement = property.Value;
             }
             else
             {
@@ -1013,6 +1018,12 @@ internal static partial class MaterialFileLoader
              !float.IsFinite(contactIgnitionTemperature) || contactIgnitionTemperature <= -273.15f ||
              contactIgnitionTemperature > ignitionTemperature))
             throw new InvalidDataException("combustion.contactIgnitionTemperature must be finite, above -273.15 and no higher than ignitionTemperature.");
+        float productCapacity = 0;
+        if (productCapacityElement.ValueKind != JsonValueKind.Undefined &&
+            (productCapacityElement.ValueKind != JsonValueKind.Number ||
+             !productCapacityElement.TryGetSingle(out productCapacity) ||
+             !float.IsFinite(productCapacity) || productCapacity <= 0 || productCapacity > 200))
+            throw new InvalidDataException("combustion.productHeatCapacityPerMass must be finite, greater than 0 and at most 200 (gameplay units).");
         return new MaterialCombustionDefinition(
             ignitionTemperature,
             burnRate,
@@ -1023,7 +1034,8 @@ internal static partial class MaterialFileLoader
             pressurePerMass,
             flameLifetimeMultiplier,
             oxidizerPerMass,
-            contactIgnitionTemperature);
+            contactIgnitionTemperature,
+            productCapacity);
     }
 
     private static MaterialEmissionDefinition? ParseEmissions(

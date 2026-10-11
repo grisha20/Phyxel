@@ -1,5 +1,7 @@
 # Каменный уголь — `core:stone_coal`
 
+- [CP: тепло угольных продуктов, измерения и ограничения](../shared/COAL_PRODUCT_HEAT_RESULTS.md), [критерии](../shared/COAL_PRODUCT_HEAT_CONTRACT.md).
+
 - [CR: лучевой обмен открытых зёрен и ограничения проверки](../shared/COAL_REHEAT_RESULTS.md).
 
 - [FP15: конечный кислород и оплаченный факел; выбранные проверки](../shared/FURNACE_POWER_RESULTS.md).

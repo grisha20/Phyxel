@@ -564,8 +564,11 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
             cell.Temperature += rise;
             float releasedEnergy = oldEnergy + burnedMass * source.HeatPerMass -
                 remainingCapacity * (cell.Temperature + 273.15);
-            float releasedCapacity = max(burnedMass * source.HeatCapacity,
-                releasedEnergy / (source.MaximumCombustionTemperature + 273.15));
+            float productCapacity = asfloat(Emissions[sourceMaterialIndex].Reserved1);
+            float releasedCapacity = productCapacity > 0
+                ? burnedMass * max(source.HeatCapacity, productCapacity)
+                : max(burnedMass * source.HeatCapacity,
+                    releasedEnergy / (source.MaximumCombustionTemperature + 273.15));
             ReactionPending[index] += float4(0,releasedEnergy,releasedCapacity,0);
         }
         else cell.Temperature+=burnedMass*source.HeatPerMass/CellEffectiveCapacity(cell);
@@ -587,8 +590,15 @@ void ReactFuel(uint2 coordinate, bool absorbedFuel)
             .5 * burnedMass * source.HeatPerMass / remainingCapacity) : 0;
         float releasedEnergy = CellEffectiveCapacity(cell) * (cell.Temperature+273.15) +
             burnedMass * source.HeatPerMass - remainingCapacity * (cell.Temperature+rise+273.15);
-        float releasedCapacity = max(burnedMass*source.HeatCapacity,
-            releasedEnergy/(source.MaximumCombustionTemperature+273.15));
+        // The grain's temperature ceiling must not manufacture more gas
+        // capacity whenever Q rises. Configured products carry a fixed C per
+        // reacted mass; E/C follows the actual heat partition and cooling.
+        // Reserved1 is float bits, preserving the shared material ABI/cache.
+        float productCapacity = asfloat(Emissions[sourceMaterialIndex].Reserved1);
+        float releasedCapacity = productCapacity > 0
+            ? burnedMass * max(source.HeatCapacity, productCapacity)
+            : max(burnedMass*source.HeatCapacity,
+                releasedEnergy/(source.MaximumCombustionTemperature+273.15));
         ReactionPending[index] += float4(0,releasedEnergy,releasedCapacity,0);
         generatedRise = rise;
     }
