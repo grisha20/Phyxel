@@ -116,6 +116,38 @@ internal static class FurnaceSurfaceHeatVerifier
         foreach (int direction in new[] { -1, 1, -w, w, -w-1, -w+1, w-1, w+1 })
             shells[centre + direction * 48] = Cell(metal, 20, 7.8f);
         Advance(shells, 120, "eight-surfaces/budget");
+        // A granular surface must receive the same reciprocal radiant pair
+        // as a fixed wall. Chemistry is deliberately absent in this probe.
+        foreach(string id in new[]{CoreMaterialIds.Coal,CoreMaterialIds.StoneCoal,CoreMaterialIds.Sand,CoreMaterialIds.Gunpowder})
+        foreach(uint donor in new[]{fire,iron})
+        {
+            uint receiver=registry.GetRequiredRuntimeIndex(id);
+            var grid=new GridCell[w*r.Height];grid[centre]=Cell(receiver,20);
+            grid[centre-12*w]=Cell(donor,1000,2);
+            var heated=Advance(grid,120,$"granular/gap/{id}/{donor}");
+            Check(heated[centre].Temperature>21 && heated[centre-12*w].Temperature<999,
+                "Visible granular surface must exchange with fire and hot metal");
+        }
+        uint charcoal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal);
+        foreach(string control in new[]{"opaque","corner","range","insulator"})
+        {
+            var grid=new GridCell[w*r.Height];grid[centre]=Cell(charcoal,20);
+            int donor=centre+(control=="range"?97:-12)*w+(control=="corner"?12:0);
+            grid[donor]=Cell(fire,1000,2);
+            if(control=="opaque")grid[centre-6*w]=Cell(fixture,20);
+            if(control=="corner")grid[centre+1]=Cell(fixture,20);
+            float savedK=table[charcoal].ThermalConductivity;
+            if(control=="insulator"){table[charcoal].ThermalConductivity=0;r.Materials.Upload(r.Context,table);}
+            Check(Advance(grid,1,"granular/control/"+control)[centre].Temperature==20,
+                "Granular radiation must respect "+control);
+            table[charcoal].ThermalConductivity=savedK;r.Materials.Upload(r.Context,table);
+        }
+        var mound=new GridCell[w*r.Height];
+        for(int y=0;y<5;y++)for(int x=-2;x<=2;x++)mound[centre+y*w+x]=Cell(charcoal,20);
+        mound[centre-12*w]=Cell(fire,1000,2);
+        var front=Advance(mound,1,"granular/front");
+        Check(front[centre].Temperature>20 && front[centre+2*w].Temperature==20,
+            "Radiation heats exposed charcoal, not its buried core in the same step");
         var serializer = new Phyxel.Serialization.SimulationStateSerializer();
         var snapshot = new Phyxel.Serialization.SimulationWorldSnapshot(w, r.Height,
             MemoryMarshal.AsBytes(melted.AsSpan()).ToArray());

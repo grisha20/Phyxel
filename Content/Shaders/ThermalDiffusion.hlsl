@@ -218,6 +218,14 @@ bool IsRadiantGas(MaterialProperties material)
         (material.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0;
 }
 
+bool IsRadiantSurface(MaterialProperties material)
+{
+    // A movable grain is still an opaque material surface. Its low internal
+    // conductivity must not remove the existing surface radiation path.
+    return material.SimulationKind == SimulationKindSolid ||
+        material.SimulationKind == SimulationKindGranular;
+}
+
 bool IsCondensedAt(int2 p)
 {
     GridCell c = SourceGrid[p.y * ThermalWidth + p.x];
@@ -260,7 +268,7 @@ float RadiantExchange(GridCell cell, uint2 coordinate, bool degreeOnly)
 {
     MaterialProperties material = Materials[cell.MaterialIndex];
     bool emitter = IsRadiantGas(material);
-    if ((!emitter && material.SimulationKind != SimulationKindSolid) ||
+    if ((!emitter && !IsRadiantSurface(material)) ||
         material.ThermalConductivity <= 0) return 0;
     uint index = coordinate.y * ThermalWidth + coordinate.x;
     float heat = 0;
@@ -293,7 +301,7 @@ float RadiantExchange(GridCell cell, uint2 coordinate, bool degreeOnly)
                     heat += RadiantPair(cell, other, index, p.y * ThermalWidth + p.x, weight, degreeOnly);
                 continue;
             }
-            if ((emitter || ThermalReserved1 != 0) && distance > 1 && otherMaterial.SimulationKind == SimulationKindSolid)
+            if ((emitter || ThermalReserved1 != 0) && distance > 1 && IsRadiantSurface(otherMaterial))
                 heat += RadiantPair(cell, other, index, p.y * ThermalWidth + p.x, weight, degreeOnly);
             break;
         }

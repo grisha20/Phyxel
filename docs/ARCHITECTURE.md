@@ -481,7 +481,13 @@ AirThermal.hlsl: float2 энергия/теплоёмкость на coarse-уз
 bits1–2 выбор грани; transport проверяет только bit0. Работает в обоих
 режимах при AirSimulation=true, фон переносит энергию/ёмкость с донорным
 лимитером. Финитная плавучесть использует T без источника объёма. Sandbox
-по-прежнему отличается неограниченным кислородом. Нет излучения/полного CFD.
+по-прежнему отличается неограниченным кислородом. Carrier не решает
+излучение и не является полным CFD. Отдельный ThermalDiffusion содержит
+ограниченный симметричный лучевой граф FIRE/Smoke↔Solid/Granular и
+Solid/Granular↔Solid/Granular через видимый газовый зазор. В CR2026-10-11
+добавлена открытая поверхность Granular; первая плотная клетка блокирует
+дальнейший луч. k — игровой коэффициент связи, не измеренная emissivity.
+[Выбранные проверки и границы](materials/shared/COAL_REHEAT_RESULTS.md).
 [Проверки](MATERIAL_ENVIRONMENT_RESULTS.md).
 
 Moisture.capillaryRate optional/default0; positive толькоsolid. Использует

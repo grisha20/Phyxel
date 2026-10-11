@@ -1,5 +1,7 @@
 # Огонь — `core:fire`
 
+- [CR: конечный лучевой обмен с открытыми зёрнами](../shared/COAL_REHEAT_RESULTS.md).
+
 - [FP15: плотность конечных оплаченных FIRE и тепловой баланс](../shared/FURNACE_POWER_RESULTS.md).
 
 - [FP12: видимость фактического горячего хвоста и парные сравнения](../shared/FURNACE_POWER_RESULTS.md).

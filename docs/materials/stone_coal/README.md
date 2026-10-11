@@ -1,5 +1,7 @@
 # Каменный уголь — `core:stone_coal`
 
+- [CR: лучевой обмен открытых зёрен и ограничения проверки](../shared/COAL_REHEAT_RESULTS.md).
+
 - [FP15: конечный кислород и оплаченный факел; выбранные проверки](../shared/FURNACE_POWER_RESULTS.md).
 
 - [FP12: общий рендер горячего конечного угольного FIRE](../shared/FURNACE_POWER_RESULTS.md).
