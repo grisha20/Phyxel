@@ -21,3 +21,5 @@
 храниться у исходного материала. Настройки JSON не являются справочником СИ.
 
 - [FS: тепло сохранённой печи](../shared/FURNACE_SENSOR_HEAT_CONTRACT.md), [новые результаты и ограничения](../shared/FURNACE_SENSOR_HEAT_RESULTS.md).
+
+- [MH: взвешенный лучевой бюджет, нагрев стен и выбранные контроли](../shared/METAL_FLAME_HEAT_RESULTS.md), [критерии](../shared/METAL_FLAME_HEAT_CONTRACT.md).

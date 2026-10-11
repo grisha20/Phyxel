@@ -90,12 +90,8 @@ bool IsOrdinaryGasSurface(GridCell cell, GridCell neighbor)
 {
     MaterialProperties a = Materials[cell.MaterialIndex];
     MaterialProperties b = Materials[neighbor.MaterialIndex];
-    bool gasA = a.SimulationKind == SimulationKindGas &&
-        ((a.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0 ||
-         b.SimulationKind == SimulationKindGranular);
-    bool gasB = b.SimulationKind == SimulationKindGas &&
-        ((b.Flags & (MaterialFlagFlame | MaterialFlagSmoke)) == 0 ||
-         a.SimulationKind == SimulationKindGranular);
+    bool gasA = a.SimulationKind == SimulationKindGas;
+    bool gasB = b.SimulationKind == SimulationKindGas;
     return (gasA && (b.SimulationKind == SimulationKindSolid || b.SimulationKind == SimulationKindGranular)) ||
         (gasB && (a.SimulationKind == SimulationKindSolid || a.SimulationKind == SimulationKindGranular));
 }
@@ -152,11 +148,9 @@ float ContactHeatFlow(
         if (!HasWetCornerPath(index, neighborIndex, cell, neighbor)) return 0;
         contactWeight = DiagonalWetContactWeight;
     }
-    if (diagonalContact && gasSurface &&
-        (Materials[cell.MaterialIndex].SimulationKind == SimulationKindGranular ||
-         Materials[neighbor.MaterialIndex].SimulationKind == SimulationKindGranular))
+    if (diagonalContact && gasSurface)
     {
-        // The diagonal flame cannot reach a buried grain through two solid
+        // A diagonal gas cannot reach a surface through two solid
         // side cells. The same two corners are tested by both endpoints.
         uint2 p = uint2(index % ThermalWidth, index / ThermalWidth);
         uint2 q = uint2(neighborIndex % ThermalWidth, neighborIndex / ThermalWidth);
@@ -187,8 +181,8 @@ float ContactHeatFlow(
     if (gasSurface)
     {
         // Gas/surface contact represents unresolved mixing at the interface.
-        // Fixed walls retain their existing conductivity-limited floor;
-        // grains separate external coupling from their slow interior k.
+        // Flame/smoke and grains use an external surface response, separate
+        // from internal conduction. Ordinary gas/solid retains its floor.
         uint surfaceIndex = Materials[cell.MaterialIndex].SimulationKind == SimulationKindGas
             ? neighbor.MaterialIndex : cell.MaterialIndex;
         MaterialProperties surface = Materials[surfaceIndex];
@@ -198,7 +192,8 @@ float ContactHeatFlow(
         float surfaceFloor = (gasFlags & MaterialFlagPhaseEnthalpy) != 0
             ? PhaseVapourSurfaceConductivityFloor : GasSurfaceConductivityFloor;
         contactConductivity = max(contactConductivity,
-            surface.SimulationKind == SimulationKindGranular
+            surface.SimulationKind == SimulationKindGranular ||
+                (gasFlags & (MaterialFlagFlame | MaterialFlagSmoke)) != 0
                 ? ExternalSurfaceThermalResponse(surface) : min(solidConductivity, surfaceFloor));
     }
     float neighborCapacity = EffectiveCapacity(neighbor);
@@ -257,7 +252,14 @@ float RadiantPair(GridCell cell, GridCell other, uint index, uint otherIndex, fl
     MaterialProperties a = Materials[cell.MaterialIndex];
     MaterialProperties b = Materials[other.MaterialIndex];
     if (a.ThermalConductivity <= 0 || b.ThermalConductivity <= 0) return 0;
-    if (degreeOnly) return weight;
+    float capacity = EffectiveCapacity(cell);
+    float otherCapacity = EffectiveCapacity(other);
+    // Bound the actual incident heat capacity, not the number of neighbours.
+    // A heavy wall can absorb several independent light flame packets
+    // without dividing their finite energy by the wall's packet count.
+    // Each endpoint owns its normalized degree; max below is symmetric and
+    // guarantees sum(edge coefficients) <= fraction * endpoint capacity.
+    if (degreeOnly) return weight * min(capacity, otherCapacity) / capacity;
     bool gasA = IsRadiantGas(a);
     bool gasB = IsRadiantGas(b);
     uint gasFlags = gasA ? a.Flags : b.Flags;
@@ -279,7 +281,7 @@ float RadiantPair(GridCell cell, GridCell other, uint index, uint otherIndex, fl
         coupling=min(ExternalSurfaceThermalResponse(a),ExternalSurfaceThermalResponse(b));
     }
     float degree = max(1.0, max(RadiantDegrees[index], RadiantDegrees[otherIndex]));
-    float coefficient = min(EffectiveCapacity(cell), EffectiveCapacity(other)) *
+    float coefficient = min(capacity, otherCapacity) *
         coupling * fraction * weight / degree;
     return coefficient * (other.Temperature - cell.Temperature);
 }

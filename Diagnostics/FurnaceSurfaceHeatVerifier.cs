@@ -56,6 +56,21 @@ internal static class FurnaceSurfaceHeatVerifier
             Check(after[centre].Temperature > 21 && after[centre + 12 * w].Temperature < 999, "gap must heat and cool both endpoints");
         }
         uint iron=registry.GetRequiredRuntimeIndex("core:cast_iron");
+        foreach(uint donor in new[]{fire,smoke})
+        foreach(bool diagonal in new[]{false,true})
+        {
+            var grid=new GridCell[w*r.Height];grid[centre]=Cell(iron,30,7.2f);
+            int hot=centre-w+(diagonal?1:0);grid[hot]=Cell(donor,1000,.1f);
+            var heated=Advance(grid,1,$"metal/contact/{donor}/{diagonal}");
+            Check(heated[centre].Temperature>30 && heated[hot].Temperature<1000,
+                "Hot gas must heat metal through a visible face or diagonal");
+            if(diagonal)
+            {
+                grid[centre+1]=Cell(fixture,30);grid[centre-w]=Cell(fixture,30);
+                Check(Advance(grid,1,$"metal/closed-corner/{donor}")[centre].Temperature==30,
+                    "Hot gas must not heat metal through a closed corner");
+            }
+        }
         foreach(var (dx,dy) in new[]{(12,0),(0,12),(12,12)})
         {
             var grid=new GridCell[w*r.Height];
@@ -109,8 +124,29 @@ internal static class FurnaceSurfaceHeatVerifier
         var many = new GridCell[w * r.Height]; many[centre] = Cell(metal, 1000, 7.8f);
         for (int distance = 2; distance <= 24; distance++)
             foreach (int direction in new[] { -1, 1, -w, w, -w-1, -w+1, w-1, w+1 }) many[centre + direction * distance] = Cell(fire, 1500, .2f);
-        var melted = Advance(many, 120, "many/melting");
+        // Independent light emitters must not dilute one another just
+        // because their heavy recipient sees many gas packets. Their total
+        // stock is well below the wall capacity, so no recipient cap binds.
+        var light=new GridCell[w*r.Height];light[centre]=Cell(iron,30,7.2f);
+        double expected=0;
+        for(int distance=2;distance<=24;distance++)
+        foreach(int direction in new[]{-1,1,-w,w,-w-1,-w+1,w-1,w+1})
+        {
+            light[centre+direction*distance]=Cell(fire,1000,.001f);
+            double d=distance*(Math.Abs(direction)==1 || Math.Abs(direction)==w ? 1 : Math.Sqrt(2));
+            expected+=.001*.8*.18/(Math.Pow(1+d/24,2))*970/(7.2*.13);
+        }
+        var lightAfter=Advance(light,1,"metal/many-light-emitters");
+        Check(lightAfter[centre].Temperature-30 >= .9*expected,
+            "Independent light flames must retain their additive finite heat flux");
+        Console.WriteLine(FormattableString.Invariant($"PHYXEL_SURFACE_LIGHT rise={lightAfter[centre].Temperature-30:F6} expected={expected:F6}"));
+        // Observe the partial plateau before the now-additive emitters can
+        // pay its entire latent heat. A 120-step observation can fully melt.
+        var melted = Advance(many, 1, "many/melting");
         Check(melted[centre].Temperature == 1000 && melted[centre].Lifetime > 1, "metal melting plateau receives Q");
+        var fullyPaid = Advance(many,120,"many/paid-melting");
+        Check(fullyPaid[centre].Lifetime >= table[metal].TransitionAboveLatentHeat,
+            "Heating beyond the melting plateau must first pay its latent heat");
         Advance(many, 600, "many/long");
         var shells = new GridCell[w * r.Height]; shells[centre] = Cell(fire, 1500, .2f);
         foreach (int direction in new[] { -1, 1, -w, w, -w-1, -w+1, w-1, w+1 })

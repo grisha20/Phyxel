@@ -45,3 +45,5 @@ PM2026-10-07: свежая «Питарда» в обоих режимах/30/60
 [Контракт](../shared/PRESSURE_FRACTURE_CONTRACT.md), [свежие проверки и ограничения](../shared/PRESSURE_FRACTURE_RESULTS.md). Реализован выбранный этап; крупные жёсткие осколки и полный механический баланс остаются будущими механизмами.
 
 - [GW: регрессии при оптимизации GPU нагрузки](../shared/GPU_WORKLOAD_RESULTS.md).
+
+- [MH: взвешенный лучевой бюджет, нагрев стен и выбранные контроли](../shared/METAL_FLAME_HEAT_RESULTS.md), [критерии](../shared/METAL_FLAME_HEAT_CONTRACT.md).

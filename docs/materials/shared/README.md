@@ -130,3 +130,5 @@ QH2026-10-08: вода/пар и смоченные проводящие solid �
 - [FS — печь с датчиками: видимое тепло и проверка FPS](FURNACE_SENSOR_HEAT_CONTRACT.md), [результаты и ограничения](FURNACE_SENSOR_HEAT_RESULTS.md).
 
 - [BD — разлёт многослойной оболочки и нагрузка разрушения](BLAST_DEBRIS_CONTRACT.md), [результаты, FPS и оставшиеся дефекты](BLAST_DEBRIS_RESULTS.md).
+
+- [MH: тепло пламени и металлические стенки](METAL_FLAME_HEAT_CONTRACT.md), [парные измерения и ограничения](METAL_FLAME_HEAT_RESULTS.md).

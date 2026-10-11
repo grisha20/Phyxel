@@ -636,3 +636,5 @@ FP2026-10-05: категория Filters содержит отдельные к�
 AmbientAir без других битов пропускает только фон, частицы запрещены.
 Closed закрывает оба канала. Прежние ID/flags v16 сохраняют смысл.
 [Контракт](FILTERS_CONTRACT.md), [проверки кистей](FILTER_BRUSHES_RESULTS.md).
+
+MH2026-10-11: RadiantDegrees хранит sum(weight*min(Ci,Cj)/Ci), а не невзвешенное число соседей. Симметричный max(1,degree_i,degree_j) сохраняет ограничение .18*Ci при множестве лёгких газовых источников. Gas↔Solid включает FIRE/Smoke и закрываемые диагонали; обычный gas/solid сохраняет свой floor. Новых полей ABI/сохранения нет. [Проверки и ограничения](materials/shared/METAL_FLAME_HEAT_RESULTS.md).
