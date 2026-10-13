@@ -242,6 +242,53 @@ internal static class AirThermalRegressionVerifier
         heat=Read();double uniformCapacityError=heat.Max(s=>Math.Abs(s.Y/.016-1));
         Console.WriteLine(FormattableString.Invariant($"PHYXEL_AIR_HEAT_UNIFORM capacityError={uniformCapacityError:R} minC={heat.Min(s=>s.Y):R} maxC={heat.Max(s=>s.Y):R}"));
         Check(uniformCapacityError<=1e-4,"Divergence-free carrier created nonuniform heat capacity");
+        // Direct old/new mapping comparison, including dense blocked starts.
+        // All other carrier/exchange/phase arithmetic is identical.
+        int mappingChecks=0;
+        foreach(string scene in new[]{"cold-pool","hot-pool","wall","channel","layers","wet-grain"})
+        foreach(uint phase in new uint[]{0,1,2,3})
+        foreach(bool open in new[]{false,true})
+        {
+            Array.Clear(grid);Array.Clear(air);Array.Clear(links);
+            uint water=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Water);
+            uint metal=registry.GetRequiredRuntimeIndex("core:cast_iron");
+            uint oil=registry.GetRequiredRuntimeIndex("core:oil");
+            uint coal=registry.GetRequiredRuntimeIndex(CoreMaterialIds.Coal);
+            for(int y=32;y<220;y++)for(int x=32;x<400;x++)
+            {
+                uint material=water;
+                if(scene=="wall" && x<50 || scene=="channel" && x%40<5)material=metal;
+                if(scene=="layers" && y<80)material=oil;
+                if(scene=="wet-grain" && x<80)material=coal;
+                if(scene=="channel" && x%40>=5 && x%40<9)continue;
+                var cell=new GridCell{IsActive=1,MaterialIndex=material,Mass=material==metal?7.2f:1,
+                    Temperature=scene=="cold-pool"?30:material==metal?900:45+(x%17),
+                    PhaseProgress=0};
+                if(material==coal){cell.MoistureMass=.1f;cell.MoistureEnergy=25;}
+                grid[y*r.Width+x]=cell;
+            }
+            for(int y=0;y<r.AirHeight;y++)for(int x=0;x<r.AirWidth;x++)
+            {
+                int i=y*r.AirWidth+x;air[i].VelocityX=.1f;air[i].VelocityY=-.05f;
+                if(x>0)links[i]|=1u<<3;if(x+1<r.AirWidth)links[i]|=1u<<5;
+                if(y>0)links[i]|=1u<<1;if(y+1<r.AirHeight)links[i]|=1u<<7;
+            }
+            SetCarrier();ctx.UpdateSubresource(links,r.AirFlowLinks.Buffer);
+            byte[] Execute(bool reference)
+            {
+                ctx.UpdateSubresource(grid,r.Grid.ReadBuffer);
+                var stock=Fresh();
+                if(scene!="cold-pool")for(int i=0;i<stock.Length;i++)stock[i].X=(400+i%23)*stock[i].Y;
+                ctx.UpdateSubresource(stock,r.AirThermal.Buffer);
+                SimulationDispatchCoordinator.DispatchAirHeat(r,open,phase,reference);
+                return new[]{r.Grid.ReadBuffer,r.AirThermal.Buffer,r.AirThermalFlux.Buffer}
+                    .SelectMany(b=>AirInventoryRegressionVerifier.Read(r,b)).ToArray();
+            }
+            var reference=Execute(true);var optimized=Execute(false);
+            Check(reference.AsSpan().SequenceEqual(optimized),$"Blocked start mapping mismatch {scene}/{phase}/{open}");
+            mappingChecks++;
+        }
+        Console.WriteLine($"PHYXEL_AIR_HEAT_MAPPING_SUCCESS comparisons={mappingChecks}");
         Console.WriteLine("PHYXEL_AIR_HEAT_SUCCESS");
     }
 }

@@ -1,5 +1,7 @@
 # Чугун — `core:cast_iron`
 
+- [W13: первый этап оптимизации воды100%, проверки и ограничения](../shared/WATER_NATIVE_20261013_RESULTS.md), [контракт](../shared/WATER_NATIVE_20261013_CONTRACT.md).
+
 - [CP: тепло угольных продуктов, измерения и ограничения](../shared/COAL_PRODUCT_HEAT_RESULTS.md), [критерии](../shared/COAL_PRODUCT_HEAT_CONTRACT.md).
 
 - [FP: пламя, поддув, излучение стен и нерешённый нагрев](../shared/FURNACE_POWER_RESULTS.md), [контракт](../shared/FURNACE_POWER_CONTRACT.md).

@@ -3,6 +3,7 @@
 #include "CellularAutomataSolver.hlsl"
 
 groupshared uint SearchTop[64], SearchLeft[64], SearchRight[64];
+groupshared uint SearchDeepest[64];
 groupshared uint Left, Right, Stop, DonorLeft, DonorRight, DonorTop;
 groupshared uint ReachLeft, ReachRight, CandidateX, CandidateTop, PathClear;
 groupshared uint Rejected[4], ChosenX, ChosenTop, ChosenTarget, ChosenTargetTop, ChosenDistance;
@@ -66,6 +67,7 @@ void ReduceDonors(uint lane)
     [unroll]for(uint stride=32;stride>0;stride>>=1){
         if(lane<stride){
             uint other=lane+stride;
+            SearchDeepest[lane]=max(SearchDeepest[lane],SearchDeepest[other]);
             if(SearchTop[other]<SearchTop[lane]){
                 SearchTop[lane]=SearchTop[other];SearchLeft[lane]=SearchLeft[other];SearchRight[lane]=SearchRight[other];
             }else if(SearchTop[other]==SearchTop[lane]){
@@ -88,10 +90,11 @@ void CSMain(uint3 group : SV_GroupID,uint lane : SV_GroupIndex)
     if(Right<=Left)return;
     uint budget=SimulationPhase==56?8:4;
     [loop]for(uint transfer=0;transfer<budget;transfer++){
-        uint high=Height,left=Width,right=0;
+        uint high=Height,left=Width,right=0,deepest=0;
         [loop]for(uint x=Left+lane;x<=Right;x+=64){
             uint top,base;
             if(!UnpackWaterColumn(WaterColumnState[x],top,base))continue;
+            deepest=max(deepest,top);
             GridCell cell=Grid[top*Width+x];
             uint above=top>0?CellKindAt(uint2(x,top-1)):SimulationKindSolid;
             bool perched=base+1<Height && (Materials[CellMaterials[(base+1)*Width+x]].Flags&MaterialFlagDensityBody)!=0;
@@ -103,16 +106,19 @@ void CSMain(uint3 group : SV_GroupID,uint lane : SV_GroupIndex)
                 else if(top==high){left=min(left,x);right=max(right,x);}
             }
         }
-        SearchTop[lane]=high;SearchLeft[lane]=left;SearchRight[lane]=right;
+        SearchTop[lane]=high;SearchLeft[lane]=left;SearchRight[lane]=right;SearchDeepest[lane]=deepest;
         ReduceDonors(lane);
         if(lane==0){
             DonorLeft=SearchLeft[0];DonorRight=SearchRight[0];DonorTop=SearchTop[0];
             ChosenX=Width;ChosenTarget=Width;ChosenTargetTop=0;ChosenDistance=Width+1;
-            if(DonorLeft==Width)Stop=1;
+            // No target can satisfy top>DonorTop+1 beyond this upper bound.
+            if(DonorLeft==Width || SearchDeepest[0]<=DonorTop+1)Stop=1;
         }
         GroupMemoryBarrierWithGroupSync();
         if(Stop!=0)break;
         [unroll]for(uint donor=0;donor<2;donor++){
+            // Searches finish before any move; an equal donor is identical.
+            if(donor==1 && DonorLeft==DonorRight)break;
             uint source=donor==0?DonorLeft:DonorRight;
             // The first obstacle on each side defines the old serial reachable interval.
             uint barrierLeft=Left,barrierRight=Right;

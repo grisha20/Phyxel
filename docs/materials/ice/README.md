@@ -1,5 +1,7 @@
 # Лёд — `core:ice`
 
+- [W13: первый этап оптимизации воды100%, проверки и ограничения](../shared/WATER_NATIVE_20261013_RESULTS.md), [контракт](../shared/WATER_NATIVE_20261013_CONTRACT.md).
+
 - [Паспорт](PASSPORT.md): источники, поведение, критерии, статусы и ограничения.
 - [Настройки игры](../../../Materials/core/ice.json): JSON, загружаемый движком.
 - [Общая регистрация материалов](../../../Materials/MaterialRegistry.cs).

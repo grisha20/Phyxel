@@ -237,10 +237,9 @@ void MarkConvection(inout GridCell cell, float vx, float vy)
 // Local horizontal parcel exchange represents unresolved liquid mixing.
 // Its equal return stays at the SAME height: it cannot destroy stable vertical
 // stratification. This is a gameplay closure, not a computed liquid velocity.
-void MixLiquidRow(uint2 p, uint span)
+void MixLiquidRow(uint2 p, uint span, bool optimized)
 {
     if (p.x + span - 1 >= Width || p.y >= Height) return;
-    GridCell packets[16];
     uint material = WaterGrid[FlattenCoordinate(p)].MaterialIndex;
     if ((Materials[material].Flags & MaterialFlagLiquidConvection) == 0) return;
     if(!FilterPathAllows(FlattenCoordinate(p),FlattenCoordinate(p+uint2(span-1,0)),material,SimulationKindLiquid,Width))return;
@@ -253,7 +252,6 @@ void MixLiquidRow(uint2 p, uint span)
         if (cell.IsActive == 0 || cell.MaterialIndex != material || cell.Mass < .99 ||
             abs(cell.Mass - WaterGrid[FlattenCoordinate(p)].Mass) > .001 ||
             (cell.BodyId & VapourCushionMarker)!=0) return;
-        packets[i] = cell;
         meanTemperature += cell.Temperature / span;
         minimum = min(minimum,cell.Temperature); maximum = max(maximum,cell.Temperature);
     }
@@ -262,12 +260,30 @@ void MixLiquidRow(uint2 p, uint span)
     uint seed = FlattenCoordinate(p) ^ HashValue(FrameIndex + 7919u * SimulationPhase);
     float mobility = LiquidMobility(Materials[material], meanTemperature);
     if (HashUnitFloat(seed) >= min(.5, contrast * .5) * min(1.0,mobility)) return;
-    for (uint i = 0; i < span; i++)
+    if(!optimized)
     {
-        uint to = (i + span/2) % span;
-        GridCell cell = packets[i];
-        MarkConvection(cell, to > i ? 4 : -4, 0);
-        WaterGrid[FlattenCoordinate(p+uint2(to,0))] = cell;
+        // Keep the original simultaneous permutation as the GPU reference.
+        GridCell packets[16];
+        for(uint i=0;i<span;i++)packets[i]=WaterGrid[FlattenCoordinate(p+uint2(i,0))];
+        for(uint i=0;i<span;i++)
+        {
+            uint to=(i+span/2)%span;
+            GridCell cell=packets[i];MarkConvection(cell,to>i?4:-4,0);
+            WaterGrid[FlattenCoordinate(p+uint2(to,0))]=cell;
+        }
+        return;
+    }
+    // The permutation exchanges two disjoint halves. Read/write one pair at
+    // a time, rather than retaining sixteen complete GridCells per thread.
+    // No later pair reads either location, so all payload fields and the
+    // original velocity markers are preserved exactly.
+    for (uint i = 0; i < span/2; i++)
+    {
+        uint a=FlattenCoordinate(p+uint2(i,0));
+        uint b=a+span/2;
+        GridCell first=WaterGrid[a], second=WaterGrid[b];
+        MarkConvection(first,4,0); MarkConvection(second,-4,0);
+        WaterGrid[a]=second; WaterGrid[b]=first;
     }
 }
 
@@ -301,7 +317,7 @@ void WaterStep(uint3 thread,uint subStep,bool optimized)
     if (subStep > 2)
     {
         uint span = subStep * 2;
-        MixLiquidRow(thread.xy * uint2(span,1) + uint2(DispatchOffsetX,0),span);
+        MixLiquidRow(thread.xy * uint2(span,1) + uint2(DispatchOffsetX,0),span,optimized);
         return;
     }
     uint2 p = thread.xy * 2 + uint2(DispatchOffsetX, DispatchOffsetY);
@@ -361,10 +377,20 @@ void CSQuench(uint3 thread : SV_DispatchThreadID) { WaterStep(thread,3,true); }
 [numthreads(16,16,1)]
 void CSColumns(uint3 thread : SV_DispatchThreadID) { WaterStep(thread,2,true); }
 [numthreads(16,16,1)]
-void CSConvect(uint3 thread : SV_DispatchThreadID) { WaterStep(thread,0,true); }
+void CSConvect(uint3 thread : SV_DispatchThreadID)
+{
+    uint2 p=thread.xy*2+uint2(DispatchOffsetX,DispatchOffsetY);
+    if(p.x+1>=Width || p.y+1>=Height)return;
+    uint a=FlattenCoordinate(p), b=a+1, c=a+Width, d=c+1;
+    // No rotation can occur below this exact existing contrast threshold.
+    // Cold homogeneous pools need only four temperature loads.
+    if(max(WaterGrid[c].Temperature-WaterGrid[b].Temperature,
+        WaterGrid[d].Temperature-WaterGrid[a].Temperature)<=.05)return;
+    WaterStep(thread,0,true);
+}
 [numthreads(16,16,1)]
 void CSMix(uint3 thread : SV_DispatchThreadID)
 {
     uint span=GasSubStep*2;
-    MixLiquidRow(thread.xy*uint2(span,1)+uint2(DispatchOffsetX,0),span);
+    MixLiquidRow(thread.xy*uint2(span,1)+uint2(DispatchOffsetX,0),span,true);
 }

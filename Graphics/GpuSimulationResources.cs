@@ -50,6 +50,8 @@ public sealed class GpuSimulationResources : IDisposable
     public required bool IsSimulationAllocated { get; init; }
     public required GpuBufferPair<GridCell> Grid { get; init; }
     public required GpuStructuredBuffer<uint> ComponentParents { get; init; }
+    public required GpuStructuredBuffer<uint> ComponentSchedule { get; init; }
+    public required Buffer ComponentArguments { get; init; }
     public required GpuStructuredBuffer<uint> BodyFlags { get; init; }
     public required GpuStructuredBuffer<uint> SolidBodyGeometry { get; init; }
     public required GpuStructuredBuffer<uint> SolidBodyMass { get; init; }
@@ -570,6 +572,8 @@ public sealed class GpuSimulationResources : IDisposable
         SolidRotationPlans.Dispose();
         SolidBodyGeometry.Dispose();
         ComponentParents.Dispose();
+        ComponentSchedule.Dispose();
+        ComponentArguments.Dispose();
         Grid.Dispose();
     }
 }

@@ -12,6 +12,7 @@ internal static class LiquidSurfaceKernelVerifier
     internal static void Run(GpuSimulationResources r, MaterialRegistry registry)
     {
         int w=r.Width,h=r.Height,checks=0;
+        bool surfaceOnly=Environment.GetEnvironmentVariable("PHYXEL_SURFACE_CACHE_ONLY")=="1";
         var materials=registry.CreateGpuTable();
         var buffers=new[]{r.Grid.ReadBuffer,r.BodyFlags.Buffer,r.PathBlockerMasks.Buffer,
             r.CellMaterials.Buffer,r.WaterPressureRoutes.Buffer,r.WaterPressureRouteScratch.Buffer,r.GasMotion.Buffer};
@@ -71,7 +72,8 @@ internal static class LiquidSurfaceKernelVerifier
             for(int i=0;i<grid.Length;i++)if(grid[i].IsActive!=0 && grid[i].MaterialIndex==gas)
                 motion[i]=new(){VelocityX=(i%7)-3,VelocityY=-2,OffsetX=.3f,OffsetY=-.4f};
             r.Context.UpdateSubresource(motion,r.GasMotion.Buffer);
-            for(uint parity=0;parity<2;parity++)foreach(uint phase in new uint[]{0,1,2,3,5,6,7,8,9,10,11,12,13,56,57,58,158})
+            for(uint parity=0;parity<2;parity++)foreach(uint phase in surfaceOnly
+                ? new uint[]{56,57} : new uint[]{0,1,2,3,5,6,7,8,9,10,11,12,13,56,57,58,158})
             {
                 var c=new SimulationFrameConstants{Width=(uint)w,Height=(uint)h,FrameIndex=parity,DeltaTime=1f/120,
                     DispatchExtentX=(uint)w,DispatchExtentY=1,SimulationPhase=33};

@@ -529,6 +529,12 @@ public sealed class SimulationDispatchCoordinator
 
         if (!settings.Paused && solidMatter && (settings.SolidGravity || (!bodyBalanceBaseline && freeBodyMatter)) && !solidSleeping)
         {
+            GpuStageTimer? solidTimer = null;
+            if (resources.CellularPhaseTimers is { } solidTimers)
+            {
+                if (!solidTimers.TryGetValue(306, out solidTimer)) solidTimers[306] = solidTimer = new GpuStageTimer(resources.Device);
+                solidTimer.Begin(resources.Context);
+            }
             // If active solids are moving, we must simulate the entire world to catch all cellular updates safely
             activeMinX = 0;
             activeMinY = 0;
@@ -569,6 +575,7 @@ public sealed class SimulationDispatchCoordinator
                 cellularSleeping = false;
             }
             presentationDirty = true;
+            solidTimer?.End(resources.Context);
         }
 
         if (settings.HydraulicPressure && liquidMatter && waterPressureRoutesDirty &&
@@ -665,6 +672,13 @@ public sealed class SimulationDispatchCoordinator
             elapsedSeconds,
             settings.Paused,
             gasMatter && resources.IsSimulationAllocated);
+        GpuStageTimer? gasLoopTimer = null;
+        if (gasTicks > 0 && resources.CellularPhaseTimers is { } gasTimers)
+        {
+            if (!gasTimers.TryGetValue(305, out gasLoopTimer))
+                gasTimers[305] = gasLoopTimer = new GpuStageTimer(resources.Device);
+            gasLoopTimer.Begin(resources.Context);
+        }
         for (int tick = 0; tick < gasTicks; tick++)
         {
             ulong tickIndex = gasScheduler.TotalTicks - (ulong)gasTicks + (ulong)tick + 1;
@@ -674,6 +688,7 @@ public sealed class SimulationDispatchCoordinator
             cellularSleeping = false;
             presentationDirty = true;
         }
+        gasLoopTimer?.End(resources.Context);
 
         if (settings.OpenBoundaries && resources.IsSimulationAllocated && !settings.Paused)
         {
@@ -1104,9 +1119,10 @@ public sealed class SimulationDispatchCoordinator
         }
     }
 
-    private void DispatchComponentLabeling(
+    internal void DispatchComponentLabeling(
         GpuSimulationResources resources,
-        ref SimulationFrameConstants constants)
+        ref SimulationFrameConstants constants,
+        bool reference = false)
     {
         DeviceContext context = resources.Context;
         int cells = resources.Width * resources.Height;
@@ -1119,8 +1135,11 @@ public sealed class SimulationDispatchCoordinator
             null,
             resources.Materials.View);
         context.ComputeShader.SetUnorderedAccessView(0, resources.ComponentParents.UnorderedView);
+        context.ClearUnorderedAccessView(resources.ComponentSchedule.UnorderedView, new RawInt4());
+        context.ComputeShader.SetUnorderedAccessView(3, resources.ComponentSchedule.UnorderedView);
         context.Dispatch(DivideRoundUp(cells, 256), 1, 1);
-        Unbind(context, 3, 1);
+        Unbind(context, 3, 4);
+        context.CopyResource(resources.ComponentSchedule.Buffer, resources.ComponentArguments);
 
         for (int iteration = 0; iteration < 24; iteration++)
         {
@@ -1132,13 +1151,15 @@ public sealed class SimulationDispatchCoordinator
                 null,
                 resources.Materials.View);
             context.ComputeShader.SetUnorderedAccessView(0, resources.ComponentParents.UnorderedView);
-            context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+            if (reference) context.Dispatch(DivideRoundUp(resources.Width, 16), DivideRoundUp(resources.Height, 16), 1);
+            else context.DispatchIndirect(resources.ComponentArguments, 0);
             Unbind(context, 3, 1);
 
             context.ComputeShader.Set(resources.ComponentCompressShader);
             context.ComputeShader.SetConstantBuffer(0, resources.FrameConstants);
             context.ComputeShader.SetUnorderedAccessView(0, resources.ComponentParents.UnorderedView);
-            context.Dispatch(DivideRoundUp(cells, 256), 1, 1);
+            if (reference) context.Dispatch(DivideRoundUp(cells, 256), 1, 1);
+            else context.DispatchIndirect(resources.ComponentArguments, 12);
             Unbind(context, 0, 1);
         }
 
@@ -1619,6 +1640,13 @@ public sealed class SimulationDispatchCoordinator
         int fireGlowTicks)
     {
         DeviceContext context = resources.Context;
+        GpuStageTimer? Stage(uint key)
+        {
+            if(resources.CellularPhaseTimers is not { } timers)return null;
+            if(!timers.TryGetValue(key,out var timer))timers[key]=timer=new(resources.Device);
+            return timer;
+        }
+        var visualTimer=Stage(300);visualTimer?.Begin(context);
         bool collect = frameIndex % 10 == 0;
         if (collect)
         {
@@ -1646,6 +1674,8 @@ public sealed class SimulationDispatchCoordinator
         // FireGlow itself still decays exactly as before after presentation.
         if (fireGlowTicks > 0)
             context.CopyResource(resources.FireGlow.Buffer, resources.FireGlowPresentation.Buffer);
+        visualTimer?.End(context);
+        var composeTimer=Stage(collect?301u:302u);composeTimer?.Begin(context);
         constants.SimulationPhase = collect ? 1u : 0u;
         UpdateConstants(context, resources, ref constants);
         context.ComputeShader.Set(resources.CompositionShader);
@@ -1671,6 +1701,7 @@ public sealed class SimulationDispatchCoordinator
         }
         constants.SimulationPhase = 0;
         context.CopyResource(resources.CompositionTargets.WriteTexture, resources.NativePresentationTexture);
+        composeTimer?.End(context);
         resources.PresentationIndex = 1 - resources.PresentationIndex;
         resources.CompositionTargets.Swap();
         if (fireGlowTicks > 0)
@@ -2386,6 +2417,12 @@ public sealed class SimulationDispatchCoordinator
     internal static void DispatchReactionPulse(GpuSimulationResources r)
     {
         var c=r.Context;
+        GpuStageTimer? timer = null;
+        if (r.CellularPhaseTimers is { } timers)
+        {
+            if (!timers.TryGetValue(304, out timer)) timers[304] = timer = new GpuStageTimer(r.Device);
+            timer.Begin(c);
+        }
         c.ComputeShader.SetShaderResources(0,r.Materials.View,r.Grid.ReadView,r.ReactionPulse.ReadView,r.AirFlowLinks.View);
         c.ComputeShader.SetUnorderedAccessViews(0,r.ReactionPending.UnorderedView,r.ReactionPulse.WriteUnorderedView,
             r.ReactionPulseScratch.UnorderedView,r.Air.UnorderedView,r.AirThermal.UnorderedView);
@@ -2398,6 +2435,7 @@ public sealed class SimulationDispatchCoordinator
         RunAirPass(c,r.ReactionFacesShader,x,y);
         RunAirPass(c,r.ReactionCommitShader,x,y);
         Unbind(c,4,5);r.ReactionPulse.Swap();
+        timer?.End(c);
     }
 
     private static void DispatchReactionGather(GpuSimulationResources r)
@@ -2412,14 +2450,16 @@ public sealed class SimulationDispatchCoordinator
         Unbind(c,4,6);
     }
 
-    internal static void DispatchAirHeat(GpuSimulationResources resources, bool openBoundaries, uint surfacePhase = 0)
+    internal static void DispatchAirHeat(GpuSimulationResources resources, bool openBoundaries, uint surfacePhase = 0,
+        bool referenceBlockedMapping = false)
     {
         var context=resources.Context;
         resources.AirHeatTimer?.Begin(context);
         int transportSteps=Environment.GetEnvironmentVariable("PHYXEL_HEAT_CFL_REFERENCE")=="1"?1:4;
         var constants=new AirThermalConstants { Width=(uint)resources.AirWidth, Height=(uint)resources.AirHeight,
             GridWidth=(uint)resources.Width,GridHeight=(uint)resources.Height, Ambient=20,Capacity=.016f,
-            Exchange=.12f,OpenBoundaries=(openBoundaries?1u:0u)|((surfacePhase&3u)<<1)|((uint)transportSteps<<8) };
+            Exchange=.12f,OpenBoundaries=(openBoundaries?1u:0u)|((surfacePhase&3u)<<1)|((uint)transportSteps<<8)|
+                (referenceBlockedMapping || Environment.GetEnvironmentVariable("PHYXEL_AIR_HEAT_REFERENCE")=="1" ? 1u<<16 : 0u) };
         context.UpdateSubresource(ref constants,resources.AirThermalConstants);
         context.ComputeShader.SetConstantBuffer(0,resources.AirThermalConstants);
         context.ComputeShader.SetShaderResources(0,resources.Air.View,resources.AirFlowLinks.View,resources.Materials.View,resources.AirProjectionB.View);
@@ -3324,6 +3364,12 @@ public sealed class SimulationDispatchCoordinator
             Reserved1 = useAir ? 1u : 0u
         };
         DeviceContext context = resources.Context;
+        GpuStageTimer? clearTimer = null;
+        if (resources.CellularPhaseTimers is { } clearTimers)
+        {
+            if (!clearTimers.TryGetValue(303, out clearTimer)) clearTimers[303] = clearTimer = new GpuStageTimer(resources.Device);
+            clearTimer.Begin(context);
+        }
         context.ClearUnorderedAccessView(resources.CombustionSummary.UnorderedView, new RawInt4(0, 0, 0, 0));
         context.ClearUnorderedAccessView(resources.EmissionClaims.UnorderedView, new RawInt4(-1, -1, -1, -1));
         // Requests combine dry-host and pore reactions within this tick only.
@@ -3331,6 +3377,7 @@ public sealed class SimulationDispatchCoordinator
         // to an old destination after the exposed surface changed.
         context.ClearUnorderedAccessView(resources.EmissionRequests.UnorderedView, new RawInt4());
         context.ClearUnorderedAccessView(resources.OxidizerDemand.UnorderedView, new RawInt4());
+        clearTimer?.End(context);
         if (measure)
         {
             context.Begin(resources.CombustionTimestampDisjointQuery);

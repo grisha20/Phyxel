@@ -38,17 +38,26 @@ groupshared uint ExchangeOwner[39*39];
 groupshared float ExchangeCapacity[39*39];
 groupshared float ExchangeResponse[39*39];
 groupshared uint ExchangeHasCells;
+bool ExchangeVisibleNode(int2 q, out int2 mapped)
+{
+    // Every candidate path starts at q and rejects it if blocked. Do that
+    // once, instead of repeating the identical rejection for up to nine nodes.
+    // Bit16 retains the original search for direct diagnostic comparison.
+    mapped=0;
+    if((HeatOpenBoundaries & (1u<<16))==0 && AirFineBlocked(q))return false;
+    return AirFineNodeFor(q,mapped);
+}
 bool ExchangeNode(int2 q, MaterialProperties m, out int2 mapped)
 {
     mapped=0;
-    if(m.SimulationKind==SimulationKindGas) return AirFineNodeFor(q,mapped) && Inside(mapped);
+    if(m.SimulationKind==SimulationKindGas) return ExchangeVisibleNode(q,mapped) && Inside(mapped);
     if(m.ThermalConductivity<=0) return false;
     int2 offsets[4]={int2(1,0),int2(0,1),int2(-1,0),int2(0,-1)};
     uint phase=(HeatOpenBoundaries>>1)&3;
     [loop] for(uint face=0;face<4;face++)
     {
         int2 surface=q+offsets[(face+phase)&3];
-        if(AirFineNodeFor(surface,mapped) && Inside(mapped) && Carrier[Index(mapped)].Blocked<=.5) return true;
+        if(ExchangeVisibleNode(surface,mapped) && Inside(mapped) && Carrier[Index(mapped)].Blocked<=.5) return true;
     }
     return false;
 }

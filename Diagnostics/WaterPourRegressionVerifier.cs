@@ -46,10 +46,17 @@ internal static class WaterPourRegressionVerifier
             coordinator.RestoreWorldActivity(r,fillHeight>0,false,false);
         }
         if(Enum.TryParse<SimulationMode>(Environment.GetEnvironmentVariable("PHYXEL_POUR_MODE"),out var mode))settings.Mode=mode;
+        if(Environment.GetEnvironmentVariable("PHYXEL_COMPONENT_KERNELS_ONLY")=="1")
+        {
+            ComponentScheduleVerifier.Run(coordinator,r,registry);
+            yield break;
+        }
         if(Environment.GetEnvironmentVariable("PHYXEL_VERIFY_LIQUID_KERNELS")=="1")
         {
-            LiquidSurfaceKernelVerifier.Run(r,registry);
-            NativeThermalKernelVerifier.Run(coordinator,r,registry);
+            if(Environment.GetEnvironmentVariable("PHYXEL_THERMAL_KERNELS_ONLY")!="1")
+                LiquidSurfaceKernelVerifier.Run(r,registry);
+            if(Environment.GetEnvironmentVariable("PHYXEL_SURFACE_CACHE_ONLY")!="1")
+                NativeThermalKernelVerifier.Run(coordinator,r,registry);
             yield break;
         }
         settings.Paused=false;
@@ -81,6 +88,13 @@ internal static class WaterPourRegressionVerifier
             if(frame%fps==0)
             {
                 var bytes=AirInventoryRegressionVerifier.Read(r,r.Grid.ReadBuffer);
+                // The existing snapshot readback has already completed these
+                // intervals. Drain ready queries without any extra flush/wait.
+                timer.Poll(r.Context);r.CellularTimer?.Poll(r.Context);
+                r.WaterConvectionTimer?.Poll(r.Context);r.AirTimer?.Poll(r.Context);
+                r.AirHeatTimer?.Poll(r.Context);r.GasMotionTimer?.Poll(r.Context);
+                if(r.CellularPhaseTimers is { } phaseTimers)
+                    foreach(var stageTimer in phaseTimers.Values)stageTimer.Poll(r.Context);
                 var grid=MemoryMarshal.Cast<byte,GridCell>(bytes).ToArray();
                 var stream=grid.Select((c,i)=>(c,i)).Where(p=>p.c.IsActive!=0&&p.c.MaterialIndex==water&&(r.Width!=968||p.i%r.Width>800)).ToArray();
                 double streamMass=stream.Sum(p=>(double)p.c.Mass);
@@ -92,10 +106,11 @@ internal static class WaterPourRegressionVerifier
                 lastTop=top;
                 var row=new {seconds=frame/(double)fps,wallSeconds=wall.Elapsed.TotalSeconds,pouring,
                     streamCells=stream.Length,mass=streamMass,minY=top,maxY=bottom,
-                    gpu=timer.Statistics,cellular=r.CellularTimer?.Statistics,convection=r.WaterConvectionTimer?.Statistics,
+                    gpu=timer.Statistics,gpuP95Ms=timer.P95Milliseconds,cellular=r.CellularTimer?.Statistics,convection=r.WaterConvectionTimer?.Statistics,
                     phases=r.CellularPhaseTimers?.ToDictionary(p=>p.Key,p=>p.Value.Statistics),
-                    thermal=coordinator.ThermalGpuTiming,air=coordinator.AirGpuTiming,gas=coordinator.GasMotionGpuTiming,
-                    combustion=coordinator.CombustionGpuTiming,frameCpuMs};
+                    thermal=coordinator.ThermalGpuTiming,air=coordinator.AirGpuTiming,airHeat=coordinator.AirHeatGpuTiming,gas=coordinator.GasMotionGpuTiming,
+                    combustion=coordinator.CombustionGpuTiming,contact=coordinator.ContactTransitionGpuTiming,
+                    phase=coordinator.PhaseGpuTiming,redistribution=coordinator.GasRedistributionGpuTiming,frameCpuMs};
                 rows.Add(row);Console.WriteLine("PHYXEL_POUR "+JsonSerializer.Serialize(row));
                 File.WriteAllBytes(Path.Combine(dir,$"grid-{frame/fps}.bin"),bytes);
                 SimulationScreenshotWriter.Save(r,Path.Combine(dir,$"world-{frame/fps}.png"));

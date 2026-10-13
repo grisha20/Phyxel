@@ -7,6 +7,8 @@ StructuredBuffer<MaterialProperties> Materials : register(t2);
 RWStructuredBuffer<uint> Parents : register(u0);
 RWStructuredBuffer<GridCell> WritableGrid : register(u1);
 RWStructuredBuffer<uint> WritableOrigins : register(u2);
+RWStructuredBuffer<uint> ComponentSchedule : register(u3);
+groupshared uint ComponentGroupActive;
 
 bool IsComponentCell(GridCell cell)
 {
@@ -52,14 +54,29 @@ void Join(uint first, uint second)
 }
 
 [numthreads(256, 1, 1)]
-void InitializeComponents(uint3 dispatchThreadId : SV_DispatchThreadID)
+void InitializeComponents(uint3 dispatchThreadId : SV_DispatchThreadID, uint lane : SV_GroupIndex)
 {
+    if (lane == 0) ComponentGroupActive = 0;
+    GroupMemoryBarrierWithGroupSync();
     uint index = dispatchThreadId.x;
-    if (index >= Width * Height)
+    if (index < Width * Height)
     {
-        return;
+        bool component = IsComponentCell(Grid[index]);
+        Parents[index] = component ? index : 0xffffffff;
+        if (component) InterlockedOr(ComponentGroupActive, 1);
     }
-    Parents[index] = IsComponentCell(Grid[index]) ? index : 0xffffffff;
+    GroupMemoryBarrierWithGroupSync();
+    if (lane == 0 && ComponentGroupActive != 0)
+    {
+        // Every group writes the same dimensions; zero remains zero only
+        // when no eligible solid exists anywhere in this exact input grid.
+        InterlockedOr(ComponentSchedule[0], (Width + 15) / 16);
+        InterlockedOr(ComponentSchedule[1], (Height + 15) / 16);
+        InterlockedOr(ComponentSchedule[2], 1);
+        InterlockedOr(ComponentSchedule[3], (Width * Height + 255) / 256);
+        InterlockedOr(ComponentSchedule[4], 1);
+        InterlockedOr(ComponentSchedule[5], 1);
+    }
 }
 
 [numthreads(16, 16, 1)]
