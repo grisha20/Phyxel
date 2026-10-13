@@ -23,6 +23,11 @@ internal static class FurnaceMaterialHeatVerifier
     {
         string dir=Environment.GetEnvironmentVariable("PHYXEL_ARTIFACT_DIR")!;
         Directory.CreateDirectory(dir);
+        if(Environment.GetEnvironmentVariable("PHYXEL_FH_BEHAVIOR") is { } behavior)
+        {
+            foreach(var resource in FurnaceBehaviorVerifier.Run(coordinator,registry,settings,dir,behavior))yield return resource;
+            yield break;
+        }
         if(Environment.GetEnvironmentVariable("PHYXEL_FH_REPLAY")=="1")
         {
             foreach(var resource in Replay(coordinator,registry,settings,dir))yield return resource;

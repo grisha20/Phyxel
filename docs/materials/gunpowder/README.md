@@ -1,5 +1,7 @@
 # Порох — `core:gunpowder`
 
+- [FB: температурное поведение в печи/камере и границы проверки](../shared/FURNACE_MATERIAL_BEHAVIOR_RESULTS.md).
+
 - [FH: печной нагрев каталога и ограничения](../shared/FURNACE_MATERIAL_HEAT_RESULTS.md), [сценарий](../shared/FURNACE_MATERIAL_HEAT_CONTRACT.md).
 
 - [RS: локальный прорыв, давление и длинные печи](../shared/PRESSURE_RELIABILITY_RESULTS.md).

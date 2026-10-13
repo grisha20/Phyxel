@@ -1,5 +1,7 @@
 # Расплавленный металл — `core:molten_metal`
 
+- [FB: температурное поведение в печи/камере и границы проверки](../shared/FURNACE_MATERIAL_BEHAVIOR_RESULTS.md).
+
 - [FH: печной нагрев каталога и ограничения](../shared/FURNACE_MATERIAL_HEAT_RESULTS.md), [сценарий](../shared/FURNACE_MATERIAL_HEAT_CONTRACT.md).
 
 - [WN: вода на полном поле и общий перенос жидкостей](../shared/WATER_NATIVE_PERFORMANCE_CONTRACT.md), [проверки и пределы](../shared/WATER_NATIVE_PERFORMANCE_RESULTS.md).

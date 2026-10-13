@@ -49,6 +49,17 @@ internal static class FuseRegressionVerifier
         File.Delete(Path.Combine(validation,"invalid.json"));
         Console.WriteLine("PHYXEL_FUSE FI07 loader6=PASS");
 
+        foreach(string invalid in new[]{"zero-conductivity","non-solid"})
+        {
+            var bad=source.DeepClone();bad["flags"]=new JsonArray("external-surface-heat");
+            if(invalid=="zero-conductivity")bad["thermal"]!["conductivity"]=0;
+            else bad["kind"]="granular";
+            string file=Path.Combine(validation,"invalid.json");File.WriteAllText(file,bad.ToJsonString());
+            bool rejected=false;try{MaterialFileLoader.LoadCore(validation,100);}catch(InvalidDataException){rejected=true;}
+            Check(rejected,"FB external surface flag accepted "+invalid);File.Delete(file);
+        }
+        Console.WriteLine("PHYXEL_FUSE FB surface-flag-loader2=PASS");
+
         foreach(string channel in new[]{"smokeRate","gasRate","flameRate"})
         foreach(float invalid in new[]{-1f,101f,float.PositiveInfinity})
         {

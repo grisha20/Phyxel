@@ -372,6 +372,9 @@ internal static partial class MaterialFileLoader
             thermal.AmbientCooling);
 
         MaterialFlags flags = ParseFlags(document.Flags, kind);
+        if ((flags & MaterialFlags.ExternalSurfaceHeat) != 0 &&
+            (kind != MaterialSimulationKind.Solid || thermal.Conductivity <= 0))
+            throw new InvalidDataException("external-surface-heat requires a solid with positive internal conductivity.");
         if ((flags & MaterialFlags.LiquidConvection) != 0 && kind != MaterialSimulationKind.Liquid)
             throw new InvalidDataException("liquid-convection requires a liquid.");
         if ((flags & MaterialFlags.SurfaceBoiling) != 0 &&
@@ -1373,6 +1376,7 @@ internal static partial class MaterialFileLoader
                     : throw new InvalidDataException("non-absorbable-liquid requires a liquid."),
                 "liquid-convection" => MaterialFlags.LiquidConvection,
                 "surface-boiling" => MaterialFlags.SurfaceBoiling,
+                "external-surface-heat" => MaterialFlags.ExternalSurfaceHeat,
                 _ => throw new InvalidDataException($"Неизвестный flag '{value}'.")
             };
             if ((flags & flag) != 0)

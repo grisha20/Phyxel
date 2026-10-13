@@ -1,5 +1,8 @@
 # Общие документы материалов
 
+FB: [наблюдаемое температурное поведение всех32 ID в печи/камере](FURNACE_MATERIAL_BEHAVIOR_RESULTS.md),
+[исправление естественного поджига фитиля](../fuse/FURNACE_IGNITION_RESULTS.md).
+
 FH: [постоянная печная проверка новых веществ](FURNACE_MATERIAL_HEAT_CONTRACT.md),
 [нагрев всего каталога и TNT: результаты/ограничения](FURNACE_MATERIAL_HEAT_RESULTS.md).
 

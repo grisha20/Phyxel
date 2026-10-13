@@ -1,5 +1,7 @@
 # Чугун — `core:cast_iron`
 
+- [FB: температурное поведение в печи/камере и границы проверки](../shared/FURNACE_MATERIAL_BEHAVIOR_RESULTS.md).
+
 - [FH: печной нагрев каталога и ограничения](../shared/FURNACE_MATERIAL_HEAT_RESULTS.md), [сценарий](../shared/FURNACE_MATERIAL_HEAT_CONTRACT.md).
 
 - [W13: первый этап оптимизации воды100%, проверки и ограничения](../shared/WATER_NATIVE_20261013_RESULTS.md), [контракт](../shared/WATER_NATIVE_20261013_CONTRACT.md).

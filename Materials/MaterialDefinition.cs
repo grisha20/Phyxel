@@ -64,7 +64,9 @@ public enum MaterialFlags : uint
     // Euclidean fast front; spreadRate is fine cells/s for this opt-in model.
     RadialIgnition = 1u << 16,
     // Paid partial surface evaporation and resolved vapour-cushion contact.
-    SurfaceBoiling = 1u << 17
+    SurfaceBoiling = 1u << 17,
+    // Opt-in normalized external heat coupling; internal conductivity is unchanged.
+    ExternalSurfaceHeat = 1u << 18
 }
 
 public static class CoreMaterialIds

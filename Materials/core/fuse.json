@@ -8,7 +8,8 @@
   "kind": "solid",
   "flags": [
     "self-oxidizing",
-    "progressive-ignition"
+    "progressive-ignition",
+    "external-surface-heat"
   ],
   "color": "#667047",
   "physics": {
