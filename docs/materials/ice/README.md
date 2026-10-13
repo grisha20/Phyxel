@@ -1,5 +1,7 @@
 # Лёд — `core:ice`
 
+- [FH: печной нагрев каталога и ограничения](../shared/FURNACE_MATERIAL_HEAT_RESULTS.md), [сценарий](../shared/FURNACE_MATERIAL_HEAT_CONTRACT.md).
+
 - [W13: первый этап оптимизации воды100%, проверки и ограничения](../shared/WATER_NATIVE_20261013_RESULTS.md), [контракт](../shared/WATER_NATIVE_20261013_CONTRACT.md).
 
 - [Паспорт](PASSPORT.md): источники, поведение, критерии, статусы и ограничения.

@@ -1,5 +1,7 @@
 # Опора — `core:fixture`
 
+- [FH: печной нагрев каталога и ограничения](../shared/FURNACE_MATERIAL_HEAT_RESULTS.md), [сценарий](../shared/FURNACE_MATERIAL_HEAT_CONTRACT.md).
+
 - [PV — сброс давления через выход](../shared/PRESSURE_VENT_CONTRACT.md),
   [проверки](../shared/PRESSURE_VENT_RESULTS.md).
 

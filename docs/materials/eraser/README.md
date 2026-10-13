@@ -1,5 +1,7 @@
 # Ластик — `core:eraser`
 
+- [FH: печной нагрев каталога и ограничения](../shared/FURNACE_MATERIAL_HEAT_RESULTS.md), [сценарий](../shared/FURNACE_MATERIAL_HEAT_CONTRACT.md).
+
 - [Паспорт](PASSPORT.md): источники, поведение, критерии, статусы и ограничения.
 - [Настройки игры](../../../Materials/core/eraser.json): JSON, загружаемый движком.
 - [Общая регистрация материалов](../../../Materials/MaterialRegistry.cs).

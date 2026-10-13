@@ -1,5 +1,7 @@
 # Порох — `core:gunpowder`
 
+- [FH: печной нагрев каталога и ограничения](../shared/FURNACE_MATERIAL_HEAT_RESULTS.md), [сценарий](../shared/FURNACE_MATERIAL_HEAT_CONTRACT.md).
+
 - [RS: локальный прорыв, давление и длинные печи](../shared/PRESSURE_RELIABILITY_RESULTS.md).
 
 TN2026-10-08: при добавлении TNT повторно проверены собственный конечный

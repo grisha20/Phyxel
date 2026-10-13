@@ -1,4 +1,6 @@
 # Дерево — `core:wood`
+
+- [FH: печной нагрев каталога и ограничения](../shared/FURNACE_MATERIAL_HEAT_RESULTS.md), [сценарий](../shared/FURNACE_MATERIAL_HEAT_CONTRACT.md).
 - [PA: профиль портрета и свежие регрессии](../shared/PORTRAIT_GPU_RESULTS.md).
 
 

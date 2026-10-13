@@ -1,5 +1,8 @@
 # Общие документы материалов
 
+FH: [постоянная печная проверка новых веществ](FURNACE_MATERIAL_HEAT_CONTRACT.md),
+[нагрев всего каталога и TNT: результаты/ограничения](FURNACE_MATERIAL_HEAT_RESULTS.md).
+
 W13: [оптимизация воды100%](WATER_NATIVE_20261013_CONTRACT.md),
 [реальный A/B, сохранённая печь и незакрытая цель FPS](WATER_NATIVE_20261013_RESULTS.md).
 

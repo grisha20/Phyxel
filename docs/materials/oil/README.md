@@ -1,5 +1,7 @@
 # Парафиновое масло — `core:oil`
 
+- [FH: печной нагрев каталога и ограничения](../shared/FURNACE_MATERIAL_HEAT_RESULTS.md), [сценарий](../shared/FURNACE_MATERIAL_HEAT_CONTRACT.md).
+
 - [W13: первый этап оптимизации воды100%, проверки и ограничения](../shared/WATER_NATIVE_20261013_RESULTS.md), [контракт](../shared/WATER_NATIVE_20261013_CONTRACT.md).
 
 - [FP15: общая квота O₂ сухой/поровой реакций угля,182 выбранные проверки](../shared/FURNACE_POWER_RESULTS.md).

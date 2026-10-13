@@ -1,5 +1,7 @@
 # Огонь — `core:fire`
 
+- [FH: печной нагрев каталога и ограничения](../shared/FURNACE_MATERIAL_HEAT_RESULTS.md), [сценарий](../shared/FURNACE_MATERIAL_HEAT_CONTRACT.md).
+
 - [CP: тепло угольных продуктов, измерения и ограничения](../shared/COAL_PRODUCT_HEAT_RESULTS.md), [критерии](../shared/COAL_PRODUCT_HEAT_CONTRACT.md).
 
 - [CR: конечный лучевой обмен с открытыми зёрнами](../shared/COAL_REHEAT_RESULTS.md).

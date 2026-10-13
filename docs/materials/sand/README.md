@@ -1,5 +1,7 @@
 # Песок — `core:sand`
 
+- [FH: печной нагрев каталога и ограничения](../shared/FURNACE_MATERIAL_HEAT_RESULTS.md), [сценарий](../shared/FURNACE_MATERIAL_HEAT_CONTRACT.md).
+
 - [Наблюдение огня над пропитанным склоном](../shared/SLOPE_FLAME_OBSERVATION.md): granular-граница воздуха и зеркальная карта; сам песок не горит.
 
 - [Паспорт](PASSPORT.md): источники, поведение, критерии, статусы и ограничения.
